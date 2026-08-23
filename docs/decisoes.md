@@ -138,6 +138,65 @@ válido.
 
 ---
 
+## Tarefa 03 — Máquinas de Estado
+
+### D-03.1 — A máquina de aprovação de comando ganha o estado `never`
+
+`state-machines.md` §10 traz a nota: *"COLAPSO SEMÂNTICO: o ACP oferece deny
+E deny_always, mas o Hermes só tem 'deny' — NÃO existe negação permanente."*
+
+**A nota está errada, e é a mesma afirmação já corrigida em G-22.**
+`approvals.deny` existe (`tools/approval.py:623-651`), é editável pelo usuário
+em `config.yaml`, e fica **acima** do bypass de yolo na cadeia de 7 camadas
+(`hermes_cli/approvals_test.py:1-30`). A spec repete o erro em dois lugares:
+aqui e em `gaps.md` G-22.
+
+Coerente com a decisão de `questions.md#pergunta-12`, a máquina do Kairos tem
+`never` como estado próprio, distinto de `deny`.
+
+### D-03.2 — A máquina de aprovação de edição reflete o piso de workspace
+
+`state-machines.md` §11 desenha `policy=session → auto_aprovado` sem
+qualificação de caminho. Pela decisão de `questions.md#pergunta-11` (G-16), o
+workspace vira **piso**: a transição para `auto_aprovado` exige estar dentro
+dele, e caminho externo vai para `pergunta_sempre` em qualquer política.
+
+### D-03.3 — O despacho da aprovação de edição é um estado, não duas setas
+
+A spec desenha **dois** pontos de entrada (`[*] --> bypass` e
+`[*] --> avaliando`). Isso deixou `bypass` inalcançável, e o validador da
+primitiva pegou — foi o primeiro erro que ele encontrou.
+
+Na verdade é um ponto de entrada só, seguido de uma decisão: *o ContextVar
+está ligado?* Modelado como estado `despacho`, a decisão fica visível em vez
+de escondida numa seta. Para CLI, gateway e cron a guarda é **inexistente**,
+não "permissiva" — distinção que importa ao auditar quem é protegido por ela.
+
+### D-03.4 — 13 entidades, 14 objetos de máquina
+
+A tabela-resumo (§15) lista 13 entidades com estado. São 14 objetos porque a
+delegação assíncrona tem **dois eixos ortogonais** (`state` e
+`delivery_state`) que evoluem independentemente — uma delegação pode estar
+`completed` na execução e `pending` na entrega, que é exatamente o gap que o
+ledger de obrigação existe para cobrir.
+
+A linhagem de sessão (§2) não vira máquina: é classificação de parentesco,
+não ciclo de vida, e vive em `Lineage` desde a Tarefa 02.
+
+### D-03.5 — Transição não declarada é recusada por construção
+
+A primitiva (`statemachine.py`) valida na construção — estado inalcançável,
+beco sem saída não declarado terminal, transição citando estado inexistente,
+saída a partir de terminal — e `transition()` é o ponto único por onde
+qualquer mudança passa. Uma cadeia de `if` deixaria a transição não prevista
+cair num `else` silencioso; aqui ela levanta, e a mensagem lista os alvos
+válidos.
+
+Isso é o que dá ao invariante 7 (terminais do ledger são imutáveis) uma
+segunda imposição, independente da de `scheduling.assert_terminal_immutable`.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

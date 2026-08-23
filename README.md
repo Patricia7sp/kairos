@@ -15,7 +15,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 |---|---|
 | 01 — Schema do banco de dados | ✅ concluída |
 | 02 — Entidades de domínio | ✅ concluída |
-| 03–21 | pendentes |
+| 03 — Máquinas de estado | ✅ concluída |
+| 04–21 | pendentes |
 
 ## Ambiente
 
