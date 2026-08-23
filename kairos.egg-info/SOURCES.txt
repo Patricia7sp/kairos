@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+kairos.egg-info/PKG-INFO
+kairos.egg-info/SOURCES.txt
+kairos.egg-info/dependency_links.txt
+kairos.egg-info/requires.txt
+kairos.egg-info/top_level.txt
+kairos_state/__init__.py
+kairos_state/connection.py
+kairos_state/schema.py
+tests/test_schema.py

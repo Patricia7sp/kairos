@@ -60,11 +60,25 @@ escalonamento determinístico que produz efeito comboio sob concorrência
 alta. A paciência real é da escada de retry com jitter da camada de
 aplicação (unit `hermes-state`, T-13), não deste timeout.
 
-### D-01.6 — Suíte em `unittest`, não `pytest`
+### D-01.6 — Suíte em `unittest`, executável por `pytest`
 
-A suíte usa `unittest` da biblioteca padrão para rodar sem dependência
-nenhuma. `pytest` continua executando-a sem alteração, e permanece em
-`[project.optional-dependencies].dev`.
+A suíte é escrita em `unittest` da biblioteca padrão, e `pytest` a executa
+sem alteração — ambos verificados, 18/18 nos dois. A escolha não é sobre
+preferência de framework: um conjunto de testes de schema não deve depender
+de terceiros **para existir**. `pytest` entra pelo relatório, não pela
+capacidade de rodar.
+
+### D-01.7 — Toolchain fixada em Python 3.11 via `uv`
+
+O host tem Python **3.14.4**; o legado fixa **3.11**. Reconstruir contra 3.14
+enquanto as specs descrevem comportamento observado em 3.11 introduziria uma
+variável que nenhuma spec cobre. O projeto passa a provisionar o 3.11 pelo
+`uv` (`.python-version`, `uv.lock`), independente do interpretador do sistema.
+
+Nota de ambiente: a máquina não tinha `pip`, `venv`, `uv` nem `pytest`, e
+`sudo` exige autenticação interativa (logo, `apt` está fora). O `uv` resolve
+tudo sem privilégio, instalando em `~/.local/bin` — por isso é ele a
+dependência de entrada do projeto, e não o gerenciador de pacotes do sistema.
 
 ---
 
