@@ -1,0 +1,6 @@
+# Config semeado no primeiro boot do container.
+# Só o mínimo: tudo além disto é escolha do operador, não default nosso.
+display:
+  language: en
+sessions:
+  cjk_fts: true

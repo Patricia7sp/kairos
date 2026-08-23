@@ -1,0 +1,9 @@
+#!/bin/bash
+# Primeiro degrau do bootstrap. A ordem entre os scripts de cont-init.d é
+# LEXICOGRÁFICA, e é o único mecanismo que garante a sequência — por isso os
+# prefixos numéricos não são decorativos.
+#
+#   01  → setup: remap de UID, chown do volume, seed de $KAIROS_HOME
+#   015 → perms de supervisão (precisa do UID já remapeado)
+#   02  → reconciliação de perfis (precisa do $KAIROS_HOME já semeado)
+exec /opt/kairos/docker/stage2-hook.sh

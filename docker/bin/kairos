@@ -1,0 +1,48 @@
+#!/bin/bash
+# Shim de `docker exec` — a correção de um bug de sintoma contraditório.
+#
+# O BUG. Os processos supervisionados rodam como o usuário não-privilegiado
+# `kairos` (UID 10000). Um `docker exec <c> kairos ...` roda como ROOT, e
+# qualquer arquivo escrito sob $KAIROS_HOME — auth.json, .env, config.yaml —
+# fica root-owned e ILEGÍVEL para o gateway.
+#
+# A manifestação clássica: o usuário roda `docker exec <c> kairos login`, que
+# grava auth.json como root:root modo 0600. A partir daí o gateway responde
+# "authentication failed" em toda mensagem — ENQUANTO
+# `docker exec <c> kairos chat -q ping` continua funcionando, porque root lê o
+# próprio arquivo. O sintoma contraditório é o que tornava o bug difícil: a
+# mesma ferramenta funciona por um caminho e falha por outro.
+#
+# A CORREÇÃO. Este shim fica em /opt/kairos/bin, PRIMEIRO no PATH. Invocado
+# como root, derruba para o usuário `kairos` antes de executar o binário real.
+#
+# CUSTO. Um fork extra apenas no caminho docker-exec-como-root; zero mudança
+# de comportamento em todos os outros.
+set -euo pipefail
+
+REAL="/opt/kairos/.venv/bin/kairos"
+KAIROS_USER="${KAIROS_USER:-kairos}"
+
+# Não-root passa direto: processos supervisionados, `docker exec --user kairos`,
+# subagentes. Nenhuma troca de privilégio, nenhum fork.
+if [ "$(id -u)" -ne 0 ]; then
+  exec "$REAL" "$@"
+fi
+
+# Opt-out explícito, para sessão de diagnóstico. O DEFAULT é derrubar.
+case "$(printf '%s' "${KAIROS_DOCKER_EXEC_AS_ROOT:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes)
+    exec "$REAL" "$@"
+    ;;
+esac
+
+if ! command -v s6-setuidgid >/dev/null 2>&1; then
+  echo "kairos: s6-setuidgid indisponível; executando como root." >&2
+  echo "kairos: arquivos escritos em \$KAIROS_HOME podem ficar root-owned." >&2
+  exec "$REAL" "$@"
+fi
+
+# Execução por CAMINHO ABSOLUTO do binário da venv. É isso que impede recursão
+# independentemente do estado do PATH — o segundo salto não pode reentrar
+# aqui. Nenhuma variável sentinela é necessária.
+exec s6-setuidgid "$KAIROS_USER" "$REAL" "$@"

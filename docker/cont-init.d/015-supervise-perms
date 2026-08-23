@@ -1,0 +1,20 @@
+#!/bin/bash
+# Torna as árvores supervise/ consultáveis e controláveis pelo usuário
+# não-privilegiado.
+#
+# O CICLO DE VIDA INTEIRO do s6 — s6-svc, s6-svstat, s6-svwait — é despachado
+# como o usuário `kairos`. Sem estas permissões, o agente não consegue
+# reiniciar o próprio gateway nem sequer perguntar se ele está de pé: os
+# comandos falham com permissão negada contra os FIFOs de controle.
+#
+# Roda DEPOIS do 01, porque precisa do UID já remapeado.
+set -euo pipefail
+
+TARGET_UID="${KAIROS_UID:-10000}"
+TARGET_GID="${KAIROS_GID:-$TARGET_UID}"
+
+for tree in /run/service/*/supervise /run/service/*/event; do
+  [ -e "$tree" ] || continue
+  chown -R "$TARGET_UID:$TARGET_GID" "$tree" 2>/dev/null || true
+  chmod -R u+rwX "$tree" 2>/dev/null || true
+done

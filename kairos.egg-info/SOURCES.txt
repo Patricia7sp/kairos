@@ -5,6 +5,7 @@ kairos.egg-info/SOURCES.txt
 kairos.egg-info/dependency_links.txt
 kairos.egg-info/requires.txt
 kairos.egg-info/top_level.txt
+kairos_container/__init__.py
 kairos_domain/__init__.py
 kairos_domain/compaction.py
 kairos_domain/credentials.py

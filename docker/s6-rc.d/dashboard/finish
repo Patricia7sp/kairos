@@ -1,0 +1,5 @@
+#!/command/execlineb -P
+# O dashboard é acessório: se ele cai, o container NÃO deve cair junto. O
+# gateway é que define a vida do container.
+foreground { s6-echo "kairos: dashboard encerrou" }
+exit 0

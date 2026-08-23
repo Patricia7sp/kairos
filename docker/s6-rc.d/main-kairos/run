@@ -1,0 +1,8 @@
+#!/command/execlineb -P
+# Gateway. Derruba privilégio AQUI, no próprio run — não no bootstrap, que
+# precisa continuar root para usermod/chown.
+with-contenv
+importas -D 10000 KAIROS_UID KAIROS_UID
+importas -D kairos KAIROS_USER KAIROS_USER
+s6-setuidgid ${KAIROS_USER}
+/opt/kairos/.venv/bin/kairos gateway

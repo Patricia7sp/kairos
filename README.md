@@ -19,7 +19,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 04 — native (`fts5_cjk`) | ✅ concluída |
 | 05 — hermes-state | ✅ concluída |
 | 06 — i18n | ✅ concluída |
-| 07–21 | pendentes |
+| 07 — container | ✅ concluída |
+| 08–21 | pendentes |
 
 ## Ambiente
 

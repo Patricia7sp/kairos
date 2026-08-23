@@ -13,7 +13,7 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["kairos_state", "kairos_domain", "kairos_i18n"]
+packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container"]
 
 [build-system]
 requires = ["setuptools>=68"]

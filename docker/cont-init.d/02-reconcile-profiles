@@ -1,0 +1,22 @@
+#!/bin/bash
+# Reconcilia os serviços s6 conforme os perfis presentes.
+#
+# Roda como root, DEPOIS do 01 (que já fez chown do volume e semeou o
+# $KAIROS_HOME) e ANTES dos serviços de usuário. Precisa do $KAIROS_HOME
+# pronto para ler quais perfis existem.
+set -euo pipefail
+
+KAIROS_HOME="${KAIROS_HOME:-/opt/data}"
+[ -d "$KAIROS_HOME" ] || exit 0
+
+# Um serviço declarado mas desabilitado por perfil é derrubado aqui, em vez de
+# subir e falhar em laço — o supervisor tentaria reiniciá-lo para sempre.
+if [ -f "$KAIROS_HOME/profiles/disabled" ]; then
+  while IFS= read -r svc; do
+    [ -n "$svc" ] || continue
+    if [ -d "/run/service/$svc" ]; then
+      echo "kairos: perfil desabilita o serviço '$svc'" >&2
+      s6-svc -d "/run/service/$svc" 2>/dev/null || true
+    fi
+  done < "$KAIROS_HOME/profiles/disabled"
+fi

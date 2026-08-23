@@ -458,6 +458,81 @@ aprovação, que é exatamente quando o usuário mais precisa da interface.
 
 ---
 
+## Tarefa 07 — container
+
+### D-07.1 — O shim de exec é uma correção de bug, não uma conveniência
+
+O bug que ele resolve tinha **sintoma contraditório**, e é por isso que era
+difícil: os processos supervisionados rodam como UID 10000, mas
+`docker exec <c> kairos login` roda como **root** e grava `auth.json` como
+`root:root` modo `0600`. A partir daí o gateway responde "authentication
+failed" em toda mensagem — **enquanto `docker exec <c> kairos chat -q ping`
+continua funcionando**, porque root lê o próprio arquivo. A mesma ferramenta
+funciona por um caminho e falha por outro.
+
+O shim fica primeiro no `PATH` e derruba privilégio quando invocado como root.
+Custo: um fork extra **só** nesse caminho.
+
+### D-07.2 — A imunidade a `PATH` vem do caminho absoluto, não de sentinela
+
+O shim executa `/opt/kairos/.venv/bin/kairos` por caminho absoluto, de modo
+que o segundo salto não pode reentrar nele **independentemente do estado do
+`PATH`**. A alternativa comum — uma variável sentinela — falha quando o
+ambiente é limpo entre os saltos, que é exatamente o que `/init` faz.
+
+Há um teste que põe um `kairos` hostil no `PATH` e confirma que não há
+recursão.
+
+### D-07.3 — Degradar é seguir rodando, e anunciar
+
+O s6-overlay exige ser PID 1. Em Fly Machines, `docker run --init` e algumas
+configurações de Nomad/K8s ele nunca será. O dispatcher escolhe o caminho e
+**avisa em stderr** que os serviços supervisionados ficam indisponíveis
+naquele runtime — mas executa o comando pedido.
+
+Falhar em silêncio seria pior; seguir em silêncio também. O operador precisa
+saber por que o dashboard não sobe.
+
+### D-07.4 — A ordem `01 → 015 → 02` é o mecanismo, não erro de digitação
+
+A ordem entre scripts de `cont-init.d` é **lexicográfica**, e é a única
+garantia de sequência. `015-supervise-perms` precisa do UID já remapeado pelo
+`01`; `02-reconcile-profiles` precisa do `$KAIROS_HOME` já semeado. O `015`
+entre `01` e `02` é intencional.
+
+Há um teste que fixa a ordenação — se alguém "corrigir" o `015` para `03`, ele
+reprova.
+
+### D-07.5 — O bootstrap não derruba privilégio e não executa o CMD
+
+Duas coisas que o stage2 deliberadamente **não** faz, e ambas por razão:
+
+- **Não derruba privilégio**, porque precisa continuar root para
+  `usermod`/`groupmod`/`chown`. A queda acontece por serviço, no `run` de cada
+  um.
+- **Não executa o CMD**, porque scripts de `cont-init.d` rodam sem argumentos
+  — os args do usuário nem chegam ali. É por isso que bootstrap e execução são
+  separados, e é o contrato que o shim legado avisa ter mudado.
+
+### D-07.6 — Grep em texto de script casa com o comentário, não com o código
+
+Um teste meu afirmava "o stage2 não usa `s6-setuidgid`" e falhou — porque o
+**comentário** que explica por que ele não usa contém a palavra. O teste
+afirmava o contrário do que pretendia.
+
+Introduzido `code_only()`, que remove comentários antes de qualquer asserção
+de comportamento sobre shell. É uma armadilha genérica: quanto melhor o
+comentário explica o que o código *não* faz, mais provável que o grep quebre.
+
+### D-07.7 — O dashboard pode cair sem derrubar o container
+
+`dashboard/finish` sai com `0`; `main-kairos` **não tem** `finish`. O gateway
+define a vida do container, o dashboard é acessório. Foi para poder expressar
+isso que o s6 substituiu o tini: um reaper de zumbis não distingue serviço
+essencial de acessório.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
