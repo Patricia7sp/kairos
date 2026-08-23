@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Português
+# Ver locales/en.yaml para a fonte de verdade das chaves.
+
+approval:
+  dangerous_header: "⚠️  COMANDO PERIGOSO: {description}"
+  command: "Comando: {command}"
+  choose_short: "[p]ermitir uma vez  [s]essão  [n]egar"
+  choose_long: "Permitir este comando? [u]ma vez / [s]essão / [a]lways / [n]egar / n[e]nhuma vez"
+  denied: "Negado. O comando não foi executado."
+  denied_permanent: "Bloqueado por uma regra de negação permanente: {pattern}"
+  timeout: "Sem resposta em {seconds}s — negando por padrão."
+  sensitive_path: "O caminho sensível {path} sempre pergunta, mesmo sob política autônoma."
+  outside_workspace: "{path} está fora do workspace — perguntando mesmo sob política autônoma."
+
+gateway:
+  drain_started: "Drenando: aguardando {count} turno(s) terminar(em)."
+  drain_cancelled: "Drenagem cancelada — voltando a atender."
+  restart_pending: "Reinício pendente; mensagens novas estão na fila."
+  paired: "Pareado. Você já pode falar com o agente."
+  pairing_code: "Seu código de pareamento é {code}. Expira em {minutes} minutos."
+  pairing_locked: "Tentativas demais. Tente de novo em {minutes} minutos."
+  unauthorized: "Este chat não está autorizado."
+
+session:
+  compacted: "Contexto compactado: {removed} mensagem(ns) arquivada(s)."
+  compaction_disabled: "O contexto está cheio e a compactação automática está desligada. Use /compress, /new, ou um modelo de contexto maior."
+  turn_busy: "Já há outro turno em andamento nesta conversa."
+  storage_busy: "O armazenamento estava ocupado — envie de novo."
+  storage_readonly: "O armazenamento está somente leitura. Verifique espaço em disco e permissões."
+
+i18n:
+  falls_back_to_english: "A superfície {surface} não tem tradução para {language}; exibindo em inglês."

@@ -3,5 +3,6 @@ Name: kairos
 Version: 0.1.0
 Summary: Kairos — reimplementação do Hermes a partir das specs do Reversa
 Requires-Python: >=3.11
+Requires-Dist: pyyaml>=6
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"

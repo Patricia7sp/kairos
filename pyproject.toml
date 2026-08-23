@@ -3,13 +3,17 @@ name = "kairos"
 version = "0.1.0"
 description = "Kairos — reimplementação do Hermes a partir das specs do Reversa"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    # Catálogos de i18n e config.yaml. O legado já a usava; no Kairos ela
+    # entra na Tarefa 06 porque é a primeira que precisa ler YAML.
+    "pyyaml>=6",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["kairos_state", "kairos_domain"]
+packages = ["kairos_state", "kairos_domain", "kairos_i18n"]
 
 [build-system]
 requires = ["setuptools>=68"]

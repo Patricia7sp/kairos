@@ -1,2 +1,3 @@
 kairos_domain
+kairos_i18n
 kairos_state

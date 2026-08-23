@@ -1,0 +1,45 @@
+# Kairos static-message catalog — English (baseline / source of truth)
+#
+# Only user-facing STATIC messages live here: the approval prompt, a handful
+# of gateway slash-command replies, and restart/drain notices.
+#
+# Agent-generated output, log lines, error tracebacks, tool outputs and
+# slash-command descriptions stay in English and are NOT translated — see
+# kairos_i18n/__init__.py for the scope rationale.
+#
+# Keys are dotted paths; the nesting below is purely for readability. Values
+# may contain {placeholder} tokens for str.format substitution.
+#
+# Adding a key here means adding it to EVERY shipping locale in the same
+# commit. Two gates enforce that (tests/test_i18n.py): one on the key set,
+# one on the placeholders.
+
+approval:
+  dangerous_header: "⚠️  DANGEROUS COMMAND: {description}"
+  command: "Command: {command}"
+  choose_short: "[a]llow once  [s]ession  [d]eny"
+  choose_long: "Allow this command? [o]nce / [s]ession / [a]lways / [d]eny / [n]ever"
+  denied: "Denied. The command was not run."
+  denied_permanent: "Blocked by a permanent deny rule: {pattern}"
+  timeout: "No answer in {seconds}s — denying by default."
+  sensitive_path: "Sensitive path {path} always asks, even under an autonomous policy."
+  outside_workspace: "{path} is outside the workspace — asking even under an autonomous policy."
+
+gateway:
+  drain_started: "Draining: waiting for {count} turn(s) to finish."
+  drain_cancelled: "Drain cancelled — back to serving."
+  restart_pending: "Restart pending; new messages are queued."
+  paired: "Paired. You can talk to the agent now."
+  pairing_code: "Your pairing code is {code}. It expires in {minutes} minutes."
+  pairing_locked: "Too many attempts. Try again in {minutes} minutes."
+  unauthorized: "This chat is not authorized."
+
+session:
+  compacted: "Context compacted: {removed} message(s) archived."
+  compaction_disabled: "Context is full and auto-compaction is off. Use /compress, /new, or a larger model."
+  turn_busy: "Another turn is already running for this conversation."
+  storage_busy: "Storage was busy — send that again."
+  storage_readonly: "Storage is read-only. Check disk space and permissions."
+
+i18n:
+  falls_back_to_english: "The {surface} surface has no {language} translation; showing English."

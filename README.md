@@ -18,7 +18,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 03 — Máquinas de estado | ✅ concluída |
 | 04 — native (`fts5_cjk`) | ✅ concluída |
 | 05 — hermes-state | ✅ concluída |
-| 06–21 | pendentes |
+| 06 — i18n | ✅ concluída |
+| 07–21 | pendentes |
 
 ## Ambiente
 

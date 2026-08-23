@@ -387,6 +387,77 @@ isso, buscar `%` casaria tudo.
 
 ---
 
+## Tarefa 06 — i18n
+
+### D-06.1 — G-30 era falso: os gates de paridade existem, e são dois
+
+A lacuna afirmava que o *"keep keys in sync"* era convenção de cabeçalho sem
+teste. **É falso.** `tests/agent/test_i18n.py` traz dois gates parametrizados
+sobre todos os idiomas, e o CI roda a suíte inteira em fatias:
+
+1. **Chaves**, nos **dois sentidos** — reprova a que falta e a que sobra. Só
+   o primeiro sentido deixaria passar chave órfã de uma remoção incompleta no
+   inglês: nunca aparece na tela, ninguém percebe.
+2. **Placeholders** — nenhuma spec mencionava este. Verifica que os tokens
+   `{...}` do valor traduzido batem com os do inglês, porque *"a mistranslated
+   placeholder would either raise KeyError at runtime or silently drop the
+   interpolated value"*. Pega o caso em que a chave existe, o texto está
+   traduzido, e mesmo assim o valor some.
+
+A tarefa passou de "adicionar um gate" para "herdar dois". Registrado como
+**E-06** na errata; é a **terceira** ocorrência de ausência tratada como fato,
+depois do PRAGMA (E-01) e do `approvals.deny` (E-04). Desta vez o gate foi
+procurado nos workflows e nos catálogos — não na suíte de testes.
+
+### D-06.2 — `covers` e `intends` são perguntas diferentes
+
+A decisão de G-32 declara cobertura por superfície. Ao implementar o aviso ao
+usuário (T-11), apareceu uma ambiguidade que o teste expôs: o aviso olha o que
+a superfície **entrega** ou o que **pretende**?
+
+Só "entrega" é honesto. O desktop *pretende* cobrir japonês, mas o catálogo
+ainda não existe (Tarefa 19) — dizer que cobre, com respaldo de um arquivo de
+declaração, seria mentir com aparência de rigor. `covers()` responde runtime,
+`intends()` responde planejamento, e o aviso usa a primeira.
+
+### D-06.3 — Entrega e alvo são campos distintos, para a dívida não sumir
+
+`SurfaceCoverage` tem `locales` (o que existe) e `target_locales` (o que o
+legado tinha). Sem os dois, ou o build fica vermelho por conteúdo que ninguém
+escreveu, ou a dívida desaparece de vista.
+
+O Kairos entrega **3** catálogos (`en`, `pt`, `es`) contra um alvo herdado de
+**17**. Os 14 restantes são trabalho de **tradução humana**, não de
+reconstrução de mecanismo — e fabricá-los seria inventar conteúdo que não
+posso verificar. Um teste fixa os números para que a diferença permaneça
+visível.
+
+### D-06.4 — PyYAML é a primeira dependência do Kairos
+
+O RF-12 diz "não introduzir dependência nova — usa o PyYAML já presente". No
+Kairos `dependencies` estava **vazio**, então PyYAML *é* nova.
+
+Adicionada mesmo assim: os catálogos são YAML, e o `config.yaml` — que a
+Tarefa 15 vai precisar — também. A intenção do requisito é "não adicione uma
+dependência **só** para i18n", e ela é respeitada: a mesma biblioteca serve às
+duas coisas.
+
+### D-06.5 — Sufixo regional cai para a base, não para o inglês
+
+`pt-BR` resolve para `pt` quando o catálogo base existe. O legado só compara
+com a lista exata. Cair no inglês por causa de um sufixo regional é pior que
+mostrar português europeu para um usuário brasileiro.
+
+### D-06.6 — Todo caminho de leitura degrada
+
+YAML inválido, arquivo ausente, catálogo que não é mapa, `config.yaml`
+quebrado, parâmetro faltante na substituição — nenhum levanta. É a invariante
+da unit levada a sério: uma chave pontilhada aparecendo na tela é feia e
+diagnóstica, e infinitamente melhor que um `KeyError` no meio de um prompt de
+aprovação, que é exatamente quando o usuário mais precisa da interface.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
