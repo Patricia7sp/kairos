@@ -82,6 +82,62 @@ dependência de entrada do projeto, e não o gerenciador de pacotes do sistema.
 
 ---
 
+## Tarefa 02 — Entidades de Domínio
+
+### D-02.1 — Regras de runtime e regras de processo ficam separadas
+
+Dos 7 grupos de `domain.md` §2, nem tudo é comportamento de software.
+*"Reject PRs that tell users to set X in your .env"* e *"menus interativos de
+CLI devem usar curses"* são instruções para quem revisa código.
+
+`kairos_domain/rules.py` registra **todas** as ~45, classificadas em
+`RUNTIME` e `PROCESS`. As de runtime apontam para a função que as impõe; as
+de processo apontam para `docs/rubrica-de-contribuicao.md`. Um teste garante
+que os dois conjuntos são não-vazios e que somam o total.
+
+O motivo de não codificar as de processo: nenhuma execução as exercitaria, e
+o teste correspondente só provaria que uma constante existe. Registrá-las
+mantém a contagem dos 7 grupos auditável sem produzir código falso.
+
+### D-02.2 — `Platform` tem 24 membros, não 23 — e resolve plugins dinamicamente
+
+A spec (`data-dictionary` §2.1) diz *"23 valores"* e então **lista 24**. A
+contagem está errada; a lista está certa. Verificado em
+`gateway/config.py:317-341`.
+
+Mais relevante: a spec **omitiu** o mecanismo. O enum define `_missing_()`,
+que cria membros dinâmicos sob demanda — `Platform("irc")` funciona sem
+alterar o núcleo, e o membro fica cacheado para que a comparação por
+identidade permaneça estável. É a Lei 2 aplicada ao enum: plataforma de
+plugin não exige mudança no core. Reproduzido, com `is_builtin` distinguindo
+os dois casos.
+
+### D-02.3 — O registro de invariantes nomeia quem ainda não impõe
+
+`kairos_domain/invariants.py` lista os 15 com o local de imposição:
+`DOMAIN` (aqui, com teste), `SCHEMA` (Tarefa 01) ou `DEFERRED` (unit futura).
+Hoje são **9 impostos e 6 diferidos** (1, 6, 11, 12, 13, 14), e há um teste
+que fixa esse conjunto — se ele crescer, houve regressão.
+
+A alternativa seria não registrar os diferidos, e aí um invariante sem dono
+desapareceria em silêncio.
+
+### D-02.4 — `Message` recusa o estado impossível na construção
+
+`active=1` **e** `compacted=1` não é um estado válido — significaria estar no
+contexto do modelo e arquivada por compressão ao mesmo tempo. O construtor
+levanta, em vez de deixar `visibility` escolher arbitrariamente. As três
+visibilidades ficam sendo de fato três.
+
+### D-02.5 — Alternância de papéis isenta `tool`
+
+`check_role_alternation` não conta mensagens de papel `tool`: uma chamada do
+assistente pode produzir vários resultados em sequência, e isso é a forma
+normal do protocolo. Aplicar a regra literalmente reprovaria histórico
+válido.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

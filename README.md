@@ -14,7 +14,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | Tarefa | Status |
 |---|---|
 | 01 — Schema do banco de dados | ✅ concluída |
-| 02–21 | pendentes |
+| 02 — Entidades de domínio | ✅ concluída |
+| 03–21 | pendentes |
 
 ## Ambiente
 
