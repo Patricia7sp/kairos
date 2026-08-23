@@ -277,6 +277,116 @@ usando um `.so` que não está.
 
 ---
 
+## Tarefa 05 — hermes-state
+
+### D-05.1 — Correção da Tarefa 01: WAL é condicional
+
+A Tarefa 01 aplicava `PRAGMA journal_mode=WAL` incondicionalmente. A spec
+(§1) é explícita: **WAL é condicional, não obrigatório**. Ele exige memória
+compartilhada e falha em NFS, em alguns FUSE e em montagens de rede — casos
+reais, não exóticos: `state.db` num home montado por rede é comum em ambiente
+corporativo.
+
+`apply_wal_with_fallback` cai para `DELETE` (o default pré-WAL), que degrada a
+concorrência mas mantém a durabilidade. E não insiste: flipar `journal_mode`
+com outras conexões abertas é caminho conhecido de corrupção.
+
+### D-05.2 — Bug de trigger encontrado só agora: FTS standalone vs external-content
+
+Os triggers de `messages_fts_trigram` e `messages_fts_cjk` usavam o comando
+`INSERT INTO t(t, ...) VALUES('delete', ...)`. Esse comando **só existe para
+tabelas external-content ou contentless**. As duas são **standalone**, e numa
+standalone ele devolve `SQL logic error`.
+
+Só `messages_fts` é external-content (`content='messages'`) e podia usá-lo.
+
+O bug atravessou as Tarefas 01 e 04 porque nenhuma das duas suítes fazia
+`UPDATE` numa linha de `messages` — e o trigger de update é o único caminho
+que exercita a remoção. Apareceu na primeira compactação, que é justamente um
+`UPDATE` em massa.
+
+### D-05.3 — A instrumentação de contenção entrou junto com a escada (T-13)
+
+Conforme `questions.md#pergunta-9`. Três orçamentos, e a ordem entre eles
+codifica o custo da falha:
+
+| Orçamento | Paciência | O que custa falhar |
+|---|---:|---|
+| `activity` | 0,5 s | Nada — a próxima janela repete |
+| `routine` | 20 s | Atraso de UI/background |
+| `transcript` | 60 s | **O turno do usuário** |
+
+`gaveup_total` do orçamento `transcript` é o número que mais importa:
+diferente de zero significa turno destruído por banco ocupado.
+
+Duas escolhas de medição que valem registro. **Esperas bem-sucedidas também
+são registradas** — medir só as falhas esconderia a degradação progressiva
+que as antecede. E as amostras de percentil usam janela deslizante, para que
+um processo de longa vida não tenha o p99 dominado pela primeira hora de
+uptime.
+
+### D-05.4 — A paciência é por tempo, com jitter, e o `busy_timeout` é curto
+
+`BUSY_TIMEOUT_MS = 1000`, deliberadamente baixo. O handler de ocupado embutido
+do SQLite usa escalonamento determinístico, o que sob concorrência alta faz
+vários escritores acordarem juntos — efeito comboio. A paciência real fica na
+camada de aplicação, com jitter aleatório que os escalona naturalmente.
+
+E é por **tempo**, não por tentativa: um orçamento contado em tentativas perde
+a corrida contra um checkpoint TRUNCATE ou um VACUUM de processo irmão, e a
+falha aparece como turno destruído mesmo com o banco saudável e apenas
+ocupado.
+
+### D-05.5 — A linhagem de compactação e seus três filtros negativos
+
+A spec chama de *"a regra de negócio mais valiosa da unit"*, e registra que
+**estava ausente** da própria versão anterior dela. A CTE recursiva só sobe
+enquanto quatro condições valem: pai encerrado por `compression`, e o filho
+**não** sendo branch, **não** sendo delegação e **não** tendo `source='tool'`.
+
+Sem os três filtros negativos, um branch arrastaria a conversa de onde
+ramificou e uma delegação arrastaria a do pai que a despachou — em ambos os
+casos o usuário veria, no próprio transcript, falas que nunca fez. Há um teste
+por filtro.
+
+Acrescentei um teto de profundidade (`MAX_LINEAGE_DEPTH = 1000`): uma linhagem
+legítima tem dezenas de degraus, e milhares indicam ciclo por corrupção — a
+CTE giraria até estourar memória.
+
+### D-05.6 — A posse do lock é verificada dentro da transação de commit
+
+Entre adquirir o lock de compactação e chamar `archive_and_compact` passou uma
+**chamada de LLM inteira**. O lease pode ter expirado e sido tomado nesse
+intervalo. Verificar fora da transação deixaria uma janela de corrida do
+tamanho da sumarização.
+
+### D-05.7 — Contabilidade coalescida, com devolução à fila em falha
+
+Streaming produz dezenas de deltas por turno. Um `UPDATE` por delta faria da
+contabilidade — que é acessória — a principal fonte de contenção no
+`state.db`, exatamente quando o turno precisa gravar o transcript.
+
+Se o flush falha, o lote **volta para a fila**: contabilidade perdida é
+irrecuperável, e uma falha transitória não deve custar os números do turno.
+`drain_at_exit` engole exceção de propósito — no encerramento não há para
+quem propagar.
+
+### D-05.8 — A busca tem quatro degraus, independentes entre si
+
+FTS5 base → trigram → bigrama CJK → `LIKE`. Cada um é opcional
+**separadamente**: a ausência do trigram não afeta o CJK, e a ausência dos
+dois não afeta o índice base. `LIKE` está sempre no fim e nunca é removido —
+é o único caminho que existe quando o SQLite foi compilado sem FTS5.
+
+Um índice presente mas inutilizável (corrompido, tokenizador sumido entre a
+sondagem e a consulta) cede à rota seguinte em vez de propagar: busca pior é
+melhor que busca quebrada.
+
+O `%` e o `_` digitados pelo usuário são escapados no caminho `LIKE` — sem
+isso, buscar `%` casaria tudo.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

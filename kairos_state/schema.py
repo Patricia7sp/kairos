@@ -223,6 +223,25 @@ CREATE TABLE IF NOT EXISTS gateway_hygiene_state (
     failure_streak INTEGER
 );
 
+-- RF-19. Obrigação de entrega com liveness do dono: o par
+-- ``owner_pid`` + ``owner_started_at`` é a mesma convenção do ledger de cron.
+-- O PID sozinho não serve — o SO o recicla, e uma obrigação seria dada como
+-- viva por um processo que só herdou o número.
+CREATE TABLE IF NOT EXISTS delivery_obligations (
+    obligation_id     TEXT PRIMARY KEY,
+    session_id        TEXT REFERENCES sessions(id),
+    target            TEXT NOT NULL,
+    payload_json      TEXT,
+    state             TEXT NOT NULL DEFAULT 'pending'
+                      CHECK(state IN ('pending','claimed','delivered','abandoned')),
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    owner_pid         INTEGER,
+    owner_started_at  INTEGER,
+    created_at        REAL NOT NULL,
+    updated_at        REAL,
+    delivered_at      REAL
+);
+
 CREATE TABLE IF NOT EXISTS state_meta (
     key    TEXT PRIMARY KEY,
     value  TEXT
@@ -257,6 +276,9 @@ CREATE INDEX IF NOT EXISTS idx_async_delegations_delivery
 -- Consequência da DIVERGÊNCIA acima: a resolução roteamento → sessão passa
 -- a ser indexável.
 CREATE INDEX IF NOT EXISTS idx_gateway_routing_session ON gateway_routing(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_obligations_state
+    ON delivery_obligations(state, created_at);
 """
 
 
@@ -337,16 +359,18 @@ WHEN new.role <> 'tool' BEGIN
         VALUES (new.id, new.content, new.tool_name, new.tool_calls);
 END;
 
+-- ATENÇÃO: ``messages_fts_trigram`` é uma tabela FTS5 STANDALONE, não
+-- external-content. O comando ``INSERT INTO t(t, ...) VALUES('delete', ...)``
+-- só existe para tabelas external-content/contentless; numa standalone ele
+-- devolve "SQL logic error". Aqui a remoção é um DELETE comum.
 CREATE TRIGGER IF NOT EXISTS messages_fts_trigram_delete AFTER DELETE ON messages
 WHEN old.role <> 'tool' BEGIN
-    INSERT INTO messages_fts_trigram(messages_fts_trigram, rowid, content, tool_name, tool_calls)
-        VALUES ('delete', old.id, old.content, old.tool_name, old.tool_calls);
+    DELETE FROM messages_fts_trigram WHERE rowid = old.id;
 END;
 
 CREATE TRIGGER IF NOT EXISTS messages_fts_trigram_update AFTER UPDATE ON messages
 WHEN new.role <> 'tool' BEGIN
-    INSERT INTO messages_fts_trigram(messages_fts_trigram, rowid, content, tool_name, tool_calls)
-        VALUES ('delete', old.id, old.content, old.tool_name, old.tool_calls);
+    DELETE FROM messages_fts_trigram WHERE rowid = old.id;
     INSERT INTO messages_fts_trigram(rowid, content, tool_name, tool_calls)
         VALUES (new.id, new.content, new.tool_name, new.tool_calls);
 END;
@@ -366,16 +390,15 @@ BEGIN
         VALUES (new.id, new.content, new.tool_name, new.tool_calls);
 END;
 
+-- Standalone, como o trigram: DELETE comum, não o comando 'delete'.
 CREATE TRIGGER IF NOT EXISTS messages_fts_cjk_delete AFTER DELETE ON messages
 WHEN old.role <> 'tool' BEGIN
-    INSERT INTO messages_fts_cjk(messages_fts_cjk, rowid, content, tool_name, tool_calls)
-        VALUES ('delete', old.id, old.content, old.tool_name, old.tool_calls);
+    DELETE FROM messages_fts_cjk WHERE rowid = old.id;
 END;
 
 CREATE TRIGGER IF NOT EXISTS messages_fts_cjk_update AFTER UPDATE ON messages
 WHEN new.role <> 'tool' BEGIN
-    INSERT INTO messages_fts_cjk(messages_fts_cjk, rowid, content, tool_name, tool_calls)
-        VALUES ('delete', old.id, old.content, old.tool_name, old.tool_calls);
+    DELETE FROM messages_fts_cjk WHERE rowid = old.id;
     INSERT INTO messages_fts_cjk(rowid, content, tool_name, tool_calls)
         VALUES (new.id, new.content, new.tool_name, new.tool_calls);
 END;
