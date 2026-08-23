@@ -6,3 +6,6 @@ __pycache__/
 *.db-shm
 .venv/
 .venv/
+
+# artefato compilado — reproduzível por native/fts5_cjk/build.sh
+*.so

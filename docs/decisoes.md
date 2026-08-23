@@ -197,6 +197,86 @@ segunda imposição, independente da de `scheduling.assert_terminal_immutable`.
 
 ---
 
+## Tarefa 04 — native (`fts5_cjk`)
+
+### D-04.1 — A lacuna 🟡 da spec foi fechada lendo a fonte
+
+`native/requirements.md` marcava 🟡: *"O conteúdo de `fts5_cjk.c` (9,6 KB) não
+foi lido linha a linha — as faixas exatas de codepoint tratadas como CJK não
+foram extraídas."*
+
+São **12 blocos**, agora documentados no próprio C:
+
+| Bloco | Faixa |
+|---|---|
+| Sílabas Hangul | `AC00..D7A3` |
+| Hangul Jamo | `1100..11FF` |
+| Hangul Jamo compat | `3130..318F` |
+| Hangul Jamo ext-A | `A960..A97F` |
+| Hangul Jamo ext-B | `D7B0..D7FF` |
+| Ideogramas CJK unificados | `4E00..9FFF` |
+| CJK ext A | `3400..4DBF` |
+| Ideogramas CJK compat | `F900..FAFF` |
+| CJK ext B..F, compat sup | `20000..2FA1F` |
+| Hiragana | `3040..309F` |
+| Katakana | `30A0..30FF` |
+| Katakana fonético ext | `31F0..31FF` |
+
+Hangul aparece **cinco vezes** porque o coreano moderno usa sílabas
+pré-compostas enquanto texto decomposto, teclados e dados legados usam Jamo —
+tratar só as sílabas deixaria de fora exatamente o material mais irregular.
+
+### D-04.2 — A marca d'água é uma FRONTEIRA, não um progresso
+
+O bug mais instrutivo da tarefa, encontrado por um teste que falhou com
+`constraint failed`. A divisão de trabalho é:
+
+```
+id  >  high_water   →  responsabilidade do GATILHO (ao vivo)
+id  <= high_water   →  responsabilidade do BACKFILL
+```
+
+O gatilho de INSERT do schema consulta `fts_cjk_rebuild_high_water` e só
+indexa **acima** dela. A marca não é "até onde o backfill chegou" — é a
+fronteira fixa entre os dois, definida no instante em que o índice nasce
+sobre um banco populado.
+
+Eu havia implementado a marca como cursor de progresso, o que fazia o backfill
+reindexar exatamente as linhas que o gatilho já inserira. O avanço passou a
+ser rastreado por um **cursor separado** (`fts_cjk_rebuild_cursor`).
+
+Num banco vazio a fronteira fica em `-1`, o gatilho cobre tudo e não há
+backfill. Num banco populado, `ensure_cjk_index` fixa a fronteira no maior id
+existente, e daí em diante os dois caminham sem se cruzar. Há teste para
+exatamente esse cenário.
+
+### D-04.3 — O build vendorizado foi exercitado de verdade
+
+Este host **não tem** `/usr/include/sqlite3ext.h`, então o caminho de RF-03
+não é hipotético: a compilação usou `vendor/` e passou com `-Wall -Wextra`
+sem warnings. Há um teste que afirma a ausência do header do sistema antes de
+concluir que o build vendorizado funcionou — se alguém instalar
+`libsqlite3-dev` na máquina, o teste avisa que o requisito deixou de ser
+exercitado ali, em vez de passar por engano.
+
+### D-04.4 — Testes que dependem da extensão são pulados, não falhados
+
+`@requires_ext` pula quando o `.so` não compila. Isso não é conveniência: é
+o comportamento sob teste. A extensão é opcional, e uma suíte que falhasse
+sem ela afirmaria o contrário do RF-12.
+
+Os testes de degradação (`DegradationTests`) rodam **sempre**, inclusive o de
+`.so` inválido — carregar lixo não pode levantar.
+
+### D-04.5 — Override de caminho quebrado não cai no padrão
+
+`KAIROS_FTS5_CJK_SO` apontando para caminho inexistente devolve `None`, em vez
+de silenciosamente usar `~/.kairos/lib`. Um override quebrado é erro de
+configuração e deve aparecer; contorná-lo faria o operador acreditar que está
+usando um `.so` que não está.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
