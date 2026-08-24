@@ -136,6 +136,17 @@ class SessionRepository:
 
         write_with_retry(op, budget=Budget.ROUTINE, detail="end_session")
 
+    def list_recent(self, limit: int = 50) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    def ensure(self, session_id: str, source: str = "web", **kwargs) -> str:
+        existing = self.get(session_id)
+        if existing is not None:
+            return session_id
+        return self.create(session_id, source=source, **kwargs)
+
     # -- linhagem -----------------------------------------------------------
 
     def compression_lineage(self, session_id: str) -> list[str]:

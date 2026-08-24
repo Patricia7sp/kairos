@@ -4,9 +4,13 @@ version = "0.1.0"
 description = "Kairos — reimplementação do Hermes a partir das specs do Reversa"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.141.1",
     # Catálogos de i18n e config.yaml. O legado já a usava; no Kairos ela
     # entra na Tarefa 06 porque é a primeira que precisa ler YAML.
+    "httpx>=0.28.1",
     "pyyaml>=6",
+    "uvicorn>=0.52.4",
+    "websockets>=17.0.1",
 ]
 
 [project.scripts]
@@ -16,7 +20,7 @@ kairos = "kairos_cli.main:main"
 dev = ["pytest>=8", "ruff>=0.16"]
 
 [tool.setuptools]
-packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container", "kairos_tools", "kairos_skills", "kairos_plugins", "kairos_providers", "kairos_gateway", "kairos_mcp", "kairos_agent", "kairos_cron", "kairos_cli", "kairos_tui_host", "kairos_acp", "kairos_integration", "kairos_evals"]
+packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container", "kairos_tools", "kairos_skills", "kairos_plugins", "kairos_providers", "kairos_gateway", "kairos_mcp", "kairos_agent", "kairos_cron", "kairos_cli", "kairos_tui_host", "kairos_acp", "kairos_integration", "kairos_evals", "kairos_web"]
 
 [build-system]
 requires = ["setuptools>=68"]

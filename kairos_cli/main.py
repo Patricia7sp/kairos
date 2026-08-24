@@ -83,6 +83,14 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
+    elif command == "dashboard":
+        parser.add_argument("--port", type=int, default=9119, help="Porta HTTP (padrão: 9119)")
+        parser.add_argument(
+            "--host", default="127.0.0.1", help="Host de escuta (padrão: 127.0.0.1)"
+        )
+        parser.add_argument(
+            "--no-browser", action="store_true", help="Não abre o navegador automaticamente"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -370,6 +370,35 @@ def cmd_sync(args) -> int:
     return ExitCode.NOT_IMPLEMENTED
 
 
+def cmd_web(args) -> int:
+    import webbrowser
+
+    import uvicorn
+
+    host = getattr(args, "host", "127.0.0.1") or "127.0.0.1"
+    port = getattr(args, "port", 9119) or 9119
+    no_browser = getattr(args, "no_browser", False)
+
+    print(f"🚀 Iniciando servidor web do Kairos em http://{host}:{port}")
+    if not no_browser and host in ("127.0.0.1", "localhost"):
+        try:
+            webbrowser.open(f"http://{host}:{port}")
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    try:
+        from kairos_web.server import app
+
+        uvicorn.run(app, host=host, port=port, log_level="info")
+        return ExitCode.OK
+    except KeyboardInterrupt:
+        print("\nServidor web encerrado.")
+        return ExitCode.OK
+    except Exception as exc:  # noqa: BLE001
+        print(f"Erro ao iniciar servidor web: {exc}")
+        return ExitCode.ERROR
+
+
 HANDLERS = {
     "version": cmd_version,
     "status": cmd_status,
@@ -385,4 +414,5 @@ HANDLERS = {
     "cron": cmd_cron,
     "tick": cmd_tick,
     "sync": cmd_sync,
+    "dashboard": cmd_web,
 }

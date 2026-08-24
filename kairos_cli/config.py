@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -14,7 +15,10 @@ __all__ = [
     "ConfigResolver",
     "Migration",
     "apply_migrations",
+    "get_config_path",
+    "load_config",
     "resolve_value",
+    "save_config",
 ]
 
 
@@ -107,3 +111,39 @@ def apply_migrations(
         saida["config_version"] = m.version
         atual = m.version
     return saida, atual
+
+
+def get_config_path() -> Path:
+    import os
+
+    kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+    return kairos_home / "config.yaml"
+
+
+def load_config() -> dict[str, Any]:
+    import yaml
+
+    path = get_config_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def save_config(config: dict[str, Any]) -> None:
+    import os
+    import tempfile
+
+    import yaml
+
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", dir=str(path.parent), delete=False, encoding="utf-8"
+    ) as tf:
+        yaml.safe_dump(config, tf, sort_keys=False)
+        tmp_name = tf.name
+    os.replace(tmp_name, path)

@@ -121,7 +121,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="cron",
     ),
-    _c("dashboard", "Painel web"),
+    _c("dashboard", "Painel web e interface gráfica", status=Status.IMPLEMENTED, unit="web"),
     _c("debug", "Diagnóstico de baixo nível"),
     _c(
         "doctor",

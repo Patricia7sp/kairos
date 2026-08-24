@@ -1,0 +1,13 @@
+"""Adapters para todos os provedores LLM suportados."""
+
+from kairos_providers.adapters.anthropic_adapter import AnthropicAdapter
+from kairos_providers.adapters.gemini_adapter import GoogleGeminiAdapter
+from kairos_providers.adapters.ollama_adapter import OllamaAdapter
+from kairos_providers.adapters.openai_adapter import OpenAICompatibleAdapter
+
+__all__ = [
+    "AnthropicAdapter",
+    "GoogleGeminiAdapter",
+    "OllamaAdapter",
+    "OpenAICompatibleAdapter",
+]

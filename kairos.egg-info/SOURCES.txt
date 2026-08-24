@@ -56,6 +56,8 @@ kairos_plugins/hooks.py
 kairos_plugins/manifest.py
 kairos_plugins/storage.py
 kairos_providers/__init__.py
+kairos_providers/base.py
+kairos_providers/manager.py
 kairos_skills/__init__.py
 kairos_skills/curator.py
 kairos_skills/frontmatter.py
@@ -77,10 +79,13 @@ kairos_tools/registry.py
 kairos_tui_host/__init__.py
 kairos_tui_host/rpc.py
 kairos_tui_host/supervisor.py
+kairos_web/__init__.py
+kairos_web/server.py
 tests/test_acp.py
 tests/test_agent.py
 tests/test_cjk.py
 tests/test_cli.py
+tests/test_cli_surface.py
 tests/test_container.py
 tests/test_cron.py
 tests/test_domain.py
@@ -91,8 +96,10 @@ tests/test_integration.py
 tests/test_machines.py
 tests/test_mcp.py
 tests/test_plugins.py
+tests/test_providers.py
 tests/test_schema.py
 tests/test_skills.py
 tests/test_state.py
 tests/test_tools.py
 tests/test_tui_host.py
+tests/test_web.py
