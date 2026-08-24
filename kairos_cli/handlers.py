@@ -414,6 +414,80 @@ def cmd_gateway(args) -> int:
     return svc.run()
 
 
+def cmd_token(args) -> int:
+    """O token de acesso do painel — sem nunca imprimi-lo por acidente.
+
+    Três decisões deliberadas aqui:
+
+    - `show` exige `--reveal`. Sem a flag ele imprime só um prefixo. Comandos
+      são executados dentro de sessões gravadas, colados em tíquetes e ficam no
+      histórico do shell; revelar por padrão é como um segredo vaza sem que
+      ninguém tenha decidido revelá-lo.
+    - `new` escreve o arquivo e imprime a linha de `export` — nunca o valor
+      solto —, para que o caminho natural de uso seja o que não deixa rastro.
+    - O arquivo nasce `0600`. Um token legível por todo o sistema não protege
+      de nada.
+    """
+    import os
+    import secrets
+    import stat
+
+    home = _home()
+    arquivo = home / "web-token"
+    as_json = getattr(args, "json", False)
+    sub = getattr(args, "token_command", None) or "show"
+
+    if sub == "path":
+        _emit({"arquivo": str(arquivo), "existe": arquivo.exists()}, as_json=as_json)
+        return ExitCode.OK
+
+    if sub == "new":
+        home.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_urlsafe(32)
+        # Cria com 0600 desde o primeiro byte: escrever e só depois ajustar a
+        # permissão deixa uma janela em que o arquivo está legível por todos.
+        fd = os.open(arquivo, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(token + "\n")
+        if as_json:
+            _emit({"arquivo": str(arquivo), "criado": True}, as_json=True)
+        else:
+            print(f"token gravado em {arquivo} (0600)")
+            print("\npara usar nesta sessão, sem deixá-lo no histórico:")
+            print(f'  export KAIROS_WEB_TOKEN="$(cat {arquivo})"')
+        return ExitCode.OK
+
+    # show
+    do_ambiente = os.environ.get("KAIROS_WEB_TOKEN")
+    if do_ambiente:
+        token, origem = do_ambiente, "KAIROS_WEB_TOKEN"
+    elif arquivo.exists():
+        token, origem = arquivo.read_text(encoding="utf-8").strip(), str(arquivo)
+    else:
+        _emit(
+            {
+                "erro": "nenhum token configurado",
+                "como resolver": "kairos token new",
+                "nota": "sem token fixo o servidor gera um por processo, e ele muda a cada restart",
+            },
+            as_json=as_json,
+        )
+        return ExitCode.NOT_FOUND if hasattr(ExitCode, "NOT_FOUND") else ExitCode.OK
+
+    if getattr(args, "reveal", False):
+        _emit({"origem": origem, "token": token}, as_json=as_json)
+    else:
+        _emit(
+            {
+                "origem": origem,
+                "token": f"{token[:4]}…{token[-2:]} ({len(token)} caracteres)",
+                "para ver inteiro": "kairos token show --reveal",
+            },
+            as_json=as_json,
+        )
+    return ExitCode.OK
+
+
 def cmd_web(args) -> int:
     import webbrowser
 
@@ -559,4 +633,5 @@ HANDLERS = {
     "dashboard": cmd_web,
     "gateway": cmd_gateway,
     "security": cmd_security,
+    "token": cmd_token,
 }

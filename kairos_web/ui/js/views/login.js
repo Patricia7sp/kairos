@@ -16,12 +16,24 @@ export function loginView({ aoEntrar }) {
           <h1>Kairos</h1>
           <p class="k-login__lema">O instante certo</p>
           <p class="k-login__mito">
-            Na mitologia grega, <em>kairós</em> é o tempo oportuno — o momento
-            que se abre e se fecha. Era representado com asas nos pés, pela
-            velocidade, e uma balança em fio de navalha, pela precisão de
-            julgá-lo. O deus tinha uma mecha na testa e a nuca raspada: o
-            instante só se agarra quando vem chegando.
+            <em>Kairós</em> é o momento oportuno — a diferença entre fazer e
+            fazer na hora certa. É disso que trata uma plataforma de agentes:
+            não de responder rápido, mas de agir quando a ação ainda vale.
           </p>
+          <ul class="k-login__pilares">
+            <li>
+              <strong>No momento certo.</strong> Os agentes observam gatilhos e
+              agendas e disparam quando a janela abre — sem esperar você lembrar.
+            </li>
+            <li>
+              <strong>Com precisão.</strong> Cada agente carrega só as skills que
+              a tarefa exige, e pede aprovação antes do que é irreversível.
+            </li>
+            <li>
+              <strong>Com autonomia.</strong> Tarefas longas seguem sozinhas em
+              segundo plano e entregam o resultado onde você já está.
+            </li>
+          </ul>
         </div>
         <div class="k-login__asas" aria-hidden="true"></div>
       </section>
@@ -30,9 +42,9 @@ export function loginView({ aoEntrar }) {
         <form class="k-login__form" novalidate>
           <h2>Entrar</h2>
           <p class="k-login__ajuda">
-            Use o token de acesso do painel. Ele é definido em
-            <code>KAIROS_WEB_TOKEN</code>; sem essa variável o servidor gera um
-            a cada arranque e o imprime no log do container.
+            Não tem o token? Gere um com <code>kairos token new</code> — ele é
+            gravado em <code>KAIROS_HOME/web-token</code> com permissão 0600 e
+            nunca aparece nos logs.
           </p>
 
           <label class="k-field">

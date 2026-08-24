@@ -47,11 +47,34 @@ DIST_DIR = Path(__file__).parent / "web_dist"
 
 # --- SESSÃO ---
 
+
 # Token gerado uma vez por processo do servidor. Fica só em memória: reiniciar
 # o servidor invalida as abas antigas, que é o comportamento desejado para uma
 # UI local. `KAIROS_WEB_TOKEN` existe para quem precisa de um valor estável
 # (proxy reverso, teste de integração) e assume o risco conscientemente.
-SESSION_TOKEN = os.environ.get("KAIROS_WEB_TOKEN") or secrets.token_urlsafe(32)
+def _token_configurado() -> str:
+    """Ambiente, arquivo, ou um por processo — nessa ordem.
+
+    O arquivo existe para que haja um caminho de token estável que NÃO passe
+    por variável de ambiente: `printenv` num container, um `docker inspect` ou
+    um dump de configuração revelam a variável a quem alcança o host. Um
+    arquivo 0600 no KAIROS_HOME não aparece em nenhum deles.
+    """
+    do_ambiente = os.environ.get("KAIROS_WEB_TOKEN")
+    if do_ambiente:
+        return do_ambiente
+    arquivo = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos")) / "web-token"
+    try:
+        if arquivo.is_file():
+            guardado = arquivo.read_text(encoding="utf-8").strip()
+            if guardado:
+                return guardado
+    except OSError:
+        pass
+    return secrets.token_urlsafe(32)
+
+
+SESSION_TOKEN = _token_configurado()
 
 # O bundle do SPA já manda este header; o WebSocket manda `?token=`.
 TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o segredo

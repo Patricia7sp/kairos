@@ -21,6 +21,12 @@ from kairos_cli.main import build_parser, main
 REPO = Path(__file__).resolve().parent.parent
 
 
+#: Comandos que nascem no Kairos e não têm correspondente no legado.
+#: `token` existe porque o painel precisava de um caminho para a credencial
+#: que não passasse por variável de ambiente nem por log.
+PROPRIOS_DO_KAIROS = frozenset({"token"})
+
+
 class ArvoreTests(unittest.TestCase):
     def test_a_contagem_e_EVIDENCIA_nao_a_frase_da_spec(self):
         """A spec dizia "50 comandos" e marcava a árvore como 🔴 **não
@@ -30,8 +36,13 @@ class ArvoreTests(unittest.TestCase):
         comando (excluídos `__init__` e `_shared`), mais **4** de topo (`run`,
         `chat`, `tick`, `version`) = **48**. Contando os subcomandos
         aninhados, são 84 invocações distintas.
+
+        Os comandos PRÓPRIOS do Kairos são contados à parte. Somá-los ao 48
+        apagaria a evidência — o número deixaria de dizer o que foi percorrido
+        no legado e passaria a dizer só "o que temos hoje".
         """
-        self.assertEqual(len(COMMANDS), 48)
+        herdados = len(COMMANDS) - len(PROPRIOS_DO_KAIROS)
+        self.assertEqual(herdados, 48)
         self.assertGreater(leaf_count(), 48)
 
     def test_nomes_unicos(self):

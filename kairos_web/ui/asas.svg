@@ -1,20 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 630" width="560" height="630" aria-hidden="true">
-  <g fill="none" stroke="#22D3EE" stroke-linecap="round" transform="translate(40 60)">
-      <path d="M 92 96 Q 296 66 500 50" stroke-width="8.5" opacity="0.300"/>
-      <path d="M 122 126 Q 305 96 488 80" stroke-width="8.0" opacity="0.270"/>
-      <path d="M 152 156 Q 314 126 476 110" stroke-width="7.4" opacity="0.240"/>
-      <path d="M 182 186 Q 323 156 464 140" stroke-width="6.8" opacity="0.210"/>
-      <path d="M 212 216 Q 332 186 452 170" stroke-width="6.3" opacity="0.180"/>
-      <path d="M 242 246 Q 341 216 440 200" stroke-width="5.8" opacity="0.150"/>
-      <path d="M 272 276 Q 350 246 428 230" stroke-width="5.2" opacity="0.120"/>
+  <g fill="none" stroke="#22D3EE" stroke-linecap="round">
+        <path d="M 92 96 Q 296 66 500 50" stroke-width="8.5" opacity="0.340"/>
+    <path d="M 500 50 L 505 300" stroke-width="1" opacity="0.153" stroke-dasharray="3 6"/>
+    <path d="M 122 126 Q 305 96 488 80" stroke-width="8.0" opacity="0.310"/>
+    <path d="M 488 80 L 505 300" stroke-width="1" opacity="0.140" stroke-dasharray="3 6"/>
+    <path d="M 152 156 Q 314 126 476 110" stroke-width="7.4" opacity="0.280"/>
+    <path d="M 476 110 L 505 300" stroke-width="1" opacity="0.126" stroke-dasharray="3 6"/>
+    <path d="M 182 186 Q 323 156 464 140" stroke-width="6.8" opacity="0.250"/>
+    <path d="M 464 140 L 505 300" stroke-width="1" opacity="0.113" stroke-dasharray="3 6"/>
+    <path d="M 212 216 Q 332 186 452 170" stroke-width="6.3" opacity="0.220"/>
+    <path d="M 452 170 L 505 300" stroke-width="1" opacity="0.099" stroke-dasharray="3 6"/>
+    <path d="M 242 246 Q 341 216 440 200" stroke-width="5.8" opacity="0.190"/>
+    <path d="M 440 200 L 505 300" stroke-width="1" opacity="0.086" stroke-dasharray="3 6"/>
+    <path d="M 272 276 Q 350 246 428 230" stroke-width="5.2" opacity="0.160"/>
+    <path d="M 428 230 L 505 300" stroke-width="1" opacity="0.072" stroke-dasharray="3 6"/>
   </g>
-  <g fill="none" stroke="#22D3EE" stroke-linecap="round" transform="translate(520 570) rotate(180) translate(0 -40)">
-      <path d="M 92 96 Q 296 66 500 50" stroke-width="8.5" opacity="0.300"/>
-      <path d="M 122 126 Q 305 96 488 80" stroke-width="8.0" opacity="0.270"/>
-      <path d="M 152 156 Q 314 126 476 110" stroke-width="7.4" opacity="0.240"/>
-      <path d="M 182 186 Q 323 156 464 140" stroke-width="6.8" opacity="0.210"/>
-      <path d="M 212 216 Q 332 186 452 170" stroke-width="6.3" opacity="0.180"/>
-      <path d="M 242 246 Q 341 216 440 200" stroke-width="5.8" opacity="0.150"/>
-      <path d="M 272 276 Q 350 246 428 230" stroke-width="5.2" opacity="0.120"/>
+  <g fill="#22D3EE" stroke="none">
+        <circle cx="500" cy="50" r="5.5" opacity="0.560"/>
+    <circle cx="488" cy="80" r="5.2" opacity="0.530"/>
+    <circle cx="476" cy="110" r="4.8" opacity="0.500"/>
+    <circle cx="464" cy="140" r="4.5" opacity="0.470"/>
+    <circle cx="452" cy="170" r="4.1" opacity="0.440"/>
+    <circle cx="440" cy="200" r="3.8" opacity="0.410"/>
+    <circle cx="428" cy="230" r="3.4" opacity="0.380"/>
   </g>
+  <!-- o instante: onde as trajetórias se encontram -->
+  <circle cx="505" cy="300" r="9" fill="#22D3EE" opacity=".85"/>
+  <circle cx="505" cy="300" r="19" fill="none" stroke="#22D3EE" stroke-width="1.5" opacity=".4"/>
+  <circle cx="505" cy="300" r="31" fill="none" stroke="#22D3EE" stroke-width="1" opacity=".2"/>
 </svg>

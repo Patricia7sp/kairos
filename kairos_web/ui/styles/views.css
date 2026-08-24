@@ -69,6 +69,18 @@
 }
 .k-login__mito em { color: var(--k-inverso-text-3); font-style: italic; }
 
+/* Os três pilares. Sem numeração: eles não são etapas de um processo, são
+ * qualidades simultâneas — numerá-los afirmaria uma ordem que não existe. */
+.k-login__pilares {
+  list-style: none; margin: var(--k-space-5) 0 0; padding: 0;
+  display: grid; gap: var(--k-space-4); max-width: 38ch;
+}
+.k-login__pilares li {
+  color: var(--k-inverso-text-2); font-size: var(--k-size-sm); line-height: 1.6;
+  padding-left: var(--k-space-4); border-left: 2px solid var(--k-inverso-accent);
+}
+.k-login__pilares strong { color: var(--k-inverso-text); font-weight: var(--k-weight-medium); }
+
 /* As asas — a talaria. Ficam atrás do texto e bem apagadas: são atmosfera, e
  * atmosfera que compete com o conteúdo vira ruído. */
 .k-login__asas {
@@ -99,7 +111,7 @@
   /* A marca vira faixa no topo; o mito sai, porque numa tela estreita ele
    * empurraria o campo para fora da primeira dobra. */
   .k-login__marca { padding: var(--k-space-6) var(--k-space-4); min-height: auto; }
-  .k-login__mito { display: none; }
+  .k-login__mito, .k-login__pilares { display: none; }
   .k-login__marca h1 { font-size: 2.2rem; }
   .k-login__asas { opacity: .3; }
 }

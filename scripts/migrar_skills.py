@@ -62,6 +62,15 @@ def traduzir_nome(nome: str) -> str:
     return nome
 
 
+# Fora da migração, com o motivo junto — uma lista sem razão vira dogma que
+# ninguém revisa.
+EXCLUIDAS = {
+    "godmode": (
+        "contorna as salvaguardas de LLMs servidos por API (Claude, GPT, Gemini), "
+        "que são serviços de terceiros e não deste operador"
+    ),
+}
+
 # URLs do projeto de origem ficam: apontam para onde o código realmente veio, e
 # reescrevê-las para um endereço do Kairos seria inventar um host que não existe.
 URL_ORIGEM = re.compile(r"https?://[^\s`\"')]*hermes[^\s`\"')]*")
@@ -108,8 +117,15 @@ def converter_frontmatter(bruto: str, categoria: str) -> str:
     saida.append(f"category: {categoria}")
     texto = "\n".join(saida)
     # `author` aparece ora como texto, ora como lista, e o Kairos espera texto.
-    # `authors:` (plural) é a mesma coisa com outro nome.
-    texto = re.sub(r"^authors:", "author:", texto, flags=re.M)
+    # `authors:` (plural) é a mesma coisa com outro nome — mas quando os DOIS
+    # existem, renomear cria um `author:` duplicado e a lista sobrescreve o
+    # texto que já estava certo. Nesse caso o bloco plural sai inteiro.
+    tem_author = re.search(r"^author:", texto, flags=re.M) is not None
+    if tem_author:
+        texto = re.sub(r"^authors:\s*\n(?:\s+-\s.*\n?)*", "", texto, flags=re.M)
+        texto = re.sub(r"^authors:.*$\n?", "", texto, flags=re.M)
+    else:
+        texto = re.sub(r"^authors:", "author:", texto, flags=re.M)
     texto = re.sub(
         r"^author:\s*\[(.+?)\]\s*$",
         lambda m: "author: " + ", ".join(x.strip().strip("\"'") for x in m.group(1).split(",")),
@@ -171,7 +187,7 @@ def main() -> int:
     if args.incluir_opcionais:
         fontes.append(args.origem / "optional-skills")
 
-    ok, falhas = [], []
+    ok, falhas, excluidas = [], [], []
     for fonte in fontes:
         if not fonte.is_dir():
             print(f"aviso: {fonte} não existe", file=sys.stderr)
@@ -184,12 +200,19 @@ def main() -> int:
             # que se referem uns aos outros por caminho completo — github-code-review
             # chama `$KAIROS_HOME/skills/github/github-auth/scripts/...`, e sem o
             # nível da categoria esse arquivo deixa de existir.
+            if origem.name in EXCLUIDAS:
+                excluidas.append((origem.name, EXCLUIDAS[origem.name]))
+                continue
             relativo = origem.relative_to(fonte)
             destino = destino_raiz / Path(*[traduzir_nome(x) for x in relativo.parts])
             sucesso, detalhe = migrar_uma(origem, destino, categoria, args.aplicar)
             (ok if sucesso else falhas).append((origem.name, detalhe))
 
     print(f"{'migradas' if args.aplicar else 'migráveis'}: {len(ok)}")
+    if excluidas:
+        print(f"deixadas de fora: {len(excluidas)}")
+        for nome, motivo in excluidas:
+            print(f"  {nome}: {motivo}")
     if falhas:
         print(f"recusadas: {len(falhas)}")
         for nome, motivo in falhas:

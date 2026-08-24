@@ -557,3 +557,85 @@ class CatalogoDeSkillsTests(unittest.TestCase):
         for alvo in sorted(alvos):
             with self.subTest(alvo=alvo):
                 self.assertTrue((self.RAIZ / alvo).exists(), f"skills/{alvo} não existe")
+
+
+class TokenDeAcessoTests(unittest.TestCase):
+    """Como o token é obtido, e por onde ele NÃO passa."""
+
+    def test_o_arquivo_de_token_e_lido_quando_nao_ha_variavel(self):
+        """O arquivo existe para haver um caminho estável fora do ambiente:
+        `printenv` e `docker inspect` revelam a variável, o arquivo 0600 não."""
+        import importlib
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alvo = Path(tmp) / "web-token"
+            alvo.write_text("token-vindo-do-arquivo\n", encoding="utf-8")
+            antigo_home = os.environ.get("KAIROS_HOME")
+            antigo_tok = os.environ.pop("KAIROS_WEB_TOKEN", None)
+            os.environ["KAIROS_HOME"] = tmp
+            try:
+                import kairos_web.server as srv
+
+                self.assertEqual(srv._token_configurado(), "token-vindo-do-arquivo")
+            finally:
+                if antigo_home is None:
+                    os.environ.pop("KAIROS_HOME", None)
+                else:
+                    os.environ["KAIROS_HOME"] = antigo_home
+                if antigo_tok is not None:
+                    os.environ["KAIROS_WEB_TOKEN"] = antigo_tok
+                importlib.invalidate_caches()
+
+    def test_a_variavel_de_ambiente_tem_precedencia(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "web-token").write_text("do-arquivo\n", encoding="utf-8")
+            antigo_home = os.environ.get("KAIROS_HOME")
+            antigo_tok = os.environ.get("KAIROS_WEB_TOKEN")
+            os.environ["KAIROS_HOME"] = tmp
+            os.environ["KAIROS_WEB_TOKEN"] = "do-ambiente"  # noqa: S105 — fixture, não segredo
+            try:
+                import kairos_web.server as srv
+
+                self.assertEqual(srv._token_configurado(), "do-ambiente")
+            finally:
+                for chave, valor in (
+                    ("KAIROS_HOME", antigo_home),
+                    ("KAIROS_WEB_TOKEN", antigo_tok),
+                ):
+                    if valor is None:
+                        os.environ.pop(chave, None)
+                    else:
+                        os.environ[chave] = valor
+
+    def test_o_token_nunca_aparece_nos_logs_do_servidor(self):
+        """Um segredo em log vaza para onde os logs forem — e eles vão longe."""
+        fonte = (Path(__file__).resolve().parent.parent / "kairos_web" / "server.py").read_text(
+            encoding="utf-8"
+        )
+        for linha in fonte.splitlines():
+            despido = linha.strip()
+            if despido.startswith(("logger.", "print(")) or ".info(" in despido:
+                with self.subTest(linha=despido[:70]):
+                    self.assertNotIn("SESSION_TOKEN", despido)
+                    self.assertNotIn("_token_configurado", despido)
+
+
+class TextoDoLoginTests(unittest.TestCase):
+    """A entrada apresenta uma plataforma de agentes, não uma aula de mitologia."""
+
+    FONTE = (
+        Path(__file__).resolve().parent.parent / "kairos_web" / "ui" / "js" / "views" / "login.js"
+    )
+
+    def test_a_entrada_liga_o_conceito_a_agentes(self):
+        texto = self.FONTE.read_text(encoding="utf-8").lower()
+        for termo in ("agentes", "momento", "autonomia", "precisão"):
+            with self.subTest(termo=termo):
+                self.assertIn(termo, texto)
+
+    def test_a_entrada_nao_ensina_a_procurar_o_token_no_log(self):
+        """A ajuda antiga mandava procurar o token no log do container — ou
+        seja, ensinava a tratar como normal um segredo estar em log."""
+        texto = self.FONTE.read_text(encoding="utf-8").lower()
+        self.assertNotIn("log do container", texto)
+        self.assertIn("kairos token new", texto)

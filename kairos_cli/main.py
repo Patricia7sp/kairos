@@ -90,6 +90,10 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
         )
     elif command == "gateway" and subcommand == "stop":
         parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
+    elif command == "token" and subcommand in ("show", None):
+        parser.add_argument(
+            "--reveal", action="store_true", help="Imprime o token inteiro (pense antes)"
+        )
     elif command == "security":
         parser.add_argument(
             "--target", help="Diretório de runtime a auditar (padrão: $KAIROS_HOME)"

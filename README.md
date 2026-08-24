@@ -179,3 +179,29 @@ uv run pytest -q                          # caminho normal
 A suíte é escrita em `unittest` da biblioteca padrão, então roda dos dois
 jeitos. `pytest` só é necessário para o relatório mais legível — nunca para
 que os testes existam.
+
+## O token de acesso do painel
+
+O painel exige um token. Três formas de obtê-lo, em ordem de precedência:
+
+```bash
+kairos token new      # gera e grava em KAIROS_HOME/web-token, com permissão 0600
+kairos token show     # mostra só um prefixo — o valor inteiro exige --reveal
+kairos token path     # onde o arquivo está
+```
+
+O arquivo existe para haver um caminho estável que **não passe por variável de
+ambiente**: `printenv`, `docker inspect` e um dump de configuração revelam a
+variável a quem alcança o host; um arquivo 0600 não aparece em nenhum deles.
+
+`KAIROS_WEB_TOKEN` continua tendo precedência, para quem precisa injetar o
+valor de um cofre. Sem nenhum dos dois, o servidor gera um por processo — mais
+seguro, mas invalida as abas abertas a cada restart.
+
+Para usar sem deixar o valor no histórico do shell:
+
+```bash
+export KAIROS_WEB_TOKEN="$(cat "$KAIROS_HOME/web-token")"
+```
+
+Um teste verifica que nenhuma linha de log do servidor menciona o token.

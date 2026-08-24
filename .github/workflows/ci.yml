@@ -73,6 +73,9 @@ jobs:
           # (sem shebang). Não há shebang a acrescentar: no s6-rc o que
           # importa é o NOME do arquivo, e o conteúdo é deliberadamente nada.
           ignore_names: "main-kairos"
+          # `skills/` é conteúdo instalável de terceiros — mesma razão pela
+          # qual o ruff também o ignora.
+          ignore_paths: "skills"
 
   dockerfile:
     name: Lint do Dockerfile (hadolint)

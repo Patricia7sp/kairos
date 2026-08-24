@@ -39,7 +39,9 @@ run "Lint (ruff format)" "$UV" run ruff format --check .
 if command -v shellcheck >/dev/null 2>&1; then
   # A expansão em palavras é intencional: uma lista de arquivos.
   # shellcheck disable=SC2046
-  run "Lint de shell" shellcheck $(git ls-files '*.sh' 'docker/bin/*' 'docker/cont-init.d/*' 'scripts/*.sh')
+  # `skills/` fora, como no ruff: é conteúdo de terceiros, e os achados ali
+  # não têm dono que possa corrigi-los.
+  run "Lint de shell" shellcheck $(git ls-files '*.sh' 'docker/bin/*' 'docker/cont-init.d/*' 'scripts/*.sh' | grep -v '^skills/')
 else
   skip "Lint de shell" "shellcheck não instalado"
 fi
