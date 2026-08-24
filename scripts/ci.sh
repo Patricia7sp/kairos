@@ -47,14 +47,16 @@ fi
 
 run "uv.lock em dia" "$UV" lock --check
 
-if command -v npm >/dev/null 2>&1 && [ -d ui-tui/node_modules ]; then
-  run "TUI: tsc"    npx --prefix ui-tui tsc --noEmit -p ui-tui
-  run "TUI: vitest" npm test --prefix ui-tui --silent
-elif command -v npm >/dev/null 2>&1; then
-  skip "TUI (vitest + tsc)" "rode: npm install --prefix ui-tui"
-else
-  skip "TUI (vitest + tsc)" "npm não instalado"
-fi
+for front in ui-tui web; do
+  if ! command -v npm >/dev/null 2>&1; then
+    skip "$front (vitest + tsc)" "npm não instalado"
+  elif [ ! -d "$front/node_modules" ]; then
+    skip "$front (vitest + tsc)" "rode: npm install --prefix $front"
+  else
+    run "$front: tsc"    npx --prefix "$front" tsc --noEmit -p "$front"
+    run "$front: vitest" npm test --prefix "$front" --silent
+  fi
+done
 
 if [ "$FAST" -eq 1 ]; then
   skip "Imagem + integração" "--fast"

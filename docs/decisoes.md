@@ -1422,6 +1422,51 @@ turno: o usuário anexou o arquivo justamente para que o agente o olhasse.
 
 ---
 
+## Tarefa 18 — web
+
+### D-18.1 — O 401 é tratado seletivamente
+
+Só um 401 com **código conhecido** derruba a sessão. Tratar todo 401 como
+sessão expirada tira o usuário do ar por causa de um endpoint que exige escopo
+maior — e ensina a reautenticar por reflexo, que é exatamente o hábito que um
+phishing explora.
+
+### D-18.2 — Jitter total no backoff de reconexão
+
+Sem jitter, todas as abas abertas reconectam no **mesmo milissegundo** depois
+de uma queda, e a rajada derruba o servidor no momento em que ele está
+subindo. O jitter é total (0..exp), não parcial: escalona melhor sob muitas
+abas.
+
+### D-18.3 — `AutoField` ganhou mascaramento de segredo
+
+A spec registra que o mascaramento **não foi localizado** no componente do
+legado. Aqui é explícito: um campo de chave de API renderizado em texto claro
+no dashboard é vazamento por compartilhamento de tela — e o dashboard é
+exatamente a superfície que se mostra a outra pessoa.
+
+Os tipos são os **reais** (`boolean`, `select`, `number`, `text`, `list`), não
+os que a spec anterior listava. Tipo desconhecido cai em `text` em vez de
+quebrar o formulário inteiro.
+
+### D-18.4 — Slot desconhecido é rejeitado, não ignorado
+
+Um widget registrado num slot inexistente nunca apareceria, e o autor do
+plugin não teria como saber. É a pior forma de falha para quem está
+escrevendo a extensão: nada acontece, e nada explica.
+
+A ordem dos widgets é determinística — por `order`, desempate por nome do
+plugin —, senão a aparência do dashboard dependeria da ordem de instalação.
+
+### D-18.5 — A sanitização continua `Won't`, e a condição está registrada
+
+Verificado na Tarefa 01 e mantido: não há *sink* de HTML nem renderizador de
+Markdown. A sanitização vira **Must** no instante em que qualquer um dos dois
+aparecer — é requisito acoplado à decisão de renderização, não item
+independente de backlog.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

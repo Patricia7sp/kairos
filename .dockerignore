@@ -12,3 +12,5 @@ docs/
 tests/
 ui-tui/node_modules/
 ui-tui/package-lock.json
+web/node_modules/
+web/package-lock.json

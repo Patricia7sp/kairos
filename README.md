@@ -30,7 +30,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 15 — hermes-cli | ✅ concluída |
 | 16 — ui-tui | ✅ concluída |
 | 17 — acp-adapter | ✅ concluída |
-| 18–21 | pendentes |
+| 18 — web | ✅ concluída |
+| 19–21 | pendentes |
 
 ## Ambiente
 
@@ -71,17 +72,19 @@ scripts/ci.sh --fast   # pula o que exige Docker
 
 Cada passo é pulado com aviso, não silenciosamente, quando a ferramenta falta.
 
-## Frontend da TUI
+## Frontends (TypeScript)
 
-A unit `ui-tui` é TypeScript/React e tem suíte própria:
+As units `ui-tui` e `web` são TypeScript/React e têm suítes próprias:
 
 ```bash
-npm install --prefix ui-tui
-npm test --prefix ui-tui        # vitest
-npx --prefix ui-tui tsc --noEmit -p ui-tui
+for f in ui-tui web; do
+  npm install --prefix "$f"
+  npm test --prefix "$f"                 # vitest
+  npx --prefix "$f" tsc --noEmit -p "$f"
+done
 ```
 
-`scripts/ci.sh` roda os dois passos junto com o resto.
+`scripts/ci.sh` roda os quatro passos junto com o resto.
 
 ## Rodar os testes
 

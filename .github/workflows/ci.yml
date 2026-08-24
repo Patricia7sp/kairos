@@ -103,7 +103,7 @@ jobs:
         run: uv run pytest -q tests/test_container.py::RealImageTests
 
   frontend:
-    name: TUI (vitest + tsc)
+    name: Frontends (vitest + tsc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -112,11 +112,16 @@ jobs:
           node-version: "22"
       # A TUI é TypeScript/React: a suíte de Python não a cobre, e um bug de
       # virtualização não aparece em pytest.
-      - run: npm ci --prefix ui-tui || npm install --prefix ui-tui
-      - name: tsc --noEmit
+      - run: npm install --prefix ui-tui
+      - run: npm install --prefix web
+      - name: tsc --noEmit (TUI)
         run: npx --prefix ui-tui tsc --noEmit -p ui-tui
-      - name: vitest
+      - name: vitest (TUI)
         run: npm test --prefix ui-tui
+      - name: tsc --noEmit (web)
+        run: npx --prefix web tsc --noEmit -p web
+      - name: vitest (web)
+        run: npm test --prefix web
 
   lockfile:
     name: uv.lock em dia
