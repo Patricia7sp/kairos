@@ -29,7 +29,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 14 — cron | ✅ concluída |
 | 15 — hermes-cli | ✅ concluída |
 | 16 — ui-tui | ✅ concluída |
-| 17–21 | pendentes |
+| 17 — acp-adapter | ✅ concluída |
+| 18–21 | pendentes |
 
 ## Ambiente
 

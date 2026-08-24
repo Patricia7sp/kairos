@@ -1357,6 +1357,71 @@ viewport mesmo com itens minúsculos (senão a tela pisca), e nunca passa de
 
 ---
 
+## Tarefa 17 — acp-adapter
+
+### D-17.1 — T-15: o workspace vira piso (fecha G-16)
+
+No legado o `cwd` só **alargava** a auto-aprovação, e sob `session` **qualquer**
+caminho passava — cinco nomes de arquivo entre a política e o disco inteiro do
+usuário. Agora nenhuma política auto-aprova fora do workspace.
+
+Não é contenção dura, e a diferença importa: caminho externo **volta ao
+diálogo**, não é recusado. Recusar quebraria monorepo com irmãos, edição em
+`~/.config` e movimentação entre projetos — e o escape hatch necessário
+reabriria exatamente o buraco.
+
+Três detalhes que entraram no critério de pronto:
+
+- A lista sensível vale **dos dois lados** da fronteira.
+- Symlink é avaliado pelo caminho **resolvido**, com teste que planta um link
+  apontando para fora.
+- A exceção do diretório temporário virou **opção explícita, default falso**.
+  No legado o `/tmp` passava como efeito colateral de `resolve()` seguir
+  symlink no macOS — não como intenção.
+
+### D-17.2 — T-16: `deny_always → never` (fecha G-22)
+
+A simetria com `allow_always → always` passa a ser exata. Não foi preciso
+criar subsistema: `approvals.deny` já existia desde a Tarefa 08; faltava a
+**ligação**, que é o que a correção de G-22 apurou.
+
+Opção desconhecida vinda do editor **nega** — fail-closed é a única leitura
+segura de uma resposta que não se entende.
+
+E sob `smart_denied` a lista encolhe: não se oferece "negar sempre" para algo
+que o sistema já nega, porque a opção sugeriria que o usuário decide algo já
+decidido.
+
+### D-17.3 — A guarda é inexistente fora do ACP, não permissiva
+
+O `ContextVar` só é ligado pelo ACP. CLI, gateway e cron passam por fora — e a
+distinção importa ao auditar: para aquelas superfícies a guarda **não existe**,
+o que é diferente de existir e permitir.
+
+### D-17.4 — Invariantes 13 e 14 fechados
+
+- **13** (caminhos sensíveis pedem aprovação mesmo sob política autônoma) →
+  `should_auto_approve_edit`
+- **14** (exceção no aprovador = negação) → `require_edit_approval`
+
+O 14 tem teste próprio: um aprovador que quebra não pode virar um aprovador
+que aceita. Resta **1** invariante diferido, o 12, da Tarefa 19.
+
+### D-17.5 — A versão respondida é sempre a própria
+
+Espelhar a versão do cliente seria prometer um protocolo que o agente não
+implementa, e o editor usaria recursos inexistentes. O valor recebido serve
+para log.
+
+### D-17.6 — Adivinhar o MIME pela extensão não é conveniência
+
+Editores omitem o MIME com frequência. Sem o palpite, um `.png` anexado viraria
+texto binário no prompt — ruído caro em tokens e inútil para o modelo. E a
+decodificação de texto é tolerante porque um byte inválido não pode derrubar o
+turno: o usuário anexou o arquivo justamente para que o agente o olhasse.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

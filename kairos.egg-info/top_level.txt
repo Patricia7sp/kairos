@@ -1,3 +1,4 @@
+kairos_acp
 kairos_agent
 kairos_cli
 kairos_container
