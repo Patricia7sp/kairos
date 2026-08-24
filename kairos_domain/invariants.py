@@ -120,8 +120,8 @@ INVARIANTS: tuple[Invariant, ...] = (
         12,
         "Após qualquer swap, socket ativo + perfil ativo + átomos de conexão concordam",
         "desktop",
-        Enforcement.DEFERRED,
-        "Tarefa 19 — apps-desktop",
+        Enforcement.HARNESS,
+        "apps/desktop/electron/connection.ts::assertAtomsAgree (vitest)",
     ),
     Invariant(
         13,

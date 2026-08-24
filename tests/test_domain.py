@@ -434,7 +434,7 @@ class RegistryTests(unittest.TestCase):
         # Deve ENCOLHER a cada tarefa. Se este número subir, algo regrediu.
         # 6 e 11 fecharam na Tarefa 05 (o registro os pegou apontando para
         # uma tarefa já concluída — que é para isso que ele existe).
-        self.assertEqual({i.number for i in unenforced()}, {12})
+        self.assertEqual({i.number for i in unenforced()}, set(), "todos os 15 impostos")
 
     def test_nenhum_invariante_aponta_para_tarefa_ja_concluida(self):
         """A guarda que pegou os invariantes 6 e 11.

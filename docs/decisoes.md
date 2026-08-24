@@ -1467,6 +1467,62 @@ independente de backlog.
 
 ---
 
+## Tarefa 19 — apps-desktop
+
+### D-19.1 — G-17 fechado: a CSP entra
+
+A verificação da lacuna tinha apurado dois desfechos opostos: o **bloqueio de
+navegação existe** no legado e é robusto; a **CSP realmente não existe**.
+
+A CSP entra agora, restritiva por padrão. A parte que mais importa é
+`connect-src 'self'`: mesmo que algo consiga executar script no renderer,
+**não consegue enviar nada para fora**. Junto vão `object-src 'none'`,
+`frame-ancestors 'none'`, `base-uri 'none'` e `form-action 'none'` — um
+formulário que posta para fora é exfiltração com aparência de UI.
+
+O relaxamento para o HMR do Vite (`unsafe-eval`, origem e websocket do dev
+server) é **explícito e condicionado a dev**. Há teste afirmando que produção
+não tem `unsafe-eval`.
+
+A defesa que o legado já tinha — `sandbox` + `contextIsolation` +
+`webSecurity` + origem `file:` — é boa e foi mantida. Ela só não cobria o caso
+em que conteúdo renderizado tenta buscar um script remoto: sem CSP, nada
+impede a requisição de sair.
+
+### D-19.2 — Negar navegação sem abrir externamente seria pior
+
+Toda navegação externa é impedida **e** desviada para o browser do sistema.
+Só negar faria links legítimos simplesmente não funcionarem, e o usuário não
+teria como saber por quê.
+
+### D-19.3 — Invariante 12 fechado, e os 15 estão impostos
+
+*"Após qualquer swap, socket ativo + perfil ativo + átomos de conexão
+concordam"* é imposto por `assertAtomsAgree`, com teste em vitest.
+
+A falha que ele cobre é silenciosa e cara: um swap que atualiza dois dos três
+átomos deixa o app **mostrando dados do perfil A enquanto escreve no perfil
+B**, e nada na tela denuncia. Por isso `swapProfile` muda os três juntos —
+atualizar em etapas é o que cria a janela de divergência.
+
+Com este, **os 15 invariantes estão todos impostos**: nenhum diferido. O teste
+que fixava o conjunto passou a afirmar conjunto vazio.
+
+### D-19.4 — `Enforcement.HARNESS` cobre imposição fora do Python
+
+O invariante 12 vive em TypeScript. O nível `HARNESS`, criado para o
+invariante 11, serve aqui pelo mesmo motivo: a imposição existe e é testada,
+só não em `kairos_domain`. Chamá-lo de `DOMAIN` mentiria sobre onde ele mora.
+
+### D-19.5 — G-18 mantido: nada de temporizador de graça no desktop
+
+A durabilidade de shutdown é do **backend**. Um número fixo no Electron seria
+adivinhação sobre um processo que ele não controla. Se um prazo for necessário
+no futuro, deve vir de sinal de prontidão do backend — e há uma constante
+nomeada registrando a decisão, para que a próxima pessoa não a "conserte".
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

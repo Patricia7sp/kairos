@@ -112,16 +112,16 @@ jobs:
           node-version: "22"
       # A TUI é TypeScript/React: a suíte de Python não a cobre, e um bug de
       # virtualização não aparece em pytest.
-      - run: npm install --prefix ui-tui
-      - run: npm install --prefix web
-      - name: tsc --noEmit (TUI)
-        run: npx --prefix ui-tui tsc --noEmit -p ui-tui
-      - name: vitest (TUI)
-        run: npm test --prefix ui-tui
-      - name: tsc --noEmit (web)
-        run: npx --prefix web tsc --noEmit -p web
-      - name: vitest (web)
-        run: npm test --prefix web
+      - name: Instalar e verificar os três frontends
+        # ui-tui (TUI React/Ink), web (SPA) e apps/desktop (Electron).
+        # A suíte de Python não cobre nenhum: um bug de virtualização, de
+        # formulário ou de CSP não aparece em pytest.
+        run: |
+          for f in ui-tui web apps/desktop; do
+            npm install --prefix "$f"
+            npx --prefix "$f" tsc --noEmit -p "$f"
+            npm test --prefix "$f"
+          done
 
   lockfile:
     name: uv.lock em dia

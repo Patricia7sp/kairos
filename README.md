@@ -31,7 +31,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 16 — ui-tui | ✅ concluída |
 | 17 — acp-adapter | ✅ concluída |
 | 18 — web | ✅ concluída |
-| 19–21 | pendentes |
+| 19 — apps-desktop | ✅ concluída |
+| 20–21 | pendentes |
 
 ## Ambiente
 
@@ -74,17 +75,17 @@ Cada passo é pulado com aviso, não silenciosamente, quando a ferramenta falta.
 
 ## Frontends (TypeScript)
 
-As units `ui-tui` e `web` são TypeScript/React e têm suítes próprias:
+As units `ui-tui`, `web` e `apps/desktop` são TypeScript/React e têm suítes próprias:
 
 ```bash
-for f in ui-tui web; do
+for f in ui-tui web apps/desktop; do
   npm install --prefix "$f"
   npm test --prefix "$f"                 # vitest
   npx --prefix "$f" tsc --noEmit -p "$f"
 done
 ```
 
-`scripts/ci.sh` roda os quatro passos junto com o resto.
+`scripts/ci.sh` roda os seis passos junto com o resto.
 
 ## Rodar os testes
 

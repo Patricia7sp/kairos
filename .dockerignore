@@ -14,3 +14,5 @@ ui-tui/node_modules/
 ui-tui/package-lock.json
 web/node_modules/
 web/package-lock.json
+apps/desktop/node_modules/
+apps/desktop/package-lock.json

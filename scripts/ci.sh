@@ -47,7 +47,7 @@ fi
 
 run "uv.lock em dia" "$UV" lock --check
 
-for front in ui-tui web; do
+for front in ui-tui web apps/desktop; do
   if ! command -v npm >/dev/null 2>&1; then
     skip "$front (vitest + tsc)" "npm não instalado"
   elif [ ! -d "$front/node_modules" ]; then
