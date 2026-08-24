@@ -1012,6 +1012,76 @@ do cron: o PID sozinho é reciclado pelo SO.
 
 ---
 
+## Tarefa 12 — mcp
+
+### D-12.1 — T-24 decidido: as ferramentas de aprovação NÃO são publicadas
+
+O 🔴 pedia uma das duas: implementar IPC real com o gateway, ou não publicar.
+**Decidi não publicar.**
+
+O diagnóstico de G-28 já mostrava que `_pending_approvals` nunca é populado e
+que `respond_to_approval` é *"best-effort without gateway IPC"*. Publicar
+manteria uma ferramenta que devolve `{"resolved": true}` **sem efeito** — e o
+projeto já estabeleceu a regra: *uma ferramenta que reporta sucesso sem efeito
+é pior que uma ferramenta ausente*. O cliente acredita ter aprovado, e nada
+aprovou.
+
+A IPC real é escopo do gateway, não desta unit. `UNPUBLISHED_TOOLS` guarda os
+dois nomes **com o motivo**, para que a ausência seja decisão registrada e não
+esquecimento.
+
+### D-12.2 — T-21: a ordem entre as duas camadas é o requisito
+
+`MCP_HARD_RESULT_CAP_CHARS = 2_000_000`, **40× acima** do limiar de spillover.
+A ordem é o que importa:
+
+- resultado grande **normal** → chega **íntegro** ao spillover (disco + preview)
+- enxurrada **patológica** → truncada aqui, com perda
+
+Um teto no nível do spillover seria proteção correta no lugar errado. Há teste
+comparando as duas constantes.
+
+O corte é 40% cabeça / 60% cauda porque erro e conclusão vivem no fim da
+saída: cortar só a cabeça descartaria justamente a parte que responde.
+
+### D-12.3 — T-24b: a ausência de autenticação fica escrita, e condicionada
+
+O servidor é stdio puro e a fronteira é o SO — quem spawna já tem os
+privilégios do usuário, e um token protegeria contra nada, porque quem inicia
+o processo pode lê-lo.
+
+`AUTHENTICATION_RATIONALE` registra isso **e** a condição de revisão: se
+houver transporte remoto, a decisão precisa ser revista **antes** de o
+transporte existir. Há teste que reprova se essa cláusula sumir.
+
+### D-12.4 — T-24c: a armadilha da correção óbvia
+
+O bug (#13414) é o bridge despejar meses de histórico no cliente MCP ao subir.
+A correção óbvia — baselinar por marca de tempo de início — **perde a primeira
+mensagem de uma conversa nova**, porque a conversa não existia no start e
+portanto não tem baseline. É exatamente o caso que mais importa.
+
+Baseline **por sessão**, e sessão desconhecida entrega desde a primeira
+mensagem. Há teste para os dois lados.
+
+### D-12.5 — Validação de config nas duas pontas
+
+Formas de abuso são recusadas **no salvamento e de novo no spawn**. Validar só
+na gravação protegeria apenas o caminho que passa pela UI — e o `config.yaml`
+é editável à mão.
+
+O que se recusa: comando que é um shell (`sh`, `bash`, `powershell`) e
+argumento com marcador de shell. Sem isso, uma entrada de config vira execução
+de comando arbitrário com a inocência de um campo de texto.
+
+### D-12.6 — Cache corrompido conta como cache ausente
+
+Levantar ao ler um manifesto corrompido impediria o boot por causa de um
+arquivo **descartável**. O cache existe para não acordar processos stdio a
+cada montagem de prompt; sua ausência custa uma partida, não uma falha.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

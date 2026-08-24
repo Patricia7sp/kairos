@@ -66,6 +66,7 @@ COPY kairos_skills/ ./kairos_skills/
 COPY kairos_plugins/ ./kairos_plugins/
 COPY kairos_providers/ ./kairos_providers/
 COPY kairos_gateway/ ./kairos_gateway/
+COPY kairos_mcp/ ./kairos_mcp/
 COPY locales/ ./locales/
 COPY native/ ./native/
 

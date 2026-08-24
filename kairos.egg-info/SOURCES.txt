@@ -24,6 +24,9 @@ kairos_gateway/delivery.py
 kairos_gateway/stream_events.py
 kairos_i18n/__init__.py
 kairos_i18n/coverage.py
+kairos_mcp/__init__.py
+kairos_mcp/client.py
+kairos_mcp/server.py
 kairos_plugins/__init__.py
 kairos_plugins/hooks.py
 kairos_plugins/manifest.py
@@ -50,6 +53,7 @@ kairos_tools/registry.py
 tests/test_cjk.py
 tests/test_container.py
 tests/test_domain.py
+tests/test_gateway.py
 tests/test_i18n.py
 tests/test_machines.py
 tests/test_plugins.py

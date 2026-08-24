@@ -2,6 +2,7 @@ kairos_container
 kairos_domain
 kairos_gateway
 kairos_i18n
+kairos_mcp
 kairos_plugins
 kairos_providers
 kairos_skills
