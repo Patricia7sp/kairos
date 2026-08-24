@@ -75,6 +75,7 @@ COPY kairos_acp/ ./kairos_acp/
 COPY kairos_integration/ ./kairos_integration/
 COPY kairos_evals/ ./kairos_evals/
 COPY kairos_web/ ./kairos_web/
+COPY skills/ ./skills/
 COPY locales/ ./locales/
 COPY native/ ./native/
 

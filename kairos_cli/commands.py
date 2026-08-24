@@ -67,8 +67,8 @@ def _sub(name, help) -> Command:
 #: o caminho comum.
 COMMANDS: tuple[Command, ...] = (
     # --- topo -------------------------------------------------------------
-    _c("run", "Conversa com o agente (comando padrão)", unit="agent"),
-    _c("chat", "Alias de `run`", unit="agent"),
+    _c("run", "Conversa com o agente (comando padrão)", status=Status.IMPLEMENTED, unit="agent"),
+    _c("chat", "Alias de `run`", status=Status.IMPLEMENTED, unit="agent"),
     _c("tick", "Executa um tick do scheduler e sai", unit="cron", status=Status.IMPLEMENTED),
     _c(
         "version",

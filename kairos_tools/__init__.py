@@ -2,6 +2,7 @@
 
 from kairos_tools.approval import ApprovalContext, Decision, Layer, Verdict, resolve
 from kairos_tools.budget import ResultBudget, SpilloverResult, maybe_spill
+from kairos_tools.builtin import register_builtin_tools
 from kairos_tools.parallel import Segment, SegmentKind, ToolCall, segment_batch
 from kairos_tools.policy import (
     DELEGATE_BLOCKED_TOOLS,
@@ -27,6 +28,7 @@ __all__ = [
     "Verdict",
     "delegate_block_reason",
     "maybe_spill",
+    "register_builtin_tools",
     "registry",
     "resolve",
     "sandbox_allows",
