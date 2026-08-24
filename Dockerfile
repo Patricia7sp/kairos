@@ -62,6 +62,7 @@ COPY kairos_domain/ ./kairos_domain/
 COPY kairos_i18n/ ./kairos_i18n/
 COPY kairos_container/ ./kairos_container/
 COPY kairos_tools/ ./kairos_tools/
+COPY kairos_skills/ ./kairos_skills/
 COPY locales/ ./locales/
 COPY native/ ./native/
 

@@ -21,7 +21,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 06 — i18n | ✅ concluída |
 | 07 — container | ✅ concluída |
 | 08 — tools | ✅ concluída |
-| 09–21 | pendentes |
+| 09 — skills | ✅ concluída |
+| 10–21 | pendentes |
 
 ## Ambiente
 

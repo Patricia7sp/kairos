@@ -786,6 +786,111 @@ entre aprender com um bug e prevenir o próximo.
 
 ---
 
+## Tarefa 09 — skills
+
+### D-09.1 — A política de divergência não é decisão nova: é herança
+
+`questions.md#pergunta-8` registrou *"a edição local vence e a sincronização
+apenas avisa"* como **decisão de produto do Kairos**, com a ressalva de que o
+comportamento do legado "não foi lido".
+
+Foi lido agora, e **o legado já faz exatamente isso**. A docstring de
+`tools/skills_sync.py:12-20` descreve a política letra por letra: *"If bundled
+changed and user copy differs: user customized it → SKIP"* e *"DELETED by
+user: respected, not re-added"*.
+
+A resposta não muda; a **natureza** muda — de "decisão a tomar" para
+"mecanismo existente a preservar". A diferença importa: reproduz-se algo
+testado em vez de inventar.
+
+### D-09.2 — O caso do meio é o inteligente
+
+A lógica de atualização tem três casos, e o segundo é o que faz o mecanismo
+funcionar:
+
+1. Bundled casa com o `origin_hash` → pula **sem ler** a cópia do usuário.
+2. Bundled mudou **e** a cópia do usuário casa com o `origin_hash` → atualiza.
+3. Bundled mudou **e** a cópia difere → preserva e avisa.
+
+A comparação do caso 2 é contra o **hash de origem registrado**, não contra o
+bundled atual. Comparar contra o atual não distinguiria nada — e há um teste
+para o caso adversarial: o usuário edita para exatamente o conteúdo do próximo
+bundled. Contra o atual pareceria "igual"; contra a origem, é edição, e é
+preservada.
+
+### D-09.3 — Manifesto v1 migra de forma conservadora
+
+Entrada v1 (sem hash) vira hash vazio, e hash vazio cai no caso 3 —
+preservação. Sem conhecer a origem, não há como afirmar que o usuário não
+editou, e a suposição segura é que editou.
+
+### D-09.4 — O hash cobre o diretório, não só o `SKILL.md`
+
+Uma skill é um diretório: `SKILL.md` mais `references/`, `scripts/`,
+`templates/`. Hashear só o `SKILL.md` deixaria a edição de um script passar
+por "inalterada" e ser sobrescrita.
+
+### D-09.5 — O limite de 60 caracteres é funcional
+
+`SKILL_PROMPT_DESC_LIMIT = 60`. O índice de skills é carregado em **toda
+sessão** e trunca a descrição; o que passa é cortado em silêncio e **a skill
+nunca roteia**, porque o modelo decide carregá-la a partir da versão truncada.
+
+Uma descrição de 80 caracteres não produz um índice feio: produz uma skill que
+nunca é usada. A mensagem de erro diz isso, e diz quantos caracteres sobraram.
+
+### D-09.6 — `author` nunca vem do ambiente
+
+Nem de login, nem de git config. Skills são compartilhadas e publicadas, e um
+nome vindo dali seria *"a privacy leak the user never opted into"*. Ausente é
+ausente — o validador aceita `None` e recusa string vazia.
+
+### D-09.7 — A quarentena é etapa obrigatória, não gatilho de suspeita
+
+Download → quarentena → scan → instalação, sem caminho alternativo. Uma
+quarentena condicional só protege contra o que a condição prevê.
+
+Três defesas, cada uma cobrindo o que a outra não cobre:
+
+- **Nome de arquivo dentro do bundle é entrada não confiável** — um
+  `../../.bashrc` escaparia antes de qualquer scan, então a contenção acontece
+  na **gravação**, não só na promoção.
+- **Contenção por caminho resolvido** na promoção — sem `resolve()`, um `..`
+  no meio passaria.
+- **Symlink rejeitado duas vezes**, no scan e na promoção: entre os dois o
+  conteúdo pode mudar. Um link para `~/.ssh/id_rsa` transformaria `skill_view`
+  num leitor de arquivo arbitrário.
+
+### D-09.8 — Skill protegida devolve o motivo, não some
+
+`apply_automatic_transitions` devolvia só as transições; o linter apontou um
+`try/except/continue` silencioso e tinha razão. Passou a devolver
+`PruneResult` com `protected: {nome: motivo}`.
+
+Uma skill que nunca é arquivada e ninguém sabe explicar por que vira mistério
+operacional — e o relatório do passe existe exatamente para isso. Uma
+protegida também não aborta a poda das demais.
+
+### D-09.9 — A evidência prevalece sobre a declaração
+
+`reconcile_classification` cruza o que o modelo **declarou** absorver com o
+que as chamadas de ferramenta **provam**. Divergindo, a evidência vence:
+declaração é intenção, chamada de ferramenta é fato.
+
+Mas a divergência **não é descartada** — vai para `discrepancies`. Um modelo
+que declara sistematicamente o que não faz é sinal de problema no prompt, e
+apagar o sintoma esconderia isso.
+
+### D-09.10 — Correções de spec: dois 🔴 e um 🟡
+
+- **`skills/` vs `optional-skills/`** — são três diretórios: 82 bundled
+  auto-semeadas, 117 oficiais não ativadas, e o runtime em `~/.kairos/skills/`.
+- **Protocolo de sync** — manifesto v2 `nome:origin_hash`, com auto-migração
+  de v1 e os três casos acima.
+- **O 🟡 da pergunta 8** — corrigido para herança, ver D-09.1.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

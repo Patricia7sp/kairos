@@ -1,5 +1,6 @@
 kairos_container
 kairos_domain
 kairos_i18n
+kairos_skills
 kairos_state
 kairos_tools

@@ -20,6 +20,11 @@ kairos_domain/session.py
 kairos_domain/statemachine.py
 kairos_i18n/__init__.py
 kairos_i18n/coverage.py
+kairos_skills/__init__.py
+kairos_skills/curator.py
+kairos_skills/frontmatter.py
+kairos_skills/hub.py
+kairos_skills/sync.py
 kairos_state/__init__.py
 kairos_state/cjk.py
 kairos_state/connection.py
@@ -40,3 +45,4 @@ tests/test_i18n.py
 tests/test_machines.py
 tests/test_schema.py
 tests/test_state.py
+tests/test_tools.py
