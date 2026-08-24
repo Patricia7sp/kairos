@@ -1626,6 +1626,86 @@ ajustá-la que a separação apareceu como a resposta certa.
 
 ---
 
+## Superfície CLI e o executável
+
+### D-CLI.1 — O buraco que nenhuma das 21 tarefas cobria
+
+O `pyproject.toml` não declarava `[project.scripts]`, mas o container
+referenciava `/opt/kairos/.venv/bin/kairos` em três lugares. A imagem
+construía, os serviços s6 subiam, o `cont-init.d` rodava na ordem — e então
+falhava com `No such file or directory`.
+
+Foi por isso que a Tarefa 07 verificou o ciclo de vida com uma imagem-stub: o
+binário real não existia. Agora existe, e os testes de integração passaram a
+exercitá-lo de verdade dentro da imagem.
+
+### D-CLI.2 — Correção de spec: são 48 comandos, não 50
+
+`hermes_cli/main.py` estava marcado 🔴 *"árvore de comandos (50 comandos) —
+não percorrida"*. Percorrida agora, o número não bate:
+`hermes_cli/subcommands/` tem **44** módulos de comando (excluídos `__init__`
+e `_shared`), e o despacho de topo acrescenta `run` e `tick`. Com `chat`
+(alias) e `version`, são **48**.
+
+O teste afirma 48 e explica de onde vem o número — uma contagem que ninguém
+conferiu vira folclore na spec seguinte.
+
+### D-CLI.3 — Registro declarativo, não 46 módulos
+
+O legado partiu `main.py` em `subcommands/*.py` porque o arquivo virou um
+god-file de 975 KB. A divisão resolveu um problema de **tamanho**, não de
+desenho — e o Kairos não tem esse problema.
+
+A árvore como dados dá três coisas que a divisão não dá: a superfície é
+legível de uma vez, é testável sem construir o parser, e a contagem deixa de
+ser folclore. Os subcomandos aninhados foram extraídos dos `add_parser("...")`
+de cada módulo do legado, então a árvore é fiel.
+
+### D-CLI.4 — Comando declarado sem implementação sai com código próprio
+
+`ExitCode.NOT_IMPLEMENTED = 69`, distinto de `OK` e de `ERROR`.
+
+É a mesma regra que o projeto aplicou em G-28 e em T-24: **reportar sucesso
+sem efeito é pior que ausência**. Um script precisa distinguir "falhou" de
+"ainda não existe", e sair com 0 faria acreditar que a operação aconteceu.
+
+A mensagem ainda diz **qual unit já existe**, quando existe — `gateway` avisa
+que `providers-gateway` está pronta e falta só a ligação. Isso transforma a
+lista de pendências em algo acionável em vez de decorativo.
+
+### D-CLI.5 — Um bug de colisão que só apareceu exercitando o CLI
+
+`approvals test` tinha um positional chamado `command`, e o parser de topo usa
+`dest="command"`. Argparse **sobrescreve**: `args.command` virava a linha
+avaliada, e o despacho procurava um handler chamado `"rm -rf build"`.
+
+O sintoma era enganoso — todo `approvals test` reportava "comando não
+implementado", como se o handler faltasse. Renomeado para `cmdline`, com teste
+que trava a distinção.
+
+### D-CLI.6 — O `doctor` sai com erro quando acha problema
+
+Um doctor que sempre sai 0 não serve nem para script nem para CI. Ele migra o
+schema se preciso, verifica `foreign_keys`, `journal_mode`, `integrity_check`
+e a contenção de escrita — e `gaveup_total` do orçamento `transcript`
+diferente de zero vira achado, porque significa **turno destruído por banco
+ocupado**.
+
+### D-CLI.7 — `auth list` nunca imprime o segredo
+
+É o comando que mais aparece em captura de tela e em log de suporte. Mostra o
+provedor e a contagem de credenciais, nunca o valor — e há teste que planta um
+`sk-NAO-VAZAR` e afirma que ele não sai.
+
+### D-CLI.8 — O fast path é usado de verdade
+
+`--version` responde **sem montar a árvore de argparse**, e há teste em
+subprocesso afirmando que `argparse` não entra em `sys.modules`. A guarda de
+leveza criada na Tarefa 15 só tem sentido se alguém de fato usar o módulo
+antes dos imports pesados; este é esse uso.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

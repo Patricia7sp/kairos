@@ -3,6 +3,7 @@ pyproject.toml
 kairos.egg-info/PKG-INFO
 kairos.egg-info/SOURCES.txt
 kairos.egg-info/dependency_links.txt
+kairos.egg-info/entry_points.txt
 kairos.egg-info/requires.txt
 kairos.egg-info/top_level.txt
 kairos_acp/__init__.py
@@ -15,7 +16,10 @@ kairos_agent/loop.py
 kairos_agent/micro_compaction.py
 kairos_cli/__init__.py
 kairos_cli/auth.py
+kairos_cli/commands.py
 kairos_cli/config.py
+kairos_cli/handlers.py
+kairos_cli/main.py
 kairos_cli/startup_fast.py
 kairos_container/__init__.py
 kairos_cron/__init__.py
@@ -80,6 +84,7 @@ tests/test_cli.py
 tests/test_container.py
 tests/test_cron.py
 tests/test_domain.py
+tests/test_evals.py
 tests/test_gateway.py
 tests/test_i18n.py
 tests/test_integration.py

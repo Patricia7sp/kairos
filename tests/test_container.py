@@ -705,3 +705,28 @@ class RealImageTests(unittest.TestCase):
         saida = r.stdout + r.stderr
         self.assertIn("remapeando", saida)
         self.assertIn("GATEWAY uid=1234", saida)
+
+    # -- o executável real -------------------------------------------------
+
+    def test_o_binario_kairos_EXISTE_na_imagem(self):
+        """A Tarefa 07 entregou um container que falhava com 'No such file'
+        porque não havia entry point. Agora há."""
+        r = self.run_in("-c", "test -x /opt/kairos/.venv/bin/kairos && echo ok")
+        self.assertEqual(r.stdout.strip(), "ok", r.stderr)
+
+    def test_o_container_RODA_o_comando_pedido(self):
+        r = self.run_in("--version", entrypoint=None)
+        saida = r.stdout + r.stderr
+        self.assertIn("kairos 0.1.0", saida)
+        self.assertIn("[container]", saida, "o fast path detecta o modo container")
+        self.assertNotIn("No such file", saida)
+
+    def test_o_doctor_migra_o_schema_dentro_do_container(self):
+        r = self.run_in("doctor", entrypoint=None)
+        saida = r.stdout + r.stderr
+        self.assertIn("/opt/data/state.db", saida)
+        self.assertIn("integrity_check", saida)
+
+    def test_comando_nao_implementado_DIZ_isso_em_vez_de_falhar_mudo(self):
+        r = self.run_in("backup", entrypoint=None)
+        self.assertIn("ainda não foi implementado", r.stdout + r.stderr)

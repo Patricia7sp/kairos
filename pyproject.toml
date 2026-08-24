@@ -9,6 +9,9 @@ dependencies = [
     "pyyaml>=6",
 ]
 
+[project.scripts]
+kairos = "kairos_cli.main:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.16"]
 

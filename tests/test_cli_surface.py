@@ -1,0 +1,289 @@
+"""A superfície CLI: árvore de comandos e executável.
+
+Fecha a lacuna que nenhuma das 21 tarefas cobria — a spec marca
+`hermes_cli/main.py` como 🔴 *"árvore de comandos (50 comandos) — não
+percorrida"*.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from kairos_cli.commands import COMMANDS, Status, command_names, find_command, leaf_count
+from kairos_cli.handlers import HANDLERS, ExitCode
+from kairos_cli.main import build_parser, main
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+class ArvoreTests(unittest.TestCase):
+    def test_a_contagem_e_EVIDENCIA_nao_a_frase_da_spec(self):
+        """A spec dizia "50 comandos" e marcava a árvore como 🔴 **não
+        percorrida** — o número nunca foi verificado.
+
+        Percorrida agora: `hermes_cli/subcommands/` tem **44** módulos de
+        comando (excluídos `__init__` e `_shared`), mais **4** de topo (`run`,
+        `chat`, `tick`, `version`) = **48**. Contando os subcomandos
+        aninhados, são 84 invocações distintas.
+        """
+        self.assertEqual(len(COMMANDS), 48)
+        self.assertGreater(leaf_count(), 48)
+
+    def test_nomes_unicos(self):
+        nomes = command_names()
+        self.assertEqual(len(nomes), len(set(nomes)))
+
+    def test_os_grupos_extraidos_do_legado_estao_todos_la(self):
+        do_legado = {
+            "acp",
+            "approvals",
+            "auth",
+            "backup",
+            "claw",
+            "config",
+            "console",
+            "cron",
+            "dashboard",
+            "debug",
+            "doctor",
+            "dump",
+            "gateway",
+            "gui",
+            "hooks",
+            "insights",
+            "login",
+            "logout",
+            "logs",
+            "mcp",
+            "memory",
+            "model",
+            "monitoring",
+            "pairing",
+            "pause",
+            "peer",
+            "plugins",
+            "profile",
+            "security",
+            "setup",
+            "skills",
+            "skin",
+            "slack",
+            "status",
+            "sync",
+            "tools",
+            "uninstall",
+            "update",
+            "verify",
+            "webhook",
+            "whatsapp",
+        }
+        self.assertLessEqual(do_legado, set(command_names()))
+
+    def test_os_subcomandos_reais_foram_preservados(self):
+        # Extraídos de `add_parser("...")` em cada módulo do legado.
+        esperado = {
+            "config": {"check", "edit", "env-path", "migrate", "path", "set", "show"},
+            "cron": {"list", "pause", "resume", "status", "tick"},
+            "skills": {"add", "install", "list", "remove", "tap"},
+            "sync": {"disable", "enable", "now", "push", "status"},
+            "pairing": {"clear-pending", "list", "revoke"},
+            "peer": {"add", "list", "remove"},
+        }
+        for grupo, subs in esperado.items():
+            with self.subTest(grupo=grupo):
+                cmd = find_command(grupo)
+                self.assertIsNotNone(cmd, grupo)
+                self.assertEqual({s.name for s in cmd.subcommands}, subs)
+
+    def test_todo_comando_tem_ajuda(self):
+        for c in COMMANDS:
+            with self.subTest(cmd=c.name):
+                self.assertTrue(c.help.strip())
+                for s in c.subcommands:
+                    self.assertTrue(s.help.strip(), f"{c.name} {s.name}")
+
+    def test_todo_comando_IMPLEMENTADO_tem_handler(self):
+        for c in COMMANDS:
+            if c.status is Status.IMPLEMENTED:
+                with self.subTest(cmd=c.name):
+                    self.assertIn(c.name, HANDLERS, f"{c.name} declarado implementado sem handler")
+
+    def test_todo_handler_corresponde_a_um_comando_declarado(self):
+        declarados = set(command_names())
+        for nome in HANDLERS:
+            with self.subTest(handler=nome):
+                self.assertIn(nome, declarados, f"handler órfão: {nome}")
+
+
+class ParserTests(unittest.TestCase):
+    def setUp(self):
+        self.parser = build_parser()
+
+    def test_a_arvore_monta_e_todo_comando_e_alcancavel(self):
+        for c in COMMANDS:
+            with self.subTest(cmd=c.name):
+                argv = [c.name]
+                if c.subcommands:
+                    argv.append(c.subcommands[0].name)
+                if c.name == "approvals":
+                    argv = ["approvals", "test", "ls"]
+                if c.name in ("config",) and argv[1] in ("set",):
+                    argv += ["k", "v"]
+                args = self.parser.parse_args(argv)
+                self.assertEqual(args.command, c.name)
+
+    def test_o_positional_de_approvals_NAO_colide_com_o_dest_de_topo(self):
+        """O bug que apareceu ao exercitar o CLI: um positional chamado
+        `command` SOBRESCREVE o `dest="command"` do parser de topo, e o
+        despacho passa a ver a linha avaliada como se fosse o comando."""
+        args = self.parser.parse_args(["approvals", "test", "rm -rf x"])
+        self.assertEqual(args.command, "approvals")
+        self.assertEqual(args.cmdline, "rm -rf x")
+
+    def test_comando_desconhecido_e_recusado(self):
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(["inventado"])
+
+
+class ExecucaoTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._saved = os.environ.get("KAIROS_HOME")
+        os.environ["KAIROS_HOME"] = self._tmp.name
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("KAIROS_HOME", None)
+        else:
+            os.environ["KAIROS_HOME"] = self._saved
+        self._tmp.cleanup()
+
+    def test_version_pelo_FAST_PATH(self):
+        self.assertEqual(main(["--version"]), 0)
+
+    def test_sem_comando_mostra_ajuda_e_sai_com_USAGE(self):
+        self.assertEqual(main([]), ExitCode.USAGE)
+
+    def test_doctor_migra_e_sai_zero_num_home_limpo(self):
+        self.assertEqual(main(["doctor"]), ExitCode.OK)
+
+    def test_o_doctor_SAI_COM_ERRO_quando_acha_problema(self):
+        """Um doctor que sempre sai 0 não serve nem para script nem para CI."""
+        main(["doctor"])  # cria o banco
+        db = Path(self._tmp.name) / "state.db"
+        db.write_bytes(b"isto nao e um banco sqlite")
+        self.assertEqual(main(["doctor"]), ExitCode.ERROR)
+
+    def test_comando_declarado_SEM_implementacao_sai_com_codigo_proprio(self):
+        """A regra do projeto: reportar sucesso sem efeito é pior que
+        ausência. Script precisa distinguir 'falhou' de 'ainda não existe'."""
+        self.assertEqual(main(["backup"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.OK)
+        self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.ERROR)
+
+    def test_approvals_test_devolve_codigo_por_veredito(self):
+        self.assertEqual(main(["approvals", "test", "ls -la"]), 0)
+        self.assertEqual(main(["approvals", "test", "sudo apt update"]), 2)
+        self.assertEqual(main(["approvals", "test", "rm -rf /"]), 3)
+
+    def test_a_negacao_do_usuario_vence_o_yolo_pela_LINHA_DE_COMANDO(self):
+        self.assertEqual(main(["approvals", "test", "rm -rf build", "--deny", "rm *", "--yolo"]), 3)
+        self.assertEqual(main(["approvals", "test", "rm -rf build", "--yolo"]), 0)
+
+    def test_os_comandos_implementados_rodam_sem_levantar(self):
+        for argv in (
+            ["status"],
+            ["tools"],
+            ["profile", "show"],
+            ["auth", "list"],
+            ["mcp", "list"],
+            ["plugins", "list"],
+            ["cron", "status"],
+            ["sync", "status"],
+            ["skills", "list"],
+            ["config", "path"],
+            ["config", "check"],
+            ["tick"],
+            ["version"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))
+
+    def test_saida_JSON_e_valida(self):
+        import contextlib
+        import io
+        import json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["status", "--json"])
+        json.loads(buf.getvalue())
+
+    def test_auth_list_NUNCA_imprime_o_segredo(self):
+        import contextlib
+        import io
+        import json as _json
+
+        (Path(self._tmp.name) / "auth.json").write_text(
+            _json.dumps({"credential_pool": {"openai": [{"key": "sk-NAO-VAZAR"}]}}),
+            encoding="utf-8",
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["auth", "list"])
+        self.assertNotIn("sk-NAO-VAZAR", buf.getvalue())
+        self.assertIn("openai", buf.getvalue())
+
+
+class ExecutavelTests(unittest.TestCase):
+    def test_o_entry_point_esta_declarado(self):
+        conteudo = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn("[project.scripts]", conteudo)
+        self.assertIn('kairos = "kairos_cli.main:main"', conteudo)
+
+    def test_o_executavel_roda_de_verdade(self):
+        exe = REPO / ".venv" / "bin" / "kairos"
+        if not exe.is_file():
+            self.skipTest("venv sem o executável instalado")
+        r = subprocess.run(
+            [str(exe), "--version"], capture_output=True, text=True, check=False, timeout=30
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("kairos", r.stdout)
+
+    def test_o_caminho_que_o_CONTAINER_espera(self):
+        """O Dockerfile e os scripts referenciam
+        `/opt/kairos/.venv/bin/kairos`. Sem o entry point, a imagem constrói
+        e falha com 'No such file or directory' — que foi exatamente o que a
+        Tarefa 07 observou."""
+        for arquivo in ("docker/main-wrapper.sh", "docker/bin/kairos"):
+            with self.subTest(arquivo=arquivo):
+                self.assertIn(
+                    "/opt/kairos/.venv/bin/kairos", (REPO / arquivo).read_text(encoding="utf-8")
+                )
+
+
+class FastPathTests(unittest.TestCase):
+    def test_o_fast_path_NAO_monta_a_arvore_de_argparse(self):
+        """A guarda de leveza só tem sentido se alguém de fato usar o módulo
+        antes dos imports pesados. `--version` é esse uso."""
+        codigo = (
+            "import sys;"
+            "from kairos_cli.main import main;"
+            "rc = main(['--version']);"
+            "print('argparse' in sys.modules)"
+        )
+        r = subprocess.run(
+            [sys.executable, "-c", codigo], capture_output=True, text=True, check=False, timeout=30
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("False", r.stdout, "o fast path montou a árvore")
+
+
+if __name__ == "__main__":
+    unittest.main()

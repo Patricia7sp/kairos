@@ -37,6 +37,19 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 
 **As 21 tarefas do plano de reconstrução estão concluídas.**
 
+## O executável
+
+```bash
+uv pip install -e .
+kairos --version
+kairos doctor
+kairos approvals test "rm -rf build" --deny "rm *" --yolo   # sai 3: deny vence yolo
+```
+
+São **48 comandos** na superfície (44 grupos do legado + `run`, `chat`,
+`tick`, `version`). Os implementados usam as units reconstruídas; os demais
+saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
+
 ## Ambiente
 
 O projeto usa [uv](https://docs.astral.sh/uv/) e fixa **Python 3.11**, a mesma
