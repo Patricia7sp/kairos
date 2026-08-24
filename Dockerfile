@@ -64,6 +64,8 @@ COPY kairos_container/ ./kairos_container/
 COPY kairos_tools/ ./kairos_tools/
 COPY kairos_skills/ ./kairos_skills/
 COPY kairos_plugins/ ./kairos_plugins/
+COPY kairos_providers/ ./kairos_providers/
+COPY kairos_gateway/ ./kairos_gateway/
 COPY locales/ ./locales/
 COPY native/ ./native/
 

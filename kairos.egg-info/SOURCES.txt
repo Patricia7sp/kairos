@@ -18,12 +18,17 @@ kairos_domain/rules.py
 kairos_domain/scheduling.py
 kairos_domain/session.py
 kairos_domain/statemachine.py
+kairos_gateway/__init__.py
+kairos_gateway/capability.py
+kairos_gateway/delivery.py
+kairos_gateway/stream_events.py
 kairos_i18n/__init__.py
 kairos_i18n/coverage.py
 kairos_plugins/__init__.py
 kairos_plugins/hooks.py
 kairos_plugins/manifest.py
 kairos_plugins/storage.py
+kairos_providers/__init__.py
 kairos_skills/__init__.py
 kairos_skills/curator.py
 kairos_skills/frontmatter.py
@@ -47,6 +52,7 @@ tests/test_container.py
 tests/test_domain.py
 tests/test_i18n.py
 tests/test_machines.py
+tests/test_plugins.py
 tests/test_schema.py
 tests/test_skills.py
 tests/test_state.py

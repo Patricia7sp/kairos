@@ -952,6 +952,66 @@ diferentes convivem no mesmo hook, e há teste para isso — o despacho passa
 
 ---
 
+## Tarefa 11 — providers-gateway
+
+### D-11.1 — `OMIT_TEMPERATURE` é sentinela porque `None` é valor legítimo
+
+`temperature=None` é aceito por alguns provedores, então `if temperature is
+None` não distinguiria "não definido" de "explicitamente nulo". E modelos de
+raciocínio (`o1`, `o3`) **rejeitam** o parâmetro: a chave precisa **sumir do
+corpo**, não ir com valor.
+
+### D-11.2 — Precedência por camada, não por ordem de importação
+
+Last-writer-wins **dentro** da camada; camada mais alta sempre vence. Sem a
+ordem por camada, a precedência dependeria da ordem de importação — que muda
+com o sistema de arquivos e é impossível de depurar.
+
+### D-11.3 — O `User-Agent` não é telemetria
+
+WAFs de provedor devolvem **403** para o User-Agent padrão do `urllib`. Sem o
+header, o provedor parece fora do ar e o erro não diz nada sobre o motivo
+real. Vai em toda requisição, montado por `build_request_kwargs`.
+
+### D-11.4 — Os 7 eventos são congelados, e os nomes da spec anterior não existem
+
+`architecture.md` já registrava que a lista antiga (`StreamDelta`,
+`ToolCallComplete`, `TurnFinished`…) não corresponde a nada no repositório. Há
+teste que reprova se algum daqueles nomes reaparecer.
+
+Todos `frozen=True`: um evento mutável depois de emitido produz corrida entre
+consumidor e produtor do stream.
+
+### D-11.5 — `CapabilityDescriptor` declara em vez de sobrescrever
+
+Substitui a herança cega de um `BasePlatformAdapter` com 131 métodos, que a
+`architecture.md` marca como violação da Lei 2.
+
+Acrescentei uma coerência que a spec não pedia: `supports_draft_streaming`
+exige `supports_edit`. Prometer streaming progressivo sem saber editar produz
+uma UI que nunca atualiza — falha silenciosa em vez de erro de configuração.
+
+### D-11.6 — Falha permanente não tem cooldown
+
+O circuit breaker distingue transitório de permanente. Não há espera que
+conserte um canal deletado ou um usuário que bloqueou o bot — pôr esses casos
+na escada faria o gateway tentar para sempre, cada tentativa consumindo uma
+conexão do pool e um slot de rate limit de que a conversa **viva** ao lado
+precisava.
+
+E sucesso **zera** o contador: a escada mede falha consecutiva, não acumulada.
+
+### D-11.7 — A obrigação só é quitada pelo adapter
+
+Marcar entregue antes da confirmação seria fingir a entrega. O modo de falha
+coberto: um cron job produz resposta, o processo morre antes do envio, e
+ninguém percebe — porque não havia registro de que a entrega era devida.
+
+Recuperação exige **prova de morte** (`pid` + `started_at`), a mesma convenção
+do cron: o PID sozinho é reciclado pelo SO.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

@@ -23,7 +23,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 08 — tools | ✅ concluída |
 | 09 — skills | ✅ concluída |
 | 10 — plugins | ✅ concluída |
-| 11–21 | pendentes |
+| 11 — providers-gateway | ✅ concluída |
+| 12–21 | pendentes |
 
 ## Ambiente
 
