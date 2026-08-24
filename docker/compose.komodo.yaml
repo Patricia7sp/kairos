@@ -1,0 +1,63 @@
+# Stack do Kairos para colar na UI do Komodo.
+#
+# Sem `build:` de propósito: o periphery roda em container e só enxerga
+# /etc/komodo e o docker.sock — o código-fonte do host não está no contexto
+# dele. A imagem é construída aqui no host (./scripts/ci.sh, ou
+# `docker build -t kairos:local .`) e a stack apenas a referencia; o daemon
+# é o mesmo, então o periphery a encontra.
+#
+# EXPOSIÇÃO: a porta é publicada apenas no endereço Tailscale do host. Isto é
+# deliberado e é a linha mais importante do arquivo. O dashboard entrega o
+# token de sessão dentro do HTML da página inicial — quem alcança a porta
+# obtém o token e, com ele, o chat do agente e o REPL de terminal. Trocar
+# `100.87.25.101:9119:9119` por `9119:9119` publicaria isso na LAN inteira.
+
+services:
+  kairos:
+    image: kairos:${KAIROS_TAG:-local}
+    container_name: kairos
+    restart: unless-stopped
+
+    ports:
+      - "100.87.25.101:9119:9119"
+
+    volumes:
+      # /opt/data é KAIROS_HOME: state.db, auth.json, skills e o marcador de
+      # drenagem. Volume nomeado, não bind: o container faz chown no arranque.
+      - kairos-data:/opt/data
+
+    environment:
+      KAIROS_DASHBOARD_PORT: "9119"
+      # UID/GID do dono do volume. O stage2 roda como root só para ajustá-los
+      # e então cada serviço derruba privilégio no próprio `run`.
+      KAIROS_UID: "10000"
+      # Token estável do dashboard. Sem esta variável o servidor gera um por
+      # processo — melhor para segurança, mas invalida as abas abertas a cada
+      # restart, e o Komodo reinicia o container com frequência.
+      KAIROS_WEB_TOKEN: ${KAIROS_WEB_TOKEN:?defina KAIROS_WEB_TOKEN no ambiente da stack}
+
+    # O gateway é o serviço principal e não escuta em porta nenhuma, então o
+    # healthcheck sonda o dashboard, que é o que precisa estar alcançável.
+    # `/api/health` é a única rota aberta sem token — foi mantida aberta
+    # exatamente para isto.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9119/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+    # O s6-overlay EXIGE ser PID 1; `init: true` intercalaria o init do Docker
+    # e degradaria para o caminho sem supervisão, derrubando o dashboard.
+    init: false
+
+    stop_grace_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  kairos-data:
