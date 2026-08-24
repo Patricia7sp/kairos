@@ -56,13 +56,35 @@ requires_ext = unittest.skipIf(_SO is None, "extensão fts5_cjk não pôde ser c
 class BuildTests(unittest.TestCase):
     """RF-03, RF-04."""
 
-    def test_o_build_usa_headers_vendorizados_sem_libsqlite3_dev(self):
-        # Este host não tem /usr/include/sqlite3ext.h — se compilou, foi
-        # pelo caminho vendor/, que é exatamente o RF-03.
-        self.assertFalse(
-            Path("/usr/include/sqlite3ext.h").exists(),
-            "host tem o header do sistema; RF-03 não é exercitado aqui",
+    def test_o_caminho_vendor_basta_para_compilar(self):
+        # RF-03 sem depender do host: pergunta ao compilador QUAIS headers ele
+        # resolveu com -Ivendor. Se algum sqlite viesse de /usr/include, o
+        # vendor/ estaria incompleto e o build quebraria em quem não tem
+        # libsqlite3-dev — exatamente o usuário final que o RF-03 protege.
+        dep = subprocess.run(
+            ["gcc", "-M", "-Ivendor", "fts5_cjk.c"],
+            cwd=SRC,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
+        self.assertEqual(dep.returncode, 0, dep.stderr)
+        sqlite_headers = [t for t in dep.stdout.split() if "sqlite" in t]
+        self.assertTrue(sqlite_headers, "nenhum header sqlite nas dependências")
+        for h in sqlite_headers:
+            self.assertTrue(
+                h.startswith("vendor/"),
+                f"{h} veio de fora do vendor/ — o vendor está incompleto",
+            )
+
+    @unittest.skipIf(
+        Path("/usr/include/sqlite3ext.h").exists(),
+        "host tem o header do sistema; a prova por ausência não se aplica aqui",
+    )
+    def test_o_build_compila_sem_o_header_do_sistema(self):
+        # Onde o header do sistema não existe, o build só pode ter compilado
+        # pelo vendor/. É a prova mais forte, mas só o host certo a permite.
         self.assertIsNotNone(_SO, "build falhou sem o header do sistema")
 
     @requires_ext
