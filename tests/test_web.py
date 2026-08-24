@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -336,3 +337,48 @@ class IdiomaTests(unittest.TestCase):
                     self.assertEqual(client.get("/api/config").json()["display"]["language"], lang)
         finally:
             client.put("/api/config", json={"config": anterior})
+
+
+class AtalhosDeIdiomaTests(unittest.TestCase):
+    """Trocar de idioma não pode trocar a tecla do atalho.
+
+    A convenção dos catálogos é `[tecla]palavra traduzida`, com a tecla igual
+    em todos os idiomas. pt e es divergiam — e ainda traziam `[a]lways`, em
+    inglês, no meio da frase traduzida.
+    """
+
+    BASE = Path(__file__).resolve().parent.parent / "locales"
+    CAMPOS = ("choose_short", "choose_long")
+
+    def _approval(self, locale: str) -> dict:
+        import yaml
+
+        d = yaml.safe_load((self.BASE / f"{locale}.yaml").read_text(encoding="utf-8"))
+        return (d or {}).get("approval", {})
+
+    def _teclas(self, texto: str) -> list[str]:
+        return re.findall(r"\[(\w)\]", texto)
+
+    def test_as_teclas_sao_as_mesmas_em_todo_idioma(self):
+        ref = {c: self._teclas(self._approval("en")[c]) for c in self.CAMPOS}
+        self.assertTrue(all(ref.values()))
+        for f in sorted(self.BASE.glob("*.yaml")):
+            a = self._approval(f.stem)
+            for campo in self.CAMPOS:
+                with self.subTest(locale=f.stem, campo=campo):
+                    self.assertEqual(self._teclas(a[campo]), ref[campo])
+
+    def test_nenhuma_traducao_repete_a_palavra_inglesa(self):
+        """`[a]lways` num texto em português é tradução esquecida."""
+        for f in sorted(self.BASE.glob("*.yaml")):
+            if f.stem in ("en", "af", "de", "ga", "it", "tr", "hu"):
+                continue  # latinas/germânicas legítimas podem coincidir
+            a = self._approval(f.stem)
+            for campo in self.CAMPOS:
+                with self.subTest(locale=f.stem, campo=campo):
+                    for palavra in ("always", "session", "deny", "never", "once"):
+                        self.assertNotIn(
+                            palavra,
+                            a[campo].lower(),
+                            f"{f.stem}.{campo} deixou '{palavra}' em inglês",
+                        )

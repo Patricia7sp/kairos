@@ -4,8 +4,8 @@
 approval:
   dangerous_header: "⚠️  COMANDO PELIGROSO: {description}"
   command: "Comando: {command}"
-  choose_short: "[p]ermitir una vez  [s]esión  [d]enegar"
-  choose_long: "¿Permitir este comando? [u]na vez / [s]esión / [a]lways / [d]enegar / [n]unca"
+  choose_short: "[a]permitir una vez  [s]sesión  [d]denegar"
+  choose_long: "¿Permitir este comando? [o]una vez / [s]sesión / [a]siempre / [d]denegar / [n]nunca"
   denied: "Denegado. El comando no se ejecutó."
   denied_permanent: "Bloqueado por una regla de denegación permanente: {pattern}"
   timeout: "Sin respuesta en {seconds}s — denegando por defecto."
