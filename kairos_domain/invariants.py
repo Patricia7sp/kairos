@@ -21,6 +21,7 @@ __all__ = ["Enforcement", "Invariant", "INVARIANTS", "unenforced", "by_module"]
 class Enforcement(str, Enum):
     DOMAIN = "domain"        # imposto neste pacote, com teste
     SCHEMA = "schema"        # imposto pelo banco (Tarefa 01)
+    HARNESS = "harness"      # imposto pela suíte — quem viola é o teste
     DEFERRED = "deferred"    # depende de unit ainda não construída
 
 
@@ -46,7 +47,8 @@ INVARIANTS: tuple[Invariant, ...] = (
     Invariant(5, "O lock pertence à identidade durável do dado, nunca à de roteamento",
               "gateway", Enforcement.SCHEMA, "session_turn_leases.conversation_id → sessions.id"),
     Invariant(6, "Linhas canônicas de sessions/messages nunca são modificadas pelo reparo",
-              "hermes_state", Enforcement.DEFERRED, "Tarefa 05 — hermes-state"),
+              "hermes_state", Enforcement.DOMAIN,
+              "kairos_state.migrations.repair_derived_objects + kairos_state.migrations.canonical_fingerprint"),
     Invariant(7, "Estados terminais do ledger são imutáveis",
               "cron", Enforcement.DOMAIN, "scheduling.assert_terminal_immutable"),
     Invariant(8, "'Abandonado' só com prova de morte (PID + hora de início)",
@@ -55,8 +57,10 @@ INVARIANTS: tuple[Invariant, ...] = (
               "skills", Enforcement.DOMAIN, "ownership.assert_can_hard_delete"),
     Invariant(10, "Skill do usuário nunca é auto-curada",
               "skills", Enforcement.DOMAIN, "ownership.can_archive"),
+    # Único invariante cuja imposição vive no HARNESS, não no código de
+    # produção: quem o viola é o teste. Ver tests/conftest.py.
     Invariant(11, "Um teste nunca toca o state.db de produção",
-              "hermes_state", Enforcement.DEFERRED, "Tarefa 05 — hermes-state"),
+              "hermes_state", Enforcement.HARNESS, "tests/conftest.py"),
     Invariant(12, "Após qualquer swap, socket ativo + perfil ativo + átomos de conexão concordam",
               "desktop", Enforcement.DEFERRED, "Tarefa 19 — apps-desktop"),
     Invariant(13, "Caminhos sensíveis pedem aprovação mesmo sob política autônoma",

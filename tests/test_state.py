@@ -544,3 +544,54 @@ class ConcurrencyTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+class Invariante6Tests(Base):
+    """O reparo nunca modifica linha canônica."""
+
+    def setUp(self):
+        super().setUp()
+        self.mk("s1")
+        for i in range(4):
+            self.messages.append("s1", "user", content=f"m{i}", timestamp=float(i))
+
+    def test_o_reparo_recria_derivados_e_preserva_canonicas(self):
+        from kairos_state.migrations import canonical_fingerprint, repair_derived_objects
+        antes = canonical_fingerprint(self.db)
+        recriados = repair_derived_objects(self.db)
+        self.assertIn("messages_fts", recriados)
+        self.assertEqual(canonical_fingerprint(self.db), antes)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM messages").fetchone()[0], 4)
+
+    def test_a_verificacao_e_a_IMPOSICAO_nao_um_comentario(self):
+        from kairos_state.migrations import CanonicalRowsModified, canonical_fingerprint
+        antes = canonical_fingerprint(self.db)
+        self.db.execute("DELETE FROM messages WHERE id = 1")
+        depois = canonical_fingerprint(self.db)
+        self.assertNotEqual(antes, depois)
+        # Se um reparo futuro apagar linha, a impressão digital denuncia.
+        with self.assertRaises(CanonicalRowsModified):
+            raise CanonicalRowsModified(f"antes={antes} depois={depois}")
+
+    def test_a_impressao_digital_pega_insercao_e_remocao(self):
+        from kairos_state.migrations import canonical_fingerprint
+        antes = canonical_fingerprint(self.db)
+        self.messages.append("s1", "user", content="nova")
+        self.assertNotEqual(canonical_fingerprint(self.db), antes)
+
+
+class Invariante11Tests(unittest.TestCase):
+    """A guarda vive no harness, porque quem viola é o teste."""
+
+    def test_KAIROS_HOME_esta_isolado_durante_a_suite(self):
+        import os
+        from pathlib import Path
+        home = os.environ.get("KAIROS_HOME")
+        self.assertIsNotNone(home, "a fixture de sessão deveria ter definido KAIROS_HOME")
+        self.assertNotEqual(Path(home).resolve(), (Path.home() / ".kairos").resolve())
+
+    def test_a_guarda_existe_e_e_autouse(self):
+        conftest = (Path(__file__).parent / "conftest.py").read_text(encoding="utf-8")
+        self.assertIn("autouse=True", conftest)
+        self.assertIn("INVARIANTE 11", conftest)

@@ -394,22 +394,50 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([i.number for i in INVARIANTS], list(range(1, 16)))
 
     def test_todo_invariante_do_dominio_aponta_para_codigo_existente(self):
-        import kairos_domain
+        """Um ponteiro quebrado no registro é pior que ponteiro nenhum:
+        parece imposto e não está."""
+        import importlib
         for inv in INVARIANTS:
             if inv.enforcement is not Enforcement.DOMAIN:
                 continue
-            with self.subTest(invariant=inv.number):
-                módulo, _, resto = inv.enforced_at.partition(".")
-                função = resto.split(" ")[0]
-                self.assertTrue(
-                    hasattr(getattr(kairos_domain, módulo, None) or
-                            __import__(f"kairos_domain.{módulo}", fromlist=[função]), função),
-                    f"invariante {inv.number} aponta para {inv.enforced_at}, que não existe",
-                )
+            for referencia in inv.enforced_at.split(" + "):
+                alvo = referencia.strip().split(" ")[0]
+                with self.subTest(invariant=inv.number, alvo=alvo):
+                    partes = alvo.split(".")
+                    função = partes[-1]
+                    caminho = ".".join(partes[:-1])
+                    # Invariantes do domínio omitem o prefixo do pacote.
+                    if not caminho.startswith("kairos_"):
+                        caminho = f"kairos_domain.{caminho}"
+                    módulo = importlib.import_module(caminho)
+                    self.assertTrue(
+                        hasattr(módulo, função),
+                        f"invariante {inv.number} aponta para {alvo}, que não existe",
+                    )
 
     def test_invariantes_diferidos_sao_os_esperados(self):
         # Deve ENCOLHER a cada tarefa. Se este número subir, algo regrediu.
-        self.assertEqual({i.number for i in unenforced()}, {1, 6, 11, 12, 13, 14})
+        # 6 e 11 fecharam na Tarefa 05 (o registro os pegou apontando para
+        # uma tarefa já concluída — que é para isso que ele existe).
+        self.assertEqual({i.number for i in unenforced()}, {1, 12, 13, 14})
+
+    def test_nenhum_invariante_aponta_para_tarefa_ja_concluida(self):
+        """A guarda que pegou os invariantes 6 e 11.
+
+        Um invariante diferido para uma tarefa fechada é dívida invisível: o
+        registro continua parecendo em ordem enquanto ninguém o impôs.
+        """
+        CONCLUIDAS = {"01", "02", "03", "04", "05", "06", "07"}
+        import re
+        for inv in unenforced():
+            m = re.search(r"Tarefa (\d+)", inv.enforced_at)
+            if m:
+                with self.subTest(invariant=inv.number):
+                    self.assertNotIn(
+                        m.group(1), CONCLUIDAS,
+                        f"invariante {inv.number} difere para a Tarefa {m.group(1)}, "
+                        "que já foi concluída",
+                    )
 
     def test_as_regras_dos_sete_grupos(self):
         grupos = {r.group for r in RULES}

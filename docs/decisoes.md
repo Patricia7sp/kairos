@@ -575,6 +575,54 @@ Confirmado na imagem real: com os dois serviços falhando, o log mostra
 
 ---
 
+## Fechamento de pendências (antes da Tarefa 08)
+
+### D-X.1 — O registro de invariantes pegou dois apontando para tarefa concluída
+
+Os invariantes **6** e **11** estavam marcados `DEFERRED` para a Tarefa 05 —
+que fechou. Dívida invisível: o registro parecia em ordem enquanto ninguém os
+havia imposto. É exatamente o que ele existe para pegar, e o mecanismo só vale
+se for consultado.
+
+Acrescentado `test_nenhum_invariante_aponta_para_tarefa_ja_concluida`, para a
+próxima ocorrência não depender de alguém lembrar de olhar.
+
+### D-X.2 — Invariante 6: a verificação é a imposição
+
+*"Linhas canônicas nunca são modificadas pelo reparo."* `repair_derived_objects`
+recria índices FTS, views e gatilhos, e compara a **impressão digital** das
+tabelas canônicas antes e depois — levantando se mudou.
+
+Um comentário dizendo "não toque em `messages`" não é imposição. A distinção
+importa mais no reparo do que em qualquer outro caminho: um índice corrompido
+é reconstruível, o transcript não, e confundir os dois num momento de pânico é
+como se perde o dado do usuário.
+
+A impressão digital é `(contagem, max(rowid))` por tabela. Não detecta edição
+de conteúdo em linha existente — deliberadamente: o reparo não tem caminho que
+faça isso, e um hash de conteúdo custaria varredura completa a cada
+verificação.
+
+### D-X.3 — Invariante 11 vive no harness, e ganhou um nível de imposição
+
+É o único cuja violação vem do **teste**, não do código de produção — então a
+imposição não pode morar no código de produção. `tests/conftest.py` tem duas
+fixtures `autouse`:
+
+1. **Escopo de sessão**: aponta `KAIROS_HOME` para um diretório descartável.
+   Cobre o caminho normal.
+2. **Por teste**: compara mtime e tamanho do `~/.kairos/state.db` real antes e
+   depois. Cobre o resto — caminho absoluto escrito à mão, `Path.home()`
+   direto, default que escapou.
+
+`autouse` é essencial: a proteção não pode depender de cada teste lembrar de
+pedi-la, porque é o esquecimento que ela cobre.
+
+Introduzido o nível `Enforcement.HARNESS` para distinguir este caso — chamá-lo
+de `DOMAIN` seria mentir sobre onde ele é imposto.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

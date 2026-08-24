@@ -16,6 +16,11 @@ from kairos_state import schema as _schema
 from kairos_state.connection import read_schema_version
 
 __all__ = [
+    "CANONICAL_TABLES",
+    "DERIVED_OBJECTS",
+    "CanonicalRowsModified",
+    "canonical_fingerprint",
+    "repair_derived_objects",
     "Migration",
     "MIGRATIONS",
     "migrate",
@@ -111,3 +116,77 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 
     shutil.copy2(source, target)
     return target
+
+
+# ---------------------------------------------------------------------------
+# Invariante 6 — o reparo NUNCA modifica linha canônica
+# ---------------------------------------------------------------------------
+
+#: Tabelas cujas linhas são o dado do usuário. O reparo pode recriar índices,
+#: gatilhos, tabelas FTS e objetos derivados — nunca tocar nestas.
+CANONICAL_TABLES = frozenset({"sessions", "messages", "system_prompts"})
+
+#: Derivados: reconstrutíveis a partir das canônicas, e portanto descartáveis
+#: no reparo.
+DERIVED_OBJECTS = frozenset({
+    "messages_fts", "messages_fts_trigram", "messages_fts_cjk",
+    "messages_fts_trigram_src", "messages_fts_cjk_src",
+})
+
+
+class CanonicalRowsModified(RuntimeError):
+    """Invariante 6 violado: o reparo mexeu em dado do usuário."""
+
+
+def canonical_fingerprint(conn: sqlite3.Connection) -> dict[str, tuple[int, int | None]]:
+    """`(contagem, max(rowid))` por tabela canônica.
+
+    É barato e suficiente: qualquer `DELETE`, `INSERT` ou re-sequenciamento
+    move um dos dois. Não pretende detectar edição de conteúdo em linha
+    existente — o reparo não tem caminho que faça isso, e um hash de conteúdo
+    inteiro custaria uma varredura completa a cada verificação.
+    """
+    out: dict[str, tuple[int, int | None]] = {}
+    for table in sorted(CANONICAL_TABLES):
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*), MAX(rowid) FROM {table}"  # noqa: S608 — nome de tabela fixo
+            ).fetchone()
+        except sqlite3.OperationalError:
+            continue
+        out[table] = (int(row[0]), row[1])
+    return out
+
+
+def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
+    """Recria os objetos derivados. **Não toca em linha canônica.**
+
+    O reparo é o caminho em que essa distinção mais importa: um índice FTS
+    corrompido é reconstruível, mas o transcript não. Confundir os dois num
+    momento de pânico é como se perde o dado do usuário.
+
+    Devolve os objetos recriados, e levanta se a impressão digital canônica
+    mudou — a verificação é a imposição, não um comentário.
+    """
+    antes = canonical_fingerprint(conn)
+
+    recriados: list[str] = []
+    with conn:
+        for obj in ("messages_fts_cjk", "messages_fts_trigram", "messages_fts"):
+            existe = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = ?", (obj,)
+            ).fetchone()
+            if existe:
+                conn.execute(f"DROP TABLE IF EXISTS {obj}")
+                recriados.append(obj)
+        for view in ("messages_fts_trigram_src", "messages_fts_cjk_src"):
+            conn.execute(f"DROP VIEW IF EXISTS {view}")
+        conn.executescript(_schema.FTS_SQL)
+        conn.executescript(_schema.FTS_TRIGGERS)
+
+    depois = canonical_fingerprint(conn)
+    if antes != depois:
+        raise CanonicalRowsModified(
+            f"o reparo alterou linhas canônicas: antes={antes} depois={depois}"
+        )
+    return recriados
