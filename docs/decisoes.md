@@ -891,6 +891,67 @@ apagar o sintoma esconderia isso.
 
 ---
 
+## Tarefa 10 — plugins
+
+### D-10.1 — G-21 fechado por capacidade declarada, não por convenção
+
+O alerta: o payload de `transform_api_error_classification` pode carregar
+*"an unredacted provider error dump"*. No legado o controle existe apenas como
+cláusula de docstring — *"callbacks must not log or forward them without
+redaction"* — sem barreira técnica nenhuma. Uma convenção documentada protege
+contra o descuido honesto e contra mais nada.
+
+**Decisão:** redação é o **default**; receber o dump cru exige
+`requires_raw_error: true` no manifesto. A autorização é **por plugin**, não
+global — dá para listar quem a pediu, e um plugin curioso instalado ao lado de
+um confiável continua vendo o campo redigido.
+
+### D-10.2 — *Run-all*, não *stop-at-first*
+
+`invoke_hook` executa **todos** os callbacks; uma resposta cedo nunca impede
+os seguintes. Muitos hooks têm efeito colateral legítimo (telemetria, log), e
+curto-circuitar entregaria comportamento que depende da **ordem de
+instalação** — que o usuário não controla nem enxerga.
+
+O desempate acontece depois, sobre os resultados, e o perdedor vai para
+`skipped` com warning: dois plugins disputando a mesma classificação é
+conflito de configuração, e silenciá-lo faria o usuário depurar por
+adivinhação.
+
+### D-10.3 — `kind` desconhecido não rejeita o plugin
+
+Coage para `standalone` com warning. Rejeitar quebraria todo plugin escrito
+contra uma versão futura com um `kind` novo, e a coerção degrada para o
+comportamento **mais restrito**, não para o mais permissivo.
+
+O contraste com `provides_hooks` é deliberado: hook inexistente **é** recusado,
+porque um hook que nunca dispara deixa o plugin "instalado e sem fazer nada" —
+falha silenciosa em vez de degradação anunciada.
+
+### D-10.4 — Falha suave de requisito de ambiente
+
+Plugin sem a variável vai para `disabled_missing_env` e **continua visível**,
+dizendo o que falta. Não é erro de instalação: é configuração pendente, e
+omitir o plugin faria o usuário procurar por que ele "não instalou".
+
+### D-10.5 — O dado do plugin mora fora da árvore de instalação
+
+`<kairos home>/plugin-data/<nome>/`, nunca dentro de `plugins/<nome>/`. Aquela
+árvore é gerenciada pelo gerenciador: `remove` a apaga e `update` faz git-pull
+dentro dela. Dado estacionado ali **morre com o código que o escreveu**, e o
+usuário não tem como prever isso.
+
+E `KAIROS_HOME` é resolvido **a cada chamada**: o perfil ativo pode mudar no
+meio da vida do processo, e um caminho cacheado escreveria no perfil errado.
+
+### D-10.6 — Aridade não discrimina plugin
+
+Anti-padrão **Won't** de `architecture.md`. Callbacks com assinaturas
+diferentes convivem no mesmo hook, e há teste para isso — o despacho passa
+`**kwargs` e deixa o callback pegar o que quiser.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
