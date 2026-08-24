@@ -110,6 +110,11 @@ class ConfigUpdateRequest(BaseModel):
     config: dict[str, Any]
 
 
+# A SPA salva a configuração com PUT (`saveConfig` em api-*.js); só POST
+# estava registrado, então a troca de idioma batia em 405 e não era aplicada —
+# sem erro visível, porque o cliente não trata o status. Os dois verbos ficam
+# aceitos: o PUT é o que o cliente usa, o POST é o que já existia.
+@app.put("/api/config")
 @app.post("/api/config")
 async def update_config(req: ConfigUpdateRequest):
     try:
@@ -494,7 +499,10 @@ async def get_model_options():
                 "id": m.id,
                 "name": m.name,
                 "provider": m.provider,
-                "context_window": m.context_window,
+                # A chave da resposta é o que a SPA lê; o atributo do descritor
+                # é `context_length`. Ler `m.context_window` levantava
+                # AttributeError e a rota inteira devolvia 500.
+                "context_window": m.context_length,
                 "supports_tools": m.supports_tools,
                 "supports_vision": m.supports_vision,
             }
@@ -503,21 +511,133 @@ async def get_model_options():
     }
 
 
+def _skill_roots() -> list[tuple[str, Path]]:
+    """Onde as skills vivem, na ordem em que se sobrepõem.
+
+    `Path.cwd()` — o que este módulo usava — é o diretório de onde o processo
+    foi lançado. Sob s6 isso é `/`, então a lista vinha sempre vazia e o menu
+    Skills abria sem nada, com as skills a poucos diretórios dali.
+    """
+    home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+    return [
+        ("builtin", Path(__file__).resolve().parent.parent / "skills"),
+        ("user", home / "skills"),
+    ]
+
+
+def _disabled_skills_file() -> Path:
+    home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+    return home / "skills-disabled.json"
+
+
+def _disabled_skills() -> set[str]:
+    f = _disabled_skills_file()
+    if not f.exists():
+        return set()
+    try:
+        return set(json.loads(f.read_text(encoding="utf-8")))
+    except (ValueError, OSError):
+        return set()
+
+
+def _read_skill(path: Path) -> dict:
+    """Nome e descrição saem do frontmatter; o diretório é só o fallback."""
+    name, description = path.parent.name, ""
+    try:
+        from kairos_skills.frontmatter import parse_frontmatter
+
+        fm, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        name = fm.name or name
+        description = fm.description or ""
+    except Exception as exc:  # noqa: BLE001 — uma skill malformada não derruba a lista
+        logger.warning("skills: frontmatter ilegível em %s: %s", path, exc)
+    return {"name": name, "description": description}
+
+
 @app.get("/api/skills")
 async def list_skills():
-    skills_path = Path.cwd() / "skills"
-    skills_list = []
-    if skills_path.exists():
-        for p in skills_path.iterdir():
-            if p.is_dir() and (p / "SKILL.md").exists():
-                skills_list.append(
-                    {
-                        "name": p.name,
-                        "enabled": True,
-                        "path": str(p / "SKILL.md"),
-                    }
-                )
-    return {"skills": skills_list}
+    desabilitadas = _disabled_skills()
+    encontradas: dict[str, dict] = {}
+    for origem, raiz in _skill_roots():
+        if not raiz.is_dir():
+            continue
+        for d in sorted(raiz.iterdir()):
+            md = d / "SKILL.md"
+            if not (d.is_dir() and md.exists()):
+                continue
+            info = _read_skill(md)
+            # A do usuário sobrepõe a embarcada de mesmo nome.
+            encontradas[d.name] = {
+                **info,
+                "id": d.name,
+                "enabled": d.name not in desabilitadas,
+                "source": origem,
+                "path": str(md),
+            }
+    return {"skills": list(encontradas.values())}
+
+
+def _skill_file(name: str, *, criar: bool = False) -> Path | None:
+    """Resolve `name` para um SKILL.md, recusando o que escapa das raízes.
+
+    `resolve()` antes da comparação é o que fecha a porta para `../..`: sem
+    isso, o nome vindo da query controlaria qualquer caminho do disco.
+    """
+    for _, raiz in reversed(_skill_roots()):
+        if not raiz.exists():
+            continue
+        md = (raiz / name / "SKILL.md").resolve()
+        if raiz.resolve() not in md.parents:
+            continue
+        if md.exists() or criar:
+            return md
+    return None
+
+
+@app.get("/api/skills/content")
+async def skill_content(name: str):
+    md = _skill_file(name)
+    if md is None:
+        return JSONResponse({"error": "skill_not_found", "name": name}, status_code=404)
+    return {"name": name, "content": md.read_text(encoding="utf-8")}
+
+
+class SkillContentRequest(BaseModel):
+    name: str
+    content: str
+
+
+@app.put("/api/skills/content")
+async def save_skill_content(req: SkillContentRequest):
+    # Escrita vai para a raiz do usuário: as embarcadas vêm da imagem e um
+    # redeploy as sobrescreveria sem avisar.
+    home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+    destino = (home / "skills" / req.name / "SKILL.md").resolve()
+    if (home / "skills").resolve() not in destino.parents:
+        return JSONResponse({"error": "invalid_name", "name": req.name}, status_code=400)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(req.content, encoding="utf-8")
+    return {"name": req.name, "saved": True}
+
+
+class SkillToggleRequest(BaseModel):
+    name: str
+    enabled: bool
+
+
+# A SPA alterna com PUT; POST fica aceito para chamadas diretas e scripts.
+@app.put("/api/skills/toggle")
+@app.post("/api/skills/toggle")
+async def toggle_skill(req: SkillToggleRequest):
+    desabilitadas = _disabled_skills()
+    if req.enabled:
+        desabilitadas.discard(req.name)
+    else:
+        desabilitadas.add(req.name)
+    f = _disabled_skills_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(sorted(desabilitadas)), encoding="utf-8")
+    return {"name": req.name, "enabled": req.enabled}
 
 
 @app.get("/api/tools/toolsets")
@@ -578,6 +698,14 @@ if DIST_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
+        # Uma rota /api/ que chegou até aqui NÃO existe. Devolver o index.html
+        # com 200 — o que este handler fazia — entrega `<!doctype html>` a quem
+        # chamou `res.json()`: a página quebra num SyntaxError de parse, sem
+        # status de erro e sem nada nos logs do servidor. Era isto que fazia o
+        # menu Skills abrir em branco. 404 em JSON transforma falha silenciosa
+        # em erro legível dos dois lados.
+        if full_path.startswith("api/"):
+            return JSONResponse({"error": "not_found", "path": f"/{full_path}"}, status_code=404)
         requested = DIST_DIR / full_path
         if requested.is_file() and full_path != "":
             return FileResponse(requested)

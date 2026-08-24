@@ -1,6 +1,6 @@
 <picture>
-  <source srcset="brand/kairos-logo-dark.svg" media="(prefers-color-scheme: dark)">
-  <img src="brand/kairos-logo-light.svg" alt="Kairos" width="260">
+  <source srcset="brand/kairos-cover-dark.svg" media="(prefers-color-scheme: dark)">
+  <img src="brand/kairos-cover-light.svg" alt="Kairos — o instante certo" width="760">
 </picture>
 
 Reimplementação do Hermes a partir das especificações geradas pelo Reversa.

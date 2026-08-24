@@ -199,3 +199,140 @@ class IdentidadeKairosTests(unittest.TestCase):
         res = TestClient(app).get("/api/health")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["app"], "kairos")
+
+
+class RotasEVerbosTests(unittest.TestCase):
+    """Os quatro defeitos que faziam menus abrir em branco.
+
+    Todos falhavam em silêncio: nenhum aparecia nos logs do servidor, e o
+    cliente não checa status antes de `res.json()`.
+    """
+
+    def setUp(self):
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+
+    def test_api_inexistente_devolve_404_json_e_nao_o_index_html(self):
+        """O catch-all servia index.html com 200 para qualquer /api/.
+
+        O cliente recebia `<!doctype html>` de `res.json()` e morria num
+        SyntaxError de parse — a página abria vazia sem erro em lugar nenhum.
+        """
+        res = self.client.get("/api/rota-que-nao-existe")
+        self.assertEqual(res.status_code, 404)
+        self.assertIn("application/json", res.headers["content-type"])
+        self.assertEqual(res.json()["error"], "not_found")
+
+    def test_a_spa_continua_servida_para_rotas_que_nao_sao_api(self):
+        """O 404 de /api/ não pode quebrar o roteamento do cliente."""
+        res = self.client.get("/skills")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/html", res.headers["content-type"])
+
+    def test_config_aceita_o_verbo_que_a_spa_usa(self):
+        """A SPA salva com PUT; só POST existia, e o 405 sumia em silêncio.
+
+        Era isto que impedia o idioma escolhido de ser aplicado.
+        """
+        res = self.client.put("/api/config", json={"config": {"display": {"language": "pt"}}})
+        self.assertEqual(res.status_code, 200)
+
+    def test_skills_sao_encontradas_fora_do_diretorio_de_trabalho(self):
+        """O handler usava Path.cwd(); sob s6 isso é `/`, e a lista vinha vazia."""
+        import os
+        from pathlib import Path as P
+
+        cwd = os.getcwd()
+        try:
+            os.chdir(tempfile.gettempdir())  # longe do repositório, como no container
+            res = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN}).get("/api/skills")
+            self.assertEqual(res.status_code, 200)
+            nomes = [s["id"] for s in res.json()["skills"]]
+            embarcadas = sorted(
+                d.name
+                for d in (P(__file__).resolve().parent.parent / "skills").iterdir()
+                if (d / "SKILL.md").exists()
+            )
+            self.assertEqual(sorted(nomes), embarcadas)
+        finally:
+            os.chdir(cwd)
+
+    def test_skill_traz_nome_e_descricao_do_frontmatter(self):
+        res = self.client.get("/api/skills")
+        for s in res.json()["skills"]:
+            with self.subTest(skill=s["id"]):
+                self.assertTrue(s["description"], f"{s['id']} sem descrição")
+                self.assertIn(s["source"], ("builtin", "user"))
+
+    def test_skill_content_recusa_travessia_de_caminho(self):
+        res = self.client.get("/api/skills/content", params={"name": "../../etc"})
+        self.assertEqual(res.status_code, 404)
+
+    def test_model_options_nao_estoura_no_descritor(self):
+        """`m.context_window` não existe — o atributo é `context_length`.
+
+        A rota inteira devolvia 500 com AttributeError.
+        """
+        res = self.client.get("/api/model/options")
+        self.assertEqual(res.status_code, 200)
+        for m in res.json()["models"]:
+            with self.subTest(model=m["id"]):
+                self.assertIsInstance(m["context_window"], int)
+
+
+class IdiomaTests(unittest.TestCase):
+    """Inglês entre os idiomas, e a escolha realmente aplicada."""
+
+    def test_ingles_esta_disponivel_no_backend(self):
+        from kairos_i18n import SUPPORTED_LANGUAGES
+
+        for lang in ("en", "pt", "es", "fr"):
+            with self.subTest(lang=lang):
+                self.assertIn(lang, SUPPORTED_LANGUAGES)
+
+    def test_ingles_esta_no_seletor_da_interface(self):
+        i18n = next(
+            (Path(__file__).resolve().parent.parent / "kairos_web" / "web_dist" / "assets").glob(
+                "i18n-*.js"
+            )
+        )
+        bundle = i18n.read_text(encoding="utf-8", errors="ignore")
+        for code, nome in (
+            ("en", "English"),
+            ("pt", "Português"),
+            ("es", "Español"),
+            ("fr", "Français"),
+        ):
+            with self.subTest(lang=code):
+                self.assertIn(f"{code}:{{name:`{nome}`}}", bundle.replace('"', ""))
+
+    def test_todo_catalogo_tem_as_mesmas_chaves_do_ingles(self):
+        """Um catálogo incompleto faz a interface cair para inglês só em partes."""
+        import yaml
+
+        base = Path(__file__).resolve().parent.parent / "locales"
+
+        def chaves(d, p=""):
+            out = set()
+            for k, v in (d or {}).items():
+                out |= chaves(v, f"{p}{k}.") if isinstance(v, dict) else {f"{p}{k}"}
+            return out
+
+        ref = chaves(yaml.safe_load((base / "en.yaml").read_text(encoding="utf-8")))
+        self.assertTrue(ref)
+        for f in sorted(base.glob("*.yaml")):
+            with self.subTest(locale=f.stem):
+                self.assertEqual(chaves(yaml.safe_load(f.read_text(encoding="utf-8"))), ref)
+
+    def test_o_idioma_salvo_e_o_idioma_relido(self):
+        client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+        anterior = client.get("/api/config").json()
+        try:
+            for lang in ("en", "pt", "es", "fr"):
+                with self.subTest(lang=lang):
+                    cfg = {**anterior, "display": {**anterior.get("display", {}), "language": lang}}
+                    self.assertEqual(
+                        client.put("/api/config", json={"config": cfg}).status_code, 200
+                    )
+                    self.assertEqual(client.get("/api/config").json()["display"]["language"], lang)
+        finally:
+            client.put("/api/config", json={"config": anterior})
