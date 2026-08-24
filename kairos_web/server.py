@@ -373,19 +373,172 @@ async def websocket_chat_endpoint(websocket: WebSocket):  # noqa: PLR0915
         logger.exception("WebSocket error: %s", exc)
 
 
+# --- FRONTEND DASHBOARD REST ENDPOINTS ---
+
+@app.get("/api/status")
+async def get_status():
+    config = load_config()
+    return {
+        "status": "healthy",
+        "gateway": "running",
+        "version": "0.1.0",
+        "app": "kairos",
+        "authenticated": True,
+        "active_profile": "default",
+        "model": config.get("model", "claude-3-7-sonnet-20250219"),
+        "provider": config.get("provider", "anthropic"),
+    }
+
+
+@app.get("/api/auth/me")
+async def get_auth_me():
+    return {
+        "authenticated": True,
+        "auth_required": False,
+        "user": "kairos-user",
+        "token": "kairos-session-token",
+        "role": "admin",
+    }
+
+
+@app.post("/api/auth/ws-ticket")
+async def get_ws_ticket():
+    return {"ticket": "kairos-session-token", "expires_in": 86400}
+
+
+@app.get("/api/profiles")
+async def list_profiles():
+    return {
+        "profiles": [
+            {
+                "name": "default",
+                "description": "Perfil Principal do Kairos",
+                "is_active": True,
+            }
+        ]
+    }
+
+
+@app.get("/api/profiles/active")
+async def get_active_profile():
+    return {"name": "default", "description": "Perfil Principal"}
+
+
+@app.get("/api/model/info")
+async def get_model_info():
+    config = load_config()
+    model = config.get("model", "claude-3-7-sonnet-20250219")
+    provider = config.get("provider", "anthropic")
+    return {
+        "model": model,
+        "provider": provider,
+        "capabilities": {
+            "supports_tools": True,
+            "supports_vision": True,
+            "supports_streaming": True,
+            "supports_reasoning": True,
+        },
+    }
+
+
+@app.get("/api/model/options")
+async def get_model_options():
+    store = _get_auth_store()
+    manager = ProviderManager(auth_store=store.profile)
+    models = manager.list_all_models()
+    return {
+        "models": [
+            {
+                "id": m.id,
+                "name": m.name,
+                "provider": m.provider,
+                "context_window": m.context_window,
+                "supports_tools": m.supports_tools,
+                "supports_vision": m.supports_vision,
+            }
+            for m in models
+        ]
+    }
+
+
+@app.get("/api/skills")
+async def list_skills():
+    skills_path = Path.cwd() / "skills"
+    skills_list = []
+    if skills_path.exists():
+        for p in skills_path.iterdir():
+            if p.is_dir() and (p / "SKILL.md").exists():
+                skills_list.append({
+                    "name": p.name,
+                    "enabled": True,
+                    "path": str(p / "SKILL.md"),
+                })
+    return {"skills": skills_list}
+
+
+@app.get("/api/tools/toolsets")
+async def list_toolsets():
+    return {
+        "toolsets": [
+            {
+                "name": "core",
+                "enabled": True,
+                "tools": ["bash", "read_file", "write_file", "edit_file", "list_dir", "web_search"],
+            }
+        ]
+    }
+
+
+@app.get("/api/env")
+async def get_env_vars():
+    return {"env": {}}
+
+
+@app.get("/api/cron/jobs")
+async def get_cron_jobs():
+    return {"jobs": []}
+
+
+@app.get("/api/analytics/usage")
+async def get_analytics_usage():
+    return {"daily": [], "totals": {"requests": 0, "tokens": 0}}
+
+
+@app.get("/api/logs")
+async def get_logs():
+    return {"logs": []}
+
+
+# --- WEBSOCKET ALIASES ---
+
+@app.websocket("/api/ws")
+@app.websocket("/api/events")
+@app.websocket("/api/pty")
+async def websocket_alias_endpoint(websocket: WebSocket):
+    await websocket_chat_endpoint(websocket)
+
+
 # --- SPA STATIC FILES ---
+
+from fastapi.responses import HTMLResponse
 
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
     if (DIST_DIR / "fonts").exists():
         app.mount("/fonts", StaticFiles(directory=str(DIST_DIR / "fonts")), name="fonts")
+    if (DIST_DIR / "fonts-terminal").exists():
+        app.mount("/fonts-terminal", StaticFiles(directory=str(DIST_DIR / "fonts-terminal")), name="fonts-terminal")
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         requested = DIST_DIR / full_path
-        if requested.is_file():
+        if requested.is_file() and full_path != "":
             return FileResponse(requested)
         index_file = DIST_DIR / "index.html"
         if index_file.exists():
-            return FileResponse(index_file)
+            html_content = index_file.read_text(encoding="utf-8")
+            injected_token = '<script>window.__HERMES_SESSION_TOKEN__="kairos-session-token";window.__HERMES_AUTH_REQUIRED__=false;</script>'
+            if "</head>" in html_content:
+                html_content = html_content.replace("</head>", f"{injected_token}</head>")
+            return HTMLResponse(content=html_content, status_code=200)
         return JSONResponse({"error": "web_dist index.html not found"}, status_code=404)

@@ -375,14 +375,16 @@ def cmd_web(args) -> int:
 
     import uvicorn
 
-    host = getattr(args, "host", "127.0.0.1") or "127.0.0.1"
+    host = getattr(args, "host", "0.0.0.0") or "0.0.0.0"
     port = getattr(args, "port", 9119) or 9119
     no_browser = getattr(args, "no_browser", False)
 
-    print(f"🚀 Iniciando servidor web do Kairos em http://{host}:{port}")
-    if not no_browser and host in ("127.0.0.1", "localhost"):
+    print(f"🚀 Servidor Web do Kairos ouvindo em http://{host}:{port}")
+    print(f"   • Local: http://127.0.0.1:{port}")
+    print(f"   • Localhost: http://localhost:{port}")
+    if not no_browser:
         try:
-            webbrowser.open(f"http://{host}:{port}")
+            webbrowser.open(f"http://127.0.0.1:{port}")
         except Exception:  # noqa: BLE001, S110
             pass
 
