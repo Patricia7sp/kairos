@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kairos">
+  <title>Kairos</title>
+  <rect width="64" height="64" rx="14" fill="#0F172A"/>
+  <g transform="translate(32 32) scale(0.66) translate(-34 -32)">
+    <g fill="none" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 19 14 L 19 50"/>
+      <path d="M 31 32 L 49 50"/>
+      <path d="M 49 14 L 31 32" stroke="#22D3EE"/>
+    </g>
+  </g>
+</svg>

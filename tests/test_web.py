@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -382,3 +384,71 @@ class AtalhosDeIdiomaTests(unittest.TestCase):
                             a[campo].lower(),
                             f"{f.stem}.{campo} deixou '{palavra}' em inglês",
                         )
+
+
+class InterfaceKairosTests(unittest.TestCase):
+    """A interface servida na raiz é a do Kairos, não o dist herdado."""
+
+    UI = Path(__file__).resolve().parent.parent / "kairos_web" / "ui"
+
+    def setUp(self):
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+
+    def test_a_raiz_serve_a_interface_propria(self):
+        html = self.client.get("/").text
+        self.assertIn("/ui/js/app.js", html)
+
+    def test_a_raiz_nao_carrega_nada_do_dist_herdado(self):
+        html = self.client.get("/").text
+        self.assertNotIn("/assets/", html, "a raiz ainda referencia bundles do Hermes")
+
+    def test_os_estaticos_da_interface_sao_servidos(self):
+        for caminho in (
+            "/ui/styles/tokens.css",
+            "/ui/styles/components.css",
+            "/ui/js/app.js",
+            "/ui/js/views/skills.js",
+            "/ui/kairos-symbol.svg",
+        ):
+            with self.subTest(caminho=caminho):
+                self.assertEqual(self.client.get(caminho).status_code, 200)
+
+    def test_o_dist_herdado_responde_so_em_legacy(self):
+        """A ponte existe enquanto chat e terminal não migram — e só ali."""
+        self.assertEqual(self.client.get("/legacy/").status_code, 200)
+
+    def test_o_token_e_injetado_na_interface_propria(self):
+        self.assertIn("__KAIROS_SESSION_TOKEN__", self.client.get("/").text)
+
+    def test_nenhum_arquivo_da_interface_menciona_hermes(self):
+        for f in sorted(self.UI.rglob("*")):
+            if f.suffix in (".js", ".css", ".html", ".svg") and f.is_file():
+                with self.subTest(arquivo=f.name):
+                    self.assertNotIn("hermes", f.read_text(encoding="utf-8").lower())
+
+    def test_os_modulos_da_interface_tem_sintaxe_valida(self):
+        """Sem passo de build, um erro de sintaxe só apareceria no navegador."""
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node não disponível")
+        for f in sorted(self.UI.rglob("*.js")):
+            with self.subTest(modulo=f.name):
+                with f.open("rb") as fonte:
+                    r = subprocess.run(
+                        [node, "--input-type=module", "--check"],
+                        stdin=fonte,
+                        capture_output=True,
+                        timeout=30,
+                        check=False,
+                    )
+                self.assertEqual(r.returncode, 0, r.stderr.decode()[:400])
+
+    def test_toda_cor_da_interface_vem_de_token(self):
+        """Cor solta é como um sistema visual vira uma coleção de exceções."""
+        permitido = {"#fff", "#ffffff"}  # o polegar do interruptor, sempre branco
+        for f in sorted(self.UI.rglob("*.css")):
+            if f.name == "tokens.css":
+                continue
+            for cor in re.findall(r"#[0-9a-fA-F]{3,8}\b", f.read_text(encoding="utf-8")):
+                with self.subTest(arquivo=f.name, cor=cor):
+                    self.assertIn(cor.lower(), permitido, f"{cor} em {f.name} fora de tokens.css")

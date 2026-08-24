@@ -1,0 +1,168 @@
+/* Componentes do Kairos. Cada um existe porque aparece em mais de uma tela;
+ * o que aparece uma vez só mora na própria view. */
+
+/* --- estrutura ---------------------------------------------------------- */
+
+.k-app { display: grid; grid-template-columns: var(--k-sidebar-w) 1fr; min-height: 100dvh; }
+
+.k-sidebar {
+  background: var(--k-surface);
+  border-right: 1px solid var(--k-border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100dvh;
+}
+.k-sidebar__brand {
+  display: flex; align-items: center; gap: var(--k-space-3);
+  padding: var(--k-space-5) var(--k-space-4) var(--k-space-4);
+}
+.k-sidebar__brand img { width: 30px; height: 30px; }
+.k-sidebar__brand strong { font-size: var(--k-size-lg); letter-spacing: -.02em; }
+
+.k-nav { padding: 0 var(--k-space-3); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.k-nav__group {
+  font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .09em;
+  color: var(--k-text-3); padding: var(--k-space-4) var(--k-space-3) var(--k-space-2);
+}
+.k-nav__item {
+  display: flex; align-items: center; gap: var(--k-space-3);
+  padding: var(--k-space-2) var(--k-space-3);
+  border-radius: var(--k-radius); color: var(--k-text-2);
+  font-size: var(--k-size-sm); font-weight: var(--k-weight-medium);
+  text-decoration: none; border: 0; background: none; cursor: pointer;
+  width: 100%; text-align: left;
+  transition: background var(--k-fast) var(--k-ease), color var(--k-fast) var(--k-ease);
+}
+.k-nav__item:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-nav__item[aria-current="page"] { background: var(--k-accent-soft); color: var(--k-accent); }
+.k-nav__item svg { width: 18px; height: 18px; flex: none; }
+.k-sidebar__foot { margin-top: auto; padding: var(--k-space-3); border-top: 1px solid var(--k-border); }
+.k-sidebar__foot .k-btn { justify-content: flex-start; color: var(--k-text-2); }
+
+.k-header {
+  height: var(--k-header-h); display: flex; align-items: center; justify-content: space-between;
+  gap: var(--k-space-4); padding: 0 var(--k-space-5);
+  border-bottom: 1px solid var(--k-border); background: var(--k-surface);
+  position: sticky; top: 0; z-index: 10;
+}
+.k-main { padding: var(--k-space-6) var(--k-space-5); max-width: 1180px; }
+/* O foco vai para cá a cada navegação, para o leitor de tela recomeçar do topo
+ * da página nova. É reposicionamento, não interação: o anel apareceria em toda
+ * troca de tela, emoldurando o conteúdo inteiro. O alvo do salto continua
+ * anunciado — só não pinta a moldura. */
+.k-main:focus { outline: none; }
+.k-page-head { margin-bottom: var(--k-space-5); }
+.k-page-head p { color: var(--k-text-2); margin-top: var(--k-space-1); }
+
+/* --- superfícies -------------------------------------------------------- */
+
+.k-card {
+  background: var(--k-surface); border-radius: var(--k-radius-lg);
+  box-shadow: var(--k-shadow-1); padding: var(--k-space-5);
+}
+.k-grid { display: grid; gap: var(--k-space-4); }
+.k-grid--stats { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
+.k-grid--cards { grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
+
+.k-stat__label { font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--k-text-3); }
+.k-stat__value { font-size: var(--k-size-2xl); font-weight: var(--k-weight-bold); letter-spacing: -.02em; margin-top: var(--k-space-2); }
+.k-stat__hint  { font-size: var(--k-size-sm); color: var(--k-text-2); }
+
+/* --- controles ---------------------------------------------------------- */
+
+.k-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--k-space-2);
+  padding: var(--k-space-2) var(--k-space-4); border-radius: var(--k-radius);
+  border: 1px solid var(--k-border-strong); background: var(--k-surface);
+  color: var(--k-text); font-size: var(--k-size-sm); font-weight: var(--k-weight-medium);
+  cursor: pointer; transition: background var(--k-fast) var(--k-ease), border-color var(--k-fast) var(--k-ease);
+}
+/* Ícone dentro de botão precisa de tamanho explícito: um <svg> sem width nem
+ * height herda o tamanho do viewBox de formas imprevisíveis entre navegadores —
+ * no botão de tema ele simplesmente colapsava e sumia. */
+.k-btn svg { width: 18px; height: 18px; flex: none; }
+.k-btn:hover:not(:disabled) { background: var(--k-surface-2); }
+.k-btn:disabled { opacity: .55; cursor: not-allowed; }
+.k-btn--primary { background: var(--k-accent); border-color: var(--k-accent); color: var(--k-accent-text); }
+.k-btn--primary:hover:not(:disabled) { background: var(--k-accent-hover); border-color: var(--k-accent-hover); }
+.k-btn--ghost { border-color: transparent; background: transparent; }
+.k-btn--ghost:hover:not(:disabled) { background: var(--k-surface-2); }
+
+.k-field { display: flex; flex-direction: column; gap: var(--k-space-2); }
+.k-label { font-size: var(--k-size-sm); font-weight: var(--k-weight-medium); }
+.k-input, .k-select, .k-textarea {
+  padding: var(--k-space-3) var(--k-space-3); border-radius: var(--k-radius);
+  border: 1px solid var(--k-border-strong); background: var(--k-surface);
+  transition: border-color var(--k-fast) var(--k-ease);
+  width: 100%;
+}
+.k-input:focus, .k-select:focus, .k-textarea:focus { border-color: var(--k-accent); outline-offset: 1px; }
+.k-textarea { font-family: var(--k-mono); font-size: var(--k-size-sm); line-height: 1.6; resize: vertical; min-height: 340px; }
+
+/* Interruptor. O input real fica por baixo, e não escondido com display:none —
+ * escondê-lo assim o tira da ordem de foco e o controle some para o teclado. */
+.k-switch { position: relative; display: inline-flex; align-items: center; flex: none; }
+.k-switch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+.k-switch__track {
+  width: 40px; height: 23px; border-radius: var(--k-radius-pill);
+  background: var(--k-border-strong); transition: background var(--k-fast) var(--k-ease);
+}
+.k-switch__thumb {
+  position: absolute; left: 3px; top: 3px; width: 17px; height: 17px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .3);
+  transition: transform var(--k-fast) var(--k-ease); pointer-events: none;
+}
+.k-switch input:checked ~ .k-switch__track { background: var(--k-accent); }
+.k-switch input:checked ~ .k-switch__thumb { transform: translateX(17px); }
+.k-switch input:focus-visible ~ .k-switch__track { outline: 2px solid var(--k-accent); outline-offset: 2px; }
+
+.k-badge {
+  display: inline-flex; align-items: center; gap: var(--k-space-1);
+  padding: 2px var(--k-space-2); border-radius: var(--k-radius-pill);
+  font-size: var(--k-size-xs); font-weight: var(--k-weight-medium);
+  background: var(--k-surface-2); color: var(--k-text-2);
+}
+.k-badge--ok     { background: var(--k-ok-soft);     color: var(--k-ok); }
+.k-badge--warn   { background: var(--k-warn-soft);   color: var(--k-warn); }
+.k-badge--danger { background: var(--k-danger-soft); color: var(--k-danger); }
+.k-badge--accent { background: var(--k-accent-soft); color: var(--k-accent); }
+
+/* --- estados ------------------------------------------------------------ */
+
+.k-empty, .k-error { text-align: center; padding: var(--k-space-7) var(--k-space-4); color: var(--k-text-2); }
+.k-empty h3, .k-error h3 { color: var(--k-text); margin-bottom: var(--k-space-2); }
+.k-error { border: 1px solid var(--k-danger); border-radius: var(--k-radius-lg); background: var(--k-danger-soft); }
+.k-error code { display: block; margin-top: var(--k-space-3); color: var(--k-text-2); font-size: var(--k-size-xs); }
+
+/* Esqueleto: a mesma altura do conteúdo que vai chegar, para a página não
+ * saltar quando ele chega. */
+.k-skeleton {
+  background: linear-gradient(90deg, var(--k-surface-2) 25%, var(--k-border) 37%, var(--k-surface-2) 63%);
+  background-size: 400% 100%; border-radius: var(--k-radius);
+  animation: k-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes k-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .k-skeleton { animation: none; } }
+
+.k-toast {
+  position: fixed; right: var(--k-space-5); bottom: var(--k-space-5); z-index: 50;
+  display: flex; flex-direction: column; gap: var(--k-space-2);
+}
+.k-toast__item {
+  background: var(--k-surface); border-radius: var(--k-radius); box-shadow: var(--k-shadow-2);
+  padding: var(--k-space-3) var(--k-space-4); font-size: var(--k-size-sm);
+  border-left: 3px solid var(--k-accent); max-width: 380px;
+}
+.k-toast__item--error { border-left-color: var(--k-danger); }
+
+/* --- responsivo --------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .k-app { grid-template-columns: 1fr; }
+  .k-sidebar {
+    position: fixed; inset: 0 auto 0 0; width: var(--k-sidebar-w); z-index: 30;
+    transform: translateX(-100%); transition: transform var(--k-fast) var(--k-ease);
+  }
+  .k-sidebar[data-open="true"] { transform: none; box-shadow: var(--k-shadow-2); }
+  .k-main { padding: var(--k-space-5) var(--k-space-4); }
+}
+@media (min-width: 901px) { .k-menu-toggle { display: none; } }

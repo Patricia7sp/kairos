@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kairos">
+  <title>Kairos</title>
+  <g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 19 14 L 19 50"/>
+    <path d="M 31 32 L 49 50"/>
+    <path d="M 49 14 L 31 32" stroke="currentColor"/>
+  </g>
+</svg>

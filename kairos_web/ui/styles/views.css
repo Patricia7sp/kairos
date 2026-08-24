@@ -1,0 +1,47 @@
+/* Estilos presos a uma tela só. O que reaparece migra para components.css. */
+
+/* --- entrada ------------------------------------------------------------ */
+
+.k-boot {
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: var(--k-space-4);
+  background: var(--k-bg); color: var(--k-text-3); font-size: var(--k-size-sm);
+}
+.k-boot img { width: min(86vw, 700px); height: auto; }
+
+/* --- skills ------------------------------------------------------------- */
+
+.k-skill-bar {
+  display: flex; gap: var(--k-space-3); align-items: center;
+  margin-bottom: var(--k-space-4); flex-wrap: wrap;
+}
+.k-skill-busca { flex: 1 1 260px; }
+
+.k-skill { display: flex; flex-direction: column; gap: var(--k-space-3); }
+.k-skill__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--k-space-3); }
+.k-skill__meta { display: flex; gap: var(--k-space-2); margin-top: var(--k-space-2); flex-wrap: wrap; }
+.k-skill__desc { color: var(--k-text-2); font-size: var(--k-size-sm); flex: 1; }
+.k-skill__foot { display: flex; gap: var(--k-space-2); }
+.k-skill__foot svg { width: 16px; height: 16px; }
+
+/* --- diálogo ------------------------------------------------------------ */
+
+.k-dialog {
+  border: 0; border-radius: var(--k-radius-lg); padding: 0;
+  background: var(--k-surface); color: var(--k-text);
+  box-shadow: var(--k-shadow-2);
+  width: min(860px, 94vw); max-height: 88dvh;
+}
+.k-dialog::backdrop { background: rgb(2 8 20 / .55); backdrop-filter: blur(2px); }
+.k-dialog__head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-4);
+  padding: var(--k-space-4) var(--k-space-5); border-bottom: 1px solid var(--k-border);
+}
+.k-dialog__head svg { width: 18px; height: 18px; }
+.k-dialog__body { padding: var(--k-space-5); overflow: auto; }
+.k-dialog__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--k-space-4); margin-top: var(--k-space-4); flex-wrap: wrap;
+}
+.k-dialog__aviso { font-size: var(--k-size-xs); color: var(--k-text-3); }
+.k-dialog__foot svg { width: 16px; height: 16px; }

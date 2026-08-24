@@ -77,3 +77,36 @@ A linha sob o logo é o fio: o instante é estreito, e é onde a marca se apoia.
 O texto — wordmark e tagline — é contorno, não `<text>`. Um `<text>` depende
 de a fonte existir em quem renderiza; onde não existe, sai uma fileira de
 caixas vazias. Foi o que aconteceu no primeiro corte desta capa.
+
+## O sistema de interface
+
+`kairos_web/ui/` — HTML, CSS e módulos ES servidos como estão, sem passo de
+build. Um passo de build a mais é um passo que pode ficar dessincronizado do
+que está servido, e este projeto já pagou esse preço uma vez.
+
+| camada | arquivo | regra |
+|---|---|---|
+| tokens | `styles/tokens.css` | **toda** cor, espaço, tamanho e tempo. Um teste recusa cor solta fora daqui |
+| base | `styles/base.css` | reset, tipografia, foco |
+| componentes | `styles/components.css` | o que aparece em mais de uma tela |
+| views | `styles/views.css` | o que aparece em uma só |
+
+As escalas de tipo e espaço são geométricas (1.25 e 1.5). Escalas ad-hoc
+produzem os "quase iguais" — 13px ao lado de 14px — que fazem uma interface
+parecer montada por acidente.
+
+Os ícones (`js/icons.js`) são desenhados na grade do símbolo: 24, traço 1.75,
+terminais arredondados, `currentColor`. Traço uniforme é o que faz um conjunto
+de ícones parecer um conjunto.
+
+### O que o sistema exige
+
+- **Cor sempre por token.** O tema escuro redefine só os papéis que mudam;
+  repetir a paleta inteira é como as duas versões saem de sincronia.
+- **Foco nunca removido sem substituto.** Quem navega por teclado perde a
+  posição. A única exceção é o `<main>`, que recebe foco a cada navegação para
+  o leitor de tela recomeçar do topo — reposicionamento, não interação.
+- **Estado de erro diz o motivo.** Tela em branco foi o defeito que originou
+  este trabalho; `k-error` mostra rota e status.
+- **Ação otimista reverte quando o servidor recusa.** O interruptor de skill
+  volta ao estado anterior — senão mostra algo que não aconteceu.

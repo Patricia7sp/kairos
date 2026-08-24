@@ -683,7 +683,25 @@ async def websocket_alias_endpoint(websocket: WebSocket):
     await websocket_chat_endpoint(websocket)
 
 
-# --- SPA STATIC FILES ---
+# --- INTERFACE DO KAIROS ---
+
+# A UI própria: HTML, CSS e módulos ES servidos como estão, sem passo de build.
+# O `web_dist` herdado continua montado sob /legacy enquanto chat e terminal
+# (que dependem dos websockets e ainda não têm equivalente aqui) não migram —
+# a ponte é explícita e tem prazo, não é o rosto do produto.
+UI_DIR = Path(__file__).parent / "ui"
+
+if UI_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR)), name="ui")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    icone = UI_DIR / "favicon.ico"
+    if icone.exists():
+        return FileResponse(icone)
+    return JSONResponse({"error": "not_found"}, status_code=404)
+
 
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
@@ -696,6 +714,33 @@ if DIST_DIR.exists():
             name="fonts-terminal",
         )
 
+    def _resposta_spa(full_path: str, raiz: Path):
+        """Serve um arquivo da raiz, ou o index com o token injetado."""
+        pedido = raiz / full_path
+        if full_path and pedido.is_file():
+            return FileResponse(pedido)
+        index = raiz / "index.html"
+        if not index.exists():
+            return JSONResponse({"error": "index.html não encontrado"}, status_code=404)
+        html = index.read_text(encoding="utf-8")
+        # O token vai no HTML porque a SPA não tem outro canal antes do primeiro
+        # request. É também por isso que a porta é publicada numa interface só:
+        # quem alcança a página alcança o token.
+        script = (
+            "<script>"
+            f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
+            "window.__KAIROS_AUTH_REQUIRED__=false;"
+            "</script>"
+        )
+        if "</head>" in html:
+            html = html.replace("</head>", f"{script}</head>")
+        return HTMLResponse(content=html, status_code=200)
+
+    @app.get("/legacy/{full_path:path}", include_in_schema=False)
+    async def serve_legacy(full_path: str):
+        """Interface herdada, mantida só enquanto chat e terminal não migram."""
+        return _resposta_spa(full_path, DIST_DIR)
+
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         # Uma rota /api/ que chegou até aqui NÃO existe. Devolver o index.html
@@ -706,19 +751,5 @@ if DIST_DIR.exists():
         # em erro legível dos dois lados.
         if full_path.startswith("api/"):
             return JSONResponse({"error": "not_found", "path": f"/{full_path}"}, status_code=404)
-        requested = DIST_DIR / full_path
-        if requested.is_file() and full_path != "":
-            return FileResponse(requested)
-        index_file = DIST_DIR / "index.html"
-        if index_file.exists():
-            html_content = index_file.read_text(encoding="utf-8")
-            injected_script = (
-                "<script>"
-                f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
-                "window.__KAIROS_AUTH_REQUIRED__=false;"
-                "</script>"
-            )
-            if "</head>" in html_content:
-                html_content = html_content.replace("</head>", f"{injected_script}</head>")
-            return HTMLResponse(content=html_content, status_code=200)
-        return JSONResponse({"error": "web_dist index.html not found"}, status_code=404)
+        # A interface do Kairos é a da raiz; o dist herdado só responde em /legacy.
+        return _resposta_spa(full_path, UI_DIR if UI_DIR.exists() else DIST_DIR)

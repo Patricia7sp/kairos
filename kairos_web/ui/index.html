@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kairos</title>
+  <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg">
+  <link rel="alternate icon" href="/ui/favicon.ico">
+  <meta name="theme-color" content="#0F172A">
+  <link rel="stylesheet" href="/ui/styles/tokens.css">
+  <link rel="stylesheet" href="/ui/styles/base.css">
+  <link rel="stylesheet" href="/ui/styles/components.css">
+  <link rel="stylesheet" href="/ui/styles/views.css">
+</head>
+<body>
+  <div class="k-boot">
+    <picture>
+      <source srcset="/ui/cover-dark.svg" media="(prefers-color-scheme: dark)">
+      <img src="/ui/cover-light.svg" alt="Kairos — o instante certo">
+    </picture>
+    <p>Carregando…</p>
+  </div>
+  <script type="module">
+    import { iniciar } from "/ui/js/app.js";
+    iniciar();
+  </script>
+</body>
+</html>
