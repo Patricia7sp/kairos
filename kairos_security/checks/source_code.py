@@ -40,8 +40,21 @@ SOURCE_SUFFIXES = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
 
 # Valores que anunciam não ser segredo de verdade.
 PLACEHOLDERS = (
-    "test", "fake", "dummy", "example", "sample", "placeholder", "changeme",
-    "your-", "your_", "xxx", "redacted", "<", "{", "$", "...",
+    "test",
+    "fake",
+    "dummy",
+    "example",
+    "sample",
+    "placeholder",
+    "changeme",
+    "your-",
+    "your_",
+    "xxx",
+    "redacted",
+    "<",
+    "{",
+    "$",
+    "...",
 )
 
 
@@ -214,9 +227,8 @@ def _is_test_file(path: Path) -> bool:
     if "tests" in path.parts or "__tests__" in path.parts:
         return True
     name = path.name
-    return (
-        name.startswith("test_")
-        or name.endswith(("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+    return name.startswith("test_") or name.endswith(
+        ("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
     )
 
 

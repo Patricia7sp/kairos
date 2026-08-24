@@ -133,10 +133,12 @@ COMMANDS: tuple[Command, ...] = (
     _c(
         "gateway",
         "Gateway de mensageria",
+        _sub("run", "Sobe o serviço em primeiro plano"),
         _sub("list", "Plataformas configuradas"),
         _sub("setup", "Configura uma plataforma"),
         _sub("status", "Estado do gateway"),
-        _sub("stop", "Encerra o gateway"),
+        _sub("stop", "Solicita drenagem e encerramento"),
+        status=Status.IMPLEMENTED,
         unit="providers-gateway",
     ),
     _c("gui", "Aplicativo desktop"),

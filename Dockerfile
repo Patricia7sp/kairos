@@ -107,6 +107,9 @@ ENV PATH="/opt/kairos/bin:/opt/kairos/.venv/bin:${PATH}" \
     S6_KEEP_ENV=1
 
 VOLUME ["/opt/data"]
-EXPOSE 8080
+# 9119: dashboard web. O gateway não escuta em porta nenhuma — a spec é
+# explícita quanto a não haver canal HTTP de controle; a drenagem é o
+# marcador .drain_request.json no volume.
+EXPOSE 9119
 
 ENTRYPOINT ["/opt/kairos/docker/entrypoint-dispatch.sh"]

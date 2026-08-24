@@ -1,5 +1,10 @@
 #!/command/execlineb -P
 with-contenv
 importas -D kairos KAIROS_USER KAIROS_USER
+importas -D 9119 KAIROS_DASHBOARD_PORT KAIROS_DASHBOARD_PORT
 s6-setuidgid ${KAIROS_USER}
-/opt/kairos/.venv/bin/kairos dashboard
+# --host 0.0.0.0 é deliberado e vale só AQUI: dentro do container o limite de
+# isolamento é o namespace de rede, não o bind. Quem publica a porta decide a
+# exposição (o compose publica numa interface só). Fora do container o padrão
+# do comando continua sendo 127.0.0.1.
+/opt/kairos/.venv/bin/kairos dashboard --host 0.0.0.0 --port ${KAIROS_DASHBOARD_PORT} --no-browser

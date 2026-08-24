@@ -187,9 +187,7 @@ class SourceRootDiscoveryTests(unittest.TestCase):
     def test_no_source_flag_skips_the_code_scan(self):
         report = run_full_audit(Path.cwd(), scan_source=False)
         self.assertIsNone(report.source_root)
-        self.assertEqual(
-            [], [f for f in report.findings if f.category == Category.SOURCE_CODE]
-        )
+        self.assertEqual([], [f for f in report.findings if f.category == Category.SOURCE_CODE])
 
 
 if __name__ == "__main__":

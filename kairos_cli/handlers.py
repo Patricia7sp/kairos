@@ -370,6 +370,50 @@ def cmd_sync(args) -> int:
     return ExitCode.NOT_IMPLEMENTED
 
 
+def cmd_gateway(args) -> int:
+    """O serviço longo. É ele que define a vida do container."""
+    import logging
+
+    from kairos_gateway.service import GatewayService
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    as_json = getattr(args, "json", False)
+    sub = getattr(args, "gateway_command", None)
+
+    if sub == "stop":
+        # Não há canal HTTP de controle (design.md): a drenagem é um arquivo.
+        from kairos_gateway.service import write_drain_request
+
+        marker = write_drain_request(_home(), getattr(args, "reason", "manual"))
+        _emit({"drenagem solicitada": str(marker)}, as_json=as_json)
+        return ExitCode.OK
+
+    svc = GatewayService(_home(), poll_interval=getattr(args, "interval", 5.0) or 5.0)
+
+    if sub == "status":
+        svc.boot()
+        _emit(svc.status(), as_json=as_json)
+        return ExitCode.OK
+
+    if sub == "list":
+        _emit({"adapters": svc.status()["adapters"] or ["nenhum registrado"]}, as_json=as_json)
+        return ExitCode.OK
+
+    if sub == "setup":
+        return ExitCode.NOT_IMPLEMENTED
+
+    if getattr(args, "once", False):
+        svc.boot()
+        entregues = svc.tick()
+        svc.shutdown()
+        _emit({"entregues": entregues, **svc.status()}, as_json=as_json)
+        return ExitCode.OK
+
+    return svc.run()
+
+
 def cmd_web(args) -> int:
     import webbrowser
 
@@ -513,5 +557,6 @@ HANDLERS = {
     "tick": cmd_tick,
     "sync": cmd_sync,
     "dashboard": cmd_web,
+    "gateway": cmd_gateway,
     "security": cmd_security,
 }

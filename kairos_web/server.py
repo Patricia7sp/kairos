@@ -416,6 +416,7 @@ async def _chat_session(websocket: WebSocket) -> None:  # noqa: PLR0915
 
 # --- FRONTEND DASHBOARD REST ENDPOINTS ---
 
+
 @app.get("/api/status")
 async def get_status():
     config = load_config()
@@ -509,11 +510,13 @@ async def list_skills():
     if skills_path.exists():
         for p in skills_path.iterdir():
             if p.is_dir() and (p / "SKILL.md").exists():
-                skills_list.append({
-                    "name": p.name,
-                    "enabled": True,
-                    "path": str(p / "SKILL.md"),
-                })
+                skills_list.append(
+                    {
+                        "name": p.name,
+                        "enabled": True,
+                        "path": str(p / "SKILL.md"),
+                    }
+                )
     return {"skills": skills_list}
 
 
@@ -552,6 +555,7 @@ async def get_logs():
 
 # --- WEBSOCKET ALIASES ---
 
+
 @app.websocket("/api/ws")
 @app.websocket("/api/events")
 @app.websocket("/api/pty")
@@ -566,7 +570,11 @@ if DIST_DIR.exists():
     if (DIST_DIR / "fonts").exists():
         app.mount("/fonts", StaticFiles(directory=str(DIST_DIR / "fonts")), name="fonts")
     if (DIST_DIR / "fonts-terminal").exists():
-        app.mount("/fonts-terminal", StaticFiles(directory=str(DIST_DIR / "fonts-terminal")), name="fonts-terminal")
+        app.mount(
+            "/fonts-terminal",
+            StaticFiles(directory=str(DIST_DIR / "fonts-terminal")),
+            name="fonts-terminal",
+        )
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):

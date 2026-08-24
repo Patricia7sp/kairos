@@ -83,8 +83,17 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
+    elif command == "gateway" and subcommand in ("run", None):
+        parser.add_argument("--once", action="store_true", help="Roda um único tick e sai")
+        parser.add_argument(
+            "--interval", type=float, default=5.0, help="Segundos entre ticks (padrão: 5)"
+        )
+    elif command == "gateway" and subcommand == "stop":
+        parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
     elif command == "security":
-        parser.add_argument("--target", help="Diretório de runtime a auditar (padrão: $KAIROS_HOME)")
+        parser.add_argument(
+            "--target", help="Diretório de runtime a auditar (padrão: $KAIROS_HOME)"
+        )
         parser.add_argument(
             "--source", help="Raiz do código-fonte a auditar (padrão: detecta o repositório)"
         )
