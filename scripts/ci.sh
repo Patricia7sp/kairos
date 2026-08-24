@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Roda localmente os MESMOS passos do CI (.github/workflows/ci.yml).
 #
-# Existe por duas razões. A primeira é que o repositório ainda não tem
-# remoto, então o workflow não executa em lugar nenhum — sem este script o CI
-# seria aspiração, não verificação. A segunda vale mesmo depois: descobrir uma
-# quebra no push é um ciclo de minutos; descobrir aqui é de segundos.
+# Existe porque descobrir uma quebra no push é um ciclo de minutos e
+# descobrir aqui é de segundos — e porque o build da imagem e os testes de
+# integração rodam contra o daemon local, que é onde a stack de fato sobe.
 #
 # Uso:
 #   scripts/ci.sh          # tudo que estiver disponível
@@ -64,7 +63,7 @@ if [ "$FAST" -eq 1 ]; then
   skip "Imagem + integração" "--fast"
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   # Invocada indiretamente por `run`.
-  # shellcheck disable=SC2317
+  # shellcheck disable=SC2317,SC2329
   hadolint_local() {
     docker run --rm -v "$PWD/.hadolint.yaml:/cfg.yaml:ro" -i \
       hadolint/hadolint:latest-alpine hadolint --config /cfg.yaml - < Dockerfile

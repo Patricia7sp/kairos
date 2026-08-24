@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
       - name: Instalar
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv sync --python "$PYTHON_VERSION" --extra dev
       - name: ruff check
         run: uv run ruff check .
@@ -67,6 +67,12 @@ jobs:
         with:
           scandir: "."
           additional_files: "kairos"
+          # `additional_files: kairos` existe para apanhar o executável, mas
+          # o glob apanha junto o marcador s6-rc user/contents.d/main-kairos —
+          # que é um arquivo VAZIO, não um script, e por isso rende SC2148
+          # (sem shebang). Não há shebang a acrescentar: no s6-rc o que
+          # importa é o NOME do arquivo, e o conteúdo é deliberadamente nada.
+          ignore_names: "main-kairos"
 
   dockerfile:
     name: Lint do Dockerfile (hadolint)
@@ -83,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv sync --python "$PYTHON_VERSION" --extra dev
       # `docker build --check` valida a estrutura do Dockerfile. O build real
       # pega o que ela não alcança — deriva entre pyproject e COPY, diretório
@@ -128,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv sync --python "$PYTHON_VERSION" --extra dev
       # G-19: no legado o harness de evals NUNCA roda em CI — os 28 workflows
       # não referenciam `evals/` de forma nenhuma. Medir sem nunca medir é o
@@ -142,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       # Um lock desatualizado passa localmente e quebra o build da imagem, que
       # resolve com `--frozen`. Barato de checar, caro de descobrir depois.
       - name: uv lock --check
