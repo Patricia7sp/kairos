@@ -200,7 +200,12 @@ COMMANDS: tuple[Command, ...] = (
         unit="hermes-cli",
     ),
     _c("prompt-size", "Tamanho do prompt de sistema", unit="agent"),
-    _c("security", "Revisão de segurança da configuração"),
+    _c(
+        "security",
+        "Auditoria de segurança e vulnerabilidades",
+        status=Status.IMPLEMENTED,
+        unit="security",
+    ),
     _c("setup", "Assistente de configuração inicial"),
     _c(
         "skills",

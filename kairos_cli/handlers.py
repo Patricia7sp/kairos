@@ -462,6 +462,22 @@ def cmd_run(args) -> int:
         return ExitCode.OK
 
 
+def cmd_security(args) -> int:
+    from kairos_security import format_cli_summary, format_json_report, run_full_audit
+
+    as_json = getattr(args, "json", False)
+    target = getattr(args, "target", None)
+    target_path = Path(target) if target else _home()
+
+    report = run_full_audit(target_path)
+    if as_json:
+        print(format_json_report(report))
+    else:
+        print(format_cli_summary(report))
+
+    return ExitCode.OK if report.passed else ExitCode.ERROR
+
+
 HANDLERS = {
     "run": cmd_run,
     "chat": cmd_run,
@@ -480,4 +496,5 @@ HANDLERS = {
     "tick": cmd_tick,
     "sync": cmd_sync,
     "dashboard": cmd_web,
+    "security": cmd_security,
 }

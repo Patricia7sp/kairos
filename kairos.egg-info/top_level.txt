@@ -11,6 +11,7 @@ kairos_integration
 kairos_mcp
 kairos_plugins
 kairos_providers
+kairos_security
 kairos_skills
 kairos_state
 kairos_tools

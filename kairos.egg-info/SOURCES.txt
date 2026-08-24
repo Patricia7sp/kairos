@@ -58,6 +58,10 @@ kairos_plugins/storage.py
 kairos_providers/__init__.py
 kairos_providers/base.py
 kairos_providers/manager.py
+kairos_security/__init__.py
+kairos_security/auditor.py
+kairos_security/formatter.py
+kairos_security/models.py
 kairos_skills/__init__.py
 kairos_skills/curator.py
 kairos_skills/frontmatter.py
@@ -73,6 +77,7 @@ kairos_state/writes.py
 kairos_tools/__init__.py
 kairos_tools/approval.py
 kairos_tools/budget.py
+kairos_tools/builtin.py
 kairos_tools/parallel.py
 kairos_tools/policy.py
 kairos_tools/registry.py
@@ -83,6 +88,7 @@ kairos_web/__init__.py
 kairos_web/server.py
 tests/test_acp.py
 tests/test_agent.py
+tests/test_builtin_tools.py
 tests/test_cjk.py
 tests/test_cli.py
 tests/test_cli_surface.py
@@ -98,6 +104,7 @@ tests/test_mcp.py
 tests/test_plugins.py
 tests/test_providers.py
 tests/test_schema.py
+tests/test_security_audit.py
 tests/test_skills.py
 tests/test_state.py
 tests/test_tools.py
