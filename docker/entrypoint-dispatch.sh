@@ -17,6 +17,14 @@
 set -euo pipefail
 
 if [ "$$" -eq 1 ]; then
+  # Sem comando: o container existe para servir, e quem serve são os serviços
+  # supervisionados (main-kairos = gateway, dashboard). Passar o wrapper como
+  # main program AQUI subiria um SEGUNDO gateway — o wrapper assume `gateway`
+  # quando não recebe argumentos — e dois gateways disputam o mesmo state.db
+  # e o mesmo ledger de entrega. Sem main program, o /init apenas supervisiona.
+  if [ "$#" -eq 0 ]; then
+    exec /init
+  fi
   exec /init /opt/kairos/docker/main-wrapper.sh "$@"
 fi
 

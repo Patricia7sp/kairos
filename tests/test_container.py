@@ -15,6 +15,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 import typing
 import unittest
 from pathlib import Path
@@ -573,6 +574,67 @@ class RealImageTests(unittest.TestCase):
                     dockerfile,
                     f"{pkg} está no pyproject mas não é copiado no Dockerfile",
                 )
+
+    # -- o bug do gateway em dobro ----------------------------------------
+
+    def test_o_gateway_sobe_UMA_vez_so(self):
+        """Dois gateways disputariam o mesmo state.db e o mesmo ledger.
+
+        O bug: no caminho PID 1 o dispatcher passava o wrapper como main
+        program mesmo sem comando, e o wrapper assume `gateway` quando não
+        recebe argumentos — somando-se ao serviço supervisionado main-kairos.
+        Só aparece no container de verdade, com a árvore do s6 no ar.
+        """
+        name = "kairos-teste-gateway-unico"
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+        try:
+            up = subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    name,
+                    "-e",
+                    "KAIROS_WEB_TOKEN=teste-nao-secreto",
+                    self.IMAGE,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            self.assertEqual(up.returncode, 0, up.stderr)
+            # A árvore do s6 precisa assentar antes da contagem.
+            deadline = time.time() + 60
+            procs = ""
+            while time.time() < deadline:
+                ps = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        name,
+                        "sh",
+                        "-c",
+                        'for d in /proc/[0-9]*; do tr "\\0" " " < $d/cmdline 2>/dev/null; echo; done',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                procs = ps.stdout
+                if "kairos dashboard" in procs and "kairos gateway" in procs:
+                    break
+                time.sleep(2)
+            gateways = [ln for ln in procs.splitlines() if "kairos gateway" in ln]
+            self.assertEqual(
+                len(gateways),
+                1,
+                f"esperado 1 gateway, achado {len(gateways)}:\n" + "\n".join(gateways),
+            )
+        finally:
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
     # -- o bug de UID ------------------------------------------------------
 

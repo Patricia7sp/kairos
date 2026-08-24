@@ -98,15 +98,38 @@ construída e são **pulados** se ela não existir. Eles cobrem o que o
 `docker build --check` não alcança: deriva entre `pyproject.toml` e o
 Dockerfile, diretórios de destino e o `PATH` de runtime.
 
+Sem comando, o container é o serviço: o s6 supervisiona `main-kairos` (o
+gateway) e `dashboard`. Com comando (`docker run kairos chat`), o comando roda
+como *main program* ao lado dos serviços.
+
+## Deploy (Komodo)
+
+A stack vive no Komodo em modo **Git**: o periphery clona este repositório e
+usa o `compose.yaml` da raiz. Como o clone traz o código, o `build:` do compose
+funciona — não há imagem a publicar em registry.
+
+Dois campos da stack não são o padrão e precisam continuar assim:
+
+| campo | valor | porquê |
+|---|---|---|
+| `auto_pull` | `false` | a imagem é buildada, não puxada; o `compose pull` falha com *pull access denied* |
+| `run_build` | `true` | é o que dispara `docker compose build` |
+
+A stack recebe `KAIROS_WEB_TOKEN` pelo *environment* — sem ele o compose
+recusa subir, de propósito. A porta é publicada **só** no endereço Tailscale
+do host: o dashboard entrega o token de sessão dentro do HTML, então quem
+alcança a porta alcança o agente e o REPL de terminal.
+
 ## CI
 
-`.github/workflows/ci.yml` roda seis jobs em paralelo: testes, ruff, shellcheck,
-hadolint, imagem+integração e `uv lock --check`. Actions fixadas por **SHA**,
-não por tag — tag é mutável.
+`.github/workflows/ci.yml` roda oito jobs em paralelo: testes, ruff, shellcheck,
+hadolint, imagem+integração, frontends, gate de recall e `uv lock --check`.
+Actions fixadas por **SHA**, não por tag — tag é mutável. Fixar por SHA cobra
+o seu preço: um SHA que não existe derruba o job já no *Set up job*, com uma
+mensagem que não menciona o pin.
 
-O repositório ainda não tem remoto, então o workflow não executa em lugar
-nenhum. Para que o CI não seja ficção, `scripts/ci.sh` roda **exatamente os
-mesmos passos** localmente:
+`scripts/ci.sh` roda **exatamente os mesmos passos** localmente, o que troca um
+ciclo de minutos por um de segundos:
 
 ```bash
 scripts/ci.sh          # tudo
