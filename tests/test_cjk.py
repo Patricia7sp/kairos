@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +20,6 @@ from pathlib import Path
 from kairos_state import connect, initialize_schema
 from kairos_state.cjk import (
     CJK_SO_ENV,
-    RebuildStatus,
     cjk_enabled,
     drop_cjk_index,
     ensure_cjk_index,
@@ -43,8 +41,9 @@ def _build_once() -> Path | None:
     if so.is_file():
         return so
     try:
-        subprocess.run([str(SRC / "build.sh"), str(out)], check=True,
-                       capture_output=True, timeout=120)
+        subprocess.run(
+            [str(SRC / "build.sh"), str(out)], check=True, capture_output=True, timeout=120
+        )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return None
     return so if so.is_file() else None
@@ -60,8 +59,10 @@ class BuildTests(unittest.TestCase):
     def test_o_build_usa_headers_vendorizados_sem_libsqlite3_dev(self):
         # Este host não tem /usr/include/sqlite3ext.h — se compilou, foi
         # pelo caminho vendor/, que é exatamente o RF-03.
-        self.assertFalse(Path("/usr/include/sqlite3ext.h").exists(),
-                         "host tem o header do sistema; RF-03 não é exercitado aqui")
+        self.assertFalse(
+            Path("/usr/include/sqlite3ext.h").exists(),
+            "host tem o header do sistema; RF-03 não é exercitado aqui",
+        )
         self.assertIsNotNone(_SO, "build falhou sem o header do sistema")
 
     @requires_ext
@@ -113,7 +114,7 @@ class TokenizerTests(unittest.TestCase):
         """A comparação que justifica a extensão inteira."""
         self._table("unicode61")
         self._insert("웅기가말했다")
-        self.assertEqual(self._hits("웅기"), 0)   # o token é a sequência inteira
+        self.assertEqual(self._hits("웅기"), 0)  # o token é a sequência inteira
 
     @requires_ext
     def test_japones_e_chines_tambem(self):
@@ -121,7 +122,7 @@ class TokenizerTests(unittest.TestCase):
         self._insert("東京都", "こんにちは世界", "中文搜索")
         self.assertEqual(self._hits("東京"), 1)
         self.assertEqual(self._hits("世界"), 1)
-        self.assertEqual(self._hits("文搜"), 1)   # casa no meio
+        self.assertEqual(self._hits("文搜"), 1)  # casa no meio
 
     @requires_ext
     def test_caractere_cjk_isolado_vira_unigrama(self):
@@ -134,7 +135,7 @@ class TokenizerTests(unittest.TestCase):
     def test_texto_latino_passa_intacto(self):
         self._table("cjk_unicode61")
         self._insert("hello world", "Hello World")
-        self.assertEqual(self._hits("world"), 2)   # dobra de caixa preservada
+        self.assertEqual(self._hits("world"), 2)  # dobra de caixa preservada
         self.assertEqual(self._hits("hello"), 2)
 
     @requires_ext
@@ -214,7 +215,7 @@ class DegradationTests(unittest.TestCase):
             lixo.write_bytes(b"isto nao e um objeto compartilhado")
             os.environ[CJK_SO_ENV] = str(lixo)
             try:
-                self.assertFalse(load_extension(self.db))   # não levanta
+                self.assertFalse(load_extension(self.db))  # não levanta
             finally:
                 del os.environ[CJK_SO_ENV]
 
@@ -233,9 +234,13 @@ class DegradationTests(unittest.TestCase):
         self.assertEqual(hits, 1)
 
     def test_rf13_remocao_e_limpa_mesmo_sem_a_extensao(self):
-        drop_cjk_index(self.db)   # não levanta
-        tabelas = {r["name"] for r in self.db.execute(
-            "SELECT name FROM sqlite_master WHERE name LIKE 'messages_fts_cjk%'")}
+        drop_cjk_index(self.db)  # não levanta
+        tabelas = {
+            r["name"]
+            for r in self.db.execute(
+                "SELECT name FROM sqlite_master WHERE name LIKE 'messages_fts_cjk%'"
+            )
+        }
         self.assertEqual(tabelas, set())
 
 
@@ -271,8 +276,10 @@ class IndexAndRebuildTests(unittest.TestCase):
 
     @requires_ext
     def test_rf05_indice_view_e_gatilhos_existem(self):
-        objetos = {r["name"] for r in self.db.execute(
-            "SELECT name FROM sqlite_master WHERE name LIKE '%cjk%'")}
+        objetos = {
+            r["name"]
+            for r in self.db.execute("SELECT name FROM sqlite_master WHERE name LIKE '%cjk%'")
+        }
         self.assertIn("messages_fts_cjk", objetos)
         self.assertIn("messages_fts_cjk_src", objetos)
         for t in ("insert", "delete", "update"):
@@ -292,17 +299,17 @@ class IndexAndRebuildTests(unittest.TestCase):
     @requires_ext
     def test_a_fronteira_separa_gatilho_de_backfill(self):
         """O erro que este desenho evita: os dois disputando a mesma linha."""
-        self._msg("user", "기존 메시지")          # existe ANTES do índice
+        self._msg("user", "기존 메시지")  # existe ANTES do índice
         drop_cjk_index(self.db)
-        ensure_cjk_index(self.db)                # fixa a fronteira aqui
+        ensure_cjk_index(self.db)  # fixa a fronteira aqui
         st = rebuild_status(self.db)
-        self.assertEqual(st.remaining, 1)        # a antiga é do backfill
+        self.assertEqual(st.remaining, 1)  # a antiga é do backfill
 
-        self._msg("user", "신규 메시지")          # chega DEPOIS
-        self.assertEqual(self._cjk_hits("신규"), 1)   # o gatilho pegou
-        self.assertEqual(self._cjk_hits("기존"), 0)   # o backfill ainda não
+        self._msg("user", "신규 메시지")  # chega DEPOIS
+        self.assertEqual(self._cjk_hits("신규"), 1)  # o gatilho pegou
+        self.assertEqual(self._cjk_hits("기존"), 0)  # o backfill ainda não
 
-        rebuild_step(self.db)                    # não colide
+        rebuild_step(self.db)  # não colide
         self.assertEqual(self._cjk_hits("기존"), 1)
 
     @requires_ext
@@ -322,8 +329,8 @@ class IndexAndRebuildTests(unittest.TestCase):
 
         st = rebuild_step(self.db, batch=5)
         self.assertEqual(st.remaining, 7)
-        self.assertEqual(st.high_water, 12)      # fronteira NÃO se move
-        self.assertGreater(st.cursor, -1)        # o cursor sim
+        self.assertEqual(st.high_water, 12)  # fronteira NÃO se move
+        self.assertGreater(st.cursor, -1)  # o cursor sim
         cursor_parcial = st.cursor
 
         # "Interrupção": nova consulta não recomeça do zero.
@@ -342,7 +349,8 @@ class IndexAndRebuildTests(unittest.TestCase):
         ensure_cjk_index(self.db)
         rebuild_step(self.db, batch=2)
         row = self.db.execute(
-            "SELECT value FROM state_meta WHERE key='fts_cjk_rebuild_progress'").fetchone()
+            "SELECT value FROM state_meta WHERE key='fts_cjk_rebuild_progress'"
+        ).fetchone()
         self.assertIsNotNone(row)
         self.assertAlmostEqual(float(row[0]), 0.5, places=3)
 
@@ -365,11 +373,14 @@ class IndexAndRebuildTests(unittest.TestCase):
         self._msg("user", "일본")
         rebuild_step(self.db)
         drop_cjk_index(self.db)
-        restos = {r["name"] for r in self.db.execute(
-            "SELECT name FROM sqlite_master WHERE name LIKE '%cjk%'")}
+        restos = {
+            r["name"]
+            for r in self.db.execute("SELECT name FROM sqlite_master WHERE name LIKE '%cjk%'")
+        }
         self.assertEqual(restos, set())
-        meta = self.db.execute(
-            "SELECT count(*) FROM state_meta WHERE key LIKE '%cjk%'").fetchone()[0]
+        meta = self.db.execute("SELECT count(*) FROM state_meta WHERE key LIKE '%cjk%'").fetchone()[
+            0
+        ]
         self.assertEqual(meta, 0)
 
 

@@ -28,6 +28,7 @@ kairos_state/migrations.py
 kairos_state/schema.py
 kairos_state/writes.py
 tests/test_cjk.py
+tests/test_container.py
 tests/test_domain.py
 tests/test_i18n.py
 tests/test_machines.py

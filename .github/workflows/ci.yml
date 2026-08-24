@@ -1,0 +1,114 @@
+# CI do Kairos.
+#
+# Um workflow só, com jobs paralelos. O legado tem 28 workflows porque tem 28
+# superfícies; aqui a divisão é por FERRAMENTA, e um job existe quando falha
+# por um motivo distinto dos outros — não para parecer completo.
+#
+# Actions fixadas por SHA, não por tag: uma tag é mutável, e confiar nela
+# significa executar código arbitrário do mantenedor da action a cada push.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  tests:
+    name: Testes (unitários)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+        with:
+          enable-cache: true
+      - name: Instalar
+        run: uv sync --python "$PYTHON_VERSION" --extra dev
+      # Sem Docker aqui: os testes de integração ficam no job `image`, para
+      # que uma falha de build não se confunda com falha de lógica.
+      - name: pytest
+        run: uv run pytest -q --deselect tests/test_container.py::RealImageTests
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - run: uv sync --python "$PYTHON_VERSION" --extra dev
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  shell:
+    name: Lint de shell (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # A imagem do container é shell na prática: entrypoint, bootstrap,
+      # wrapper e o shim de UID. Um erro de quoting ali não aparece em teste
+      # de Python.
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
+        env:
+          SHELLCHECK_OPTS: -e SC1091
+        with:
+          scandir: "."
+          additional_files: "kairos"
+
+  dockerfile:
+    name: Lint do Dockerfile (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+
+  image:
+    name: Imagem + testes de integração
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - run: uv sync --python "$PYTHON_VERSION" --extra dev
+      # `docker build --check` valida a estrutura do Dockerfile. O build real
+      # pega o que ela não alcança — deriva entre pyproject e COPY, diretório
+      # de destino ausente, PATH de runtime. Foram três bugs assim na Tarefa
+      # 07; por isso o build entra no CI, e não só o --check.
+      - name: docker build --check
+        run: docker build --check .
+      - name: Construir a imagem
+        run: docker build -t kairos:test .
+      - name: Imagem-stub para o ciclo de vida s6
+        run: |
+          printf 'FROM kairos:test\nRUN printf %s > /opt/kairos/.venv/bin/kairos && chmod +x /opt/kairos/.venv/bin/kairos\n' \
+            "'#!/bin/bash\ncase \"\$1\" in\n  gateway) echo \"GATEWAY uid=\$(id -u)\"; sleep 3 ;;\n  dashboard) echo \"DASH uid=\$(id -u)\"; sleep 3 ;;\n  boom) exit 42 ;;\n  echo) cat ;;\n  *) echo \"CLI uid=\$(id -u) args=\$*\" ;;\nesac\n'" \
+            > Dockerfile.stub
+          docker build -t kairos:stub -f Dockerfile.stub .
+      - name: Testes de integração
+        run: uv run pytest -q tests/test_container.py::RealImageTests
+
+  lockfile:
+    name: uv.lock em dia
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      # Um lock desatualizado passa localmente e quebra o build da imagem, que
+      # resolve com `--frozen`. Barato de checar, caro de descobrir depois.
+      - name: uv lock --check
+        run: uv lock --check

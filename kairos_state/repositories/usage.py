@@ -16,8 +16,12 @@ from kairos_state.writes import write_with_retry
 __all__ = ["BillingRoute", "TokenDelta", "UsageRepository"]
 
 _COUNTERS = (
-    "api_call_count", "input_tokens", "output_tokens",
-    "cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
+    "api_call_count",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
 )
 
 
@@ -38,8 +42,14 @@ class BillingRoute:
     task: str = "chat"
 
     def as_key(self) -> tuple:
-        return (self.session_id, self.model, self.billing_provider,
-                self.billing_base_url, self.billing_mode, self.task)
+        return (
+            self.session_id,
+            self.model,
+            self.billing_provider,
+            self.billing_base_url,
+            self.billing_mode,
+            self.task,
+        )
 
 
 @dataclass
@@ -51,7 +61,7 @@ class TokenDelta:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
 
-    def merge(self, other: "TokenDelta") -> None:
+    def merge(self, other: TokenDelta) -> None:
         for name in _COUNTERS:
             setattr(self, name, getattr(self, name) + getattr(other, name))
 
@@ -90,6 +100,7 @@ class UsageRepository:
     def flush(self, *, now: float | None = None) -> int:
         """Grava o acumulado em lote. Devolve quantas rotas foram gravadas."""
         import time as _time
+
         moment = now if now is not None else _time.time()
 
         with self._lock:
@@ -110,23 +121,23 @@ class UsageRepository:
                 for key, delta in batch:
                     route = routes[key]
                     self._conn.execute(
-                        f"INSERT INTO session_model_usage("
+                        f"INSERT INTO session_model_usage("  # noqa: S608 — nomes de coluna vêm de _COUNTERS, constante do módulo
                         f"  session_id, model, billing_provider, billing_base_url, "
                         f"  billing_mode, task, {columns}, first_seen, last_seen) "
                         f"VALUES (?, ?, ?, ?, ?, ?, {holes}, ?, ?) "
                         f"ON CONFLICT(session_id, model, billing_provider, "
                         f"            billing_base_url, billing_mode, task) DO UPDATE SET "
                         f"  {increments}, last_seen = excluded.last_seen",
-                        (*route.as_key(),
-                         *[getattr(delta, n) for n in _COUNTERS],
-                         moment, moment),
+                        (*route.as_key(), *[getattr(delta, n) for n in _COUNTERS], moment, moment),
                     )
             return len(batch)
 
         try:
             return write_with_retry(op, budget=Budget.ROUTINE, detail="flush_token_usage")
         except Exception:
-            # Devolve o lote à fila: contabilidade perdida é irrecuperável,
+            # DELIBERADO: qualquer falha devolve o lote à fila e RE-LEVANTA.
+            # Estreitar aqui faria uma exceção não prevista descartar o lote
+            # em silêncio — contabilidade perdida é irrecuperável,
             # e uma falha transitória não deve custar os números do turno.
             with self._lock:
                 for key, delta in batch:
@@ -142,5 +153,8 @@ class UsageRepository:
         """
         try:
             return self.flush()
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # DELIBERADO: no encerramento não há para quem propagar. Engolir
+            # aqui é a escolha certa — levantar num atexit vira traceback
+            # confuso que esconde o motivo real do shutdown.
             return 0

@@ -66,15 +66,14 @@ class ConnectionTests(Base):
     """RF-01, RF-02, RF-03."""
 
     def test_rf01_wal_com_fallback(self):
-        self.assertEqual(
-            self.db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal"
-        )
+        self.assertEqual(self.db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
 
     def test_rf01_fallback_para_delete_nao_levanta(self):
         # Simula FS sem suporte a WAL: o PRAGMA devolve outro modo.
         class FakeConn:
             def __init__(self):
                 self.executed = []
+
             def execute(self, sql):
                 self.executed.append(sql)
                 if "journal_mode=WAL" in sql:
@@ -133,6 +132,7 @@ class RetryAndContentionTests(Base):
     def test_paciencia_e_por_TEMPO_nao_por_tentativa(self):
         # Relógio falso: estoura a paciência sem gastar tempo real.
         agora = {"t": 0.0}
+
         def clock():
             agora["t"] += 0.3
             return agora["t"]
@@ -163,19 +163,15 @@ class RetryAndContentionTests(Base):
 
     def test_t13_gaveup_de_transcript_e_o_numero_que_importa(self):
         # Diferente de zero = turno destruído por banco ocupado (#74478).
-        self.assertEqual(
-            get_write_contention_stats()["by_budget"]["transcript"]["gaveup_total"], 0
-        )
+        self.assertEqual(get_write_contention_stats()["by_budget"]["transcript"]["gaveup_total"], 0)
         record_wait(Budget.TRANSCRIPT, 61.0, gave_up=True)
-        self.assertEqual(
-            get_write_contention_stats()["by_budget"]["transcript"]["gaveup_total"], 1
-        )
+        self.assertEqual(get_write_contention_stats()["by_budget"]["transcript"]["gaveup_total"], 1)
 
     def test_t13_telemetria_nunca_derruba_a_escrita(self):
         # "never let telemetry break a write"
         record_wait(Budget.ROUTINE, float("nan"))
         record_wait(Budget.ROUTINE, -1.0, detail=object())  # type: ignore[arg-type]
-        self.mk("s1")   # a escrita segue funcionando
+        self.mk("s1")  # a escrita segue funcionando
 
     def test_t13_ring_de_eventos_lentos_e_limitado(self):
         for _ in range(200):
@@ -189,11 +185,13 @@ class SidecarTests(Base):
 
     def test_rf05_alterar_exibicao_nao_toca_o_payload_da_api(self):
         self.mk("s1")
-        mid = self.messages.append("s1", "assistant",
-                                   content="visível", api_content="enviado ao provedor")
+        mid = self.messages.append(
+            "s1", "assistant", content="visível", api_content="enviado ao provedor"
+        )
         self.db.execute("UPDATE messages SET content='REDIGIDO' WHERE id=?", (mid,))
-        row = self.db.execute("SELECT content, api_content FROM messages WHERE id=?",
-                              (mid,)).fetchone()
+        row = self.db.execute(
+            "SELECT content, api_content FROM messages WHERE id=?", (mid,)
+        ).fetchone()
         self.assertEqual(row["content"], "REDIGIDO")
         self.assertEqual(row["api_content"], "enviado ao provedor")
 
@@ -210,8 +208,10 @@ class SidecarTests(Base):
 
         self.mk("s1", system_prompt="prompt grande e repetido")
         self.mk("s2", system_prompt="prompt grande e repetido")
-        hashes = {r["system_prompt_hash"] for r in
-                  self.db.execute("SELECT system_prompt_hash FROM sessions")}
+        hashes = {
+            r["system_prompt_hash"]
+            for r in self.db.execute("SELECT system_prompt_hash FROM sessions")
+        }
         self.assertEqual(hashes, {h1})
 
 
@@ -263,11 +263,14 @@ class LeaseTests(Base):
 class LineageTests(Base):
     """RF-10 — a regra mais valiosa da unit."""
 
-    def _chain(self, child, parent, *, end_reason="compression", model_config=None,
-               source="cli"):
+    def _chain(self, child, parent, *, end_reason="compression", model_config=None, source="cli"):
         self.mk(parent, source=source, end_reason=end_reason, ended_at=1.0)
-        self.mk(child, source=source, parent_session_id=parent,
-                model_config=json.dumps(model_config) if model_config else None)
+        self.mk(
+            child,
+            source=source,
+            parent_session_id=parent,
+            model_config=json.dumps(model_config) if model_config else None,
+        )
 
     def test_ancestral_por_compactacao_entra(self):
         self._chain("filho", "pai")
@@ -298,8 +301,13 @@ class LineageTests(Base):
     def test_a_cadeia_para_no_primeiro_filtro_violado(self):
         # a --compression--> b --branch--> c : só b e c, nunca a.
         self.mk("a", end_reason="compression", ended_at=1.0)
-        self.mk("b", parent_session_id="a", end_reason="compression", ended_at=2.0,
-                model_config=json.dumps({"_branched_from": "z"}))
+        self.mk(
+            "b",
+            parent_session_id="a",
+            end_reason="compression",
+            ended_at=2.0,
+            model_config=json.dumps({"_branched_from": "z"}),
+        )
         self.mk("c", parent_session_id="b")
         self.assertEqual(self.sessions.compression_lineage("c"), ["b", "c"])
 
@@ -322,7 +330,8 @@ class CompactionTests(Base):
         self.assertEqual(antes, depois, "nenhum DELETE")
 
         estados = self.db.execute(
-            "SELECT active, compacted, count(*) c FROM messages GROUP BY 1,2").fetchall()
+            "SELECT active, compacted, count(*) c FROM messages GROUP BY 1,2"
+        ).fetchall()
         self.assertEqual([(r["active"], r["compacted"], r["c"]) for r in estados], [(0, 1, 5)])
 
     def test_watermark_protege_o_que_chegou_durante_a_sumarizacao(self):
@@ -356,9 +365,11 @@ class CompactionTests(Base):
         ).fetchall()
         self.assertEqual(
             [(r["active"], r["compacted"], r["c"]) for r in vis],
-            [(0, 0, 2),    # rebobinadas: fora do contexto E fora da busca
-             (0, 1, 2),    # compactadas: fora do contexto, DENTRO da busca
-             (1, 0, 1)],   # ativa
+            [
+                (0, 0, 2),  # rebobinadas: fora do contexto E fora da busca
+                (0, 1, 2),  # compactadas: fora do contexto, DENTRO da busca
+                (1, 0, 1),
+            ],  # ativa
         )
 
 
@@ -376,7 +387,7 @@ class SearchTests(Base):
         caps = probe(self.db)
         self.assertTrue(caps.fts5)
         self.assertTrue(caps.trigram)
-        self.assertFalse(caps.cjk)          # extensão não carregada aqui
+        self.assertFalse(caps.cjk)  # extensão não carregada aqui
         self.assertIsNone(caps.reason)
 
     def test_like_e_sempre_a_ultima_rota(self):
@@ -386,8 +397,9 @@ class SearchTests(Base):
         self.assertEqual(len(SearchIndex(self.db).search("orçamento")), 2)
 
     def test_rf12_sem_fts5_a_busca_continua_por_like(self):
-        self.db.executescript("DROP TABLE IF EXISTS messages_fts;"
-                              "DROP TABLE IF EXISTS messages_fts_trigram;")
+        self.db.executescript(
+            "DROP TABLE IF EXISTS messages_fts;DROP TABLE IF EXISTS messages_fts_trigram;"
+        )
         caps = probe(self.db)
         self.assertFalse(caps.fts5)
         self.assertEqual(caps.reason, "fts5_unavailable")
@@ -402,8 +414,9 @@ class SearchTests(Base):
         self.assertEqual(len(SearchIndex(self.db).search("reunião")), 1)
 
     def test_curinga_do_usuario_e_literal_no_like(self):
-        self.db.executescript("DROP TABLE IF EXISTS messages_fts;"
-                              "DROP TABLE IF EXISTS messages_fts_trigram;")
+        self.db.executescript(
+            "DROP TABLE IF EXISTS messages_fts;DROP TABLE IF EXISTS messages_fts_trigram;"
+        )
         # '%' não pode casar tudo.
         self.assertEqual(SearchIndex(self.db).search("%"), [])
 
@@ -432,7 +445,8 @@ class UsageTests(Base):
     def test_enfileirar_nao_toca_o_banco(self):
         self.usage.queue(self.rota, TokenDelta(input_tokens=1))
         self.assertEqual(
-            self.db.execute("SELECT count(*) FROM session_model_usage").fetchone()[0], 0)
+            self.db.execute("SELECT count(*) FROM session_model_usage").fetchone()[0], 0
+        )
 
     def test_delta_vazio_e_ignorado(self):
         self.usage.queue(self.rota, TokenDelta())
@@ -445,27 +459,34 @@ class UsageTests(Base):
         self.usage.flush()
         rows = self.db.execute(
             "SELECT billing_provider, input_tokens FROM session_model_usage "
-            "ORDER BY billing_provider").fetchall()
-        self.assertEqual([(r["billing_provider"], r["input_tokens"]) for r in rows],
-                         [("anthropic", 200), ("openai", 100)])
+            "ORDER BY billing_provider"
+        ).fetchall()
+        self.assertEqual(
+            [(r["billing_provider"], r["input_tokens"]) for r in rows],
+            [("anthropic", 200), ("openai", 100)],
+        )
 
     def test_flushes_sucessivos_acumulam(self):
-        self.usage.queue(self.rota, TokenDelta(input_tokens=10)); self.usage.flush()
-        self.usage.queue(self.rota, TokenDelta(input_tokens=5)); self.usage.flush()
+        self.usage.queue(self.rota, TokenDelta(input_tokens=10))
+        self.usage.flush()
+        self.usage.queue(self.rota, TokenDelta(input_tokens=5))
+        self.usage.flush()
         self.assertEqual(
-            self.db.execute("SELECT input_tokens FROM session_model_usage").fetchone()[0], 15)
+            self.db.execute("SELECT input_tokens FROM session_model_usage").fetchone()[0], 15
+        )
 
     def test_rf15_dreno_no_encerramento(self):
         self.usage.queue(self.rota, TokenDelta(output_tokens=7))
         self.assertEqual(self.usage.drain_at_exit(), 1)
         self.assertEqual(
-            self.db.execute("SELECT output_tokens FROM session_model_usage").fetchone()[0], 7)
+            self.db.execute("SELECT output_tokens FROM session_model_usage").fetchone()[0], 7
+        )
 
     def test_dreno_nao_levanta_mesmo_com_banco_fechado(self):
         self.usage.queue(self.rota, TokenDelta(output_tokens=1))
         self.db.close()
-        self.assertEqual(self.usage.drain_at_exit(), 0)   # não levanta
-        self.db = connect(self.path)   # para o tearDown
+        self.assertEqual(self.usage.drain_at_exit(), 0)  # não levanta
+        self.db = connect(self.path)  # para o tearDown
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +502,9 @@ class MigrationTests(Base):
         with tempfile.TemporaryDirectory() as d:
             conn = connect(Path(d) / "novo.db")
             self.assertEqual(migrate(conn), 1)
-            tabelas = {r["name"] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}
+            tabelas = {
+                r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
             self.assertIn("sessions", tabelas)
             self.assertIn("delivery_obligations", tabelas)
             conn.close()
@@ -500,8 +522,9 @@ class MigrationTests(Base):
         self.assertTrue(b.name.endswith("-1"))
 
     def test_corrupcao_e_distinguida_de_ocupado_e_de_disco_cheio(self):
-        self.assertTrue(is_corruption_error(
-            sqlite3.DatabaseError("database disk image is malformed")))
+        self.assertTrue(
+            is_corruption_error(sqlite3.DatabaseError("database disk image is malformed"))
+        )
         self.assertTrue(is_corruption_error(sqlite3.DatabaseError("file is not a database")))
         self.assertFalse(is_corruption_error(sqlite3.OperationalError("database is locked")))
         self.assertFalse(is_corruption_error(sqlite3.OperationalError("disk I/O error")))
@@ -509,7 +532,7 @@ class MigrationTests(Base):
 
 # ---------------------------------------------------------------------------
 class ConcurrencyTests(Base):
-    """"6 superfícies escrevem concorrentemente sem perda"."""
+    """ "6 superfícies escrevem concorrentemente sem perda"."""
 
     def test_seis_escritores_concorrentes_nao_perdem_mensagem(self):
         self.mk("s1")
@@ -522,14 +545,19 @@ class ConcurrencyTests(Base):
             try:
                 for i in range(POR_ESCRITOR):
                     repo.append("s1", "user", content=f"w{n}-{i}", timestamp=time.time())
-            except Exception as exc:       # pragma: no cover
+            except Exception as exc:  # noqa: BLE001 — pragma: no cover
+                # DELIBERADO: o teste quer QUALQUER falha de escrita
+                # concorrente, não uma classe prevista. Estreitar aqui faria
+                # o teste passar diante do erro que ele deveria pegar.
                 erros.append(exc)
             finally:
                 conn.close()
 
         threads = [threading.Thread(target=escritor, args=(n,)) for n in range(6)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         self.assertEqual(erros, [])
         total = self.db.execute("SELECT count(*) FROM messages").fetchone()[0]
@@ -557,7 +585,11 @@ class Invariante6Tests(Base):
             self.messages.append("s1", "user", content=f"m{i}", timestamp=float(i))
 
     def test_o_reparo_recria_derivados_e_preserva_canonicas(self):
-        from kairos_state.migrations import canonical_fingerprint, repair_derived_objects
+        from kairos_state.migrations import (
+            canonical_fingerprint,
+            repair_derived_objects,
+        )
+
         antes = canonical_fingerprint(self.db)
         recriados = repair_derived_objects(self.db)
         self.assertIn("messages_fts", recriados)
@@ -566,6 +598,7 @@ class Invariante6Tests(Base):
 
     def test_a_verificacao_e_a_IMPOSICAO_nao_um_comentario(self):
         from kairos_state.migrations import CanonicalRowsModified, canonical_fingerprint
+
         antes = canonical_fingerprint(self.db)
         self.db.execute("DELETE FROM messages WHERE id = 1")
         depois = canonical_fingerprint(self.db)
@@ -576,6 +609,7 @@ class Invariante6Tests(Base):
 
     def test_a_impressao_digital_pega_insercao_e_remocao(self):
         from kairos_state.migrations import canonical_fingerprint
+
         antes = canonical_fingerprint(self.db)
         self.messages.append("s1", "user", content="nova")
         self.assertNotEqual(canonical_fingerprint(self.db), antes)
@@ -587,6 +621,7 @@ class Invariante11Tests(unittest.TestCase):
     def test_KAIROS_HOME_esta_isolado_durante_a_suite(self):
         import os
         from pathlib import Path
+
         home = os.environ.get("KAIROS_HOME")
         self.assertIsNotNone(home, "a fixture de sessão deveria ter definido KAIROS_HOME")
         self.assertNotEqual(Path(home).resolve(), (Path.home() / ".kairos").resolve())

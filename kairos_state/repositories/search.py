@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 __all__ = ["Route", "SearchCapabilities", "SearchIndex", "probe"]
 
@@ -21,7 +21,7 @@ __all__ = ["Route", "SearchCapabilities", "SearchIndex", "probe"]
 MAX_FTS5_QUERY_CHARS = 2_048
 
 
-class Route(str, Enum):
+class Route(StrEnum):
     FTS5 = "fts5"
     TRIGRAM = "trigram"
     CJK = "cjk"
@@ -52,14 +52,14 @@ class SearchCapabilities:
             out.append(Route.TRIGRAM)
         if self.cjk:
             out.append(Route.CJK)
-        out.append(Route.LIKE)   # sempre disponível, sempre por último
+        out.append(Route.LIKE)  # sempre disponível, sempre por último
         return tuple(out)
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE name = ?", (name,)
-    ).fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (name,)).fetchone() is not None
+    )
 
 
 def probe(conn: sqlite3.Connection) -> SearchCapabilities:
@@ -119,7 +119,7 @@ class SearchIndex:
         }[route]
         query = term[:MAX_FTS5_QUERY_CHARS]
         return self._conn.execute(
-            f"SELECT m.id, m.session_id, m.content FROM {table} f "
+            f"SELECT m.id, m.session_id, m.content FROM {table} f "  # noqa: S608 — nome de tabela vem do dict fechado de Route
             f"JOIN messages m ON m.id = f.rowid "
             f"WHERE f MATCH ? AND m.active = 1 "
             f"ORDER BY m.timestamp DESC LIMIT ?",

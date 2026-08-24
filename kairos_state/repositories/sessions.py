@@ -12,7 +12,7 @@ import time
 from kairos_state.contention import Budget
 from kairos_state.writes import write_with_retry
 
-__all__ = ["SessionRepository", "COMPRESSION_LINEAGE_SQL"]
+__all__ = ["COMPRESSION_LINEAGE_SQL", "SessionRepository"]
 
 
 # ---------------------------------------------------------------------------
@@ -93,9 +93,16 @@ class SessionRepository:
 
     # -- ciclo de vida ------------------------------------------------------
 
-    def create(self, session_id: str, source: str, *, started_at: float | None = None,
-               system_prompt: str | None = None, parent_session_id: str | None = None,
-               **columns) -> str:
+    def create(
+        self,
+        session_id: str,
+        source: str,
+        *,
+        started_at: float | None = None,
+        system_prompt: str | None = None,
+        parent_session_id: str | None = None,
+        **columns,
+    ) -> str:
         prompt_hash = self.intern_system_prompt(system_prompt) if system_prompt else None
         fields = {
             "id": session_id,
@@ -110,16 +117,14 @@ class SessionRepository:
 
         def op():
             with self._conn:
-                self._conn.execute(f"INSERT INTO sessions({names}) VALUES ({holes})", fields)
+                self._conn.execute(f"INSERT INTO sessions({names}) VALUES ({holes})", fields)  # noqa: S608 — nomes de coluna vêm das chaves do dict construído aqui
             return session_id
 
         # Criação de sessão é caminho de transcript: a falha aborta o turno.
         return write_with_retry(op, budget=Budget.TRANSCRIPT, detail="create_session")
 
     def get(self, session_id: str) -> sqlite3.Row | None:
-        return self._conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        return self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
 
     def end(self, session_id: str, end_reason: str, *, ended_at: float | None = None) -> None:
         def op():

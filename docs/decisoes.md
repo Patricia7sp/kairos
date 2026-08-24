@@ -623,6 +623,73 @@ de `DOMAIN` seria mentir sobre onde ele é imposto.
 
 ---
 
+## CI
+
+### D-CI.1 — Um workflow, seis jobs — não 28 arquivos
+
+O legado tem 28 workflows porque tem 28 superfícies. Aqui a divisão é por
+**ferramenta**, e um job existe quando falha por um motivo distinto dos
+outros. Um job a mais que não distingue nada só adiciona espera.
+
+O `image` é separado do `tests` de propósito: uma falha de build não pode se
+confundir com falha de lógica no relatório.
+
+### D-CI.2 — Actions fixadas por SHA
+
+Tag é mutável. Confiar nela significa executar código arbitrário do mantenedor
+da action a cada push. O legado já faz assim; herdado.
+
+### D-CI.3 — `scripts/ci.sh` existe para o CI não ser ficção
+
+O repositório ainda não tem remoto — o workflow não roda em lugar nenhum.
+Sem um espelho local, ter o arquivo seria fingir cobertura.
+
+Vale mesmo depois do remoto existir: descobrir uma quebra no push é um ciclo
+de minutos, aqui é de segundos. E o script **pula com aviso** em vez de
+silenciosamente quando falta ferramenta — pular calado seria a mesma ficção em
+menor escala.
+
+O script é linted por ele mesmo, e não passou na primeira tentativa.
+
+### D-CI.4 — Conjunto de regras deliberado, e cada exceção argumentada
+
+`[tool.ruff.lint.select]` lista famílias escolhidas, não o default inteiro.
+Cada `ignore` traz o motivo em uma linha; um ignore sem justificativa é dívida
+disfarçada de configuração.
+
+A distinção que guiou o triagem dos 60 achados iniciais:
+
+- **Cosmético** (`I`, `RUF022`, `UP`) → auto-corrigido.
+- **Real** (`F401`, `B017`, `RUF012`, `PLW2901`) → corrigido de fato. O `B017`
+  era um `assertRaises(Exception)` que passaria até com `TypeError` de
+  assinatura errada — o teste tinha deixado de significar o que dizia.
+- **Deliberado** (`BLE001`, `S110`, `S311`, `S608`) → `noqa` **por sítio, com
+  justificativa**, nunca regra desligada em bloco. Regra de segurança
+  silenciada globalmente deixa de proteger o caso que ninguém previu.
+
+### D-CI.5 — Formatador adotado agora, que é o momento mais barato
+
+`ruff format` reformataria 27 arquivos. Inspecionei o diff num arquivo antes
+de decidir: mudanças de quebra de assinatura, sem tocar comentários nem
+tabelas. Adotado e passa a ser exigido — o custo só cresce com o tempo.
+
+### D-CI.6 — `str, Enum` → `StrEnum`
+
+`UP042`. Além de modernizar para o alvo 3.11, resolve a razão de existir do
+helper `_label()` de `statemachine.py`: com `StrEnum`, `str(membro)` já devolve
+o valor em vez de `Classe.MEMBRO`. Os 310 testes passaram sem alteração,
+incluindo o `Platform._missing_` que cria membros dinâmicos.
+
+### D-CI.7 — O hadolint achou um bug de tamanho de imagem
+
+`DL3046`: `useradd` com UID alto sem `-l` cria entradas em `lastlog`/`faillog`
+indexadas por UID, gerando arquivos esparsos de centenas de MB. Corrigido, não
+silenciado — e o teste que fixava a string exata do `useradd` quebrou junto,
+o que o expôs como específico demais: agora afirma a **propriedade**, não a
+ordem das flags.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

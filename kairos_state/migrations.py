@@ -17,16 +17,16 @@ from kairos_state.connection import read_schema_version
 
 __all__ = [
     "CANONICAL_TABLES",
-    "DERIVED_OBJECTS",
-    "CanonicalRowsModified",
-    "canonical_fingerprint",
-    "repair_derived_objects",
-    "Migration",
-    "MIGRATIONS",
-    "migrate",
-    "backup_corrupt_db",
-    "is_corruption_error",
     "CORRUPTION_MARKERS",
+    "DERIVED_OBJECTS",
+    "MIGRATIONS",
+    "CanonicalRowsModified",
+    "Migration",
+    "backup_corrupt_db",
+    "canonical_fingerprint",
+    "is_corruption_error",
+    "migrate",
+    "repair_derived_objects",
 ]
 
 #: Marcadores de dano estrutural. Distintos de "disco cheio" e de "ocupado":
@@ -46,8 +46,9 @@ def is_corruption_error(exc: BaseException) -> bool:
 
 
 class Migration:
-    def __init__(self, version: int, description: str,
-                 apply: Callable[[sqlite3.Connection], None]) -> None:
+    def __init__(
+        self, version: int, description: str, apply: Callable[[sqlite3.Connection], None]
+    ) -> None:
         self.version = version
         self.description = description
         self.apply = apply
@@ -128,10 +129,15 @@ CANONICAL_TABLES = frozenset({"sessions", "messages", "system_prompts"})
 
 #: Derivados: reconstrutíveis a partir das canônicas, e portanto descartáveis
 #: no reparo.
-DERIVED_OBJECTS = frozenset({
-    "messages_fts", "messages_fts_trigram", "messages_fts_cjk",
-    "messages_fts_trigram_src", "messages_fts_cjk_src",
-})
+DERIVED_OBJECTS = frozenset(
+    {
+        "messages_fts",
+        "messages_fts_trigram",
+        "messages_fts_cjk",
+        "messages_fts_trigram_src",
+        "messages_fts_cjk_src",
+    }
+)
 
 
 class CanonicalRowsModified(RuntimeError):
@@ -149,9 +155,7 @@ def canonical_fingerprint(conn: sqlite3.Connection) -> dict[str, tuple[int, int 
     out: dict[str, tuple[int, int | None]] = {}
     for table in sorted(CANONICAL_TABLES):
         try:
-            row = conn.execute(
-                f"SELECT COUNT(*), MAX(rowid) FROM {table}"  # noqa: S608 — nome de tabela fixo
-            ).fetchone()
+            row = conn.execute(f"SELECT COUNT(*), MAX(rowid) FROM {table}").fetchone()  # noqa: S608 — nome de tabela vem de CANONICAL_TABLES, constante do módulo
         except sqlite3.OperationalError:
             continue
         out[table] = (int(row[0]), row[1])
@@ -173,9 +177,7 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
     recriados: list[str] = []
     with conn:
         for obj in ("messages_fts_cjk", "messages_fts_trigram", "messages_fts"):
-            existe = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE name = ?", (obj,)
-            ).fetchone()
+            existe = conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (obj,)).fetchone()
             if existe:
                 conn.execute(f"DROP TABLE IF EXISTS {obj}")
                 recriados.append(obj)

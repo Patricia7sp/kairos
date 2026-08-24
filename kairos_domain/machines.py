@@ -11,10 +11,11 @@ Estados reaproveitados da Tarefa 02 (``ExecutionStatus``, ``JobState``,
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from kairos_domain.scheduling import ExecutionStatus
-from kairos_domain.statemachine import StateMachine, Transition as T
+from kairos_domain.statemachine import StateMachine
+from kairos_domain.statemachine import Transition as T
 
 __all__ = ["MACHINES", "machine"]
 
@@ -23,7 +24,8 @@ __all__ = ["MACHINES", "machine"]
 # 1. Sessão
 # ---------------------------------------------------------------------------
 
-class SessionState(str, Enum):
+
+class SessionState(StrEnum):
     ACTIVE = "ativa"
     SUSPENDED = "suspensa"
     RESUME_PENDING = "resume_pending"
@@ -39,8 +41,12 @@ SESSION = StateMachine(
         T(SessionState.ACTIVE, SessionState.ACTIVE, "turno normal"),
         T(SessionState.ACTIVE, SessionState.SUSPENDED, "suspended=1"),
         T(SessionState.SUSPENDED, SessionState.ACTIVE, "reopen_session()"),
-        T(SessionState.ACTIVE, SessionState.RESUME_PENDING, "resume_pending=1",
-          "marcador de turno interrompido"),
+        T(
+            SessionState.ACTIVE,
+            SessionState.RESUME_PENDING,
+            "resume_pending=1",
+            "marcador de turno interrompido",
+        ),
         T(SessionState.RESUME_PENDING, SessionState.ACTIVE, "session.resume + auto-continue"),
         T(SessionState.RESUME_PENDING, SessionState.ENDED, "resume_pending_expired"),
         T(SessionState.ACTIVE, SessionState.ENDED, "end_session(end_reason)"),
@@ -55,7 +61,8 @@ SESSION = StateMachine(
 # 3. Mensagem — três visibilidades
 # ---------------------------------------------------------------------------
 
-class MessageVisibility(str, Enum):
+
+class MessageVisibility(StrEnum):
     ACTIVE = "ativa"
     ARCHIVED = "arquivada"
     REWOUND = "rebobinada"
@@ -67,10 +74,18 @@ MESSAGE = StateMachine(
     states=frozenset(MessageVisibility),
     initial=MessageVisibility.ACTIVE,
     transitions=(
-        T(MessageVisibility.ACTIVE, MessageVisibility.ARCHIVED,
-          "archive_and_compact()", "compressão: active=0, compacted=1"),
-        T(MessageVisibility.ACTIVE, MessageVisibility.REWOUND,
-          "rewind/undo", "active=0, compacted=0"),
+        T(
+            MessageVisibility.ACTIVE,
+            MessageVisibility.ARCHIVED,
+            "archive_and_compact()",
+            "compressão: active=0, compacted=1",
+        ),
+        T(
+            MessageVisibility.ACTIVE,
+            MessageVisibility.REWOUND,
+            "rewind/undo",
+            "active=0, compacted=0",
+        ),
         # Arquivada pode voltar: a compactação é reversível por rewind, e é
         # por isso que arquivar nunca é delete.
         T(MessageVisibility.ARCHIVED, MessageVisibility.REWOUND, "rewind sobre trecho compactado"),
@@ -83,7 +98,8 @@ MESSAGE = StateMachine(
 # 4. Skill
 # ---------------------------------------------------------------------------
 
-class SkillLifecycle(str, Enum):
+
+class SkillLifecycle(StrEnum):
     ACTIVE = "active"
     STALE = "stale"
     ARCHIVED = "archived"
@@ -98,10 +114,18 @@ SKILL = StateMachine(
     transitions=(
         T(SkillLifecycle.ACTIVE, SkillLifecycle.STALE, "sem uso por get_stale_after_days()"),
         T(SkillLifecycle.STALE, SkillLifecycle.ACTIVE, "usada de novo"),
-        T(SkillLifecycle.STALE, SkillLifecycle.ARCHIVED, "sem uso por get_archive_after_days()",
-          "proteções: referência de cron, builtin, proveniência do usuário"),
-        T(SkillLifecycle.ACTIVE, SkillLifecycle.ABSORBED,
-          "_delete_skill(absorbed_into=X)", "consolidação por LLM"),
+        T(
+            SkillLifecycle.STALE,
+            SkillLifecycle.ARCHIVED,
+            "sem uso por get_archive_after_days()",
+            "proteções: referência de cron, builtin, proveniência do usuário",
+        ),
+        T(
+            SkillLifecycle.ACTIVE,
+            SkillLifecycle.ABSORBED,
+            "_delete_skill(absorbed_into=X)",
+            "consolidação por LLM",
+        ),
     ),
     terminal=frozenset({SkillLifecycle.ARCHIVED, SkillLifecycle.ABSORBED}),
 )
@@ -117,20 +141,36 @@ CRON_EXECUTION = StateMachine(
     states=frozenset(ExecutionStatus),
     initial=ExecutionStatus.CLAIMED,
     transitions=(
-        T(ExecutionStatus.CLAIMED, ExecutionStatus.RUNNING,
-          "mark_execution_running()", "EXATAMENTE UMA VEZ"),
+        T(
+            ExecutionStatus.CLAIMED,
+            ExecutionStatus.RUNNING,
+            "mark_execution_running()",
+            "EXATAMENTE UMA VEZ",
+        ),
         T(ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED, "finish_execution()"),
         T(ExecutionStatus.RUNNING, ExecutionStatus.FAILED, "finish_execution()"),
-        T(ExecutionStatus.CLAIMED, ExecutionStatus.UNKNOWN,
-          "recover_interrupted_executions()", "dono PROVADO morto: pid + process_started_at"),
-        T(ExecutionStatus.RUNNING, ExecutionStatus.UNKNOWN,
-          "recover_interrupted_executions()", "dono PROVADO morto"),
+        T(
+            ExecutionStatus.CLAIMED,
+            ExecutionStatus.UNKNOWN,
+            "recover_interrupted_executions()",
+            "dono PROVADO morto: pid + process_started_at",
+        ),
+        T(
+            ExecutionStatus.RUNNING,
+            ExecutionStatus.UNKNOWN,
+            "recover_interrupted_executions()",
+            "dono PROVADO morto",
+        ),
     ),
     # Invariante 7: terminais são imutáveis. A primitiva impõe isso ao
     # recusar qualquer transição declarada a partir deles.
-    terminal=frozenset({
-        ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.UNKNOWN,
-    }),
+    terminal=frozenset(
+        {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.UNKNOWN,
+        }
+    ),
 )
 
 
@@ -138,7 +178,8 @@ CRON_EXECUTION = StateMachine(
 # 6. Job de cron
 # ---------------------------------------------------------------------------
 
-class CronJobState(str, Enum):
+
+class CronJobState(StrEnum):
     SCHEDULED = "scheduled"
     PAUSED = "paused"
     COMPLETED = "completed"
@@ -166,7 +207,8 @@ CRON_JOB = StateMachine(
 # 7. Monitor de cron
 # ---------------------------------------------------------------------------
 
-class MonitorOutcome(str, Enum):
+
+class MonitorOutcome(StrEnum):
     FIRST_RUN = "primeira_execucao"
     CHANGED = "mudou"
     UNCHANGED = "inalterado"
@@ -180,8 +222,12 @@ CRON_MONITOR = StateMachine(
     initial=MonitorOutcome.FIRST_RUN,
     transitions=(
         T(MonitorOutcome.FIRST_RUN, MonitorOutcome.CHANGED, "sempre", "first_run=True"),
-        T(MonitorOutcome.UNCHANGED, MonitorOutcome.UNCHANGED, "hash == last_output_hash",
-          "execução do agente SUPRIMIDA inteiramente"),
+        T(
+            MonitorOutcome.UNCHANGED,
+            MonitorOutcome.UNCHANGED,
+            "hash == last_output_hash",
+            "execução do agente SUPRIMIDA inteiramente",
+        ),
         T(MonitorOutcome.UNCHANGED, MonitorOutcome.CHANGED, "hash != last_output_hash"),
         T(MonitorOutcome.CHANGED, MonitorOutcome.UNCHANGED, "próximo tick, hash igual"),
         T(MonitorOutcome.CHANGED, MonitorOutcome.CHANGED, "próximo tick, hash diferente"),
@@ -197,12 +243,13 @@ CRON_MONITOR = StateMachine(
 # 8. Delegação assíncrona — DOIS eixos ortogonais
 # ---------------------------------------------------------------------------
 
-class DelegationExecution(str, Enum):
+
+class DelegationExecution(StrEnum):
     DISPATCHED = "dispatched"
     COMPLETED = "completed"
 
 
-class DelegationDelivery(str, Enum):
+class DelegationDelivery(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     DELIVERED = "delivered"
@@ -213,7 +260,9 @@ DELEGATION_EXECUTION = StateMachine(
     source_ref="async_delegations.state",
     states=frozenset(DelegationExecution),
     initial=DelegationExecution.DISPATCHED,
-    transitions=(T(DelegationExecution.DISPATCHED, DelegationExecution.COMPLETED, "resultado chegou"),),
+    transitions=(
+        T(DelegationExecution.DISPATCHED, DelegationExecution.COMPLETED, "resultado chegou"),
+    ),
     terminal=frozenset({DelegationExecution.COMPLETED}),
 )
 
@@ -223,11 +272,18 @@ DELEGATION_DELIVERY = StateMachine(
     states=frozenset(DelegationDelivery),
     initial=DelegationDelivery.PENDING,
     transitions=(
-        T(DelegationDelivery.PENDING, DelegationDelivery.CLAIMED,
-          "delivery_claim + delivery_claimed_at"),
+        T(
+            DelegationDelivery.PENDING,
+            DelegationDelivery.CLAIMED,
+            "delivery_claim + delivery_claimed_at",
+        ),
         T(DelegationDelivery.CLAIMED, DelegationDelivery.DELIVERED, "delivered_at"),
-        T(DelegationDelivery.CLAIMED, DelegationDelivery.PENDING,
-          "claim expirou", "delivery_attempts++"),
+        T(
+            DelegationDelivery.CLAIMED,
+            DelegationDelivery.PENDING,
+            "claim expirou",
+            "delivery_attempts++",
+        ),
     ),
     terminal=frozenset({DelegationDelivery.DELIVERED}),
 )
@@ -237,7 +293,8 @@ DELEGATION_DELIVERY = StateMachine(
 # 9. Handoff de sessão
 # ---------------------------------------------------------------------------
 
-class HandoffState(str, Enum):
+
+class HandoffState(StrEnum):
     REQUESTED = "requested"
     CLAIMED = "claimed"
     COMPLETED = "completed"
@@ -263,7 +320,8 @@ HANDOFF = StateMachine(
 # 10. Aprovação de comando
 # ---------------------------------------------------------------------------
 
-class CommandApproval(str, Enum):
+
+class CommandApproval(StrEnum):
     PENDING = "pendente"
     ONCE = "once"
     SESSION = "session"
@@ -281,17 +339,29 @@ COMMAND_APPROVAL = StateMachine(
     transitions=(
         T(CommandApproval.PENDING, CommandApproval.ONCE, "allow_once"),
         T(CommandApproval.PENDING, CommandApproval.SESSION, "allow_session"),
-        T(CommandApproval.PENDING, CommandApproval.ALWAYS, "allow_always",
-          "persiste em command_allowlist"),
-        T(CommandApproval.PENDING, CommandApproval.DENY,
-          "deny | timeout | exceção", "FAIL-CLOSED"),
-        T(CommandApproval.PENDING, CommandApproval.NEVER, "deny_always",
-          "persiste em approvals.deny — DIVERGÊNCIA, ver docs/decisoes.md D-03.1"),
+        T(
+            CommandApproval.PENDING,
+            CommandApproval.ALWAYS,
+            "allow_always",
+            "persiste em command_allowlist",
+        ),
+        T(CommandApproval.PENDING, CommandApproval.DENY, "deny | timeout | exceção", "FAIL-CLOSED"),
+        T(
+            CommandApproval.PENDING,
+            CommandApproval.NEVER,
+            "deny_always",
+            "persiste em approvals.deny — DIVERGÊNCIA, ver docs/decisoes.md D-03.1",
+        ),
     ),
-    terminal=frozenset({
-        CommandApproval.ONCE, CommandApproval.SESSION, CommandApproval.ALWAYS,
-        CommandApproval.DENY, CommandApproval.NEVER,
-    }),
+    terminal=frozenset(
+        {
+            CommandApproval.ONCE,
+            CommandApproval.SESSION,
+            CommandApproval.ALWAYS,
+            CommandApproval.DENY,
+            CommandApproval.NEVER,
+        }
+    ),
 )
 
 
@@ -299,7 +369,8 @@ COMMAND_APPROVAL = StateMachine(
 # 11. Aprovação de edição (ACP)
 # ---------------------------------------------------------------------------
 
-class EditApproval(str, Enum):
+
+class EditApproval(StrEnum):
     #: O ponto onde o despacho chega. A spec desenha DOIS pontos de entrada
     #: ([*] --> bypass e [*] --> avaliando); na verdade é um só, seguido de
     #: uma decisão — o ContextVar está ligado? Modelar assim torna a decisão
@@ -321,25 +392,48 @@ EDIT_APPROVAL = StateMachine(
     transitions=(
         # CLI, gateway e cron nunca ligam o ContextVar: para eles a guarda
         # inteira é inexistente, não "permissiva".
-        T(EditApproval.DISPATCH, EditApproval.BYPASS,
-          "ContextVar NÃO ligado", "CLI, gateway, cron"),
+        T(
+            EditApproval.DISPATCH,
+            EditApproval.BYPASS,
+            "ContextVar NÃO ligado",
+            "CLI, gateway, cron",
+        ),
         T(EditApproval.DISPATCH, EditApproval.EVALUATING, "ContextVar ligado (run ACP)"),
-        T(EditApproval.EVALUATING, EditApproval.ALWAYS_ASK, "caminho sensível",
-          "vale MESMO sob política autônoma"),
+        T(
+            EditApproval.EVALUATING,
+            EditApproval.ALWAYS_ASK,
+            "caminho sensível",
+            "vale MESMO sob política autônoma",
+        ),
         T(EditApproval.EVALUATING, EditApproval.ALWAYS_ASK, "policy=ask"),
-        T(EditApproval.EVALUATING, EditApproval.AUTO_APPROVED,
-          "policy=session | workspace_session",
-          "DIVERGÊNCIA: só DENTRO do workspace — ver D-03.2"),
-        T(EditApproval.EVALUATING, EditApproval.ALWAYS_ASK,
-          "caminho fora do workspace", "DIVERGÊNCIA: piso, ver D-03.2"),
+        T(
+            EditApproval.EVALUATING,
+            EditApproval.AUTO_APPROVED,
+            "policy=session | workspace_session",
+            "DIVERGÊNCIA: só DENTRO do workspace — ver D-03.2",
+        ),
+        T(
+            EditApproval.EVALUATING,
+            EditApproval.ALWAYS_ASK,
+            "caminho fora do workspace",
+            "DIVERGÊNCIA: piso, ver D-03.2",
+        ),
         T(EditApproval.ALWAYS_ASK, EditApproval.APPROVED, "usuário permite"),
-        T(EditApproval.ALWAYS_ASK, EditApproval.BLOCKED,
-          "usuário nega | timeout | exceção", "FAIL-CLOSED"),
+        T(
+            EditApproval.ALWAYS_ASK,
+            EditApproval.BLOCKED,
+            "usuário nega | timeout | exceção",
+            "FAIL-CLOSED",
+        ),
     ),
-    terminal=frozenset({
-        EditApproval.BYPASS, EditApproval.AUTO_APPROVED,
-        EditApproval.APPROVED, EditApproval.BLOCKED,
-    }),
+    terminal=frozenset(
+        {
+            EditApproval.BYPASS,
+            EditApproval.AUTO_APPROVED,
+            EditApproval.APPROVED,
+            EditApproval.BLOCKED,
+        }
+    ),
 )
 
 
@@ -347,7 +441,8 @@ EDIT_APPROVAL = StateMachine(
 # 12. Pareamento de usuário
 # ---------------------------------------------------------------------------
 
-class Pairing(str, Enum):
+
+class Pairing(StrEnum):
     UNKNOWN = "desconhecido"
     CODE_ISSUED = "codigo_emitido"
     APPROVED = "aprovado"
@@ -361,12 +456,15 @@ PAIRING = StateMachine(
     states=frozenset(Pairing),
     initial=Pairing.UNKNOWN,
     transitions=(
-        T(Pairing.UNKNOWN, Pairing.CODE_ISSUED, "unauthorized_dm_behavior='pair'",
-          "8 chars, alfabeto de 32 sem 0/O/1/I, secrets.choice()"),
+        T(
+            Pairing.UNKNOWN,
+            Pairing.CODE_ISSUED,
+            "unauthorized_dm_behavior='pair'",
+            "8 chars, alfabeto de 32 sem 0/O/1/I, secrets.choice()",
+        ),
         T(Pairing.CODE_ISSUED, Pairing.APPROVED, "dono aprova via CLI"),
         T(Pairing.CODE_ISSUED, Pairing.EXPIRED, "1 hora"),
-        T(Pairing.CODE_ISSUED, Pairing.LOCKED_OUT, "5 tentativas falhas",
-          "lockout de 1 hora"),
+        T(Pairing.CODE_ISSUED, Pairing.LOCKED_OUT, "5 tentativas falhas", "lockout de 1 hora"),
         T(Pairing.EXPIRED, Pairing.UNKNOWN, "volta ao início"),
         T(Pairing.LOCKED_OUT, Pairing.UNKNOWN, "após 1 hora"),
     ),
@@ -378,7 +476,8 @@ PAIRING = StateMachine(
 # 13. Drain do gateway
 # ---------------------------------------------------------------------------
 
-class Drain(str, Enum):
+
+class Drain(StrEnum):
     SERVING = "servindo"
     DRAINING = "drenando"
     STOPPING = "parando"
@@ -394,8 +493,12 @@ DRAIN = StateMachine(
     states=frozenset(Drain),
     initial=Drain.SERVING,
     transitions=(
-        T(Drain.SERVING, Drain.DRAINING, "dashboard escreve .drain_request.json",
-          "semântica BASEADA EM PRESENÇA; não há canal HTTP de controle"),
+        T(
+            Drain.SERVING,
+            Drain.DRAINING,
+            "dashboard escreve .drain_request.json",
+            "semântica BASEADA EM PRESENÇA; não há canal HTTP de controle",
+        ),
         T(Drain.DRAINING, Drain.SERVING, "marcador REMOVIDO (cancel)"),
         T(Drain.DRAINING, Drain.STOPPING, "turnos concluíram OU restart_drain_timeout"),
         T(Drain.STOPPING, Drain.CLEAN_EXIT, "shutdown_flush OK"),
@@ -403,8 +506,12 @@ DRAIN = StateMachine(
         # O watchdog é thread de OS PURA porque, com o loop congelado, todo
         # caminho de recuperação baseado em asyncio é estruturalmente incapaz
         # de disparar.
-        T(Drain.WEDGED, Drain.SIGKILL, "watchdog (thread de OS pura)",
-          "dump de stacks via faulthandler"),
+        T(
+            Drain.WEDGED,
+            Drain.SIGKILL,
+            "watchdog (thread de OS pura)",
+            "dump de stacks via faulthandler",
+        ),
         T(Drain.SIGKILL, Drain.CGROUP_CLEANUP, "ExecStopPost="),
     ),
     terminal=frozenset({Drain.CLEAN_EXIT, Drain.CGROUP_CLEANUP}),
@@ -415,7 +522,8 @@ DRAIN = StateMachine(
 # 14. Fase de compactação
 # ---------------------------------------------------------------------------
 
-class CompactionPhase(str, Enum):
+
+class CompactionPhase(StrEnum):
     FREE = "livre"
     COMPRESSING = "comprimindo"
     INEFFECTIVE = "ineficaz"
@@ -430,22 +538,41 @@ COMPACTION = StateMachine(
     states=frozenset(CompactionPhase),
     initial=CompactionPhase.FREE,
     transitions=(
-        T(CompactionPhase.FREE, CompactionPhase.COMPRESSING,
-          "try_acquire_compression_lock()", "holder + expires_at"),
+        T(
+            CompactionPhase.FREE,
+            CompactionPhase.COMPRESSING,
+            "try_acquire_compression_lock()",
+            "holder + expires_at",
+        ),
         T(CompactionPhase.COMPRESSING, CompactionPhase.FREE, "release_compression_lock()"),
-        T(CompactionPhase.COMPRESSING, CompactionPhase.INEFFECTIVE,
-          "compression_made_progress() == False"),
-        T(CompactionPhase.INEFFECTIVE, CompactionPhase.FREE,
-          "_record_ineffective_compression_verdict()", "compression_ineffective_count++"),
+        T(
+            CompactionPhase.COMPRESSING,
+            CompactionPhase.INEFFECTIVE,
+            "compression_made_progress() == False",
+        ),
+        T(
+            CompactionPhase.INEFFECTIVE,
+            CompactionPhase.FREE,
+            "_record_ineffective_compression_verdict()",
+            "compression_ineffective_count++",
+        ),
         T(CompactionPhase.COMPRESSING, CompactionPhase.FAILED, "timeout / erro do sumarizador"),
-        T(CompactionPhase.FAILED, CompactionPhase.COOLDOWN,
-          "record_timeout_failure()", "escada de cooldown"),
+        T(
+            CompactionPhase.FAILED,
+            CompactionPhase.COOLDOWN,
+            "record_timeout_failure()",
+            "escada de cooldown",
+        ),
         T(CompactionPhase.COOLDOWN, CompactionPhase.FREE, "cooldown expirou"),
         T(CompactionPhase.INEFFECTIVE, CompactionPhase.BLOCKED, "strikes suficientes"),
         # O contador é DURÁVEL: sobrevive a reinícios, então o breaker não é
         # zerado por um restart oportuno.
-        T(CompactionPhase.BLOCKED, CompactionPhase.FREE,
-          "_refresh_durable_guards()", "relê estado durável do banco"),
+        T(
+            CompactionPhase.BLOCKED,
+            CompactionPhase.FREE,
+            "_refresh_durable_guards()",
+            "relê estado durável do banco",
+        ),
     ),
 )
 
@@ -486,7 +613,8 @@ STATEFUL_ENTITY_COUNT = 13
 # Lógica derivada
 # ---------------------------------------------------------------------------
 
-class SessionStatus(str, Enum):
+
+class SessionStatus(StrEnum):
     """Status **derivado da forma da última mensagem** — não é coluna."""
 
     COMPLETE = "complete"
@@ -525,11 +653,11 @@ def classify_session_status(
         return SessionStatus.COMPLETE
 
     if last_role == "user":
-        return SessionStatus.INTERRUPTED      # o agente nunca respondeu
+        return SessionStatus.INTERRUPTED  # o agente nunca respondeu
     if last_role == "tool":
-        return SessionStatus.INTERRUPTED      # o resultado nunca foi consumido
+        return SessionStatus.INTERRUPTED  # o resultado nunca foi consumido
 
-    return SessionStatus.COMPLETE             # default benigno
+    return SessionStatus.COMPLETE  # default benigno
 
 
 def monitor_outcome(

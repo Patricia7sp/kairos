@@ -7,38 +7,38 @@ Reconstruído de ``_reversa_sdd/domain.md`` §2.1-2.2 e §4, e
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
-    "Role",
-    "Visibility",
     "Message",
+    "Role",
     "RoleAlternationError",
     "SyntheticUserMessageError",
     "ToolPairError",
-    "check_role_alternation",
+    "Visibility",
     "check_no_synthetic_user_message",
+    "check_role_alternation",
     "check_tool_pairs_intact",
 ]
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
     SYSTEM = "system"
 
 
-class Visibility(str, Enum):
+class Visibility(StrEnum):
     """As três visibilidades, derivadas de ``active``/``compacted``.
 
     A combinação ``active=1, compacted=1`` não existe: uma mensagem não pode
     estar simultaneamente no contexto do modelo e arquivada por compressão.
     """
 
-    ACTIVE = "active"        # active=1 compacted=0 — busca ✅, contexto ✅
-    ARCHIVED = "archived"    # active=0 compacted=1 — busca ✅, contexto ❌
-    REWOUND = "rewound"      # active=0 compacted=0 — busca ❌, contexto ❌
+    ACTIVE = "active"  # active=1 compacted=0 — busca ✅, contexto ✅
+    ARCHIVED = "archived"  # active=0 compacted=1 — busca ✅, contexto ❌
+    REWOUND = "rewound"  # active=0 compacted=0 — busca ❌, contexto ❌
 
     @property
     def in_model_context(self) -> bool:
@@ -107,6 +107,7 @@ class Message:
 # Invariantes de sequência
 # ---------------------------------------------------------------------------
 
+
 def check_role_alternation(messages: list[Message]) -> None:
     """Invariante 2 — *"never two same-role messages in a row"*.
 
@@ -121,8 +122,7 @@ def check_role_alternation(messages: list[Message]) -> None:
             continue
         if previous is not None and message.role is previous:
             raise RoleAlternationError(
-                f"duas mensagens de papel '{message.role.value}' em sequência "
-                f"na posição {index}"
+                f"duas mensagens de papel '{message.role.value}' em sequência na posição {index}"
             )
         previous = message.role
 
@@ -137,9 +137,7 @@ def check_no_synthetic_user_message(messages: list[Message]) -> None:
     """
     for index, message in enumerate(messages):
         if message.role is Role.USER and message.synthetic:
-            raise SyntheticUserMessageError(
-                f"mensagem de usuário sintética na posição {index}"
-            )
+            raise SyntheticUserMessageError(f"mensagem de usuário sintética na posição {index}")
 
 
 def check_tool_pairs_intact(messages: list[Message]) -> None:

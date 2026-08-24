@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 
 __all__ = [
     "IllegalTransition",
-    "UnknownState",
-    "Transition",
     "StateMachine",
+    "Transition",
+    "UnknownState",
 ]
 
 
@@ -63,7 +63,9 @@ class StateMachine:
         unknown = {t.source for t in self.transitions} | {t.target for t in self.transitions}
         unknown -= self.states
         if unknown:
-            raise UnknownState(f"{self.name}: transições citam estados não declarados: {sorted(map(_label, unknown))}")
+            raise UnknownState(
+                f"{self.name}: transições citam estados não declarados: {sorted(map(_label, unknown))}"
+            )
         if self.initial not in self.states:
             raise UnknownState(f"{self.name}: estado inicial {self.initial!r} não declarado")
         if not self.terminal <= self.states:
@@ -128,7 +130,9 @@ def validate(machines: Iterable[StateMachine]) -> None:
     """Levanta na primeira máquina malformada."""
     for m in machines:
         if m.unreachable():
-            raise UnknownState(f"{m.name}: estados inalcançáveis {sorted(map(_label, m.unreachable()))}")
+            raise UnknownState(
+                f"{m.name}: estados inalcançáveis {sorted(map(_label, m.unreachable()))}"
+            )
         if m.dead_ends():
             raise IllegalTransition(
                 f"{m.name}: estados sem saída não declarados terminais: "

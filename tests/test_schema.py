@@ -64,11 +64,20 @@ class SchemaTestCase(unittest.TestCase):
         self.assertEqual(len(self.columns("messages")), 23)
 
     def test_session_model_usage_tem_pk_composta_de_6_colunas(self):
-        pk = [r["name"] for r in self.db.execute("PRAGMA table_info(session_model_usage)") if r["pk"]]
-        self.assertEqual(pk, [
-            "session_id", "model", "billing_provider",
-            "billing_base_url", "billing_mode", "task",
-        ])
+        pk = [
+            r["name"] for r in self.db.execute("PRAGMA table_info(session_model_usage)") if r["pk"]
+        ]
+        self.assertEqual(
+            pk,
+            [
+                "session_id",
+                "model",
+                "billing_provider",
+                "billing_base_url",
+                "billing_mode",
+                "task",
+            ],
+        )
 
     def test_os_tres_indices_fts_existem(self):
         # messages_fts_cjk depende da extensão nativa (Tarefa 04) e é opcional.
@@ -144,7 +153,9 @@ class SchemaTestCase(unittest.TestCase):
         self.assertEqual([(f["table"], f["to"]) for f in fks], [("sessions", "id")])
 
         self.db.execute("INSERT INTO sessions(id, source, started_at) VALUES ('s1','cli',1.0)")
-        self.db.execute("INSERT INTO session_turn_leases(conversation_id, holder) VALUES ('s1','h1')")
+        self.db.execute(
+            "INSERT INTO session_turn_leases(conversation_id, holder) VALUES ('s1','h1')"
+        )
         with self.assertRaises(sqlite3.IntegrityError):
             # Um segundo lease para a mesma conversa é impossível por construção.
             self.db.execute(
@@ -155,7 +166,9 @@ class SchemaTestCase(unittest.TestCase):
 
     def test_mensagem_nasce_ativa(self):
         self.db.execute("INSERT INTO sessions(id, source, started_at) VALUES ('s1','cli',1.0)")
-        self.db.execute("INSERT INTO messages(session_id, role, timestamp) VALUES ('s1','user',1.0)")
+        self.db.execute(
+            "INSERT INTO messages(session_id, role, timestamp) VALUES ('s1','user',1.0)"
+        )
         row = self.db.execute("SELECT active, compacted FROM messages").fetchone()
         self.assertEqual((row["active"], row["compacted"]), (1, 0))
 

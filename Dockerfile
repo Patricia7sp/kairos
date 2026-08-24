@@ -45,7 +45,10 @@ RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
 # O container COMEÇA como root de propósito: o stage2 precisa de root para
 # usermod/groupmod e para o chown do volume. Cada serviço supervisionado então
 # derruba para este usuário no próprio `run`.
-RUN useradd -u ${KAIROS_UID} -m -d /opt/data kairos
+# `-l` é essencial com UID alto: sem ele o useradd cria entradas em
+# /var/log/lastlog e /var/log/faillog indexadas por UID, produzindo arquivos
+# esparsos de centenas de MB na imagem (hadolint DL3046).
+RUN useradd -l -u ${KAIROS_UID} -m -d /opt/data kairos
 
 # --- aplicação ---------------------------------------------------------------
 WORKDIR /opt/kairos

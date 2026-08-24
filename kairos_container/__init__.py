@@ -87,8 +87,8 @@ def read_container_mode(path: Path | None = None) -> ContainerMode | None:
         return None
 
     fields: dict[str, str] = {}
-    for line in raw.splitlines():
-        line = line.strip()
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")

@@ -22,12 +22,12 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 __all__ = [
-    "Budget",
     "BUDGET_SECONDS",
+    "Budget",
     "ContentionRecorder",
     "get_write_contention_stats",
     "record_wait",
@@ -35,7 +35,7 @@ __all__ = [
 ]
 
 
-class Budget(str, Enum):
+class Budget(StrEnum):
     """Os três orçamentos de paciência, com propósitos distintos.
 
     A separação existe porque falhar significa coisas diferentes em cada um:
@@ -93,7 +93,7 @@ class _BudgetCounters:
 def _percentile(sorted_samples: list[float], q: float) -> float:
     if not sorted_samples:
         return 0.0
-    index = min(len(sorted_samples) - 1, int(round(q * (len(sorted_samples) - 1))))
+    index = min(len(sorted_samples) - 1, round(q * (len(sorted_samples) - 1)))
     return round(sorted_samples[index], 1)
 
 
@@ -118,9 +118,12 @@ class ContentionRecorder:
         """Registra uma espera. **Nunca levanta.**"""
         try:
             self._record(budget, wait_seconds, gave_up=gave_up, detail=detail)
-        except Exception:
-            # "never let telemetry break a write". Uma falha aqui não pode
-            # propagar para o caminho de escrita que estamos medindo.
+        except Exception:  # noqa: BLE001, S110 — ver abaixo
+            # DELIBERADO. "never let telemetry break a write": uma falha aqui
+            # não pode propagar para o caminho de escrita que estamos medindo.
+            # Capturar estreito exigiria prever toda falha possível de
+            # contador, ring e serialização — e errar a previsão derrubaria
+            # justamente a escrita que a telemetria deveria só observar.
             pass
 
     def _record(self, budget, wait_seconds, *, gave_up, detail) -> None:
@@ -168,7 +171,10 @@ class ContentionRecorder:
                 path.replace(path.with_suffix(path.suffix + ".1"))
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
+            # DELIBERADO, mesma razão: o espelho JSONL é best-effort. Disco
+            # cheio, permissão negada ou FS somente-leitura degradam a
+            # observabilidade; não podem degradar a escrita.
             pass
 
     def stats(self) -> dict:
@@ -209,8 +215,9 @@ def configure(jsonl_path: Path | None = None) -> None:
     _RECORDER = ContentionRecorder(jsonl_path=jsonl_path if jsonl_path else _default_jsonl())
 
 
-def record_wait(budget: Budget, wait_seconds: float, *, gave_up: bool = False,
-                detail: str | None = None) -> None:
+def record_wait(
+    budget: Budget, wait_seconds: float, *, gave_up: bool = False, detail: str | None = None
+) -> None:
     _RECORDER.record(budget, wait_seconds, gave_up=gave_up, detail=detail)
 
 

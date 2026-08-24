@@ -15,13 +15,12 @@ import re
 import stat
 import subprocess
 import tempfile
+import typing
 import unittest
 from pathlib import Path
 
 from kairos_container import (
     CONTAINER_MODE_FILENAME,
-    ContainerMode,
-    container_mode_path,
     in_container,
     read_container_mode,
 )
@@ -51,16 +50,17 @@ class ShellHarness(unittest.TestCase):
     def fake_real_binary(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            f'#!/bin/bash\necho "REAL uid=$(id -u) args=$*" >> {self.log}\n',
-            encoding="utf-8")
+            f'#!/bin/bash\necho "REAL uid=$(id -u) args=$*" >> {self.log}\n', encoding="utf-8"
+        )
         path.chmod(0o755)
 
     def run_script(self, script: Path, *args, env=None, uid=0):
         self.stub("id", f'if [ "${{1:-}}" = "-u" ]; then echo {uid}; else /usr/bin/id "$@"; fi')
         e = {**os.environ, "PATH": f"{self.bindir}:{os.environ['PATH']}"}
         e.update(env or {})
-        return subprocess.run([str(script), *args], env=e, capture_output=True,
-                              text=True, timeout=30)
+        return subprocess.run(
+            [str(script), *args], env=e, capture_output=True, text=True, timeout=30, check=False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -78,14 +78,15 @@ class ExecShimTests(ShellHarness):
         self.fake_real_binary(self.real)
         self.shim = Path(self._tmp.name) / "shim.sh"
         self.shim.write_text(
-            self.shim_src.read_text(encoding="utf-8")
-                .replace('REAL="/opt/kairos/.venv/bin/kairos"', f'REAL="{self.real}"'),
-            encoding="utf-8")
+            self.shim_src.read_text(encoding="utf-8").replace(
+                'REAL="/opt/kairos/.venv/bin/kairos"', f'REAL="{self.real}"'
+            ),
+            encoding="utf-8",
+        )
         self.shim.chmod(0o755)
 
     def _setuidgid_stub(self):
-        self.stub("s6-setuidgid",
-                  f'echo "SETUIDGID user=$1" >> {self.log}\nshift\nexec "$@"')
+        self.stub("s6-setuidgid", f'echo "SETUIDGID user=$1" >> {self.log}\nshift\nexec "$@"')
 
     def test_rf09_nao_root_vai_direto_ao_binario_sem_troca_de_privilegio(self):
         self._setuidgid_stub()
@@ -109,16 +110,18 @@ class ExecShimTests(ShellHarness):
         for value in ("1", "true", "TRUE", "yes", "Yes"):
             with self.subTest(value=value):
                 self.log.unlink(missing_ok=True)
-                r = self.run_script(self.shim, "doctor", uid=0,
-                                    env={"KAIROS_DOCKER_EXEC_AS_ROOT": value})
+                r = self.run_script(
+                    self.shim, "doctor", uid=0, env={"KAIROS_DOCKER_EXEC_AS_ROOT": value}
+                )
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertNotIn("SETUIDGID", self.log.read_text())
 
     def test_valor_nao_reconhecido_do_opt_out_NAO_mantem_root(self):
         # O default é o caminho seguro: só 1/true/yes optam por sair.
         self._setuidgid_stub()
-        r = self.run_script(self.shim, "doctor", uid=0,
-                            env={"KAIROS_DOCKER_EXEC_AS_ROOT": "talvez"})
+        r = self.run_script(
+            self.shim, "doctor", uid=0, env={"KAIROS_DOCKER_EXEC_AS_ROOT": "talvez"}
+        )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("SETUIDGID", self.log.read_text())
 
@@ -154,7 +157,8 @@ class ExecShimTests(ShellHarness):
         # absoluto impede a reentrada.
         self._setuidgid_stub()
         (self.bindir / "kairos").write_text(
-            "#!/bin/bash\necho RECURSAO >&2\nexit 99\n", encoding="utf-8")
+            "#!/bin/bash\necho RECURSAO >&2\nexit 99\n", encoding="utf-8"
+        )
         (self.bindir / "kairos").chmod(0o755)
         r = self.run_script(self.shim, "chat", uid=0)
         self.assertEqual(r.returncode, 0)
@@ -186,8 +190,9 @@ class DispatchTests(ShellHarness):
     def test_o_fallback_roda_o_bootstrap_e_DEPOIS_o_wrapper(self):
         pos_stage2 = self.src.index("stage2-hook.sh")
         pos_wrapper = self.src.rindex("main-wrapper.sh")
-        self.assertLess(pos_stage2, pos_wrapper,
-                        "o bootstrap precisa preceder a execução do comando")
+        self.assertLess(
+            pos_stage2, pos_wrapper, "o bootstrap precisa preceder a execução do comando"
+        )
 
     def test_o_caminho_nao_pid1_executa_de_fato(self):
         """Comportamento, não texto: degradar é seguir rodando."""
@@ -198,9 +203,11 @@ class DispatchTests(ShellHarness):
             p.chmod(0o755)
         script = Path(self._tmp.name) / "dispatch.sh"
         script.write_text(
-            self.src.replace("/opt/kairos/docker/stage2-hook.sh", str(stage2))
-                    .replace("/opt/kairos/docker/main-wrapper.sh", str(wrapper)),
-            encoding="utf-8")
+            self.src.replace("/opt/kairos/docker/stage2-hook.sh", str(stage2)).replace(
+                "/opt/kairos/docker/main-wrapper.sh", str(wrapper)
+            ),
+            encoding="utf-8",
+        )
         script.chmod(0o755)
         r = self.run_script(script, "chat", "-q", "ping")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -281,12 +288,18 @@ class ContInitOrderTests(unittest.TestCase):
                 self.assertTrue(p.stat().st_mode & stat.S_IXUSR, f"{p.name} não é executável")
 
     def test_todos_tem_sintaxe_valida(self):
-        for p in list((DOCKER / "cont-init.d").iterdir()) + [
-                DOCKER / "stage2-hook.sh", DOCKER / "main-wrapper.sh",
-                DOCKER / "entrypoint-dispatch.sh", DOCKER / "entrypoint.sh",
-                DOCKER / "bin" / "kairos"]:
+        for p in [
+            *(DOCKER / "cont-init.d").iterdir(),
+            DOCKER / "stage2-hook.sh",
+            DOCKER / "main-wrapper.sh",
+            DOCKER / "entrypoint-dispatch.sh",
+            DOCKER / "entrypoint.sh",
+            DOCKER / "bin" / "kairos",
+        ]:
             with self.subTest(script=p.name):
-                r = subprocess.run(["bash", "-n", str(p)], capture_output=True, text=True)
+                r = subprocess.run(
+                    ["bash", "-n", str(p)], capture_output=True, text=True, check=False
+                )
                 self.assertEqual(r.returncode, 0, r.stderr)
 
 
@@ -339,7 +352,18 @@ class DockerfileTests(unittest.TestCase):
 
     def test_rf18_o_UID_e_parametrizavel_e_o_default_e_10000(self):
         self.assertIn("ARG KAIROS_UID=10000", self.src)
-        self.assertIn("useradd -u ${KAIROS_UID}", self.src)
+        # Propriedade, não ordem de flags: fixar a string exata fez este teste
+        # quebrar ao acrescentarmos `-l`, que é melhoria e não regressão.
+        m = re.search(r"^RUN useradd (.+)$", self.src, re.MULTILINE)
+        self.assertIsNotNone(m)
+        flags = m.group(1)
+        self.assertIn("-u ${KAIROS_UID}", flags)
+
+    def test_useradd_usa_l_por_causa_do_UID_alto(self):
+        """Sem `-l`, um UID alto gera lastlog/faillog esparsos de centenas de
+        MB na imagem (hadolint DL3046)."""
+        m = re.search(r"^RUN useradd (.+)$", self.src, re.MULTILINE)
+        self.assertIn("-l", m.group(1).split())
 
     def test_o_entrypoint_e_o_dispatcher(self):
         self.assertIn('ENTRYPOINT ["/opt/kairos/docker/entrypoint-dispatch.sh"]', self.src)
@@ -352,8 +376,13 @@ class DockerfileTests(unittest.TestCase):
         self.assertIn("build.sh /opt/kairos/lib ||", self.src)
 
     def test_docker_build_check_nao_reporta_warning(self):
-        r = subprocess.run(["docker", "build", "--check", str(REPO)],
-                           capture_output=True, text=True, timeout=180)
+        r = subprocess.run(
+            ["docker", "build", "--check", str(REPO)],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
         self.assertIn("no warnings found", r.stdout + r.stderr)
 
 
@@ -362,7 +391,7 @@ class ShellCheckTests(unittest.TestCase):
     """Lint de shell. Pulado quando a ferramenta não está instalada — como a
     extensão CJK, é dependência de desenvolvimento, não de execução."""
 
-    SCRIPTS = [
+    SCRIPTS: typing.ClassVar[list] = [
         DOCKER / "entrypoint-dispatch.sh",
         DOCKER / "stage2-hook.sh",
         DOCKER / "main-wrapper.sh",
@@ -376,12 +405,13 @@ class ShellCheckTests(unittest.TestCase):
 
     def test_todos_os_scripts_passam_no_shellcheck(self):
         import shutil
+
         sc = shutil.which("shellcheck")
         if sc is None:
             self.skipTest("shellcheck não instalado")
         for script in self.SCRIPTS:
             with self.subTest(script=script.name):
-                r = subprocess.run([sc, str(script)], capture_output=True, text=True)
+                r = subprocess.run([sc, str(script)], capture_output=True, text=True, check=False)
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
@@ -426,8 +456,7 @@ class ContainerModeTests(unittest.TestCase):
     def test_parse_autoritativo(self):
         self.write("runtime=s6\nuid=10000\ngid=10000\nhome=/opt/data\nsupervised=1\n")
         m = read_container_mode()
-        self.assertEqual((m.runtime, m.uid, m.gid, str(m.home)),
-                         ("s6", 10000, 10000, "/opt/data"))
+        self.assertEqual((m.runtime, m.uid, m.gid, str(m.home)), ("s6", 10000, 10000, "/opt/data"))
         self.assertTrue(m.supervised)
         self.assertFalse(m.degraded)
 
@@ -446,7 +475,7 @@ class ContainerModeTests(unittest.TestCase):
         self.write("runtime=s6\nlixo sem igual\n\n# comentário\nuid=nao-numero\n")
         m = read_container_mode()
         self.assertEqual(m.runtime, "s6")
-        self.assertEqual(m.uid, 10000)   # default
+        self.assertEqual(m.uid, 10000)  # default
 
     def test_chave_desconhecida_e_preservada_nao_descartada(self):
         # Uma chave nova escrita por um bootstrap mais recente não pode
@@ -481,20 +510,23 @@ class RealImageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import shutil
+
         if shutil.which("docker") is None:
             raise unittest.SkipTest("docker não disponível")
-        r = subprocess.run(["docker", "image", "inspect", cls.IMAGE],
-                           capture_output=True, text=True)
+        r = subprocess.run(
+            ["docker", "image", "inspect", cls.IMAGE], capture_output=True, text=True, check=False
+        )
         if r.returncode != 0:
             raise unittest.SkipTest(
-                f"imagem {cls.IMAGE} não construída — rode: docker build -t {cls.IMAGE} .")
+                f"imagem {cls.IMAGE} não construída — rode: docker build -t {cls.IMAGE} ."
+            )
 
     def run_in(self, *cmd, image=None, entrypoint="/bin/bash", extra=()):
         args = ["docker", "run", "--rm", *extra]
         if entrypoint:
             args += ["--entrypoint", entrypoint]
         args += [image or self.IMAGE, *cmd]
-        return subprocess.run(args, capture_output=True, text=True, timeout=120)
+        return subprocess.run(args, capture_output=True, text=True, timeout=120, check=False)
 
     # -- estrutura ---------------------------------------------------------
 
@@ -509,8 +541,8 @@ class RealImageTests(unittest.TestCase):
     def test_a_ordem_de_cont_init_no_disco_da_imagem(self):
         r = self.run_in("-c", "ls /etc/cont-init.d/")
         self.assertEqual(
-            r.stdout.split(),
-            ["01-kairos-setup", "015-supervise-perms", "02-reconcile-profiles"])
+            r.stdout.split(), ["01-kairos-setup", "015-supervise-perms", "02-reconcile-profiles"]
+        )
 
     def test_s6_setuidgid_existe_no_caminho_absoluto_que_o_shim_usa(self):
         # O bug: o shim dependia do PATH, e num `docker exec` cru /command não
@@ -526,25 +558,30 @@ class RealImageTests(unittest.TestCase):
         aconteceu com `kairos_container`.
         """
         import re as _re
-        declared = _re.search(r"packages = \[([^\]]+)\]",
-                              (REPO / "pyproject.toml").read_text(encoding="utf-8"))
+
+        declared = _re.search(
+            r"packages = \[([^\]]+)\]", (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        )
         self.assertIsNotNone(declared)
         names = _re.findall(r'"([^"]+)"', declared.group(1))
         self.assertTrue(names)
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
         for pkg in names:
             with self.subTest(package=pkg):
-                self.assertIn(f"COPY {pkg}/", dockerfile,
-                              f"{pkg} está no pyproject mas não é copiado no Dockerfile")
+                self.assertIn(
+                    f"COPY {pkg}/",
+                    dockerfile,
+                    f"{pkg} está no pyproject mas não é copiado no Dockerfile",
+                )
 
     # -- o bug de UID ------------------------------------------------------
 
     def _uid_probe(self):
         return (
             'cat > /opt/kairos/.venv/bin/kairos <<"EOF"\n'
-            '#!/bin/bash\nid -u\nEOF\n'
-            'chmod +x /opt/kairos/.venv/bin/kairos\n'
-            'mkdir -p /opt/data && chown 10000:10000 /opt/data\n'
+            "#!/bin/bash\nid -u\nEOF\n"
+            "chmod +x /opt/kairos/.venv/bin/kairos\n"
+            "mkdir -p /opt/data && chown 10000:10000 /opt/data\n"
         )
 
     def test_rf08_root_derruba_para_uid_10000_na_imagem_real(self):
@@ -552,8 +589,7 @@ class RealImageTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip().splitlines()[-1], "10000", r.stderr)
 
     def test_rf11_o_opt_out_mantem_root_na_imagem_real(self):
-        r = self.run_in(
-            "-c", self._uid_probe() + "KAIROS_DOCKER_EXEC_AS_ROOT=1 kairos login")
+        r = self.run_in("-c", self._uid_probe() + "KAIROS_DOCKER_EXEC_AS_ROOT=1 kairos login")
         self.assertEqual(r.stdout.strip().splitlines()[-1], "0", r.stderr)
 
     def test_sem_mecanismo_de_queda_o_shim_RECUSA_em_vez_de_virar_root(self):
@@ -573,8 +609,12 @@ class RealImageTests(unittest.TestCase):
     # -- ciclo de vida s6 --------------------------------------------------
 
     def _stub_available(self) -> bool:
-        return subprocess.run(["docker", "image", "inspect", self.STUB],
-                              capture_output=True).returncode == 0
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", self.STUB], capture_output=True, check=False
+            ).returncode
+            == 0
+        )
 
     def test_rf21_o_container_herda_o_exit_code_do_main_program(self):
         if not self._stub_available():
@@ -595,10 +635,12 @@ class RealImageTests(unittest.TestCase):
             self.skipTest(f"imagem {self.STUB} não construída")
         r = self.run_in("--version", image=self.STUB, entrypoint=None)
         saida = r.stdout + r.stderr
-        ordem = [n for n in ("01-kairos-setup", "015-supervise-perms",
-                             "02-reconcile-profiles") if f"running /etc/cont-init.d/{n}" in saida]
-        self.assertEqual(ordem, ["01-kairos-setup", "015-supervise-perms",
-                                 "02-reconcile-profiles"])
+        ordem = [
+            n
+            for n in ("01-kairos-setup", "015-supervise-perms", "02-reconcile-profiles")
+            if f"running /etc/cont-init.d/{n}" in saida
+        ]
+        self.assertEqual(ordem, ["01-kairos-setup", "015-supervise-perms", "02-reconcile-profiles"])
         for n in ordem:
             with self.subTest(script=n):
                 self.assertIn(f"/etc/cont-init.d/{n} exited 0", saida)
@@ -615,11 +657,17 @@ class RealImageTests(unittest.TestCase):
             self.skipTest(f"imagem {self.STUB} não construída")
         vol = tempfile.mkdtemp()
         try:
-            subprocess.run(["docker", "run", "--rm", "-v", f"{vol}:/opt/data",
-                            self.STUB, "--version"], capture_output=True, timeout=120)
+            subprocess.run(
+                ["docker", "run", "--rm", "-v", f"{vol}:/opt/data", self.STUB, "--version"],
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
             r = self.run_in(
-                "-c", 'cat /opt/data/.container-mode; stat -c "%a %U:%G" /opt/data/.container-mode',
-                extra=("-v", f"{vol}:/opt/data"))
+                "-c",
+                'cat /opt/data/.container-mode; stat -c "%a %U:%G" /opt/data/.container-mode',
+                extra=("-v", f"{vol}:/opt/data"),
+            )
             self.assertIn("runtime=s6", r.stdout)
             self.assertIn("uid=10000", r.stdout)
             self.assertIn("supervised=1", r.stdout)
@@ -627,18 +675,33 @@ class RealImageTests(unittest.TestCase):
         finally:
             # O volume ficou com dono UID 10000 (é o ponto do teste), então o
             # host não consegue removê-lo — a limpeza vai de dentro.
-            subprocess.run(["docker", "run", "--rm", "-v", f"{vol}:/v",
-                            "--entrypoint", "/bin/bash", self.IMAGE,
-                            "-c", "rm -rf /v/* /v/.[!.]* 2>/dev/null || true"],
-                           capture_output=True, timeout=60)
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{vol}:/v",
+                    "--entrypoint",
+                    "/bin/bash",
+                    self.IMAGE,
+                    "-c",
+                    "rm -rf /v/* /v/.[!.]* 2>/dev/null || true",
+                ],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
             import shutil as _sh
+
             _sh.rmtree(vol, ignore_errors=True)
 
     def test_rf18_KAIROS_UID_sobrescreve_de_verdade(self):
         if not self._stub_available():
             self.skipTest(f"imagem {self.STUB} não construída")
-        r = self.run_in("--version", image=self.STUB, entrypoint=None,
-                        extra=("-e", "KAIROS_UID=1234"))
+        r = self.run_in(
+            "--version", image=self.STUB, entrypoint=None, extra=("-e", "KAIROS_UID=1234")
+        )
         saida = r.stdout + r.stderr
         self.assertIn("remapeando", saida)
         self.assertIn("GATEWAY uid=1234", saida)

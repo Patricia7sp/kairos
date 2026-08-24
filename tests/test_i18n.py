@@ -19,11 +19,9 @@ from pathlib import Path
 
 import yaml
 
-import kairos_i18n as i18n
 from kairos_i18n import (
     BASELINE,
     LANGUAGE_ENV,
-    SUPPORTED_LANGUAGES,
     flatten,
     get_language,
     load_catalog,
@@ -86,7 +84,9 @@ class ParityGateTests(unittest.TestCase):
             with self.subTest(lang=lang):
                 other = set(raw(lang))
                 self.assertEqual(en - other, set(), f"{lang}.yaml: chaves faltando")
-                self.assertEqual(other - en, set(), f"{lang}.yaml: chaves que não existem no inglês")
+                self.assertEqual(
+                    other - en, set(), f"{lang}.yaml: chaves que não existem no inglês"
+                )
 
     def test_gate_de_placeholders(self):
         """O gate mais valioso, e o que quase se perdeu.
@@ -179,8 +179,7 @@ class ResolutionTests(EnvBase):
     def test_rf03_override_por_chamada_vence_tudo(self):
         os.environ[LANGUAGE_ENV] = "es"
         reset_language_cache()
-        self.assertEqual(t("approval.denied", lang="pt"),
-                         "Negado. O comando não foi executado.")
+        self.assertEqual(t("approval.denied", lang="pt"), "Negado. O comando não foi executado.")
 
     def test_rf02_env_vence_o_baseline(self):
         os.environ[LANGUAGE_ENV] = "pt"
@@ -190,7 +189,8 @@ class ResolutionTests(EnvBase):
     def test_env_vence_o_config(self):
         # A env é o override rápido: teste e execução pontual sem editar arquivo.
         Path(self._tmp.name, "config.yaml").write_text(
-            "display:\n  language: es\n", encoding="utf-8")
+            "display:\n  language: es\n", encoding="utf-8"
+        )
         reset_language_cache()
         self.assertEqual(get_language(), "es")
         os.environ[LANGUAGE_ENV] = "pt"
@@ -199,7 +199,8 @@ class ResolutionTests(EnvBase):
 
     def test_config_vence_o_baseline(self):
         Path(self._tmp.name, "config.yaml").write_text(
-            "display:\n  language: pt\n", encoding="utf-8")
+            "display:\n  language: pt\n", encoding="utf-8"
+        )
         reset_language_cache()
         self.assertEqual(get_language(), "pt")
 
@@ -247,8 +248,9 @@ class FormatTests(EnvBase):
         self.assertIn("{count}", out)
 
     def test_parametro_extra_e_ignorado(self):
-        self.assertEqual(t("approval.denied", lang="en", irrelevante=1),
-                         "Denied. The command was not run.")
+        self.assertEqual(
+            t("approval.denied", lang="en", irrelevante=1), "Denied. The command was not run."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +303,7 @@ class CoverageTests(unittest.TestCase):
         # Divergência entre superfícies é decisão registrada, não defeito.
         b = coverage_for(Surface.BACKEND).target_locales
         d = coverage_for(Surface.DESKTOP).target_locales
-        self.assertNotEqual(b, d)   # e isso não reprova nada
+        self.assertNotEqual(b, d)  # e isso não reprova nada
 
     def test_entrega_nunca_excede_o_alvo(self):
         for name, cov in COVERAGE.items():
@@ -310,8 +312,12 @@ class CoverageTests(unittest.TestCase):
 
     def test_superficie_declarando_idioma_fora_do_alvo_e_recusada(self):
         with self.assertRaises(ValueError):
-            SurfaceCoverage(surface="x", locales=frozenset({"pt"}),
-                            target_locales=frozenset({"en"}), rationale="—")
+            SurfaceCoverage(
+                surface="x",
+                locales=frozenset({"pt"}),
+                target_locales=frozenset({"en"}),
+                rationale="—",
+            )
 
     def test_t11_aviso_olha_o_que_ENTREGA_nao_o_que_pretende(self):
         """A distinção que importa para não mentir ao usuário.
@@ -322,8 +328,9 @@ class CoverageTests(unittest.TestCase):
         mentir com aparência de rigor.
         """
         from kairos_i18n.coverage import intends
-        self.assertTrue(intends(Surface.DESKTOP, "ja"))       # pretende
-        self.assertFalse(covers(Surface.DESKTOP, "ja"))       # não entrega
+
+        self.assertTrue(intends(Surface.DESKTOP, "ja"))  # pretende
+        self.assertFalse(covers(Surface.DESKTOP, "ja"))  # não entrega
         self.assertTrue(falls_back_to_english(Surface.DESKTOP, "ja"))
 
         # O backend entrega pt hoje: nada de aviso.
@@ -338,8 +345,7 @@ class CoverageTests(unittest.TestCase):
         self.assertFalse(falls_back_to_english(Surface.DESKTOP, "en"))
 
     def test_a_mensagem_de_aviso_existe_no_catalogo(self):
-        msg = t("i18n.falls_back_to_english", lang="en",
-                surface="desktop", language="Portuguese")
+        msg = t("i18n.falls_back_to_english", lang="en", surface="desktop", language="Portuguese")
         self.assertNotEqual(msg, "i18n.falls_back_to_english")
         self.assertIn("desktop", msg)
 

@@ -15,13 +15,13 @@ from pathlib import Path
 from kairos_state import schema as _schema
 
 __all__ = [
-    "connect",
-    "initialize_schema",
-    "default_db_path",
+    "BUSY_TIMEOUT_MS",
     "CJKExtensionUnavailable",
     "apply_wal_with_fallback",
+    "connect",
+    "default_db_path",
+    "initialize_schema",
     "read_connection",
-    "BUSY_TIMEOUT_MS",
 ]
 
 #: Curto de propósito: a paciência real é da escada de retry da aplicação
@@ -45,7 +45,9 @@ def default_db_path() -> Path:
     return root / "state.db"
 
 
-def connect(db_path: str | os.PathLike[str] | None = None, *, timeout: float = 1.0) -> sqlite3.Connection:
+def connect(
+    db_path: str | os.PathLike[str] | None = None, *, timeout: float = 1.0
+) -> sqlite3.Connection:
     """Abre uma conexão com os pragmas de durabilidade e integridade.
 
     ``timeout`` fica deliberadamente **curto** (1 s). O handler de ocupado
@@ -167,7 +169,9 @@ def initialize_schema(
 
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         if row is None:
-            conn.execute("INSERT INTO schema_version(version) VALUES (?)", (_schema.SCHEMA_VERSION,))
+            conn.execute(
+                "INSERT INTO schema_version(version) VALUES (?)", (_schema.SCHEMA_VERSION,)
+            )
             return _schema.SCHEMA_VERSION
         return int(row["version"])
 

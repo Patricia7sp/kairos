@@ -2,27 +2,40 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from kairos_domain.message import DomainRuleViolation
 
 __all__ = [
     "PLACEHOLDER_SECRETS",
     "AuthFailureKind",
-    "SecretError",
     "NotACredentialError",
-    "has_usable_secret",
+    "SecretError",
     "assert_env_is_for_secrets",
     "classify_auth_failure",
+    "has_usable_secret",
     "should_reauthenticate",
 ]
 
 #: Valores que *parecem* segredo e não são. Aceitar um destes produz uma
 #: falha de autenticação confusa lá na frente, em vez de um erro claro aqui.
-PLACEHOLDER_SECRETS = frozenset({
-    "changeme", "change_me", "your_api_key", "your-api-key", "yourapikey",
-    "xxx", "***", "<your_key>", "todo", "tbd", "placeholder", "none", "null",
-})
+PLACEHOLDER_SECRETS = frozenset(
+    {
+        "changeme",
+        "change_me",
+        "your_api_key",
+        "your-api-key",
+        "yourapikey",
+        "xxx",
+        "***",
+        "<your_key>",
+        "todo",
+        "tbd",
+        "placeholder",
+        "none",
+        "null",
+    }
+)
 
 
 class SecretError(DomainRuleViolation):
@@ -57,9 +70,9 @@ def assert_env_is_for_secrets(key: str, *, is_credential: bool) -> None:
         )
 
 
-class AuthFailureKind(str, Enum):
-    AUTHENTICATION = "authentication"   # 401/403 confirmado
-    CONNECTIVITY = "connectivity"       # timeout, rede, 5xx
+class AuthFailureKind(StrEnum):
+    AUTHENTICATION = "authentication"  # 401/403 confirmado
+    CONNECTIVITY = "connectivity"  # timeout, rede, 5xx
 
 
 def classify_auth_failure(
@@ -88,6 +101,7 @@ def should_reauthenticate(
     timed_out: bool = False,
     network_error: bool = False,
 ) -> bool:
-    return classify_auth_failure(
-        status_code, timed_out=timed_out, network_error=network_error
-    ) is AuthFailureKind.AUTHENTICATION
+    return (
+        classify_auth_failure(status_code, timed_out=timed_out, network_error=network_error)
+        is AuthFailureKind.AUTHENTICATION
+    )

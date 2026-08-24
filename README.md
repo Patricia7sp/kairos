@@ -44,6 +44,23 @@ construída e são **pulados** se ela não existir. Eles cobrem o que o
 `docker build --check` não alcança: deriva entre `pyproject.toml` e o
 Dockerfile, diretórios de destino e o `PATH` de runtime.
 
+## CI
+
+`.github/workflows/ci.yml` roda seis jobs em paralelo: testes, ruff, shellcheck,
+hadolint, imagem+integração e `uv lock --check`. Actions fixadas por **SHA**,
+não por tag — tag é mutável.
+
+O repositório ainda não tem remoto, então o workflow não executa em lugar
+nenhum. Para que o CI não seja ficção, `scripts/ci.sh` roda **exatamente os
+mesmos passos** localmente:
+
+```bash
+scripts/ci.sh          # tudo
+scripts/ci.sh --fast   # pula o que exige Docker
+```
+
+Cada passo é pulado com aviso, não silenciosamente, quando a ferramenta falta.
+
 ## Rodar os testes
 
 A extensão CJK opcional exige `gcc`:

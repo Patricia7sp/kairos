@@ -6,3 +6,4 @@ Requires-Python: >=3.11
 Requires-Dist: pyyaml>=6
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: ruff>=0.16; extra == "dev"

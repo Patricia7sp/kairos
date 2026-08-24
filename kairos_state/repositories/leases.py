@@ -15,7 +15,7 @@ import time
 from kairos_state.contention import Budget
 from kairos_state.writes import write_with_retry
 
-__all__ = ["LeaseRepository", "LeaseNotHeld"]
+__all__ = ["LeaseNotHeld", "LeaseRepository"]
 
 
 class LeaseNotHeld(RuntimeError):
@@ -30,8 +30,13 @@ class LeaseRepository:
     adquirir o seu lease, senão comprimir travaria a conversa.
     """
 
-    def __init__(self, conn: sqlite3.Connection, *, table: str = "session_turn_leases",
-                 key_column: str = "conversation_id") -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        table: str = "session_turn_leases",
+        key_column: str = "conversation_id",
+    ) -> None:
         if table not in ("session_turn_leases", "compression_locks"):
             raise ValueError(f"tabela de lease desconhecida: {table!r}")
         self._conn = conn
@@ -39,15 +44,16 @@ class LeaseRepository:
         self._key = key_column if table == "session_turn_leases" else "session_id"
 
     @classmethod
-    def turn_leases(cls, conn: sqlite3.Connection) -> "LeaseRepository":
+    def turn_leases(cls, conn: sqlite3.Connection) -> LeaseRepository:
         return cls(conn, table="session_turn_leases")
 
     @classmethod
-    def compression_locks(cls, conn: sqlite3.Connection) -> "LeaseRepository":
+    def compression_locks(cls, conn: sqlite3.Connection) -> LeaseRepository:
         return cls(conn, table="compression_locks")
 
-    def try_acquire(self, key: str, holder: str, *, ttl_seconds: float = 300.0,
-                    now: float | None = None) -> bool:
+    def try_acquire(
+        self, key: str, holder: str, *, ttl_seconds: float = 300.0, now: float | None = None
+    ) -> bool:
         """Adquire se livre ou **expirado**. Não bloqueia.
 
         Um lease expirado é adquirível por qualquer holder novo, sem
@@ -63,7 +69,7 @@ class LeaseRepository:
                 # precisam ser atômicas, senão dois processos limpam o mesmo
                 # lease e ambos acham que o adquiriram.
                 cur = self._conn.execute(
-                    f"INSERT INTO {self._table}({self._key}, holder, acquired_at, expires_at) "
+                    f"INSERT INTO {self._table}({self._key}, holder, acquired_at, expires_at) "  # noqa: S608 — self._table é validado no __init__ contra uma lista fechada
                     f"VALUES (:k, :h, :now, :exp) "
                     f"ON CONFLICT({self._key}) DO UPDATE SET "
                     f"  holder = excluded.holder, "
@@ -81,21 +87,23 @@ class LeaseRepository:
         """Quem detém o lease **não expirado**, ou `None`."""
         moment = now if now is not None else time.time()
         row = self._conn.execute(
-            f"SELECT holder, expires_at FROM {self._table} WHERE {self._key} = ?", (key,)
+            f"SELECT holder, expires_at FROM {self._table} WHERE {self._key} = ?",  # noqa: S608
+            (key,),
         ).fetchone()
         if row is None or row["expires_at"] <= moment:
             return None
         return row["holder"]
 
-    def refresh(self, key: str, holder: str, *, ttl_seconds: float = 300.0,
-                now: float | None = None) -> bool:
+    def refresh(
+        self, key: str, holder: str, *, ttl_seconds: float = 300.0, now: float | None = None
+    ) -> bool:
         """Estende o prazo. Só o holder atual consegue."""
         moment = now if now is not None else time.time()
 
         def op():
             with self._conn:
                 cur = self._conn.execute(
-                    f"UPDATE {self._table} SET expires_at = ? "
+                    f"UPDATE {self._table} SET expires_at = ? "  # noqa: S608 — self._table é validado no __init__ contra uma lista fechada
                     f"WHERE {self._key} = ? AND holder = ? AND expires_at > ?",
                     (moment + ttl_seconds, key, holder, moment),
                 )
@@ -106,10 +114,11 @@ class LeaseRepository:
     def release(self, key: str, holder: str) -> bool:
         """Libera. Só o holder atual — senão um processo atrasado poderia
         liberar o lease que outro já adquiriu."""
+
         def op():
             with self._conn:
                 cur = self._conn.execute(
-                    f"DELETE FROM {self._table} WHERE {self._key} = ? AND holder = ?",
+                    f"DELETE FROM {self._table} WHERE {self._key} = ? AND holder = ?",  # noqa: S608 — self._table é validado no __init__ contra uma lista fechada
                     (key, holder),
                 )
             return cur.rowcount > 0

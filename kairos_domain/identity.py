@@ -7,12 +7,12 @@ Reconstruído de ``_reversa_sdd/data-dictionary.md`` §2.1-2.2 e
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
-__all__ = ["Platform", "SessionSource", "BUILTIN_PLATFORM_COUNT"]
+__all__ = ["BUILTIN_PLATFORM_COUNT", "Platform", "SessionSource"]
 
 
-class Platform(str, Enum):
+class Platform(StrEnum):
     """Plataformas de origem.
 
     **24 membros embutidos** — a spec (``data-dictionary`` §2.1) diz "23
@@ -53,7 +53,7 @@ class Platform(str, Enum):
     RELAY = "relay"  # adaptador de relay genérico (EXPERIMENTAL)
 
     @classmethod
-    def _missing_(cls, value: object) -> "Platform | None":
+    def _missing_(cls, value: object) -> Platform | None:
         """Cria um membro dinâmico para plataforma de plugin."""
         if not isinstance(value, str) or not value:
             return None

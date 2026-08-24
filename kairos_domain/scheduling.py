@@ -3,25 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from kairos_domain.message import DomainRuleViolation
 
 __all__ = [
+    "DeadSubprocessReportedSuccess",
     "ExecutionStatus",
     "JobState",
     "SchedulingError",
-    "DeadSubprocessReportedSuccess",
     "TerminalStateMutated",
-    "effective_job_state",
-    "collapse_backlog",
     "assert_terminal_immutable",
+    "collapse_backlog",
+    "effective_job_state",
     "finish_status_for_dead_owner",
     "monitor_hash_after_source_failure",
 ]
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Os 5 estados do CHECK constraint (Tarefa 01)."""
 
     CLAIMED = "claimed"
@@ -39,7 +39,7 @@ class ExecutionStatus(str, Enum):
         )
 
 
-class JobState(str, Enum):
+class JobState(StrEnum):
     ENABLED = "enabled"
     PAUSED = "paused"
     DISABLED = "disabled"
@@ -105,14 +105,10 @@ def finish_status_for_dead_owner(*, owner_is_live: bool) -> ExecutionStatus:
     return ExecutionStatus.UNKNOWN
 
 
-def assert_not_reporting_success_when_dead(
-    *, owner_is_live: bool, status: ExecutionStatus
-) -> None:
+def assert_not_reporting_success_when_dead(*, owner_is_live: bool, status: ExecutionStatus) -> None:
     """Invariante 15, na forma de guarda."""
     if not owner_is_live and status is ExecutionStatus.COMPLETED:
-        raise DeadSubprocessReportedSuccess(
-            "subprocesso morto não pode reportar 'completed'"
-        )
+        raise DeadSubprocessReportedSuccess("subprocesso morto não pode reportar 'completed'")
 
 
 @dataclass(frozen=True)

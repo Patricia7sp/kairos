@@ -7,20 +7,20 @@ Reconstruído de ``_reversa_sdd/domain.md`` §1.1 e
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from kairos_domain.identity import SessionSource
 
 __all__ = [
-    "EndReason",
-    "ChildKind",
-    "Session",
-    "Lineage",
     "RESET_END_REASONS",
+    "ChildKind",
+    "EndReason",
+    "Lineage",
+    "Session",
 ]
 
 
-class EndReason(str, Enum):
+class EndReason(StrEnum):
     COMPRESSION = "compression"
     BRANCHED = "branched"
     SESSION_RESET = "session_reset"
@@ -32,17 +32,19 @@ class EndReason(str, Enum):
 
 
 #: data-dictionary §6.9 — as razões de fim que caracterizam um filho de reset.
-RESET_END_REASONS = frozenset({
-    EndReason.SESSION_RESET,
-    EndReason.SESSION_SWITCH,
-    EndReason.IDLE,
-    EndReason.DAILY,
-    EndReason.SUSPENDED,
-    EndReason.RESUME_PENDING_EXPIRED,
-})
+RESET_END_REASONS = frozenset(
+    {
+        EndReason.SESSION_RESET,
+        EndReason.SESSION_SWITCH,
+        EndReason.IDLE,
+        EndReason.DAILY,
+        EndReason.SUSPENDED,
+        EndReason.RESUME_PENDING_EXPIRED,
+    }
+)
 
 
-class ChildKind(str, Enum):
+class ChildKind(StrEnum):
     """Como uma sessão nasceu de outra."""
 
     ROOT = "root"

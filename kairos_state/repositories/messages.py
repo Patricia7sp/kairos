@@ -18,9 +18,16 @@ class MessageRepository:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def append(self, session_id: str, role: str, *, content: str | None = None,
-               api_content: str | None = None, timestamp: float | None = None,
-               **columns) -> int:
+    def append(
+        self,
+        session_id: str,
+        role: str,
+        *,
+        content: str | None = None,
+        api_content: str | None = None,
+        timestamp: float | None = None,
+        **columns,
+    ) -> int:
         """Grava uma mensagem. **Orçamento de transcript** (RF-05).
 
         `content` é o que se exibe; `api_content` é o que vai ao provedor.
@@ -41,9 +48,7 @@ class MessageRepository:
 
         def op():
             with self._conn:
-                cur = self._conn.execute(
-                    f"INSERT INTO messages({names}) VALUES ({holes})", fields
-                )
+                cur = self._conn.execute(f"INSERT INTO messages({names}) VALUES ({holes})", fields)  # noqa: S608 — nomes de coluna vêm das chaves do dict construído aqui, não de entrada externa
             return int(cur.lastrowid)
 
         # Perder o transcript é pior que atrasar: aguenta a paciência longa.
@@ -67,14 +72,14 @@ class MessageRepository:
         resumo que começou antes delas existirem.
         """
         row = self._conn.execute(
-            "SELECT COALESCE(MAX(id), -1) FROM messages "
-            "WHERE session_id = ? AND active = 1",
+            "SELECT COALESCE(MAX(id), -1) FROM messages WHERE session_id = ? AND active = 1",
             (session_id,),
         ).fetchone()
         return int(row[0])
 
-    def archive_and_compact(self, session_id: str, watermark: int,
-                            *, lock_holder: str | None = None) -> int:
+    def archive_and_compact(
+        self, session_id: str, watermark: int, *, lock_holder: str | None = None
+    ) -> int:
         """Arquiva o que está até a marca. **Não apaga nada** (RF-11).
 
         As mensagens continuam na tabela e mudam de visibilidade:
@@ -87,6 +92,7 @@ class MessageRepository:
         lease pode ter expirado e sido tomado nesse intervalo. Verificar
         fora seria uma janela de corrida do tamanho da sumarização.
         """
+
         def op():
             with self._conn:
                 if lock_holder is not None:
@@ -111,11 +117,11 @@ class MessageRepository:
 
     def rewind(self, session_id: str, after_id: int) -> int:
         """Rebobina: `active=0, compacted=0` — some da busca também."""
+
         def op():
             with self._conn:
                 cur = self._conn.execute(
-                    "UPDATE messages SET active = 0, compacted = 0 "
-                    "WHERE session_id = ? AND id > ?",
+                    "UPDATE messages SET active = 0, compacted = 0 WHERE session_id = ? AND id > ?",
                     (session_id, after_id),
                 )
             return cur.rowcount

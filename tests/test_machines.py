@@ -60,7 +60,9 @@ class PrimitiveTests(unittest.TestCase):
     def test_transicao_citando_estado_nao_declarado_e_recusada(self):
         with self.assertRaises(UnknownState):
             StateMachine(
-                name="m", states=frozenset({"a"}), initial="a",
+                name="m",
+                states=frozenset({"a"}),
+                initial="a",
                 transitions=(Transition("a", "fantasma", "x"),),
             )
 
@@ -71,15 +73,20 @@ class PrimitiveTests(unittest.TestCase):
     def test_terminal_com_saida_declarada_e_recusado(self):
         with self.assertRaises(IllegalTransition):
             StateMachine(
-                name="m", states=frozenset({"a", "b"}), initial="a",
+                name="m",
+                states=frozenset({"a", "b"}),
+                initial="a",
                 transitions=(Transition("a", "b", "x"), Transition("b", "a", "volta")),
                 terminal=frozenset({"b"}),
             )
 
     def test_estado_inalcancavel_e_detectado(self):
         m = StateMachine(
-            name="m", states=frozenset({"a", "b", "orfao"}), initial="a",
-            transitions=(Transition("a", "b", "x"),), terminal=frozenset({"b"}),
+            name="m",
+            states=frozenset({"a", "b", "orfao"}),
+            initial="a",
+            transitions=(Transition("a", "b", "x"),),
+            terminal=frozenset({"b"}),
         )
         self.assertEqual(m.unreachable(), frozenset({"orfao"}))
         with self.assertRaises(UnknownState):
@@ -87,7 +94,9 @@ class PrimitiveTests(unittest.TestCase):
 
     def test_beco_sem_saida_nao_declarado_terminal_e_detectado(self):
         m = StateMachine(
-            name="m", states=frozenset({"a", "b"}), initial="a",
+            name="m",
+            states=frozenset({"a", "b"}),
+            initial="a",
             transitions=(Transition("a", "b", "x"),),
         )
         self.assertEqual(m.dead_ends(), frozenset({"b"}))
@@ -198,9 +207,8 @@ class SkillMachineTests(unittest.TestCase):
 class CronExecutionTests(unittest.TestCase):
     def test_inv7_terminais_sao_imutaveis(self):
         for t in (ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.UNKNOWN):
-            with self.subTest(status=t):
-                with self.assertRaises(IllegalTransition):
-                    CRON_EXECUTION.transition(t, ExecutionStatus.RUNNING)
+            with self.subTest(status=t), self.assertRaises(IllegalTransition):
+                CRON_EXECUTION.transition(t, ExecutionStatus.RUNNING)
 
     def test_claimed_pode_ir_direto_a_unknown(self):
         # O dono pode morrer entre reivindicar e começar.
@@ -250,17 +258,20 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(monitor_outcome("a b", "a  b"), MonitorOutcome.CHANGED)
 
     def test_primeira_execucao_nao_e_alcancada_de_volta(self):
-        self.assertEqual(CRON_MONITOR.targets_from(MonitorOutcome.FIRST_RUN),
-                         frozenset({MonitorOutcome.CHANGED}))
+        self.assertEqual(
+            CRON_MONITOR.targets_from(MonitorOutcome.FIRST_RUN), frozenset({MonitorOutcome.CHANGED})
+        )
 
 
 class DelegationTests(unittest.TestCase):
     def test_os_dois_eixos_sao_ortogonais(self):
         # Uma delegação pode estar completed na execução e pending na entrega
         # — exatamente o gap que o ledger de obrigação cobre.
-        self.assertTrue(DELEGATION_EXECUTION.states.isdisjoint(
-            {DelegationDelivery.CLAIMED, DelegationDelivery.DELIVERED}
-        ))
+        self.assertTrue(
+            DELEGATION_EXECUTION.states.isdisjoint(
+                {DelegationDelivery.CLAIMED, DelegationDelivery.DELIVERED}
+            )
+        )
 
     def test_claim_expirado_volta_a_pending(self):
         DELEGATION_DELIVERY.transition(DelegationDelivery.CLAIMED, DelegationDelivery.PENDING)
@@ -291,8 +302,15 @@ class CommandApprovalTests(unittest.TestCase):
     def test_todos_os_desfechos_sao_terminais(self):
         self.assertEqual(
             COMMAND_APPROVAL.targets_from(CommandApproval.PENDING),
-            frozenset({CommandApproval.ONCE, CommandApproval.SESSION, CommandApproval.ALWAYS,
-                       CommandApproval.DENY, CommandApproval.NEVER}),
+            frozenset(
+                {
+                    CommandApproval.ONCE,
+                    CommandApproval.SESSION,
+                    CommandApproval.ALWAYS,
+                    CommandApproval.DENY,
+                    CommandApproval.NEVER,
+                }
+            ),
         )
 
     def test_um_desfecho_nao_vira_outro(self):

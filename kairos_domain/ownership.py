@@ -7,41 +7,41 @@ do usuário de atores autônomos, e o marcado 🟢🟢 na análise.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from kairos_domain.message import DomainRuleViolation
 
 __all__ = [
-    "Provenance",
-    "SkillState",
-    "Skill",
     "Actor",
-    "OwnershipError",
     "HardDeleteByAutonomousActor",
-    "UserSkillAutoCurated",
+    "OwnershipError",
     "ProtectedByCronReference",
-    "can_archive",
+    "Provenance",
+    "Skill",
+    "SkillState",
+    "UserSkillAutoCurated",
     "assert_can_hard_delete",
+    "can_archive",
 ]
 
 
-class Provenance(str, Enum):
+class Provenance(StrEnum):
     """De quem a skill é.
 
     A distinção não é cosmética: ela decide quem pode arquivá-la.
     """
 
-    USER = "user"          # o usuário pediu — pertence ao usuário
+    USER = "user"  # o usuário pediu — pertence ao usuário
     SEDIMENT = "sediment"  # sedimento do fork de revisão — território do Curador
 
 
-class SkillState(str, Enum):
+class SkillState(StrEnum):
     ACTIVE = "active"
     STALE = "stale"
     ARCHIVED = "archived"
 
 
-class Actor(str, Enum):
+class Actor(StrEnum):
     USER_FOREGROUND = "user_foreground"
     CURATOR = "curator"
     BACKGROUND_REVIEW = "background_review"
@@ -106,8 +106,7 @@ def can_archive(
     """
     if actor.is_autonomous and skill.provenance is Provenance.USER:
         raise UserSkillAutoCurated(
-            f"{actor.value} não pode curar a skill {skill.name!r}: "
-            "proveniência é do usuário"
+            f"{actor.value} não pode curar a skill {skill.name!r}: proveniência é do usuário"
         )
 
     if cron_index is not None and cron_index.references(skill.name):

@@ -18,15 +18,15 @@ from pathlib import Path
 from kairos_state import schema as _schema
 
 __all__ = [
-    "CJK_SO_ENV",
     "CJK_SO_BASENAME",
-    "find_extension",
-    "load_extension",
-    "is_loaded",
-    "cjk_enabled",
-    "ensure_cjk_index",
-    "drop_cjk_index",
+    "CJK_SO_ENV",
     "RebuildStatus",
+    "cjk_enabled",
+    "drop_cjk_index",
+    "ensure_cjk_index",
+    "find_extension",
+    "is_loaded",
+    "load_extension",
     "rebuild_status",
     "rebuild_step",
 ]
@@ -112,9 +112,7 @@ def is_loaded(conn: sqlite3.Connection) -> bool:
     garante que o tokenizador foi criado.
     """
     try:
-        conn.execute(
-            "CREATE VIRTUAL TABLE temp._cjk_probe USING fts5(c, tokenize='cjk_unicode61')"
-        )
+        conn.execute("CREATE VIRTUAL TABLE temp._cjk_probe USING fts5(c, tokenize='cjk_unicode61')")
     except sqlite3.OperationalError:
         return False
     else:
@@ -131,9 +129,10 @@ def ensure_cjk_index(conn: sqlite3.Connection) -> bool:
     if not is_loaded(conn):
         return False
 
-    novo = conn.execute(
-        "SELECT name FROM sqlite_master WHERE name='messages_fts_cjk'"
-    ).fetchone() is None
+    novo = (
+        conn.execute("SELECT name FROM sqlite_master WHERE name='messages_fts_cjk'").fetchone()
+        is None
+    )
 
     with conn:
         conn.executescript(_schema.FTS_CJK_SQL)
@@ -164,8 +163,7 @@ def drop_cjk_index(conn: sqlite3.Connection) -> None:
         conn.execute("DROP VIEW IF EXISTS messages_fts_cjk_src")
         conn.execute(
             "DELETE FROM state_meta WHERE key IN (?, ?, ?, ?)",
-            (_schema.FTS_CJK_HIGH_WATER_KEY, _CURSOR_KEY, _PROGRESS_KEY,
-             _schema.FTS_CJK_STALE_KEY),
+            (_schema.FTS_CJK_HIGH_WATER_KEY, _CURSOR_KEY, _PROGRESS_KEY, _schema.FTS_CJK_STALE_KEY),
         )
 
 
@@ -251,8 +249,11 @@ def rebuild_status(conn: sqlite3.Connection) -> RebuildStatus:
         (cursor, high_water),
     ).fetchone()[0]
     return RebuildStatus(
-        high_water=high_water, cursor=cursor,
-        remaining=remaining, total=total, loaded=loaded,
+        high_water=high_water,
+        cursor=cursor,
+        remaining=remaining,
+        total=total,
+        loaded=loaded,
     )
 
 

@@ -51,12 +51,13 @@ from kairos_domain.ownership import (
     assert_can_hard_delete,
     can_archive,
 )
-from kairos_domain.rules import RULES, Kind, process_rules, runtime_rules
+from kairos_domain.rules import RULES, process_rules, runtime_rules
 from kairos_domain.scheduling import (
     DeadSubprocessReportedSuccess,
     ExecutionStatus,
     JobState,
     MonitorState,
+    SchedulingError,
     TerminalStateMutated,
     assert_not_reporting_success_when_dead,
     assert_terminal_immutable,
@@ -161,12 +162,15 @@ class InvariantesDeSequenciaTests(unittest.TestCase):
     def test_inv2_varios_tool_results_seguidos_sao_validos(self):
         # Uma chamada do assistente pode gerar vários resultados; isso é a
         # forma normal do protocolo, não violação.
-        check_role_alternation([
-            user(),
-            assistant(tool_calls=("a", "b")),
-            tool("a"), tool("b"),
-            assistant(),
-        ])
+        check_role_alternation(
+            [
+                user(),
+                assistant(tool_calls=("a", "b")),
+                tool("a"),
+                tool("b"),
+                assistant(),
+            ]
+        )
 
     def test_inv3_usuario_sintetico_viola(self):
         with self.assertRaises(SyntheticUserMessageError):
@@ -188,12 +192,12 @@ class InvariantesDeSequenciaTests(unittest.TestCase):
 class CompactionTests(unittest.TestCase):
     def test_regra1_fronteira_nao_corta_par_de_ferramenta(self):
         msgs = [
-            user(),                          # 0
-            assistant(tool_calls=("a",)),    # 1  <- cortar aqui deixaria 'a' órfão
-            tool("a"),                       # 2
-            assistant(),                     # 3
-            user(),                          # 4
-            assistant(),                     # 5
+            user(),  # 0
+            assistant(tool_calls=("a",)),  # 1  <- cortar aqui deixaria 'a' órfão
+            tool("a"),  # 2
+            assistant(),  # 3
+            user(),  # 4
+            assistant(),  # 5
         ]
         boundary = plan_boundary(msgs, CompactionPolicy(protect_first_n=2, protect_last_n=2))
         # Empurrada de 2 para 3: a cabeça preservada não pode conter um
@@ -247,8 +251,15 @@ class LineageTests(unittest.TestCase):
         self.lin = Lineage()
 
     def _s(self, sid, parent=None, end=None, ended_at=None, started=1.0, **kw):
-        s = Session(id=sid, source="cli", started_at=started,
-                    parent_session_id=parent, end_reason=end, ended_at=ended_at, **kw)
+        s = Session(
+            id=sid,
+            source="cli",
+            started_at=started,
+            parent_session_id=parent,
+            end_reason=end,
+            ended_at=ended_at,
+            **kw,
+        )
         self.lin.add(s)
         return s
 
@@ -312,9 +323,8 @@ class OwnershipTests(unittest.TestCase):
 
     def test_inv9_ator_autonomo_nao_faz_hard_delete(self):
         for actor in (Actor.CURATOR, Actor.BACKGROUND_REVIEW):
-            with self.subTest(actor=actor):
-                with self.assertRaises(HardDeleteByAutonomousActor):
-                    assert_can_hard_delete(actor)
+            with self.subTest(actor=actor), self.assertRaises(HardDeleteByAutonomousActor):
+                assert_can_hard_delete(actor)
 
     def test_usuario_em_foreground_pode(self):
         assert_can_hard_delete(Actor.USER_FOREGROUND)
@@ -360,16 +370,22 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(collapse_backlog(500), 1)
 
     def test_inv7_estado_terminal_e_imutavel(self):
-        for terminal in (ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.UNKNOWN):
-            with self.subTest(status=terminal):
-                with self.assertRaises(TerminalStateMutated):
-                    assert_terminal_immutable(terminal, ExecutionStatus.RUNNING)
+        for terminal in (
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.UNKNOWN,
+        ):
+            with self.subTest(status=terminal), self.assertRaises(TerminalStateMutated):
+                assert_terminal_immutable(terminal, ExecutionStatus.RUNNING)
         # Não-terminal pode avançar.
         assert_terminal_immutable(ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
 
     def test_inv8_reconciliacao_exige_prova_de_morte(self):
         self.assertEqual(finish_status_for_dead_owner(owner_is_live=False), ExecutionStatus.UNKNOWN)
-        with self.assertRaises(Exception):
+        # Exceção específica: `assertRaises(Exception)` passaria até com um
+        # TypeError de assinatura errada, e o teste deixaria de significar
+        # "o dono vivo é recusado".
+        with self.assertRaises(SchedulingError):
             finish_status_for_dead_owner(owner_is_live=True)
 
     def test_inv15_morto_nao_reporta_sucesso(self):
@@ -378,9 +394,7 @@ class SchedulingTests(unittest.TestCase):
                 owner_is_live=False, status=ExecutionStatus.COMPLETED
             )
         # 'unknown' é exatamente o que ele PODE reportar.
-        assert_not_reporting_success_when_dead(
-            owner_is_live=False, status=ExecutionStatus.UNKNOWN
-        )
+        assert_not_reporting_success_when_dead(owner_is_live=False, status=ExecutionStatus.UNKNOWN)
 
     def test_falha_da_fonte_nao_muda_o_hash(self):
         antes = MonitorState(last_output_hash="abc", last_changed_at=1.0)
@@ -397,6 +411,7 @@ class RegistryTests(unittest.TestCase):
         """Um ponteiro quebrado no registro é pior que ponteiro nenhum:
         parece imposto e não está."""
         import importlib
+
         for inv in INVARIANTS:
             if inv.enforcement is not Enforcement.DOMAIN:
                 continue
@@ -404,14 +419,14 @@ class RegistryTests(unittest.TestCase):
                 alvo = referencia.strip().split(" ")[0]
                 with self.subTest(invariant=inv.number, alvo=alvo):
                     partes = alvo.split(".")
-                    função = partes[-1]
+                    nome_funcao = partes[-1]
                     caminho = ".".join(partes[:-1])
                     # Invariantes do domínio omitem o prefixo do pacote.
                     if not caminho.startswith("kairos_"):
                         caminho = f"kairos_domain.{caminho}"
-                    módulo = importlib.import_module(caminho)
+                    mod = importlib.import_module(caminho)
                     self.assertTrue(
-                        hasattr(módulo, função),
+                        hasattr(mod, nome_funcao),
                         f"invariante {inv.number} aponta para {alvo}, que não existe",
                     )
 
@@ -429,12 +444,14 @@ class RegistryTests(unittest.TestCase):
         """
         CONCLUIDAS = {"01", "02", "03", "04", "05", "06", "07"}
         import re
+
         for inv in unenforced():
             m = re.search(r"Tarefa (\d+)", inv.enforced_at)
             if m:
                 with self.subTest(invariant=inv.number):
                     self.assertNotIn(
-                        m.group(1), CONCLUIDAS,
+                        m.group(1),
+                        CONCLUIDAS,
                         f"invariante {inv.number} difere para a Tarefa {m.group(1)}, "
                         "que já foi concluída",
                     )
@@ -443,11 +460,20 @@ class RegistryTests(unittest.TestCase):
         grupos = {r.group for r in RULES}
         self.assertEqual(
             grupos,
-            {"cache", "compaction", "ownership", "credentials", "scheduling", "surface", "rejected"},
+            {
+                "cache",
+                "compaction",
+                "ownership",
+                "credentials",
+                "scheduling",
+                "surface",
+                "rejected",
+            },
         )
 
     def test_as_dez_regras_de_compactacao(self):
         from kairos_domain.rules import by_group
+
         self.assertEqual(len(by_group("compaction")), 10)
 
     def test_regras_de_processo_nao_viram_codigo_falso(self):

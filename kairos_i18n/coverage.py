@@ -19,13 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
+    "COVERAGE",
     "Surface",
     "SurfaceCoverage",
-    "COVERAGE",
     "coverage_for",
     "covers",
-    "intends",
     "falls_back_to_english",
+    "intends",
 ]
 
 
@@ -85,10 +85,27 @@ class Surface:
 
 
 #: Os 17 do backend e da SPA no legado. O Kairos herda o conjunto como alvo.
-_SEVENTEEN = frozenset({
-    "af", "ar", "de", "en", "es", "fr", "ga", "hu", "it",
-    "ja", "ko", "pt", "ru", "tr", "uk", "zh", "zh-hant",
-})
+_SEVENTEEN = frozenset(
+    {
+        "af",
+        "ar",
+        "de",
+        "en",
+        "es",
+        "fr",
+        "ga",
+        "hu",
+        "it",
+        "ja",
+        "ko",
+        "pt",
+        "ru",
+        "tr",
+        "uk",
+        "zh",
+        "zh-hant",
+    }
+)
 
 COVERAGE: dict[str, SurfaceCoverage] = {
     Surface.BACKEND: SurfaceCoverage(
@@ -101,13 +118,13 @@ COVERAGE: dict[str, SurfaceCoverage] = {
     ),
     Surface.SPA: SurfaceCoverage(
         surface=Surface.SPA,
-        locales=frozenset(),      # Tarefa 18
+        locales=frozenset(),  # Tarefa 18
         target_locales=_SEVENTEEN,
         rationale="Rótulos de UI administrativa; paridade garantida pelo compilador.",
     ),
     Surface.DESKTOP: SurfaceCoverage(
         surface=Surface.DESKTOP,
-        locales=frozenset(),      # Tarefa 19
+        locales=frozenset(),  # Tarefa 19
         target_locales=frozenset({"ar", "en", "ja", "zh", "zh-hant"}),
         rationale=(
             "Catálogo ~4x maior que o da SPA (3.350 linhas). Expandir para 17 "
@@ -123,8 +140,7 @@ def coverage_for(surface: str) -> SurfaceCoverage:
         return COVERAGE[surface]
     except KeyError:
         raise KeyError(
-            f"superfície desconhecida: {surface!r}. "
-            f"Conhecidas: {sorted(COVERAGE)}"
+            f"superfície desconhecida: {surface!r}. Conhecidas: {sorted(COVERAGE)}"
         ) from None
 
 

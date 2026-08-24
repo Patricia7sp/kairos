@@ -1,0 +1,18 @@
+# Configuração do hadolint para o Dockerfile do Kairos.
+#
+# O objetivo é pegar REGRESSÃO nova, não reescrever a imagem para silenciar
+# regra que é escolha deliberada. Cada ignore abaixo tem justificativa de uma
+# linha — um ignore sem motivo é dívida disfarçada de configuração.
+failure-threshold: warning
+
+ignored:
+  # DL3008: não fixamos versão de pacote apt. Fixar exigiria atualizar o
+  # Dockerfile a cada patch de segurança do Debian, e o custo supera o ganho
+  # numa imagem que já parte de uma base versionada.
+  - DL3008
+  # DL3013: idem para pip — as versões vêm do pyproject/uv.lock, que é onde
+  # a fixação pertence.
+  - DL3013
+  # DL3059: RUNs consecutivos são deliberados aqui, para que o cache de
+  # camada quebre no ponto certo (deps antes de código).
+  - DL3059

@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.16"]
 
 [tool.setuptools]
 packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container"]
@@ -21,3 +21,56 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: exige Docker; pulado quando a imagem não foi construída",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Conjunto DELIBERADO, não o default inteiro. Cada família está aqui porque
+# pega uma classe de erro que já apareceu neste projeto ou que custa caro:
+select = [
+    "F",      # pyflakes — import morto, nome indefinido
+    "E", "W", # pycodestyle
+    "I",      # ordenação de import (diff ruidoso é diff que ninguém lê)
+    "UP",     # pyupgrade — sintaxe obsoleta para o alvo 3.11
+    "B",      # bugbear — armadilhas reais, incl. assertRaises(Exception)
+    "SIM",    # simplificações que reduzem aninhamento
+    "S",      # bandit — o projeto executa comandos e escreve arquivos
+    "BLE",    # blind except — permitido, mas cada um tem de ser justificado
+    "PL",     # pylint (subconjunto)
+    "RUF",
+]
+ignore = [
+    "E501",    # comprimento de linha: o formatador cuida; falhar por isso é ruído
+    "S101",    # assert: é a linguagem dos testes
+    "PLR2004", # "magic value": em teste, o valor literal É a asserção
+    "PLR0913", # muitos argumentos: repositórios espelham colunas de tabela
+    # --- famílias deliberadas, com o motivo ---
+    # Import tardio é padrão neste projeto: quebra ciclo entre camadas e
+    # mantém o caminho de boot barato (o CLI sonda .container-mode antes de
+    # qualquer import pesado).
+    "PLC0415",
+    # `global` para cache de módulo em i18n e contention. A alternativa —
+    # classe singleton — troca uma linha explícita por indireção.
+    "PLW0603",
+    # `contextlib.suppress` esconde QUAL exceção foi engolida no ponto de
+    # leitura; nos caminhos de degradação queremos o `except` visível.
+    "SIM105",
+    # Muitos `return` numa cascata de classificação é a forma mais legível:
+    # cada degrau devolve e sai.
+    "PLR0911",
+    # O código é escrito em português: travessão e aspas tipográficas são
+    # pontuação correta aqui, não caractere ambíguo infiltrado.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Testes executam subprocessos e mexem em tempdir de propósito.
+"tests/**" = ["S603", "S607", "S108"]
+
+[tool.ruff.format]
+quote-style = "double"

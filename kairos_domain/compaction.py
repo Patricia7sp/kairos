@@ -17,14 +17,14 @@ from kairos_domain.message import (
 )
 
 __all__ = [
-    "CompactionPolicy",
-    "CompactionError",
-    "SummaryProvenanceError",
-    "plan_boundary",
-    "effective_protect_first_n",
-    "validate_summary_provenance",
-    "next_cooldown_seconds",
     "COOLDOWN_LADDER",
+    "CompactionError",
+    "CompactionPolicy",
+    "SummaryProvenanceError",
+    "effective_protect_first_n",
+    "next_cooldown_seconds",
+    "plan_boundary",
+    "validate_summary_provenance",
 ]
 
 
@@ -106,7 +106,7 @@ def plan_boundary(messages: list[Message], policy: CompactionPolicy) -> int:
         return 0
 
     real_indices = [i for i, m in enumerate(messages) if m.role in (Role.USER, Role.ASSISTANT)]
-    tail = real_indices[-policy.protect_last_n:] if policy.protect_last_n else []
+    tail = real_indices[-policy.protect_last_n :] if policy.protect_last_n else []
     ceiling = tail[0] if tail else total
 
     boundary = min(policy.protect_first_n, ceiling)

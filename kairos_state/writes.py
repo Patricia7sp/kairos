@@ -13,7 +13,7 @@ from typing import TypeVar
 
 from kairos_state.contention import BUDGET_SECONDS, Budget, record_wait
 
-__all__ = ["WriteGaveUp", "write_with_retry", "is_busy_error"]
+__all__ = ["WriteGaveUp", "is_busy_error", "write_with_retry"]
 
 T = TypeVar("T")
 
@@ -50,7 +50,10 @@ def _sleep_before_retry(elapsed: float) -> None:
     comboio. Jitter os escalona naturalmente.
     """
     low, high = _FAST_JITTER if elapsed < _SLOW_AFTER_S else _SLOW_JITTER
-    time.sleep(random.uniform(low, high))
+    # `random` e não `secrets`: isto é escalonamento de retry, não segredo.
+    # O objetivo é que dois escritores não acordem juntos; um PRNG previsível
+    # serve, e `secrets` custaria entropia do sistema num laço quente.
+    time.sleep(random.uniform(low, high))  # noqa: S311
 
 
 def write_with_retry(

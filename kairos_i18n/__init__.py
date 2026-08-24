@@ -34,20 +34,20 @@ from kairos_i18n.coverage import (
 )
 
 __all__ = [
-    "SUPPORTED_LANGUAGES",
     "BASELINE",
-    "LANGUAGE_ENV",
-    "t",
-    "get_language",
-    "reset_language_cache",
-    "flatten",
-    "load_catalog",
-    "locales_dir",
-    "Surface",
     "COVERAGE",
+    "LANGUAGE_ENV",
+    "SUPPORTED_LANGUAGES",
+    "Surface",
     "coverage_for",
     "covers",
     "falls_back_to_english",
+    "flatten",
+    "get_language",
+    "load_catalog",
+    "locales_dir",
+    "reset_language_cache",
+    "t",
 ]
 
 BASELINE = "en"
