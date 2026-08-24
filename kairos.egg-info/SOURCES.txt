@@ -10,6 +10,10 @@ kairos_agent/auxiliary.py
 kairos_agent/compaction.py
 kairos_agent/loop.py
 kairos_agent/micro_compaction.py
+kairos_cli/__init__.py
+kairos_cli/auth.py
+kairos_cli/config.py
+kairos_cli/startup_fast.py
 kairos_container/__init__.py
 kairos_cron/__init__.py
 kairos_cron/dispatch.py
@@ -62,6 +66,7 @@ kairos_tools/registry.py
 tests/test_agent.py
 tests/test_cjk.py
 tests/test_container.py
+tests/test_cron.py
 tests/test_domain.py
 tests/test_gateway.py
 tests/test_i18n.py

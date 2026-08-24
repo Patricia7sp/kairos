@@ -1217,6 +1217,71 @@ default silencioso ("para sempre") é o mais perigoso dos dois.
 
 ---
 
+## Tarefa 15 — hermes-cli
+
+### D-15.1 — O fast path é leve, e a leveza é testada em subprocesso
+
+`startup_fast.py` é importado antes da parede de imports pesados e usa só
+`os`/`sys`. A guarda importa o módulo num **subprocesso limpo** e reprova se
+qualquer módulo pesado aparecer em `sys.modules`.
+
+Sem a guarda, a leveza se perde na primeira vez que alguém adiciona um import
+"só para uma coisinha" — e ninguém percebe, porque nada quebra: só fica lento.
+
+### D-15.2 — A linha de versão tem UMA implementação
+
+O bug do legado vale reproduzir como lição: a impressão de versão foi
+duplicada em cópias `*_fast()`, cada uma reimplementando resolução de raiz,
+detecção de container e de perfil. As cópias divergiram — um commit mudou a
+saída canônica e referenciou, dentro da função rápida, um símbolo que não
+existe naquele caminho. `--version` passou a dar `NameError` no fast path
+*"and nobody noticed"*.
+
+Uma implementação única, importada pelos dois caminhos, torna a divergência
+**estruturalmente impossível**.
+
+### D-15.3 — O fast path sonda, o caminho lento decide
+
+`container_mode_marker_exists()` faz um `stat` e nada mais. Quanto menos este
+módulo souber do formato do arquivo, menos há para dessincronizar com o parse
+autoritativo — e o erro é sempre **em direção ao caminho lento**.
+
+### D-15.4 — A camada de origem é devolvida junto com o valor
+
+`ConfigResolver.resolve` devolve `(valor, camada)`. É o que torna a
+configuração depurável: *"por que este valor?"* tem resposta sem o usuário
+adivinhar em qual dos cinco lugares olhar.
+
+A precedência é um `IntEnum`, não a ordem implícita de um `if`: dá para
+testá-la, e acrescentar camada vira mudança visível.
+
+### D-15.5 — O lock de auth tem duas camadas porque cada uma cobre o que a outra não cobre
+
+`flock` separa **processos**. Um `threading.local` separa **threads** — e é
+necessário porque o flock do kernel **não** separa threads do mesmo processo:
+as duas passariam pelo `LOCK_EX` e escreveriam por cima uma da outra.
+
+Sem `fcntl` nem `msvcrt`, degrada para o lock só por thread: pior, mas melhor
+que nenhum.
+
+### D-15.6 — A herança de credencial é assimétrica de propósito
+
+O `auth.json` do perfil é a autoridade; provedores não configurados nele
+herdam do global em **somente leitura**; e toda escrita nova vai para o
+perfil.
+
+Sem a assimetria, configurar um provedor dentro de um perfil escreveria no
+global e vazaria para os outros — que é exatamente o isolamento que o perfil
+existe para dar.
+
+### D-15.7 — A escrita de auth é transacional
+
+`tmp` + `replace`, sob lock. Um `auth.json` meio escrito é **indistinguível de
+um sem credencial**, e o sintoma aparece como falha de autenticação — não como
+arquivo corrompido, que é o que o usuário procuraria.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

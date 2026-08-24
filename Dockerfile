@@ -69,6 +69,7 @@ COPY kairos_gateway/ ./kairos_gateway/
 COPY kairos_mcp/ ./kairos_mcp/
 COPY kairos_agent/ ./kairos_agent/
 COPY kairos_cron/ ./kairos_cron/
+COPY kairos_cli/ ./kairos_cli/
 COPY locales/ ./locales/
 COPY native/ ./native/
 

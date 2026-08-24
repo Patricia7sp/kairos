@@ -27,7 +27,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 12 — mcp | ✅ concluída |
 | 13 — agent | ✅ concluída |
 | 14 — cron | ✅ concluída |
-| 15–21 | pendentes |
+| 15 — hermes-cli | ✅ concluída |
+| 16–21 | pendentes |
 
 ## Ambiente
 
