@@ -27,6 +27,12 @@ kairos_state/contention.py
 kairos_state/migrations.py
 kairos_state/schema.py
 kairos_state/writes.py
+kairos_tools/__init__.py
+kairos_tools/approval.py
+kairos_tools/budget.py
+kairos_tools/parallel.py
+kairos_tools/policy.py
+kairos_tools/registry.py
 tests/test_cjk.py
 tests/test_container.py
 tests/test_domain.py

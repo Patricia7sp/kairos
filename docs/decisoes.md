@@ -690,6 +690,102 @@ ordem das flags.
 
 ---
 
+## Tarefa 08 — tools
+
+### D-08.1 — A ordem das camadas de aprovação é a política (T-27)
+
+`resolve()` é o **ponto de entrada único**, e isso é o desenho, não
+conveniência. Expor as camadas individualmente permitiria a um chamador
+consultá-las fora de ordem — e um `if allowlist: allow` escrito antes do
+`user_deny` em qualquer lugar do código anularia a camada 4.
+
+A propriedade que não pode se perder, com teste que a fixa:
+
+```
+4. approvals.deny    ← ACIMA do bypass
+5. yolo / mode=off   ← ABAIXO da negação do usuário
+6. command_allowlist
+```
+
+**`--yolo` amplia o que é permitido e nunca alcança o que foi proibido.**
+`Layer` é `IntEnum` justamente para que a ordem seja comparável em teste, e
+`Decision.bypassable` expõe a propriedade sem que o chamador precise conhecer
+os números.
+
+### D-08.2 — As duas camadas veem exatamente as mesmas variantes
+
+A desofuscação (`detection_variants`) alimenta tanto o `approvals.deny` quanto
+a detecção de padrão perigoso. Se divergissem, a ofuscação viraria caminho de
+contorno de uma e não da outra — a pior combinação possível, porque criaria a
+impressão de proteção onde ela é seletiva.
+
+`r\m -rf /`, `g\i\t st""atus` e `rm${IFS}-rf${IFS}x` recebem o mesmo veredito
+das formas simples.
+
+### D-08.3 — A mensagem de recusa fala com o modelo, não com o humano
+
+*"NÃO tente de novo nem reformule o comando; o usuário o proibiu
+explicitamente."* Uma recusa genérica inicia uma busca por sinônimo: o modelo
+tenta `unlink` depois de `rm`, `python -c "os.remove"` depois disso. A recusa
+precisa **encerrar a tentativa**.
+
+### D-08.4 — Allowlist e blocklist, cada uma onde faz sentido
+
+Sandbox por **allowlist** (7): ferramenta nova nasce invisível até alguém
+decidir o contrário. Uma blocklist esqueceria o que ainda não existe.
+
+Delegação por **blocklist** (5): o subagente é o mesmo agente com menos
+autoridade, então herdar tudo menos exceções nomeadas é o default correto. E
+cada exceção carrega o **motivo** — é o que impede a lista de virar folclore,
+e `delegate_block_reason` devolve o motivo em vez de um booleano porque sem
+ele o modelo tenta por outro caminho achando que foi acidente.
+
+Ambas `frozenset`: política mutável em runtime não é política, é sugestão.
+
+### D-08.5 — Requisito não atendido OMITE a ferramenta
+
+Um schema que o modelo pode chamar e que sempre erra é pior que ferramenta
+ausente: ele tenta, falha, e tenta de novo achando que errou os argumentos.
+E um requisito que **levanta** conta como não satisfeito — propagar
+transformaria a montagem do prompt inteiro em falha por causa de uma sonda de
+ambiente.
+
+### D-08.6 — Correção de spec: o critério de paralelizabilidade existe
+
+A unit marcava 🔴: *"o critério que decide quais ferramentas de um lote são
+paralelizáveis não foi localizado"*. Ele existe, em
+`agent/tool_dispatch_helpers.py:44-73` — a busca anterior olhou `tools/`, e
+ele mora em `agent/`.
+
+São quatro classes, e a terceira é a interessante: **arbitragem por
+sobreposição de caminho**. Leitores compartilham subárvore entre si; um
+escritor conflita com qualquer reserva sobreposta. A razão está no próprio
+código: impedir que um `search_files`/`read_file` em lote observe estado
+**pré-mutação** quando o modelo os agrupa junto com o `patch`/`write_file` de
+que dependem — *"the classic same-block write→read race"*.
+
+### D-08.7 — Dois testes meus afirmavam a propriedade errada
+
+Ao testar a segmentação, assumi que "ordenado" significava "segmentos
+separados". Não significa: trechos sequenciais adjacentes são **fundidos**, e
+a fusão preserva a ordem. A propriedade real é **não estarem na mesma corrida
+paralela**, e virou o helper `assert_ordenados`.
+
+O segundo era mais sutil: misturei caminho absoluto no corpo do patch com
+caminho absoluto no leitor, sem perceber que cabeçalhos de patch são
+**relativos à raiz do repositório**. O teste realista usa a forma relativa nos
+dois lados. E acrescentei o caso complementar: o leitor do `path=` obsoleto
+**não** deve ser ordenado atrás, porque o patch não toca aquele arquivo.
+
+### D-08.8 — O teste de deriva do Dockerfile funcionou
+
+`kairos_tools` entrou no `pyproject` e não no `COPY`. O teste criado na
+Tarefa 07 — depois de o build real pegar exatamente isso com
+`kairos_container` — reprovou sozinho, antes de qualquer build. É a diferença
+entre aprender com um bug e prevenir o próximo.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

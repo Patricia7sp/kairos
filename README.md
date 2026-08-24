@@ -20,7 +20,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 05 — hermes-state | ✅ concluída |
 | 06 — i18n | ✅ concluída |
 | 07 — container | ✅ concluída |
-| 08–21 | pendentes |
+| 08 — tools | ✅ concluída |
+| 09–21 | pendentes |
 
 ## Ambiente
 

@@ -61,6 +61,7 @@ COPY kairos_state/ ./kairos_state/
 COPY kairos_domain/ ./kairos_domain/
 COPY kairos_i18n/ ./kairos_i18n/
 COPY kairos_container/ ./kairos_container/
+COPY kairos_tools/ ./kairos_tools/
 COPY locales/ ./locales/
 COPY native/ ./native/
 
