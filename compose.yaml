@@ -28,10 +28,17 @@ services:
       # UID/GID do dono do volume. O stage2 roda como root só para ajustá-los
       # e então cada serviço derruba privilégio no próprio `run`.
       KAIROS_UID: "10000"
-      # Token estável do dashboard. Sem esta variável o servidor gera um por
-      # processo — melhor para segurança, mas invalida as abas abertas a cada
-      # restart, e o Komodo reinicia o container com frequência.
-      KAIROS_WEB_TOKEN: ${KAIROS_WEB_TOKEN:?defina KAIROS_WEB_TOKEN no ambiente da stack}
+      # KAIROS_WEB_TOKEN foi DELIBERADAMENTE removida daqui.
+      #
+      # Um token em variável de ambiente aparece em `docker inspect`, no dump
+      # de configuração da stack e em qualquer `printenv` — quem alcança o host
+      # o lê sem precisar de mais nada. O token agora vive em
+      # /opt/data/web-token (0600, dentro do volume, portanto sobrevive a
+      # redeploy), gerado com `kairos token new`.
+      #
+      # Para reintroduzi-la — um cofre que injeta o valor, por exemplo — basta
+      # declará-la no ambiente da stack: a variável tem precedência sobre o
+      # arquivo.
 
     # O gateway é o serviço principal e não escuta em porta nenhuma, então o
     # healthcheck sonda o dashboard, que é o que precisa estar alcançável.
