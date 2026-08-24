@@ -340,7 +340,7 @@ class CredentialTests(unittest.TestCase):
 
     def test_config_nao_credencial_no_env_e_recusada(self):
         with self.assertRaises(NotACredentialError):
-            assert_env_is_for_secrets("HERMES_LOG_LEVEL", is_credential=False)
+            assert_env_is_for_secrets("KAIROS_LOG_LEVEL", is_credential=False)
         assert_env_is_for_secrets("OPENAI_API_KEY", is_credential=True)
 
     def test_so_401_403_confirmado_reautentica(self):

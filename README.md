@@ -1,6 +1,14 @@
-# Kairos
+<picture>
+  <source srcset="brand/kairos-logo-dark.svg" media="(prefers-color-scheme: dark)">
+  <img src="brand/kairos-logo-light.svg" alt="Kairos" width="260">
+</picture>
 
 Reimplementação do Hermes a partir das especificações geradas pelo Reversa.
+
+A origem fica no histórico e nas referências de spec (`enforced_at`,
+`source_ref`, `unit=`), que é onde rastreabilidade pertence. O que **roda** é
+Kairos: identidade, rotas, header de sessão e health check. `brand/` traz o
+manual da marca.
 
 **Specs (fonte da verdade):** `../hermes-agent/_reversa_sdd/`
 **Plano de reconstrução:** `../hermes-agent/_reversa_sdd/reconstruction-plan.md`

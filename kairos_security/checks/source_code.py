@@ -76,7 +76,7 @@ def _is_real_credential(line: str, match: re.Match[str]) -> bool:
     key, value = match.group(1), match.group(2)
     if _normalize(value) == _normalize(key):
         return False
-    # `TOKEN_HEADER = "X-Hermes-Session-Token"` guarda o *nome* do cabeçalho,
+    # `TOKEN_HEADER = "X-Kairos-Session-Token"` guarda o *nome* do cabeçalho,
     # não o segredo que trafega nele.
     if key.upper().endswith(("_HEADER", "_NAME", "_FIELD", "_PARAM", "_PREFIX")):
         return False

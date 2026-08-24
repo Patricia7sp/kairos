@@ -147,3 +147,55 @@ class SessionTokenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IdentidadeKairosTests(unittest.TestCase):
+    """A porta 9119 serve Kairos, não Hermes Agent.
+
+    O `web_dist` chegou pronto do Hermes (não há fonte da SPA neste
+    repositório), então a marca só se mantém se alguém verificar. Reimportar o
+    dist sem repassar o rebrand faz o dashboard voltar a se anunciar como
+    Hermes — e é isso que estes testes travam.
+    """
+
+    DIST = Path(__file__).resolve().parent.parent / "kairos_web" / "web_dist"
+
+    def test_nenhum_artefato_servido_menciona_hermes(self):
+        suspeitos = []
+        for f in (
+            list(self.DIST.rglob("*.js"))
+            + list(self.DIST.rglob("*.css"))
+            + [self.DIST / "index.html"]
+        ):
+            if not f.is_file():
+                continue
+            texto = f.read_text(encoding="utf-8", errors="ignore")
+            if "hermes" in texto.lower():
+                suspeitos.append(f.relative_to(self.DIST).as_posix())
+        self.assertEqual(suspeitos, [], f"marca residual do Hermes em: {suspeitos}")
+
+    def test_o_titulo_da_pagina_e_kairos(self):
+        html = (self.DIST / "index.html").read_text(encoding="utf-8")
+        self.assertIn("<title>Kairos", html)
+
+    def test_o_contrato_do_token_casa_entre_servidor_e_bundles(self):
+        """Renomear de um lado só derruba o login — sem erro, só 401."""
+        from kairos_web.server import TOKEN_HEADER as header
+
+        self.assertEqual(header, "X-Kairos-Session-Token")
+        bundles = " ".join(
+            f.read_text(encoding="utf-8", errors="ignore") for f in self.DIST.rglob("*.js")
+        )
+        self.assertIn(header, bundles, "os bundles não esperam o header do servidor")
+        servidor = (Path(__file__).resolve().parent.parent / "kairos_web" / "server.py").read_text(
+            encoding="utf-8"
+        )
+        for nome in ("__KAIROS_SESSION_TOKEN__", "__KAIROS_AUTH_REQUIRED__"):
+            with self.subTest(nome=nome):
+                self.assertIn(nome, servidor)
+                self.assertIn(nome, bundles)
+
+    def test_o_health_se_identifica_como_kairos(self):
+        res = TestClient(app).get("/api/health")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["app"], "kairos")

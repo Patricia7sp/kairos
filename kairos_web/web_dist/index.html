@@ -2,12 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+    <meta name="theme-color" content="#0F172A" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <title>Hermes Agent - Dashboard</title>
+    <title>Kairos — Dashboard</title>
     <script type="module" crossorigin src="/assets/index-5L-kTU1u.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-CbXtAM7H.js">
     <link rel="modulepreload" crossorigin href="/assets/react-vendor-B6GYCG81.js">
@@ -22,8 +24,25 @@
     <link rel="modulepreload" crossorigin href="/assets/plugins-DQ1W4gl8.js">
     <link rel="modulepreload" crossorigin href="/assets/chat-activation-BiaqYo9D.js">
     <link rel="stylesheet" crossorigin href="/assets/index-mXYHKWVT.css">
+    <style>
+      .kairos-boot{position:fixed;inset:0;display:flex;flex-direction:column;
+        align-items:center;justify-content:center;gap:1.25rem;
+        background:#F8FAFC;font:500 .9rem/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;
+        color:#475569}
+      .kairos-boot img{width:min(60vw,219px);height:auto}
+      .kairos-boot p{margin:0;letter-spacing:.02em}
+      @media (prefers-color-scheme:dark){
+        .kairos-boot{background:#0B1220;color:#94A3B8}
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="kairos-boot" role="status" aria-live="polite">
+      <picture>
+        <source srcset="/kairos-logo-dark.svg" media="(prefers-color-scheme: dark)"/>
+        <img src="/kairos-logo-light.svg" alt="Kairos" width="219" height="64"/>
+      </picture>
+      <p>Iniciando…</p>
+    </div></div>
   </body>
 </html>

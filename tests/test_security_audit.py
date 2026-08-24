@@ -135,7 +135,7 @@ class SourceCodeScanTests(unittest.TestCase):
         self.assertNotIn("SEC-SRC-002", self._ids(f))
 
     def test_ignores_header_name_constant(self):
-        f = self._scan("h.py", 'TOKEN_HEADER = "X-Hermes-Session-Token"\n')
+        f = self._scan("h.py", 'TOKEN_HEADER = "X-Kairos-Session-Token"\n')
         self.assertNotIn("SEC-SRC-002", self._ids(f))
 
     def test_ignores_tokenize_which_merely_starts_with_token(self):

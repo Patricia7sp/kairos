@@ -53,7 +53,7 @@ DIST_DIR = Path(__file__).parent / "web_dist"
 SESSION_TOKEN = os.environ.get("KAIROS_WEB_TOKEN") or secrets.token_urlsafe(32)
 
 # O bundle do SPA já manda este header; o WebSocket manda `?token=`.
-TOKEN_HEADER = "X-Hermes-Session-Token"  # noqa: S105 — nome de header, não o segredo
+TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o segredo
 
 # `/api/health` fica aberto: é o que `kairos doctor` e o healthcheck do
 # container sondam, e não devolve nada além de "estou de pé".
@@ -586,8 +586,8 @@ if DIST_DIR.exists():
             html_content = index_file.read_text(encoding="utf-8")
             injected_script = (
                 "<script>"
-                f'window.__HERMES_SESSION_TOKEN__="{SESSION_TOKEN}";'
-                "window.__HERMES_AUTH_REQUIRED__=false;"
+                f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
+                "window.__KAIROS_AUTH_REQUIRED__=false;"
                 "</script>"
             )
             if "</head>" in html_content:

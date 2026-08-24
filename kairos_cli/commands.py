@@ -74,7 +74,7 @@ COMMANDS: tuple[Command, ...] = (
         "version",
         "Mostra a versão, o perfil e o modo de container",
         status=Status.IMPLEMENTED,
-        unit="hermes-cli",
+        unit="kairos-cli",
     ),
     # --- grupos (extraídos de hermes_cli/subcommands/) --------------------
     _c("acp", "Servidor Agent Client Protocol para editores", unit="acp-adapter"),
@@ -92,7 +92,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("add", "Adiciona uma credencial"),
         _sub("list", "Lista credenciais do perfil"),
         status=Status.IMPLEMENTED,
-        unit="hermes-cli",
+        unit="kairos-cli",
     ),
     _c("backup", "Backup e restauração do estado"),
     _c("claw", "Automação de browser"),
@@ -107,7 +107,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("set", "Define um valor"),
         _sub("show", "Mostra o valor efetivo e a camada de origem"),
         status=Status.IMPLEMENTED,
-        unit="hermes-cli",
+        unit="kairos-cli",
     ),
     _c("console", "Console interativo"),
     _c(
@@ -127,7 +127,7 @@ COMMANDS: tuple[Command, ...] = (
         "doctor",
         "Diagnóstico do ambiente e do estado",
         status=Status.IMPLEMENTED,
-        unit="hermes-state",
+        unit="kairos-state",
     ),
     _c("dump", "Exporta estado para inspeção"),
     _c(
@@ -145,9 +145,9 @@ COMMANDS: tuple[Command, ...] = (
     _c("hooks", "Hooks de plugin", unit="plugins"),
     _c("import-agent", "Importa configuração de outro agente"),
     _c("import", "Importa sessões e dados"),
-    _c("insights", "Métricas de uso e custo", unit="hermes-state"),
-    _c("login", "Autentica num provedor", unit="hermes-cli"),
-    _c("logout", "Encerra a autenticação", unit="hermes-cli"),
+    _c("insights", "Métricas de uso e custo", unit="kairos-state"),
+    _c("login", "Autentica num provedor", unit="kairos-cli"),
+    _c("logout", "Encerra a autenticação", unit="kairos-cli"),
     _c("logs", "Logs do gateway e dos serviços"),
     _c(
         "mcp",
@@ -199,7 +199,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("list", "Lista os perfis"),
         _sub("show", "Mostra o perfil ativo"),
         status=Status.IMPLEMENTED,
-        unit="hermes-cli",
+        unit="kairos-cli",
     ),
     _c("prompt-size", "Tamanho do prompt de sistema", unit="agent"),
     _c(
