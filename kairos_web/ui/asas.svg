@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 630" width="560" height="630" aria-hidden="true">
+  <g fill="none" stroke="#22D3EE" stroke-linecap="round" transform="translate(40 60)">
+      <path d="M 92 96 Q 296 66 500 50" stroke-width="8.5" opacity="0.300"/>
+      <path d="M 122 126 Q 305 96 488 80" stroke-width="8.0" opacity="0.270"/>
+      <path d="M 152 156 Q 314 126 476 110" stroke-width="7.4" opacity="0.240"/>
+      <path d="M 182 186 Q 323 156 464 140" stroke-width="6.8" opacity="0.210"/>
+      <path d="M 212 216 Q 332 186 452 170" stroke-width="6.3" opacity="0.180"/>
+      <path d="M 242 246 Q 341 216 440 200" stroke-width="5.8" opacity="0.150"/>
+      <path d="M 272 276 Q 350 246 428 230" stroke-width="5.2" opacity="0.120"/>
+  </g>
+  <g fill="none" stroke="#22D3EE" stroke-linecap="round" transform="translate(520 570) rotate(180) translate(0 -40)">
+      <path d="M 92 96 Q 296 66 500 50" stroke-width="8.5" opacity="0.300"/>
+      <path d="M 122 126 Q 305 96 488 80" stroke-width="8.0" opacity="0.270"/>
+      <path d="M 152 156 Q 314 126 476 110" stroke-width="7.4" opacity="0.240"/>
+      <path d="M 182 186 Q 323 156 464 140" stroke-width="6.8" opacity="0.210"/>
+      <path d="M 212 216 Q 332 186 452 170" stroke-width="6.3" opacity="0.180"/>
+      <path d="M 242 246 Q 341 216 440 200" stroke-width="5.8" opacity="0.150"/>
+      <path d="M 272 276 Q 350 246 428 230" stroke-width="5.2" opacity="0.120"/>
+  </g>
+</svg>

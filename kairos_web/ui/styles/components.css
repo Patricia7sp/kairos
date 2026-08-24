@@ -166,3 +166,31 @@
   .k-main { padding: var(--k-space-5) var(--k-space-4); }
 }
 @media (min-width: 901px) { .k-menu-toggle { display: none; } }
+
+/* --- tabela ------------------------------------------------------------- */
+
+/* O envoltório é que rola, não a página: uma tabela larga não pode empurrar
+ * o corpo inteiro para o lado. */
+.k-tabela-envolve { overflow-x: auto; padding: 0; }
+.k-tabela { width: 100%; border-collapse: collapse; font-size: var(--k-size-sm); }
+.k-tabela th, .k-tabela td {
+  text-align: left; padding: var(--k-space-3) var(--k-space-4);
+  border-bottom: 1px solid var(--k-border); vertical-align: top;
+}
+.k-tabela thead th {
+  font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--k-text-3); font-weight: var(--k-weight-medium);
+  position: sticky; top: 0; background: var(--k-surface);
+}
+.k-tabela tbody tr:last-child td { border-bottom: 0; }
+.k-tabela tbody tr:hover { background: var(--k-surface-2); }
+.k-tabela__sub { color: var(--k-text-3); font-size: var(--k-size-xs); margin-top: 2px; }
+.k-tabela__destaque { background: var(--k-accent-soft); }
+.k-tabela__destaque:hover { background: var(--k-accent-soft); }
+.k-tabela td .k-badge + .k-badge { margin-left: var(--k-space-1); }
+
+.k-modelo-padrao {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--k-space-4); margin-bottom: var(--k-space-5);
+}
+.k-modelo-padrao__valor { font-size: var(--k-size-lg); margin-top: var(--k-space-1); }

@@ -110,3 +110,20 @@ de ícones parecer um conjunto.
   este trabalho; `k-error` mostra rota e status.
 - **Ação otimista reverte quando o servidor recusa.** O interruptor de skill
   volta ao estado anterior — senão mostra algo que não aconteceu.
+
+## Autenticação
+
+A tela de entrada divide-se em duas: a marca à esquerda, a tarefa à direita.
+O painel esquerdo usa a **superfície invertida** — sempre escura, nos dois
+temas, porque a marca não muda de lado quando o sistema muda. As penas ao
+fundo são a talaria, em opacidade baixa: atmosfera que compete com o conteúdo
+vira ruído.
+
+Em tela estreita a marca vira faixa no topo e o texto do mito sai — numa
+coluna só ele empurraria o campo para fora da primeira dobra.
+
+O token **deixou de viajar no HTML**. Antes era injetado em toda resposta da
+raiz: quem alcançasse a porta obtinha a credencial só de carregar a página.
+Agora entra pelo formulário e vira cookie `httpOnly` — fora do alcance de
+qualquer script — com `SameSite=Lax`. A interface herdada em `/legacy` ainda
+recebe o token na página porque lê de `window` e não sabe usar cookie.

@@ -45,3 +45,70 @@
 }
 .k-dialog__aviso { font-size: var(--k-size-xs); color: var(--k-text-3); }
 .k-dialog__foot svg { width: 16px; height: 16px; }
+
+/* --- login -------------------------------------------------------------- */
+
+.k-login { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100dvh; }
+
+.k-login__marca {
+  position: relative; overflow: hidden;
+  background: radial-gradient(120% 100% at 30% 20%, var(--k-inverso-bg-2) 0%, var(--k-inverso-bg) 70%);
+  color: var(--k-inverso-text);
+  display: flex; align-items: center; padding: var(--k-space-7);
+}
+.k-login__marca-conteudo { position: relative; z-index: 1; max-width: 30rem; }
+.k-login__simbolo { width: 62px; height: 62px; margin-bottom: var(--k-space-4); }
+.k-login__marca h1 { font-size: 3rem; letter-spacing: -.03em; }
+.k-login__lema {
+  color: var(--k-inverso-accent); font-size: var(--k-size-sm); letter-spacing: .22em;
+  text-transform: uppercase; margin-top: var(--k-space-2);
+}
+.k-login__mito {
+  margin-top: var(--k-space-5); color: var(--k-inverso-text-2);
+  font-size: var(--k-size-sm); line-height: 1.75; max-width: 34ch;
+}
+.k-login__mito em { color: var(--k-inverso-text-3); font-style: italic; }
+
+/* As asas — a talaria. Ficam atrás do texto e bem apagadas: são atmosfera, e
+ * atmosfera que compete com o conteúdo vira ruído. */
+.k-login__asas {
+  position: absolute; inset: 0;
+  background: url("/ui/asas.svg") right center / auto 118% no-repeat;
+  opacity: .3; pointer-events: none;
+}
+
+.k-login__forma {
+  display: flex; flex-direction: column; justify-content: center;
+  padding: var(--k-space-7) var(--k-space-6); background: var(--k-surface);
+}
+.k-login__form { width: min(24rem, 100%); margin: auto; display: grid; gap: var(--k-space-4); }
+.k-login__ajuda { color: var(--k-text-2); font-size: var(--k-size-sm); }
+.k-login__ajuda code { background: var(--k-surface-2); padding: 1px 5px; border-radius: var(--k-radius-sm); }
+.k-login__erro {
+  color: var(--k-danger); background: var(--k-danger-soft);
+  padding: var(--k-space-3); border-radius: var(--k-radius); font-size: var(--k-size-sm);
+}
+.k-login__enviar { width: 100%; padding: var(--k-space-3); }
+.k-login__rodape {
+  text-align: center; color: var(--k-text-3); font-size: var(--k-size-xs);
+  margin-top: var(--k-space-6);
+}
+
+@media (max-width: 860px) {
+  .k-login { grid-template-columns: 1fr; }
+  /* A marca vira faixa no topo; o mito sai, porque numa tela estreita ele
+   * empurraria o campo para fora da primeira dobra. */
+  .k-login__marca { padding: var(--k-space-6) var(--k-space-4); min-height: auto; }
+  .k-login__mito { display: none; }
+  .k-login__marca h1 { font-size: 2.2rem; }
+  .k-login__asas { opacity: .3; }
+}
+
+.k-skill-contagem { color: var(--k-text-3); font-size: var(--k-size-sm); margin-top: var(--k-space-2); }
+.k-skill-grupo + .k-skill-grupo { margin-top: var(--k-space-6); }
+.k-skill-grupo__titulo {
+  display: flex; align-items: center; gap: var(--k-space-3);
+  font-size: var(--k-size-md); text-transform: capitalize;
+  color: var(--k-text-2); margin-bottom: var(--k-space-3);
+  padding-bottom: var(--k-space-2); border-bottom: 1px solid var(--k-border);
+}

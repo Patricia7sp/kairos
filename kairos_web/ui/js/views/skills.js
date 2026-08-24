@@ -61,6 +61,7 @@ export async function skillsView(raiz) {
     <div class="k-page-head">
       <h1>Skills</h1>
       <p>Capacidades que o agente carrega. As embarcadas vêm com a imagem; as suas vivem em <code>KAIROS_HOME/skills</code>.</p>
+      <p class="k-skill-contagem" data-contagem></p>
     </div>
     <div class="k-skill-bar">
       <label class="k-field k-skill-busca">
@@ -99,7 +100,29 @@ export async function skillsView(raiz) {
       lista.innerHTML = `<div class="k-empty"><h3>Nada corresponde a “${esc(termo)}”</h3></div>`;
       return;
     }
-    lista.innerHTML = `<div class="k-grid k-grid--cards">${vis.map(cartao).join("")}</div>`;
+
+    // Agrupadas por categoria: 85 cartões numa grade única viram uma parede
+    // onde nada se acha. O cabeçalho de grupo é o que devolve a orientação.
+    const grupos = new Map();
+    for (const s of vis) {
+      const g = s.category || "geral";
+      if (!grupos.has(g)) grupos.set(g, []);
+      grupos.get(g).push(s);
+    }
+    const ativas = skills.filter((s) => s.enabled).length;
+    raiz.querySelector("[data-contagem]").textContent =
+      `${skills.length} skills em ${grupos.size} categorias · ${ativas} ativas` +
+      (termo ? ` · ${vis.length} correspondem ao filtro` : "");
+
+    lista.innerHTML = [...grupos.entries()]
+      .map(([nome, itens]) => `
+        <section class="k-skill-grupo">
+          <h2 class="k-skill-grupo__titulo">
+            ${esc(nome)} <span class="k-badge">${itens.length}</span>
+          </h2>
+          <div class="k-grid k-grid--cards">${itens.map(cartao).join("")}</div>
+        </section>`)
+      .join("");
   }
 
   raiz.querySelector("[data-filtro]").addEventListener("input", pintar);

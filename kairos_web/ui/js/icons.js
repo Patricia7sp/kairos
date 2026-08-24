@@ -27,5 +27,6 @@ export const icons = {
   check: svg('<path d="m4.5 12.5 5 5 10-11"/>'),
   save: svg('<path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h7V3M8 21v-7h8v7"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  logout: svg('<path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/>'),
   refresh: svg('<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>'),
 };

@@ -70,6 +70,16 @@
   --k-shadow-1: 0 0 0 1px rgb(15 23 42 / .04), 0 1px 2px rgb(15 23 42 / .06);
   --k-shadow-2: 0 0 0 1px rgb(15 23 42 / .05), 0 6px 20px -6px rgb(15 23 42 / .16);
 
+  /* Superfície invertida: sempre escura, nos dois temas. O painel do login
+   * carrega a marca, e a marca não muda de lado quando o sistema muda. Fora
+   * daqui nada deveria fixar cor. */
+  --k-inverso-bg:     #0B1220;
+  --k-inverso-bg-2:   #15243B;
+  --k-inverso-text:   #F1F5F9;
+  --k-inverso-text-2: #A9B8CC;
+  --k-inverso-text-3: #CBD5E1;
+  --k-inverso-accent: #22D3EE;
+
   --k-sidebar-w: 244px;
   --k-header-h: 60px;
 

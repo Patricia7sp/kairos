@@ -10,13 +10,17 @@ import { icons } from "./icons.js";
 import { aplicarTema, temaAtual } from "./ui.js";
 import { dashboardView } from "./views/dashboard.js";
 import { skillsView } from "./views/skills.js";
+import { sessoesView } from "./views/sessoes.js";
+import { modelosView } from "./views/modelos.js";
 import { emBreveView } from "./views/em-breve.js";
+import { loginView } from "./views/login.js";
+import { api } from "./api.js";
 
 const ROTAS = [
   { id: "visao-geral", titulo: "Visão geral", icone: "dashboard", grupo: "Agente", view: dashboardView },
   { id: "skills",      titulo: "Skills",      icone: "skills",    grupo: "Agente", view: skillsView },
-  { id: "sessoes",     titulo: "Sessões",     icone: "sessions",  grupo: "Agente", view: emBreveView },
-  { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: emBreveView },
+  { id: "sessoes",     titulo: "Sessões",     icone: "sessions",  grupo: "Agente", view: sessoesView },
+  { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
   { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: emBreveView },
   { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: emBreveView },
   { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: emBreveView },
@@ -58,6 +62,9 @@ function montarShell() {
         <div class="k-sidebar__foot">
           <button class="k-btn k-btn--ghost" data-tema style="width:100%">
             <span data-tema-icone></span><span data-tema-texto></span>
+          </button>
+          <button class="k-btn k-btn--ghost" data-sair style="width:100%">
+            ${icons.logout}<span>Sair</span>
           </button>
         </div>
       </aside>
@@ -115,7 +122,7 @@ async function navegar() {
 async function pintarSaude() {
   const alvo = document.querySelector("[data-saude]");
   try {
-    const { status, version } = await (await import("./api.js")).api.health();
+    const { status, version } = await api.health();
     alvo.className = "k-badge k-badge--ok";
     alvo.textContent = `${status} · v${version}`;
   } catch {
@@ -124,11 +131,22 @@ async function pintarSaude() {
   }
 }
 
-export function iniciar() {
+async function sair() {
+  try {
+    await api.logout();
+  } finally {
+    // Mesmo se o servidor não responder, a sessão desta aba acabou: manter a
+    // interface montada daria a impressão de continuar autenticado.
+    montarLogin();
+  }
+}
+
+function montarApp() {
   aplicarTema(temaAtual());
   montarShell();
   pintarBotaoTema();
   document.querySelector("[data-tema]").addEventListener("click", alternarTema);
+  document.querySelector("[data-sair]").addEventListener("click", sair);
   document.querySelector("[data-menu]").addEventListener("click", (ev) => {
     const barra = document.querySelector("[data-sidebar]");
     const aberto = barra.dataset.open === "true";
@@ -138,4 +156,21 @@ export function iniciar() {
   addEventListener("hashchange", navegar);
   navegar();
   pintarSaude();
+}
+
+function montarLogin() {
+  aplicarTema(temaAtual());
+  document.title = "Entrar · Kairos";
+  loginView({ aoEntrar: montarApp });
+}
+
+export async function iniciar() {
+  let autenticado = false;
+  try {
+    autenticado = (await api.quemSou()).authenticated === true;
+  } catch {
+    autenticado = false; // sem resposta: a tela de login é o destino seguro
+  }
+  if (autenticado) montarApp();
+  else montarLogin();
 }

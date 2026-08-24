@@ -127,9 +127,13 @@ class SessionTokenTests(unittest.TestCase):
     def test_health_stays_open_for_probes(self):
         self.assertEqual(self.anon.get("/api/health").status_code, 200)
 
-    def test_auth_me_reports_the_live_token(self):
-        res = self.auth.get("/api/auth/me")
-        self.assertEqual(res.json()["token"], SESSION_TOKEN)
+    def test_auth_me_NAO_devolve_o_token(self):
+        """A rota respondia com o token no corpo — quem a alcançasse levava a
+        credencial junto. Agora diz apenas quem está falando."""
+        corpo = self.auth.get("/api/auth/me").json()
+        self.assertTrue(corpo["authenticated"])
+        self.assertNotIn("token", corpo)
+        self.assertNotIn(SESSION_TOKEN, str(corpo))
 
     def test_ws_ticket_reports_the_live_token(self):
         res = self.auth.post("/api/auth/ws-ticket")
@@ -249,13 +253,11 @@ class RotasEVerbosTests(unittest.TestCase):
             os.chdir(tempfile.gettempdir())  # longe do repositório, como no container
             res = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN}).get("/api/skills")
             self.assertEqual(res.status_code, 200)
-            nomes = [s["id"] for s in res.json()["skills"]]
-            embarcadas = sorted(
-                d.name
-                for d in (P(__file__).resolve().parent.parent / "skills").iterdir()
-                if (d / "SKILL.md").exists()
-            )
-            self.assertEqual(sorted(nomes), embarcadas)
+            ids = {s["id"] for s in res.json()["skills"]}
+            raiz = P(__file__).resolve().parent.parent / "skills"
+            embarcadas = {md.parent.relative_to(raiz).as_posix() for md in raiz.rglob("SKILL.md")}
+            self.assertEqual(ids, embarcadas)
+            self.assertGreater(len(ids), 30, "o catálogo migrado não foi encontrado")
         finally:
             os.chdir(cwd)
 
@@ -417,8 +419,16 @@ class InterfaceKairosTests(unittest.TestCase):
         """A ponte existe enquanto chat e terminal não migram — e só ali."""
         self.assertEqual(self.client.get("/legacy/").status_code, 200)
 
-    def test_o_token_e_injetado_na_interface_propria(self):
-        self.assertIn("__KAIROS_SESSION_TOKEN__", self.client.get("/").text)
+    def test_o_token_NAO_viaja_no_html_da_interface_propria(self):
+        """Injetar o token no HTML entregava a credencial a quem só carregasse
+        a página. A interface autentica e passa a usar o cookie httpOnly."""
+        html = self.client.get("/").text
+        self.assertNotIn(SESSION_TOKEN, html)
+        self.assertNotIn("__KAIROS_SESSION_TOKEN__", html)
+
+    def test_a_interface_herdada_ainda_recebe_o_token(self):
+        """Ela lê de `window` e não sabe usar cookie; a ponte depende disso."""
+        self.assertIn("__KAIROS_SESSION_TOKEN__", self.client.get("/legacy/").text)
 
     def test_nenhum_arquivo_da_interface_menciona_hermes(self):
         for f in sorted(self.UI.rglob("*")):
@@ -452,3 +462,98 @@ class InterfaceKairosTests(unittest.TestCase):
             for cor in re.findall(r"#[0-9a-fA-F]{3,8}\b", f.read_text(encoding="utf-8")):
                 with self.subTest(arquivo=f.name, cor=cor):
                     self.assertIn(cor.lower(), permitido, f"{cor} em {f.name} fora de tokens.css")
+
+
+class AutenticacaoTests(unittest.TestCase):
+    """Entrar, sair, e voltar a ser barrado."""
+
+    def setUp(self):
+        self.anon = TestClient(app)
+
+    def test_rota_protegida_recusa_sem_credencial(self):
+        self.assertEqual(self.anon.get("/api/skills").status_code, 401)
+
+    def test_me_e_aberto_e_responde_que_nao_ha_sessao(self):
+        corpo = self.anon.get("/api/auth/me").json()
+        self.assertFalse(corpo["authenticated"])
+        self.assertTrue(corpo["auth_required"])
+
+    def test_login_com_token_errado_recusa(self):
+        res = self.anon.post("/api/auth/login", json={"token": "nao-e-o-token"})
+        self.assertEqual(res.status_code, 401)
+        self.assertNotIn(SESSION_TOKEN, res.text)
+
+    def test_o_ciclo_completo_entrar_usar_sair(self):
+        c = TestClient(app)
+        self.assertEqual(c.post("/api/auth/login", json={"token": SESSION_TOKEN}).status_code, 200)
+        self.assertEqual(c.get("/api/skills").status_code, 200, "não entrou")
+        self.assertTrue(c.get("/api/auth/me").json()["authenticated"])
+
+        self.assertEqual(c.post("/api/auth/logout").status_code, 200)
+        self.assertEqual(c.get("/api/skills").status_code, 401, "continuou dentro depois de sair")
+        self.assertFalse(c.get("/api/auth/me").json()["authenticated"])
+
+    def test_o_cookie_de_sessao_e_httponly(self):
+        """Sem httpOnly, qualquer script da página lê a credencial."""
+        c = TestClient(app)
+        res = c.post("/api/auth/login", json={"token": SESSION_TOKEN})
+        bruto = res.headers.get("set-cookie", "")
+        self.assertIn("kairos_session", bruto)
+        self.assertIn("httponly", bruto.lower())
+        self.assertIn("samesite=lax", bruto.lower())
+
+    def test_o_header_continua_valendo_para_cli_e_integracao(self):
+        c = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+        self.assertEqual(c.get("/api/skills").status_code, 200)
+
+
+class CatalogoDeSkillsTests(unittest.TestCase):
+    """As skills migradas do Hermes carregam e não trazem a marca de origem."""
+
+    RAIZ = Path(__file__).resolve().parent.parent / "skills"
+
+    def test_o_catalogo_tem_mais_de_trinta_skills(self):
+        encontradas = list(self.RAIZ.rglob("SKILL.md"))
+        self.assertGreater(len(encontradas), 30, f"só {len(encontradas)} skills")
+
+    def test_toda_skill_carrega_e_valida(self):
+        from kairos_skills.frontmatter import parse_frontmatter, validate_frontmatter
+
+        for md in sorted(self.RAIZ.rglob("SKILL.md")):
+            with self.subTest(skill=md.parent.name):
+                fm, _ = parse_frontmatter(md.read_text(encoding="utf-8"))
+                validate_frontmatter(fm)
+                self.assertTrue(fm.description.strip())
+
+    def test_nenhuma_skill_procura_o_ambiente_do_hermes(self):
+        """`$HERMES_HOME/.env` não existe no Kairos: a skill não acharia nada.
+
+        As referências de ambiente são funcionais, não decorativas — é por isso
+        que traduzi-las faz parte de migrar a capacidade, e não da estética.
+        """
+        proibidos = ("HERMES_HOME", "hermes_home", "~/.hermes", "$HOME/.hermes")
+        for f in sorted(self.RAIZ.rglob("*")):
+            if not f.is_file():
+                continue
+            try:
+                texto = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for termo in proibidos:
+                with self.subTest(arquivo=str(f.relative_to(self.RAIZ)), termo=termo):
+                    self.assertNotIn(termo, texto)
+
+    def test_as_skills_que_se_citam_por_caminho_resolvem(self):
+        """Achatar as categorias quebraria estes caminhos sem nada acusar."""
+        alvos = set()
+        for md in sorted(self.RAIZ.rglob("SKILL.md")):
+            alvos |= set(
+                re.findall(
+                    r"KAIROS_HOME[:\-\w${}/.]*?/skills/([\w/-]+\.\w+)",
+                    md.read_text(encoding="utf-8"),
+                )
+            )
+        self.assertTrue(alvos, "nenhuma referência cruzada encontrada")
+        for alvo in sorted(alvos):
+            with self.subTest(alvo=alvo):
+                self.assertTrue((self.RAIZ / alvo).exists(), f"skills/{alvo} não existe")

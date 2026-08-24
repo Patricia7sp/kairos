@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from hmac import compare_digest
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,9 +56,17 @@ SESSION_TOKEN = os.environ.get("KAIROS_WEB_TOKEN") or secrets.token_urlsafe(32)
 # O bundle do SPA já manda este header; o WebSocket manda `?token=`.
 TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o segredo
 
+# Cookie de sessão. Guarda o mesmo token, mas `httpOnly`: assim o JavaScript
+# da página não consegue lê-lo, e o token deixa de viajar dentro do HTML.
+# Antes ele era injetado em toda resposta da raiz — quem alcançasse a porta
+# obtinha a credencial só de carregar a página, sem autenticar-se.
+SESSION_COOKIE = "kairos_session"
+
 # `/api/health` fica aberto: é o que `kairos doctor` e o healthcheck do
 # container sondam, e não devolve nada além de "estou de pé".
-_OPEN_PATHS = frozenset({"/api/health"})
+# `/api/auth/*` precisa ficar aberto pelo motivo óbvio: é onde se autentica, e
+# é o que a interface consulta para saber se deve mostrar a tela de login.
+_OPEN_PATHS = frozenset({"/api/health", "/api/auth/me", "/api/auth/login", "/api/auth/logout"})
 
 
 def _token_ok(supplied: str | None) -> bool:
@@ -65,13 +74,28 @@ def _token_ok(supplied: str | None) -> bool:
     return bool(supplied) and compare_digest(supplied, SESSION_TOKEN)
 
 
+def _credencial(request) -> str | None:
+    """A credencial da requisição, venha de onde vier.
+
+    Cookie primeiro porque é o caminho da interface; header e query seguem
+    valendo para CLI, WebSocket e integração.
+    """
+    return (
+        request.cookies.get(SESSION_COOKIE)
+        or request.headers.get(TOKEN_HEADER)
+        or request.query_params.get("token")
+    )
+
+
+def _autenticado(request) -> bool:
+    return _token_ok(_credencial(request))
+
+
 @app.middleware("http")
 async def require_session_token(request, call_next):
     path = request.url.path
-    if path.startswith("/api/") and path not in _OPEN_PATHS:
-        supplied = request.headers.get(TOKEN_HEADER) or request.query_params.get("token")
-        if not _token_ok(supplied):
-            return JSONResponse({"error": "invalid_session_token"}, status_code=401)
+    if path.startswith("/api/") and path not in _OPEN_PATHS and not _autenticado(request):
+        return JSONResponse({"error": "invalid_session_token"}, status_code=401)
     return await call_next(request)
 
 
@@ -437,15 +461,46 @@ async def get_status():
     }
 
 
+class LoginRequest(BaseModel):
+    token: str
+
+
 @app.get("/api/auth/me")
-async def get_auth_me():
+async def get_auth_me(request: Request):
+    """Quem está falando. NUNCA devolve o token.
+
+    A versão anterior respondia `authenticated: True` fixo e incluía o token
+    no corpo — quem alcançasse a rota levava a credencial junto.
+    """
     return {
-        "authenticated": True,
-        "auth_required": False,
-        "user": "kairos-user",
-        "token": SESSION_TOKEN,
-        "role": "admin",
+        "authenticated": _autenticado(request),
+        "auth_required": True,
+        "user": "kairos" if _autenticado(request) else None,
     }
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest, response: Response):
+    if not _token_ok(req.token.strip()):
+        # Uma pausa curta encarece a tentativa em série sem punir quem erra
+        # de verdade uma vez.
+        await asyncio.sleep(0.4)
+        return JSONResponse({"error": "invalid_token"}, status_code=401)
+    response.set_cookie(
+        SESSION_COOKIE,
+        SESSION_TOKEN,
+        httponly=True,  # fora do alcance de qualquer script da página
+        samesite="lax",  # não acompanha requisição vinda de outro site
+        max_age=60 * 60 * 12,
+        path="/",
+    )
+    return {"authenticated": True, "user": "kairos"}
+
+
+@app.post("/api/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"authenticated": False}
 
 
 @app.post("/api/auth/ws-ticket")
@@ -556,25 +611,31 @@ def _read_skill(path: Path) -> dict:
 
 @app.get("/api/skills")
 async def list_skills():
+    """Lista as skills das duas raízes, com a categoria vinda do caminho.
+
+    A varredura é recursiva porque o catálogo é organizado por categoria
+    (`skills/github/github-auth/`), e as skills se referem umas às outras por
+    caminho completo — achatar quebraria essas referências.
+    """
     desabilitadas = _disabled_skills()
     encontradas: dict[str, dict] = {}
     for origem, raiz in _skill_roots():
         if not raiz.is_dir():
             continue
-        for d in sorted(raiz.iterdir()):
-            md = d / "SKILL.md"
-            if not (d.is_dir() and md.exists()):
-                continue
+        for md in sorted(raiz.rglob("SKILL.md")):
+            rel = md.parent.relative_to(raiz)
+            ident = rel.as_posix()
             info = _read_skill(md)
-            # A do usuário sobrepõe a embarcada de mesmo nome.
-            encontradas[d.name] = {
+            # A do usuário sobrepõe a embarcada de mesmo identificador.
+            encontradas[ident] = {
                 **info,
-                "id": d.name,
-                "enabled": d.name not in desabilitadas,
+                "id": ident,
+                "category": rel.parts[0] if len(rel.parts) > 1 else "geral",
+                "enabled": ident not in desabilitadas,
                 "source": origem,
                 "path": str(md),
             }
-    return {"skills": list(encontradas.values())}
+    return {"skills": sorted(encontradas.values(), key=lambda s: (s["category"], s["name"]))}
 
 
 def _skill_file(name: str, *, criar: bool = False) -> Path | None:
@@ -714,8 +775,14 @@ if DIST_DIR.exists():
             name="fonts-terminal",
         )
 
-    def _resposta_spa(full_path: str, raiz: Path):
-        """Serve um arquivo da raiz, ou o index com o token injetado."""
+    def _resposta_spa(full_path: str, raiz: Path, *, injetar_token: bool = False):
+        """Serve um arquivo da raiz, ou o index.
+
+        `injetar_token` existe só para a interface herdada, que lê o token de
+        `window` e não sabe usar cookie. A interface do Kairos NÃO recebe o
+        token no HTML: ela autentica e passa a usar o cookie httpOnly, e é isso
+        que impede que carregar a página já entregue a credencial.
+        """
         pedido = raiz / full_path
         if full_path and pedido.is_file():
             return FileResponse(pedido)
@@ -723,23 +790,21 @@ if DIST_DIR.exists():
         if not index.exists():
             return JSONResponse({"error": "index.html não encontrado"}, status_code=404)
         html = index.read_text(encoding="utf-8")
-        # O token vai no HTML porque a SPA não tem outro canal antes do primeiro
-        # request. É também por isso que a porta é publicada numa interface só:
-        # quem alcança a página alcança o token.
-        script = (
-            "<script>"
-            f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
-            "window.__KAIROS_AUTH_REQUIRED__=false;"
-            "</script>"
-        )
-        if "</head>" in html:
-            html = html.replace("</head>", f"{script}</head>")
+        if injetar_token:
+            script = (
+                "<script>"
+                f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
+                "window.__KAIROS_AUTH_REQUIRED__=false;"
+                "</script>"
+            )
+            if "</head>" in html:
+                html = html.replace("</head>", f"{script}</head>")
         return HTMLResponse(content=html, status_code=200)
 
     @app.get("/legacy/{full_path:path}", include_in_schema=False)
     async def serve_legacy(full_path: str):
         """Interface herdada, mantida só enquanto chat e terminal não migram."""
-        return _resposta_spa(full_path, DIST_DIR)
+        return _resposta_spa(full_path, DIST_DIR, injetar_token=True)
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):

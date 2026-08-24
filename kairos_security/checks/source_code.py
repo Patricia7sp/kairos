@@ -32,6 +32,13 @@ IGNORE_DIRS = frozenset(
         ".ruff_cache",
         ".pytest_cache",
         "locales",
+        # Skills são conteúdo instalável de terceiros, não o código deste
+        # projeto. Mantê-las no gate faria qualquer skill nova quebrar o CI por
+        # falso positivo — `ENV_API_KEY = "COMFY_CLOUD_API_KEY"` é o NOME de uma
+        # variável de ambiente, e `password == "x-oauth-basic"` compara com uma
+        # constante pública do protocolo de credencial do git. Para auditá-las
+        # de propósito existe `kairos security --source skills/`.
+        "skills",
     }
 )
 

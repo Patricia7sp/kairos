@@ -89,8 +89,16 @@ def validate_frontmatter(fm: Frontmatter, *, new_skill: bool = False) -> None:
     # `author` NUNCA é derivado do ambiente — nem de login, nem de git config.
     # Skills são compartilhadas e publicadas, e um nome vindo dali seria "a
     # privacy leak the user never opted into". Ausente é ausente.
-    if fm.author is not None and not fm.author.strip():
-        raise FrontmatterError("author, se presente, não pode ser vazio")
+    if fm.author is not None:
+        # Um catálogo real traz `author` ora como texto, ora como lista de
+        # nomes. Sem esta guarda o validador estourava com AttributeError —
+        # um traceback em vez da mensagem acionável que ele promete.
+        if not isinstance(fm.author, str):
+            raise FrontmatterError(
+                f"author deve ser texto, veio {type(fm.author).__name__}: {fm.author!r}"
+            )
+        if not fm.author.strip():
+            raise FrontmatterError("author, se presente, não pode ser vazio")
 
 
 _FM_BLOCK = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)

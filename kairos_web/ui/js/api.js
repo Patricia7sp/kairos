@@ -31,8 +31,12 @@ async function request(path, { method = "GET", body } = {}) {
   try {
     res = await fetch(path, {
       method,
+      // O cookie de sessão é httpOnly e o navegador o envia sozinho em
+      // same-origin. O header só entra se alguém injetou um token na página —
+      // o caso da interface herdada, não o desta.
+      credentials: "same-origin",
       headers: {
-        [HEADER]: sessionToken(),
+        ...(sessionToken() ? { [HEADER]: sessionToken() } : {}),
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
@@ -65,6 +69,9 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  quemSou: () => request("/api/auth/me"),
+  logout:  () => request("/api/auth/logout", { method: "POST" }),
+
   health:      () => request("/api/health"),
   status:      () => request("/api/status"),
   config:      () => request("/api/config"),
