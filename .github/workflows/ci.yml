@@ -123,6 +123,20 @@ jobs:
             npm test --prefix "$f"
           done
 
+  evals:
+    name: Recall de compactação (gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd3d55efc9f92eb1de1dd90d0 # v5.4.0
+      - run: uv sync --python "$PYTHON_VERSION" --extra dev
+      # G-19: no legado o harness de evals NUNCA roda em CI — os 28 workflows
+      # não referenciam `evals/` de forma nenhuma. Medir sem nunca medir é o
+      # mesmo que não medir, então o gate é um job próprio: uma queda de
+      # recall reprova o PR, e não se confunde com falha de lógica.
+      - name: Gate de recall
+        run: uv run pytest -q tests/test_evals.py
+
   lockfile:
     name: uv.lock em dia
     runs-on: ubuntu-latest

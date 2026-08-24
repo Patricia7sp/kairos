@@ -34,6 +34,8 @@ kairos_domain/rules.py
 kairos_domain/scheduling.py
 kairos_domain/session.py
 kairos_domain/statemachine.py
+kairos_evals/__init__.py
+kairos_evals/recall.py
 kairos_gateway/__init__.py
 kairos_gateway/capability.py
 kairos_gateway/delivery.py
@@ -80,6 +82,7 @@ tests/test_cron.py
 tests/test_domain.py
 tests/test_gateway.py
 tests/test_i18n.py
+tests/test_integration.py
 tests/test_machines.py
 tests/test_mcp.py
 tests/test_plugins.py

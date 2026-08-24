@@ -33,7 +33,9 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 18 — web | ✅ concluída |
 | 19 — apps-desktop | ✅ concluída |
 | 20 — Integração | ✅ concluída |
-| 21 | pendente |
+| 21 — evals | ✅ concluída |
+
+**As 21 tarefas do plano de reconstrução estão concluídas.**
 
 ## Ambiente
 

@@ -1573,6 +1573,59 @@ superfície que gravou o dobro e outra que gravou nada.
 
 ---
 
+## Tarefa 21 — evals
+
+### D-21.1 — G-19 fechado: o gate existe E roda
+
+A lacuna não era só a falta de um *gate*. Era mais grave: no legado o harness
+**nunca roda em CI** — os 28 workflows não referenciam `evals/` de forma
+nenhuma. Medir sem nunca medir é o mesmo que não medir.
+
+Por isso o gate é **job próprio** no CI, e não uma linha dentro dos testes
+gerais: uma queda de recall reprova o PR, e não se confunde com falha de
+lógica no relatório.
+
+### D-21.2 — Identificador perdido reprova independentemente do score
+
+Duas condições de reprovação, e a segunda é a que importa. Um recall de 0,9
+**com um SHA perdido** é pior que 0,8 sem nenhum: o agregado esconde
+exatamente a falha mais cara da compactação.
+
+É a mesma regra que a unit `agent` já aplica (regra 10 de compactação):
+identificadores são indexados **mecanicamente**, não confiados ao sumarizador.
+Aqui a consequência é que eles também são **verificados** mecanicamente, e
+nunca vão ao juiz — a checagem de que um SHA aparece é determinística, e
+delegá-la a um modelo introduziria ruído numa medida que não precisa dele.
+
+### D-21.3 — Juiz indisponível não aprova por omissão
+
+Exceção no juiz conta como **fato não preservado**. Um eval que passa porque o
+modelo caiu é pior que eval nenhum: dá o número tranquilizador sem a medida.
+
+### D-21.4 — Um falso positivo que o teste encontrou
+
+A primeira versão da heurística sem juiz filtrava palavras por comprimento
+(>3 caracteres) — e descartava exatamente os tokens que carregam **identidade**:
+números e siglas. O efeito era que `item 3` e `item 7` ficavam
+indistinguíveis, e o harness reportava **100% de recall com metade dos fatos
+perdidos**.
+
+Falso positivo num gate é pior que gate nenhum: aprova a compactação quebrada
+com um número tranquilizador.
+
+A correção separa as duas naturezas, porque elas falham de formas diferentes:
+
+- **Identidade** (números, siglas) é **obrigatória** — qualquer uma ausente
+  reprova de imediato. Um número que some *é* fato perdido.
+- **Prosa** passa por fração (50%), porque paráfrase é reescrita legítima:
+  *"optamos por SQLite com WAL"* sobrevive em *"decidimos usar SQLite no modo
+  WAL"*.
+
+Uma única razão de corte não conseguia atender aos dois casos — foi tentando
+ajustá-la que a separação apareceu como a resposta certa.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

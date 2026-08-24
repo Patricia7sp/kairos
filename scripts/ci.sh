@@ -45,6 +45,8 @@ else
   skip "Lint de shell" "shellcheck não instalado"
 fi
 
+run "Gate de recall (G-19)" "$UV" run pytest -q tests/test_evals.py
+
 run "uv.lock em dia" "$UV" lock --check
 
 for front in ui-tui web apps/desktop; do
