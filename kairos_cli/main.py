@@ -86,7 +86,9 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command == "dashboard":
         parser.add_argument("--port", type=int, default=9119, help="Porta HTTP (padrão: 9119)")
         parser.add_argument(
-            "--host", default="0.0.0.0", help="Host de escuta (padrão: 0.0.0.0)"
+            "--host",
+            default="127.0.0.1",
+            help="Host de escuta (padrão: 127.0.0.1; use 0.0.0.0 para expor na rede)",
         )
         parser.add_argument(
             "--no-browser", action="store_true", help="Não abre o navegador automaticamente"

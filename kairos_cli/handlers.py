@@ -375,7 +375,7 @@ def cmd_web(args) -> int:
 
     import uvicorn
 
-    host = getattr(args, "host", "0.0.0.0") or "0.0.0.0"
+    host = getattr(args, "host", "127.0.0.1") or "127.0.0.1"
     port = getattr(args, "port", 9119) or 9119
     no_browser = getattr(args, "no_browser", False)
 

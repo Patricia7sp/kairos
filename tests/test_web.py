@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from kairos_web.server import app
+from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
 
 class WebServerApiTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class WebServerApiTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._orig_home = os.environ.get("KAIROS_HOME")
         os.environ["KAIROS_HOME"] = self._tmp.name
-        self.client = TestClient(app)
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
 
     def tearDown(self):
         if self._orig_home:
@@ -94,6 +94,55 @@ class WebServerApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertIn("sessions", data)
+
+
+class SessionTokenTests(unittest.TestCase):
+    """O dashboard escuta em loopback, mas qualquer processo local alcança a
+    porta — o token é o que separa a UI de um curl de outro usuário da máquina."""
+
+    def setUp(self):
+        self.anon = TestClient(app)
+        self.auth = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+
+    def test_token_is_not_the_old_hardcoded_constant(self):
+        self.assertNotEqual(SESSION_TOKEN, "kairos-session-token")
+        self.assertGreaterEqual(len(SESSION_TOKEN), 32)
+
+    def test_api_rejects_missing_token(self):
+        res = self.anon.get("/api/sessions")
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.json()["error"], "invalid_session_token")
+
+    def test_api_rejects_wrong_token(self):
+        res = self.anon.get("/api/sessions", headers={TOKEN_HEADER: "kairos-session-token"})
+        self.assertEqual(res.status_code, 401)
+
+    def test_api_accepts_token_via_query_param(self):
+        res = self.anon.get("/api/sessions", params={"token": SESSION_TOKEN})
+        self.assertEqual(res.status_code, 200)
+
+    def test_health_stays_open_for_probes(self):
+        self.assertEqual(self.anon.get("/api/health").status_code, 200)
+
+    def test_auth_me_reports_the_live_token(self):
+        res = self.auth.get("/api/auth/me")
+        self.assertEqual(res.json()["token"], SESSION_TOKEN)
+
+    def test_ws_ticket_reports_the_live_token(self):
+        res = self.auth.post("/api/auth/ws-ticket")
+        self.assertEqual(res.json()["ticket"], SESSION_TOKEN)
+
+    def test_websocket_refuses_connection_without_token(self):
+        from starlette.websockets import WebSocketDisconnect as WSDisconnect
+
+        with self.assertRaises(WSDisconnect) as ctx, self.anon.websocket_connect("/ws/chat"):
+            pass
+        self.assertEqual(ctx.exception.code, 4401)
+
+    def test_websocket_accepts_token_in_query(self):
+        with self.auth.websocket_connect(f"/ws/chat?token={SESSION_TOKEN}") as ws:
+            ws.send_text(json.dumps({"type": "ping"}))
+            self.assertEqual(json.loads(ws.receive_text())["type"], "pong")
 
 
 if __name__ == "__main__":

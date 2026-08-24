@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
+from hmac import compare_digest
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -41,6 +43,36 @@ app.add_middleware(
 )
 
 DIST_DIR = Path(__file__).parent / "web_dist"
+
+# --- SESSÃO ---
+
+# Token gerado uma vez por processo do servidor. Fica só em memória: reiniciar
+# o servidor invalida as abas antigas, que é o comportamento desejado para uma
+# UI local. `KAIROS_WEB_TOKEN` existe para quem precisa de um valor estável
+# (proxy reverso, teste de integração) e assume o risco conscientemente.
+SESSION_TOKEN = os.environ.get("KAIROS_WEB_TOKEN") or secrets.token_urlsafe(32)
+
+# O bundle do SPA já manda este header; o WebSocket manda `?token=`.
+TOKEN_HEADER = "X-Hermes-Session-Token"  # noqa: S105 — nome de header, não o segredo
+
+# `/api/health` fica aberto: é o que `kairos doctor` e o healthcheck do
+# container sondam, e não devolve nada além de "estou de pé".
+_OPEN_PATHS = frozenset({"/api/health"})
+
+
+def _token_ok(supplied: str | None) -> bool:
+    """Compara em tempo constante — `==` em segredo vaza por timing."""
+    return bool(supplied) and compare_digest(supplied, SESSION_TOKEN)
+
+
+@app.middleware("http")
+async def require_session_token(request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and path not in _OPEN_PATHS:
+        supplied = request.headers.get(TOKEN_HEADER) or request.query_params.get("token")
+        if not _token_ok(supplied):
+            return JSONResponse({"error": "invalid_session_token"}, status_code=401)
+    return await call_next(request)
 
 
 def _get_auth_store() -> AuthStore:
@@ -253,7 +285,16 @@ async def get_session_messages(session_id: str):
 
 
 @app.websocket("/ws/chat")
-async def websocket_chat_endpoint(websocket: WebSocket):  # noqa: PLR0915
+async def websocket_chat_endpoint(websocket: WebSocket):
+    supplied = websocket.query_params.get("token") or websocket.headers.get(TOKEN_HEADER)
+    if not _token_ok(supplied):
+        # 4401 é o código que o SPA reconhece para recarregar e repegar o token.
+        await websocket.close(code=4401)
+        return
+    await _chat_session(websocket)
+
+
+async def _chat_session(websocket: WebSocket) -> None:  # noqa: PLR0915
     await websocket.accept()
     logger.info("WebSocket chat client connected")
 
@@ -396,14 +437,14 @@ async def get_auth_me():
         "authenticated": True,
         "auth_required": False,
         "user": "kairos-user",
-        "token": "kairos-session-token",
+        "token": SESSION_TOKEN,
         "role": "admin",
     }
 
 
 @app.post("/api/auth/ws-ticket")
 async def get_ws_ticket():
-    return {"ticket": "kairos-session-token", "expires_in": 86400}
+    return {"ticket": SESSION_TOKEN, "expires_in": 86400}
 
 
 @app.get("/api/profiles")
@@ -520,8 +561,6 @@ async def websocket_alias_endpoint(websocket: WebSocket):
 
 # --- SPA STATIC FILES ---
 
-from fastapi.responses import HTMLResponse
-
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
     if (DIST_DIR / "fonts").exists():
@@ -537,8 +576,13 @@ if DIST_DIR.exists():
         index_file = DIST_DIR / "index.html"
         if index_file.exists():
             html_content = index_file.read_text(encoding="utf-8")
-            injected_token = '<script>window.__HERMES_SESSION_TOKEN__="kairos-session-token";window.__HERMES_AUTH_REQUIRED__=false;</script>'
+            injected_script = (
+                "<script>"
+                f'window.__HERMES_SESSION_TOKEN__="{SESSION_TOKEN}";'
+                "window.__HERMES_AUTH_REQUIRED__=false;"
+                "</script>"
+            )
             if "</head>" in html_content:
-                html_content = html_content.replace("</head>", f"{injected_token}</head>")
+                html_content = html_content.replace("</head>", f"{injected_script}</head>")
             return HTMLResponse(content=html_content, status_code=200)
         return JSONResponse({"error": "web_dist index.html not found"}, status_code=404)
