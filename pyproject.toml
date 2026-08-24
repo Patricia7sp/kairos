@@ -13,7 +13,7 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.16"]
 
 [tool.setuptools]
-packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container", "kairos_tools", "kairos_skills", "kairos_plugins", "kairos_providers", "kairos_gateway", "kairos_mcp", "kairos_agent", "kairos_cron", "kairos_cli", "kairos_tui_host", "kairos_acp"]
+packages = ["kairos_state", "kairos_domain", "kairos_i18n", "kairos_container", "kairos_tools", "kairos_skills", "kairos_plugins", "kairos_providers", "kairos_gateway", "kairos_mcp", "kairos_agent", "kairos_cron", "kairos_cli", "kairos_tui_host", "kairos_acp", "kairos_integration"]
 
 [build-system]
 requires = ["setuptools>=68"]

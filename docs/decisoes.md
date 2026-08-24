@@ -1523,6 +1523,56 @@ nomeada registrando a decisão, para que a próxima pessoa não a "conserte".
 
 ---
 
+## Tarefa 20 — Integração das superfícies
+
+### D-20.1 — O núcleo é biblioteca, e a verificação existe para que isso apareça
+
+Não há "agent server". Cada superfície importa o núcleo no próprio processo, e
+há **sete processos escrevendo no mesmo SQLite**.
+
+Isso não é acidente a corrigir — é a forma do sistema, e é o que torna a
+contenção de escrita (Tarefa 05, G-20) preocupação de primeira ordem em vez de
+detalhe de persistência.
+
+`assert_no_central_server` reprova quando há **um único** escritor. Não porque
+um servidor central seja ilegal, mas porque seria mudança de arquitetura — e
+precisa ser **decisão**, não deriva. A verificação faz a deriva aparecer.
+
+### D-20.2 — As duas leis viraram asserções, não parágrafos
+
+`architecture.md` chama as duas de *"the lens for reviewing any change"*.
+Enquanto forem só prosa, valem na revisão de quem lembrou delas.
+
+- **Lei 1** (`assert_prompt_cache_intact`): alterar contexto passado, trocar
+  toolset ou reconstruir o system prompt mid-conversa **multiplica o custo do
+  usuário**, e a compactação é a única exceção. A mensagem nomeia todas as
+  violações de uma vez, para quem estiver depurando não descobrir uma por
+  execução.
+- **Lei 2** (`assert_narrow_waist`): ferramenta core nova cujo problema
+  terminal+file ou uma skill já resolvem é recusada. *"Every model tool we add
+  is sent on every API call"* — o custo é permanente e pago por cada usuário,
+  em cada turno.
+
+### D-20.3 — A tabela de perfis torna auditável o que era só uma frase
+
+*"A guarda de aprovação é política do editor"* não é verificável solta.
+`SURFACE_PROFILES` responde **quais** superfícies ligam o guard — e o teste
+afirma que é exatamente uma, o ACP.
+
+### D-20.4 — A verificação de ponta a ponta
+
+Sete escritores concorrentes no mesmo `state.db`, e o teste afirma três coisas
+distintas:
+
+1. nenhuma exceção;
+2. `PRAGMA integrity_check` = `ok` — integridade estrutural, não só contagem;
+3. **cada superfície** teve todas as suas mensagens gravadas, não só o total.
+
+O terceiro é o que pega perda parcial: um total correto pode esconder uma
+superfície que gravou o dobro e outra que gravou nada.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

@@ -32,7 +32,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 17 — acp-adapter | ✅ concluída |
 | 18 — web | ✅ concluída |
 | 19 — apps-desktop | ✅ concluída |
-| 20–21 | pendentes |
+| 20 — Integração | ✅ concluída |
+| 21 | pendente |
 
 ## Ambiente
 

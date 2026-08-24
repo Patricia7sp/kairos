@@ -6,6 +6,7 @@ kairos_cron
 kairos_domain
 kairos_gateway
 kairos_i18n
+kairos_integration
 kairos_mcp
 kairos_plugins
 kairos_providers
