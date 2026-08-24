@@ -1,5 +1,6 @@
 kairos_agent
 kairos_container
+kairos_cron
 kairos_domain
 kairos_gateway
 kairos_i18n

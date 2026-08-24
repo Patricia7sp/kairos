@@ -26,7 +26,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 11 — providers-gateway | ✅ concluída |
 | 12 — mcp | ✅ concluída |
 | 13 — agent | ✅ concluída |
-| 14–21 | pendentes |
+| 14 — cron | ✅ concluída |
+| 15–21 | pendentes |
 
 ## Ambiente
 

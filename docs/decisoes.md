@@ -1156,6 +1156,67 @@ reescrever o histórico continuamente.
 
 ---
 
+## Tarefa 14 — cron
+
+### D-14.1 — O claim roda antes do efeito colateral, e o escopo é cirúrgico
+
+`claim_dispatch` incrementa `repeat.completed` **antes** de o job rodar, e
+persiste na hora. Se o tick morrer no meio — kill, OOM, segfault, hard-timeout
+— o dispatch não é perdido: já foi debitado. É o que converte *at-least-once*
+em *at-most-times*.
+
+O escopo é deliberadamente estreito (ADR 008, #38758): só `kind == "once"` com
+`repeat.times > 0`. Ampliá-lo tornaria **todo** job recorrente sujeito a perder
+disparos por crash — trocaria um problema raro por um comum.
+
+E o catch-up **consome uma unidade**: sem isso, um job `once` atrasado
+disparia sem debitar nada e poderia disparar de novo.
+
+### D-14.2 — Duplo portão contra registro contraditório
+
+`is_job_runnable` exige `enabled` **e** ausência de marcador de pausa. Um
+registro em que os dois discordam é dado corrompido, e a leitura segura é não
+disparar — *"so a contradictory half-paused record never fires"*.
+
+### D-14.3 — Job que reinicia o gateway é rejeitado na CRIAÇÃO
+
+Um job assim mata o processo que o executa: a execução nunca alcança estado
+terminal durável, é reconciliada como `unknown` no boot seguinte, e **dispara
+de novo**. Laço de reinício disfarçado de automação (#30719).
+
+Rejeitar na execução seria tarde — o job já estaria salvo, e o usuário
+descobriria pelo sintoma. A mensagem de erro explica o laço, não só o veto.
+
+### D-14.4 — Falha da fonte é erro, nunca mudança
+
+O hash armazenado fica **intocado**. A consequência é o que importa: uma fonte
+que cai e volta com a saída anterior **continua suprimindo**. Se o erro
+atualizasse o hash, a volta ao normal pareceria mudança — alerta falso
+exatamente quando o sistema observado se recuperou.
+
+E o que é suprimido no caso `no_change` é a **execução inteira do agente**, sem
+LLM e sem entrega. A spec anterior dizia que só a entrega era cancelada, o que
+subestima em uma chamada de modelo por tick.
+
+### D-14.5 — Comparação por bytes exatos, com a consequência assumida
+
+Sem remoção de timestamp e sem normalização de espaços — normalizar seria
+adivinhar o que o usuário considera ruído. A consequência é real e está no
+docstring do legado: scripts precisam emitir saída estável, senão *todo tick
+parecerá mudança*.
+
+### D-14.6 — O diff injetado no prompt é limitado
+
+Uma saída que mudou por inteiro produziria um diff do tamanho da saída, e o
+prompt do agente é o recurso escasso nesse caminho.
+
+### D-14.7 — `once` sem `repeat` recebe 1
+
+Uma agenda de disparo único que repetisse para sempre é contradição — e o
+default silencioso ("para sempre") é o mais perigoso dos dois.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

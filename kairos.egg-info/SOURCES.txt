@@ -11,6 +11,10 @@ kairos_agent/compaction.py
 kairos_agent/loop.py
 kairos_agent/micro_compaction.py
 kairos_container/__init__.py
+kairos_cron/__init__.py
+kairos_cron/dispatch.py
+kairos_cron/monitor.py
+kairos_cron/schedule.py
 kairos_domain/__init__.py
 kairos_domain/compaction.py
 kairos_domain/credentials.py
@@ -55,6 +59,7 @@ kairos_tools/budget.py
 kairos_tools/parallel.py
 kairos_tools/policy.py
 kairos_tools/registry.py
+tests/test_agent.py
 tests/test_cjk.py
 tests/test_container.py
 tests/test_domain.py
