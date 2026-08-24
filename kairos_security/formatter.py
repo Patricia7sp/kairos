@@ -21,6 +21,7 @@ def format_cli_summary(report: SecurityReport) -> str:
         "          🛡️  KAIROS SECURITY AUDIT REPORT                  ",
         "============================================================",
         f"Alvo auditado:  {report.target}",
+        f"Código-fonte:   {report.source_root or '(não auditado)'}",
         f"Duração:        {report.duration_ms} ms",
         f"Security Score: {report.security_score}/100",
         f"Status Geral:   {'✅ APROVADO' if report.passed else '❌ REQUER ATENÇÃO'}",
@@ -55,6 +56,7 @@ def format_cli_summary(report: SecurityReport) -> str:
 def format_json_report(report: SecurityReport) -> str:
     data = {
         "target": report.target,
+        "source_root": report.source_root,
         "timestamp": report.timestamp,
         "duration_ms": report.duration_ms,
         "score": report.security_score,

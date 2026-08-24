@@ -22,6 +22,7 @@ class Category(StrEnum):
     AGENT_GUARDRAILS = "agent_guardrails"
     API_SURFACE = "api_surface"
     PROMPT_INJECTION = "prompt_injection"
+    SOURCE_CODE = "source_code"
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class Finding:
 @dataclass
 class SecurityReport:
     target: str
+    source_root: str | None = None
     timestamp: float = field(default_factory=time.time)
     findings: list[Finding] = field(default_factory=list)
     duration_ms: float = 0.0

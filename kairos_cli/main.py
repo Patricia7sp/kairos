@@ -83,6 +83,20 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
+    elif command == "security":
+        parser.add_argument("--target", help="Diretório de runtime a auditar (padrão: $KAIROS_HOME)")
+        parser.add_argument(
+            "--source", help="Raiz do código-fonte a auditar (padrão: detecta o repositório)"
+        )
+        parser.add_argument(
+            "--no-source", action="store_true", help="Audita só o runtime, sem ler o código-fonte"
+        )
+        parser.add_argument(
+            "--fail-on",
+            choices=["critical", "high", "medium", "low"],
+            default="high",
+            help="Severidade mínima que reprova a auditoria (padrão: high)",
+        )
     elif command == "dashboard":
         parser.add_argument("--port", type=int, default=9119, help="Porta HTTP (padrão: 9119)")
         parser.add_argument(

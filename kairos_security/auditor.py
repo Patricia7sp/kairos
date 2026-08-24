@@ -11,14 +11,45 @@ from kairos_security.checks.path_traversal import run_path_traversal_tests
 from kairos_security.checks.permissions import check_file_permissions
 from kairos_security.checks.prompt_injection import evaluate_prompt_hardening
 from kairos_security.checks.secrets import check_hardcoded_secrets
+from kairos_security.checks.source_code import scan_source_tree
 from kairos_security.models import Finding, SecurityReport
 
 
-class SecurityAuditor:
-    """Executa varreduras de segurança estáticas e dinâmicas no Kairos."""
+def find_source_root(start: Path | None = None) -> Path | None:
+    """Sobe a árvore até achar a raiz do repositório do Kairos.
 
-    def __init__(self, target_dir: Path | None = None) -> None:
+    O alvo de runtime (`~/.kairos`) e o código-fonte são lugares diferentes:
+    auditar um não diz nada sobre o outro. Como o `pyproject.toml` marca a
+    raiz, dá para encontrá-la mesmo quando o comando roda de outro diretório
+    — inclusive a partir do próprio pacote instalado em modo editável.
+    """
+    for base in (start, Path.cwd(), Path(__file__).resolve().parent):
+        if base is None:
+            continue
+        for candidate in (base.resolve(), *base.resolve().parents):
+            if (candidate / "pyproject.toml").is_file():
+                return candidate
+    return None
+
+
+class SecurityAuditor:
+    """Executa varreduras de segurança estáticas e dinâmicas no Kairos.
+
+    `target_dir` é a instalação em runtime; `source_root` é o repositório.
+    Quando o segundo não é informado, é procurado — e se não existir (caso
+    de um wheel instalado sem as fontes), a auditoria de código simplesmente
+    não roda, em vez de reportar "nenhum achado" sobre algo que não olhou.
+    """
+
+    def __init__(
+        self,
+        target_dir: Path | None = None,
+        source_root: Path | None = None,
+        scan_source: bool = True,
+    ) -> None:
         self.target_dir = target_dir or Path.cwd()
+        self.scan_source = scan_source
+        self.source_root = source_root or (find_source_root() if scan_source else None)
 
     def run_audit(self, system_prompt: str = "") -> SecurityReport:
         t0 = time.time()
@@ -56,14 +87,23 @@ class SecurityAuditor:
         default_prompt = system_prompt or "Você é o Kairos, um assistente agentic de programação."
         findings.extend(evaluate_prompt_hardening(default_prompt))
 
+        # 7. Código-fonte (SAST) — o repositório, não a instalação.
+        if self.scan_source and self.source_root is not None:
+            findings.extend(scan_source_tree(self.source_root))
+
         duration = (time.time() - t0) * 1000
         return SecurityReport(
             target=str(self.target_dir),
+            source_root=str(self.source_root) if self.source_root else None,
             findings=findings,
             duration_ms=round(duration, 2),
         )
 
 
-def run_full_audit(target_dir: Path | None = None) -> SecurityReport:
-    auditor = SecurityAuditor(target_dir)
+def run_full_audit(
+    target_dir: Path | None = None,
+    source_root: Path | None = None,
+    scan_source: bool = True,
+) -> SecurityReport:
+    auditor = SecurityAuditor(target_dir, source_root=source_root, scan_source=scan_source)
     return auditor.run_audit()

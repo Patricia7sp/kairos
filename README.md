@@ -50,6 +50,32 @@ São **48 comandos** na superfície (44 grupos do legado + `run`, `chat`,
 `tick`, `version`). Os implementados usam as units reconstruídas; os demais
 saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
 
+## Auditoria de segurança
+
+```bash
+kairos security                  # runtime (~/.kairos) + código-fonte
+kairos security --no-source      # só o runtime
+kairos security --source .       # aponta a raiz do código explicitamente
+kairos security --fail-on low    # reprova em qualquer achado
+kairos security --json           # para script/CI
+```
+
+A auditoria cobre **dois alvos diferentes**, e é importante não confundi-los:
+o *runtime* (`~/.kairos`: permissões de `auth.json`, credenciais gravadas,
+guardrails carregados) e o *código-fonte* (o repositório). Auditar um não diz
+nada sobre o outro — a versão anterior só olhava o runtime e por isso dava
+100/100 enquanto o servidor web tinha um token fixo no código.
+
+O SAST (`SEC-SRC-*`) não é um linter genérico: cada regra corresponde a um
+defeito já encontrado neste projeto ou caro o bastante para valer o
+falso-positivo. Ele **não audita código de teste** — fixture é insegura de
+propósito — e cada regra propensa a ruído tem um validador (`DIRECT_API_KEY =
+"direct_api_key"` é constante de enum, não credencial; `md5(usedforsecurity=
+False)` já se declarou fora de uso criptográfico).
+
+Sai com **1** quando há achado no nível de `--fail-on` (padrão: `high`), o que
+o torna utilizável como passo de CI.
+
 ## Ambiente
 
 O projeto usa [uv](https://docs.astral.sh/uv/) e fixa **Python 3.11**, a mesma

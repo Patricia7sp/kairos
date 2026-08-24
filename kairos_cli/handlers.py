@@ -465,19 +465,34 @@ def cmd_run(args) -> int:
 
 
 def cmd_security(args) -> int:
-    from kairos_security import format_cli_summary, format_json_report, run_full_audit
+    from kairos_security import Severity, format_cli_summary, format_json_report, run_full_audit
 
     as_json = getattr(args, "json", False)
     target = getattr(args, "target", None)
     target_path = Path(target) if target else _home()
 
-    report = run_full_audit(target_path)
+    source = getattr(args, "source", None)
+    scan_source = not getattr(args, "no_source", False)
+    report = run_full_audit(
+        target_path,
+        source_root=Path(source) if source else None,
+        scan_source=scan_source,
+    )
+
     if as_json:
         print(format_json_report(report))
     else:
         print(format_cli_summary(report))
+        if scan_source and report.source_root is None:
+            print("aviso: código-fonte não encontrado — auditado só o runtime.")
 
-    return ExitCode.OK if report.passed else ExitCode.ERROR
+    # Ordem decrescente: reprovar em "medium" também reprova em high/critical.
+    ladder = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW]
+    threshold = getattr(args, "fail_on", "high") or "high"
+    reproving = set(ladder[: ladder.index(Severity(threshold)) + 1])
+    if any(f.severity in reproving for f in report.findings):
+        return ExitCode.ERROR
+    return ExitCode.OK
 
 
 HANDLERS = {
