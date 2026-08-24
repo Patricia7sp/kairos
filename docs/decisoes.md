@@ -1282,6 +1282,81 @@ arquivo corrompido, que é o que o usuário procuraria.
 
 ---
 
+## Tarefa 16 — ui-tui
+
+### D-16.1 — Esta unit é TypeScript, e foi construída em TypeScript
+
+Até aqui o Kairos era só Python. A TUI **não é** — e escrevê-la em Python
+seria reimplementar outra coisa com o mesmo nome. As duas pontas foram
+construídas:
+
+- **Python** (`kairos_tui_host/`): o host de compute e o protocolo JSON-RPC —
+  o backend com que a TUI conversa.
+- **TypeScript** (`ui-tui/`): buffer circular e virtualização por altura
+  medida, com **vitest** e `tsc --noEmit`.
+
+E o CI ganhou um job próprio: a suíte de Python não cobre a TUI, e um bug de
+virtualização não aparece em `pytest`. `scripts/ci.sh` roda o mesmo passo
+localmente, pulando com aviso se `npm install` ainda não rodou.
+
+### D-16.2 — Processo, não thread — e o porquê fica escrito
+
+Uma thread não bastaria. Uma ferramenta em C que não solta o GIL, ou um laço
+de CPU puro, monopoliza o interpretador — e a TUI, que precisa desenhar a
+60 FPS, congela. O usuário vê a interface travar e **não tem como distinguir
+isso de um travamento real do agente**.
+
+Processo separado torna o congelamento do compute **observável e
+interrompível** pela TUI, em vez de arrastá-la junto.
+
+### D-16.3 — Sem heartbeat não é o mesmo que morto
+
+`UNRESPONSIVE` é estado próprio. Um host ocupado num laço de CPU está **vivo e
+travado**, e a resposta é diferente: morto se reinicia, travado se interrompe.
+Colapsar os dois faria o supervisor reiniciar trabalho legítimo que só estava
+demorando.
+
+### D-16.4 — O supervisor desiste, e a janela zera o contador
+
+Reiniciar em laço consome CPU e esconde o erro real numa enxurrada de logs
+iguais. Mas a janela é o complemento necessário: um processo que roda bem por
+horas e cai uma vez **não** é um processo que falha em laço, e sem a janela ele
+acabaria marcado como tal depois de dias de uptime.
+
+### D-16.5 — O registro deferido de handlers, e o motivo mecânico
+
+`@method` apenas enfileira; `install(server)` reconstrói cada função com o
+`globals()` do servidor via `types.FunctionType`.
+
+É o que permitiu quebrar um `server.py` gigante em módulos **sem trocar o
+modelo de escopo por globais**: os handlers continuam enxergando os globais do
+servidor como antes de serem movidos. A alternativa — passar tudo por
+argumento — exigiria reescrever os 156 handlers de uma vez.
+
+`__defaults__`, `__kwdefaults__`, `__closure__`, `__doc__` e `__dict__` são
+preservados: perder qualquer um mudaria o comportamento em silêncio. Há teste
+para os defaults, para o `__doc__` e para os atributos que decoradores
+acrescentam.
+
+### D-16.6 — Buffer circular e virtualização são camadas distintas
+
+O buffer limita quanto histórico **existe**; a virtualização limita quanto
+está **montado** na árvore de fibers. Confundi-los resolve metade do problema
+— foi o que o G-23 fez ao concluir que só o buffer existia.
+
+### D-16.7 — As constantes de profiling têm teste de regressão
+
+`OVERSCAN` 40→20 e `MAX_MOUNTED` 260→120 vieram de medição: ~23 mil nós Yoga
+vivos em PageUp sustentado, renderer p99 = 106 ms. Um "ajuste" que as devolva
+ao valor antigo reintroduz o problema, então há teste fixando os números **e**
+a folga declarada (120 é mais de 4× a cobertura necessária de ~25 itens).
+
+E há teste para as **duas garantias em tensão**: o span montado cobre o
+viewport mesmo com itens minúsculos (senão a tela pisca), e nunca passa de
+`MAX_MOUNTED` (senão o renderer perde o frame).
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

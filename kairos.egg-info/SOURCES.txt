@@ -63,8 +63,12 @@ kairos_tools/budget.py
 kairos_tools/parallel.py
 kairos_tools/policy.py
 kairos_tools/registry.py
+kairos_tui_host/__init__.py
+kairos_tui_host/rpc.py
+kairos_tui_host/supervisor.py
 tests/test_agent.py
 tests/test_cjk.py
+tests/test_cli.py
 tests/test_container.py
 tests/test_cron.py
 tests/test_domain.py

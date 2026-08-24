@@ -11,3 +11,4 @@ kairos_providers
 kairos_skills
 kairos_state
 kairos_tools
+kairos_tui_host

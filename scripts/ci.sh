@@ -47,6 +47,15 @@ fi
 
 run "uv.lock em dia" "$UV" lock --check
 
+if command -v npm >/dev/null 2>&1 && [ -d ui-tui/node_modules ]; then
+  run "TUI: tsc"    npx --prefix ui-tui tsc --noEmit -p ui-tui
+  run "TUI: vitest" npm test --prefix ui-tui --silent
+elif command -v npm >/dev/null 2>&1; then
+  skip "TUI (vitest + tsc)" "rode: npm install --prefix ui-tui"
+else
+  skip "TUI (vitest + tsc)" "npm não instalado"
+fi
+
 if [ "$FAST" -eq 1 ]; then
   skip "Imagem + integração" "--fast"
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

@@ -10,3 +10,5 @@ __pycache__/
 uv.lock
 docs/
 tests/
+ui-tui/node_modules/
+ui-tui/package-lock.json

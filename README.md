@@ -28,7 +28,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 13 — agent | ✅ concluída |
 | 14 — cron | ✅ concluída |
 | 15 — hermes-cli | ✅ concluída |
-| 16–21 | pendentes |
+| 16 — ui-tui | ✅ concluída |
+| 17–21 | pendentes |
 
 ## Ambiente
 
@@ -68,6 +69,18 @@ scripts/ci.sh --fast   # pula o que exige Docker
 ```
 
 Cada passo é pulado com aviso, não silenciosamente, quando a ferramenta falta.
+
+## Frontend da TUI
+
+A unit `ui-tui` é TypeScript/React e tem suíte própria:
+
+```bash
+npm install --prefix ui-tui
+npm test --prefix ui-tui        # vitest
+npx --prefix ui-tui tsc --noEmit -p ui-tui
+```
+
+`scripts/ci.sh` roda os dois passos junto com o resto.
 
 ## Rodar os testes
 
