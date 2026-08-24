@@ -122,12 +122,26 @@ class ExecShimTests(ShellHarness):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("SETUIDGID", self.log.read_text())
 
-    def test_sem_s6_setuidgid_avisa_e_segue(self):
-        # Nada de stub: o comando não existe.
+    def test_sem_mecanismo_de_queda_o_shim_RECUSA(self):
+        """O comportamento mudou na verificação com a imagem real.
+
+        Antes: avisar e rodar como root. Isso recria o bug que o shim existe
+        para prevenir, e o recria em silêncio prático — ninguém lê o stderr de
+        um `docker exec ... kairos login`, e o sintoma só aparece uma hora
+        depois como falha de autenticação contraditória.
+
+        Agora: recusa com exit 77 e aponta o opt-out.
+
+        Este harness roda no HOST, que pode ter `/usr/bin/setpriv` — e o shim
+        o usa por caminho absoluto, de propósito. Então aqui só dá para
+        afirmar a propriedade mais fraca, porém a que importa: **sem mecanismo
+        de queda, o binário real NÃO é executado**. O exit 77 e a mensagem são
+        verificados contra a imagem real, em `RealImageTests`.
+        """
         r = self.run_script(self.shim, "chat", uid=0)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("root-owned", r.stderr)
-        self.assertIn("REAL", self.log.read_text())
+        self.assertNotEqual(r.returncode, 0, "não pode ter sucesso como root")
+        registrado = self.log.read_text() if self.log.exists() else ""
+        self.assertNotIn("REAL", registrado, "recusar significa NÃO executar")
 
     def test_rf10_o_caminho_e_absoluto_logo_imune_a_PATH(self):
         fonte = self.shim_src.read_text(encoding="utf-8")
@@ -447,3 +461,184 @@ class ContainerModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+class RealImageTests(unittest.TestCase):
+    """Verificação contra a imagem construída de verdade.
+
+    `docker build --check` valida a ESTRUTURA do Dockerfile e não pega deriva
+    entre listas, diretório de destino ausente, nem PATH de runtime. Os três
+    bugs mais graves da Tarefa 07 só apareceram aqui.
+
+    Pulado quando Docker não está disponível — é verificação de integração,
+    não requisito para rodar a suíte.
+    """
+
+    IMAGE = "kairos:test"
+    STUB = "kairos:stub"
+
+    @classmethod
+    def setUpClass(cls):
+        import shutil
+        if shutil.which("docker") is None:
+            raise unittest.SkipTest("docker não disponível")
+        r = subprocess.run(["docker", "image", "inspect", cls.IMAGE],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise unittest.SkipTest(
+                f"imagem {cls.IMAGE} não construída — rode: docker build -t {cls.IMAGE} .")
+
+    def run_in(self, *cmd, image=None, entrypoint="/bin/bash", extra=()):
+        args = ["docker", "run", "--rm", *extra]
+        if entrypoint:
+            args += ["--entrypoint", entrypoint]
+        args += [image or self.IMAGE, *cmd]
+        return subprocess.run(args, capture_output=True, text=True, timeout=120)
+
+    # -- estrutura ---------------------------------------------------------
+
+    def test_o_shim_resolve_antes_da_venv_no_PATH_real(self):
+        r = self.run_in("-c", "command -v kairos")
+        self.assertEqual(r.stdout.strip(), "/opt/kairos/bin/kairos")
+
+    def test_o_usuario_existe_com_uid_10000(self):
+        r = self.run_in("-c", "id -u kairos")
+        self.assertEqual(r.stdout.strip(), "10000")
+
+    def test_a_ordem_de_cont_init_no_disco_da_imagem(self):
+        r = self.run_in("-c", "ls /etc/cont-init.d/")
+        self.assertEqual(
+            r.stdout.split(),
+            ["01-kairos-setup", "015-supervise-perms", "02-reconcile-profiles"])
+
+    def test_s6_setuidgid_existe_no_caminho_absoluto_que_o_shim_usa(self):
+        # O bug: o shim dependia do PATH, e num `docker exec` cru /command não
+        # está lá — quem o semeia é o /init, que não roda nesse caminho.
+        r = self.run_in("-c", "test -x /command/s6-setuidgid && echo ok")
+        self.assertEqual(r.stdout.strip(), "ok")
+
+    def test_todo_pacote_declarado_no_pyproject_esta_na_imagem(self):
+        """Deriva entre duas listas mantidas à mão.
+
+        O `pyproject.toml` declara os pacotes; o Dockerfile os copia um a um.
+        Adicionar um pacote e esquecer o COPY quebra o build — e foi o que
+        aconteceu com `kairos_container`.
+        """
+        import re as _re
+        declared = _re.search(r"packages = \[([^\]]+)\]",
+                              (REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIsNotNone(declared)
+        names = _re.findall(r'"([^"]+)"', declared.group(1))
+        self.assertTrue(names)
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+        for pkg in names:
+            with self.subTest(package=pkg):
+                self.assertIn(f"COPY {pkg}/", dockerfile,
+                              f"{pkg} está no pyproject mas não é copiado no Dockerfile")
+
+    # -- o bug de UID ------------------------------------------------------
+
+    def _uid_probe(self):
+        return (
+            'cat > /opt/kairos/.venv/bin/kairos <<"EOF"\n'
+            '#!/bin/bash\nid -u\nEOF\n'
+            'chmod +x /opt/kairos/.venv/bin/kairos\n'
+            'mkdir -p /opt/data && chown 10000:10000 /opt/data\n'
+        )
+
+    def test_rf08_root_derruba_para_uid_10000_na_imagem_real(self):
+        r = self.run_in("-c", self._uid_probe() + "kairos login")
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "10000", r.stderr)
+
+    def test_rf11_o_opt_out_mantem_root_na_imagem_real(self):
+        r = self.run_in(
+            "-c", self._uid_probe() + "KAIROS_DOCKER_EXEC_AS_ROOT=1 kairos login")
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "0", r.stderr)
+
+    def test_sem_mecanismo_de_queda_o_shim_RECUSA_em_vez_de_virar_root(self):
+        """Rodar como root "com um aviso" recria o bug em silêncio prático."""
+        script = (
+            self._uid_probe()
+            + "mv /command/s6-setuidgid /command/.x\n"
+            + "mv /package/admin/s6/command/s6-setuidgid /package/admin/s6/command/.x\n"
+            + "mv /usr/bin/setpriv /usr/bin/.x\n"
+            + "kairos login\n"
+        )
+        r = self.run_in("-c", script)
+        self.assertEqual(r.returncode, 77)
+        self.assertIn("Recusando", r.stderr)
+        self.assertIn("KAIROS_DOCKER_EXEC_AS_ROOT=1", r.stderr)
+
+    # -- ciclo de vida s6 --------------------------------------------------
+
+    def _stub_available(self) -> bool:
+        return subprocess.run(["docker", "image", "inspect", self.STUB],
+                              capture_output=True).returncode == 0
+
+    def test_rf21_o_container_herda_o_exit_code_do_main_program(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in("boom", image=self.STUB, entrypoint=None)
+        self.assertEqual(r.returncode, 42)
+
+    def test_rf19_os_servicos_supervisionados_rodam_como_10000(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in("--version", image=self.STUB, entrypoint=None)
+        saida = r.stdout + r.stderr
+        self.assertIn("GATEWAY uid=10000", saida)
+        self.assertIn("DASH uid=10000", saida)
+
+    def test_o_cont_init_roda_na_ordem_e_todos_saem_zero(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in("--version", image=self.STUB, entrypoint=None)
+        saida = r.stdout + r.stderr
+        ordem = [n for n in ("01-kairos-setup", "015-supervise-perms",
+                             "02-reconcile-profiles") if f"running /etc/cont-init.d/{n}" in saida]
+        self.assertEqual(ordem, ["01-kairos-setup", "015-supervise-perms",
+                                 "02-reconcile-profiles"])
+        for n in ordem:
+            with self.subTest(script=n):
+                self.assertIn(f"/etc/cont-init.d/{n} exited 0", saida)
+
+    def test_rf01_rf02_o_caminho_nao_pid1_avisa_e_AINDA_executa(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in("boom", image=self.STUB, entrypoint=None, extra=("--init",))
+        self.assertIn("INDISPON", r.stderr)
+        self.assertEqual(r.returncode, 42, "degradou, mas o comando tinha de rodar")
+
+    def test_rf16_o_marcador_e_escrito_com_dono_e_perms_corretos(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        vol = tempfile.mkdtemp()
+        try:
+            subprocess.run(["docker", "run", "--rm", "-v", f"{vol}:/opt/data",
+                            self.STUB, "--version"], capture_output=True, timeout=120)
+            r = self.run_in(
+                "-c", 'cat /opt/data/.container-mode; stat -c "%a %U:%G" /opt/data/.container-mode',
+                extra=("-v", f"{vol}:/opt/data"))
+            self.assertIn("runtime=s6", r.stdout)
+            self.assertIn("uid=10000", r.stdout)
+            self.assertIn("supervised=1", r.stdout)
+            self.assertIn("644 kairos:kairos", r.stdout)
+        finally:
+            # O volume ficou com dono UID 10000 (é o ponto do teste), então o
+            # host não consegue removê-lo — a limpeza vai de dentro.
+            subprocess.run(["docker", "run", "--rm", "-v", f"{vol}:/v",
+                            "--entrypoint", "/bin/bash", self.IMAGE,
+                            "-c", "rm -rf /v/* /v/.[!.]* 2>/dev/null || true"],
+                           capture_output=True, timeout=60)
+            import shutil as _sh
+            _sh.rmtree(vol, ignore_errors=True)
+
+    def test_rf18_KAIROS_UID_sobrescreve_de_verdade(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in("--version", image=self.STUB, entrypoint=None,
+                        extra=("-e", "KAIROS_UID=1234"))
+        saida = r.stdout + r.stderr
+        self.assertIn("remapeando", saida)
+        self.assertIn("GATEWAY uid=1234", saida)

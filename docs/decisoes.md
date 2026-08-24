@@ -524,12 +524,54 @@ Introduzido `code_only()`, que remove comentários antes de qualquer asserção
 de comportamento sobre shell. É uma armadilha genérica: quanto melhor o
 comentário explica o que o código *não* faz, mais provável que o grep quebre.
 
-### D-07.7 — O dashboard pode cair sem derrubar o container
+### D-07.7 — O build real achou três bugs que o `--check` não podia achar
+
+`docker build --check` valida a **estrutura** do Dockerfile. Não valida nada
+que dependa do sistema de arquivos, de listas mantidas em dois lugares ou do
+`PATH` de runtime. Os três bugs mais graves da tarefa só apareceram
+construindo a imagem de verdade:
+
+**1. Deriva entre `pyproject.toml` e o Dockerfile.** O `COPY` lista os pacotes
+um a um; `kairos_container`, adicionado nesta mesma tarefa, ficou de fora. São
+duas listas mantidas à mão, e a deriva é invisível até o `pip install -e .`
+falhar. Virou teste: todo pacote declarado precisa ter um `COPY`.
+
+**2. `install` não cria o diretório de destino.** `/opt/kairos/bin`,
+`/etc/cont-init.d` e `/etc/s6-overlay/s6-rc.d` não existiam. Erro trivial,
+invisível sem executar.
+
+**3. O shim dependia do `PATH` para achar o `s6-setuidgid` — e falhava
+exatamente no cenário para o qual existe.** Num `docker exec` cru o `PATH` não
+inclui `/command`: quem o semeia é o `/init`, que não roda nesse caminho.
+Resultado: o shim caía no fallback e executava **como root**, reintroduzindo o
+bug de UID que ele existe para prevenir.
+
+O teste unitário passava porque eu injetava um `s6-setuidgid` stub no `PATH` do
+harness. O stub escondia a dependência que era o bug.
+
+### D-07.8 — Não conseguir derrubar privilégio virou recusa, não aviso
+
+Consequência direta do bug 3. A versão anterior avisava em `stderr` e seguia
+como root. Isso é **o mesmo bug com passos extras**: ninguém lê o stderr de um
+`docker exec ... kairos login`, e o sintoma aparece uma hora depois como falha
+de autenticação contraditória.
+
+Agora o shim tenta `/command/s6-setuidgid`, depois
+`/package/admin/s6/command/s6-setuidgid`, depois o `PATH`, depois `setpriv` —
+e, não conseguindo nenhum, **recusa com exit 77** apontando o opt-out. Falhar
+alto agora é melhor que corromper agora e confundir depois. Quem realmente
+quer root já tem `KAIROS_DOCKER_EXEC_AS_ROOT=1`.
+
+### D-07.9 — O dashboard pode cair sem derrubar o container
 
 `dashboard/finish` sai com `0`; `main-kairos` **não tem** `finish`. O gateway
 define a vida do container, o dashboard é acessório. Foi para poder expressar
 isso que o s6 substituiu o tini: um reaper de zumbis não distingue serviço
 essencial de acessório.
+
+Confirmado na imagem real: com os dois serviços falhando, o log mostra
+`kairos: dashboard encerrou` e o container continua — quem o encerra é o
+`main-kairos`.
 
 ---
 

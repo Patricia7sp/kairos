@@ -50,9 +50,14 @@ RUN useradd -u ${KAIROS_UID} -m -d /opt/data kairos
 # --- aplicação ---------------------------------------------------------------
 WORKDIR /opt/kairos
 COPY pyproject.toml README.md ./
+# ATENÇÃO: esta lista tem de bater com [tool.setuptools].packages do
+# pyproject.toml. São duas listas mantidas à mão, e a deriva entre elas só
+# aparece num build real — `docker build --check` não a detecta. Há um teste
+# que compara as duas (tests/test_container.py).
 COPY kairos_state/ ./kairos_state/
 COPY kairos_domain/ ./kairos_domain/
 COPY kairos_i18n/ ./kairos_i18n/
+COPY kairos_container/ ./kairos_container/
 COPY locales/ ./locales/
 COPY native/ ./native/
 
@@ -66,7 +71,10 @@ RUN /opt/kairos/native/fts5_cjk/build.sh /opt/kairos/lib || \
 
 # --- scripts de container -----------------------------------------------------
 COPY docker/ /opt/kairos/docker/
-RUN install -m 0755 /opt/kairos/docker/bin/kairos /opt/kairos/bin/kairos \
+# `install` não cria o diretório de destino; `-D` cria só o pai do arquivo,
+# então os diretórios vêm explícitos.
+RUN mkdir -p /opt/kairos/bin /etc/cont-init.d /etc/s6-overlay/s6-rc.d \
+    && install -m 0755 /opt/kairos/docker/bin/kairos /opt/kairos/bin/kairos \
     && install -m 0755 /opt/kairos/docker/cont-init.d/01-kairos-setup      /etc/cont-init.d/01-kairos-setup \
     && install -m 0755 /opt/kairos/docker/cont-init.d/015-supervise-perms  /etc/cont-init.d/015-supervise-perms \
     && install -m 0755 /opt/kairos/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles \

@@ -33,6 +33,17 @@ uv venv --python 3.11     # cria .venv com o 3.11 gerenciado pelo uv
 uv pip install -e ".[dev]"
 ```
 
+## Imagem de container
+
+```bash
+docker build -t kairos:test .
+```
+
+Os testes de integração (`RealImageTests`) verificam contra a imagem
+construída e são **pulados** se ela não existir. Eles cobrem o que o
+`docker build --check` não alcança: deriva entre `pyproject.toml` e o
+Dockerfile, diretórios de destino e o `PATH` de runtime.
+
 ## Rodar os testes
 
 A extensão CJK opcional exige `gcc`:

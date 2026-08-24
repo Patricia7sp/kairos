@@ -1,0 +1,12 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+*.so
+uv.lock
+docs/
+tests/

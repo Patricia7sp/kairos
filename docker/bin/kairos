@@ -36,13 +36,47 @@ case "$(printf '%s' "${KAIROS_DOCKER_EXEC_AS_ROOT:-}" | tr '[:upper:]' '[:lower:
     ;;
 esac
 
-if ! command -v s6-setuidgid >/dev/null 2>&1; then
-  echo "kairos: s6-setuidgid indisponível; executando como root." >&2
-  echo "kairos: arquivos escritos em \$KAIROS_HOME podem ficar root-owned." >&2
-  exec "$REAL" "$@"
+# s6-setuidgid TAMBÉM por caminho absoluto, e pela mesma razão que o binário
+# da venv: num `docker exec` cru o PATH não inclui /command — quem o semeia é
+# o /init, que não roda neste caminho. Depender do PATH aqui faz o shim falhar
+# exatamente no cenário para o qual ele existe.
+S6_SETUIDGID=""
+for candidate in /command/s6-setuidgid /package/admin/s6/command/s6-setuidgid; do
+  if [ -x "$candidate" ]; then
+    S6_SETUIDGID="$candidate"
+    break
+  fi
+done
+if [ -z "$S6_SETUIDGID" ] && command -v s6-setuidgid >/dev/null 2>&1; then
+  S6_SETUIDGID="$(command -v s6-setuidgid)"
+fi
+if [ -z "$S6_SETUIDGID" ] && [ -x /usr/bin/setpriv ]; then
+  # Fallback fora do s6. Mesma semântica: derruba UID, GID e grupos
+  # suplementares antes de executar.
+  exec /usr/bin/setpriv --reuid "$KAIROS_USER" --regid "$KAIROS_USER" \
+       --clear-groups "$REAL" "$@"
+fi
+
+# Não conseguimos derrubar privilégio: RECUSAMOS, em vez de rodar como root.
+#
+# Rodar como root "com um aviso" recria precisamente o bug que este shim
+# existe para prevenir — e o recria em silêncio prático, porque ninguém lê o
+# stderr de um `docker exec ... kairos login`. O sintoma só aparece uma hora
+# depois, como falha de autenticação contraditória. Falhar agora, alto, é
+# melhor que corromper agora e confundir depois.
+#
+# Quem realmente quer root tem o opt-out explícito acima.
+if [ -z "$S6_SETUIDGID" ]; then
+  echo "kairos: não foi possível derrubar privilégio para '$KAIROS_USER'."      >&2
+  echo "kairos: s6-setuidgid e setpriv indisponíveis. Executar como root aqui"  >&2
+  echo "kairos: gravaria arquivos root-owned em \$KAIROS_HOME e quebraria o"    >&2
+  echo "kairos: gateway de forma difícil de diagnosticar. Recusando."           >&2
+  echo "kairos: Se é isso mesmo que você quer, use:"                            >&2
+  echo "kairos:   KAIROS_DOCKER_EXEC_AS_ROOT=1 kairos $*"                       >&2
+  exit 77
 fi
 
 # Execução por CAMINHO ABSOLUTO do binário da venv. É isso que impede recursão
 # independentemente do estado do PATH — o segundo salto não pode reentrar
 # aqui. Nenhuma variável sentinela é necessária.
-exec s6-setuidgid "$KAIROS_USER" "$REAL" "$@"
+exec "$S6_SETUIDGID" "$KAIROS_USER" "$REAL" "$@"
