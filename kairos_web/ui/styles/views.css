@@ -116,11 +116,100 @@
   .k-login__asas { opacity: .3; }
 }
 
-.k-skill-contagem { color: var(--k-text-3); font-size: var(--k-size-sm); margin-top: var(--k-space-2); }
-.k-skill-grupo + .k-skill-grupo { margin-top: var(--k-space-6); }
-.k-skill-grupo__titulo {
-  display: flex; align-items: center; gap: var(--k-space-3);
-  font-size: var(--k-size-md); text-transform: capitalize;
-  color: var(--k-text-2); margin-bottom: var(--k-space-3);
-  padding-bottom: var(--k-space-2); border-bottom: 1px solid var(--k-border);
+
+/* --- skills: navegador em três tempos ----------------------------------- */
+
+.k-sk { display: grid; grid-template-columns: 232px 1fr; gap: var(--k-space-5); align-items: start; }
+
+.k-sk__cats {
+  position: sticky; top: calc(var(--k-header-h) + var(--k-space-4));
+  max-height: calc(100dvh - var(--k-header-h) - var(--k-space-6));
+  display: flex; flex-direction: column; gap: var(--k-space-2);
+}
+.k-sk__cats-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-2); }
+.k-sk__cats-topo h2 {
+  font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .09em;
+  color: var(--k-text-3); font-weight: var(--k-weight-medium);
+}
+.k-sk__limpar { padding: var(--k-space-1) var(--k-space-2); font-size: var(--k-size-xs); }
+.k-sk__limpar svg { width: 13px; height: 13px; }
+
+/* A lista rola sozinha: 27 categorias não cabem na altura da janela, e deixar
+ * a página inteira rolar tiraria a grade de vista junto. */
+.k-sk__lista-cats { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-right: 2px; }
+.k-sk__cat {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-2);
+  width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+  padding: var(--k-space-2) var(--k-space-3); border-radius: var(--k-radius);
+  color: var(--k-text-2); font: inherit; font-size: var(--k-size-sm);
+  transition: background var(--k-fast) var(--k-ease), color var(--k-fast) var(--k-ease);
+}
+.k-sk__cat:hover { background: var(--k-surface-2); color: var(--k-text); }
+.k-sk__cat[aria-current="true"] { background: var(--k-accent-soft); color: var(--k-accent); font-weight: var(--k-weight-medium); }
+.k-sk__cat[aria-current="true"] .k-badge { background: var(--k-accent); color: var(--k-accent-text); }
+
+.k-sk__barra { margin-bottom: var(--k-space-3); }
+.k-sk__resumo { color: var(--k-text-3); font-size: var(--k-size-sm); margin-bottom: var(--k-space-4); }
+.k-skill__tags { display: flex; gap: var(--k-space-1); flex-wrap: wrap; }
+
+/* --- detalhe ------------------------------------------------------------ */
+
+.k-dialog__cat { font-size: var(--k-size-xs); color: var(--k-text-3); }
+.k-det__desc { font-size: var(--k-size-md); color: var(--k-text); margin-bottom: var(--k-space-4); }
+.k-det__meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--k-space-3); margin: 0 0 var(--k-space-5);
+  padding: var(--k-space-4); background: var(--k-surface-2); border-radius: var(--k-radius);
+}
+.k-det__meta dt { font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--k-text-3); }
+.k-det__meta dd { margin: 2px 0 0; font-size: var(--k-size-sm); }
+.k-det__bloco { margin-bottom: var(--k-space-5); }
+.k-det__bloco h4 {
+  font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--k-text-3); margin-bottom: var(--k-space-2); font-weight: var(--k-weight-medium);
+}
+
+@media (max-width: 860px) {
+  /* Em coluna única a lista de categorias vira uma faixa que rola de lado:
+   * empilhá-la inteira empurraria a grade para baixo da dobra. */
+  .k-sk { grid-template-columns: 1fr; }
+  .k-sk__cats { position: static; max-height: none; }
+  .k-sk__lista-cats { flex-direction: row; overflow-x: auto; padding-bottom: var(--k-space-2); }
+  .k-sk__cat { white-space: nowrap; }
+}
+
+/* --- sessões ------------------------------------------------------------ */
+
+.k-ses { display: grid; grid-template-columns: minmax(320px, 5fr) 7fr; gap: var(--k-space-4); align-items: start; }
+.k-ses__lista { max-height: 70dvh; overflow-y: auto; }
+.k-ses__lista tbody tr { cursor: pointer; }
+.k-ses__nome { font-weight: var(--k-weight-medium); }
+.k-ses__detalhe { position: sticky; top: calc(var(--k-header-h) + var(--k-space-4)); }
+.k-ses__cab { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--k-space-3); margin-bottom: var(--k-space-4); }
+.k-ses__titulo-msgs {
+  display: flex; align-items: center; gap: var(--k-space-2);
+  font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--k-text-3); font-weight: var(--k-weight-medium); margin-bottom: var(--k-space-3);
+}
+.k-ses__vazio { color: var(--k-text-3); font-size: var(--k-size-sm); }
+.k-ses__msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: var(--k-space-3); max-height: 52dvh; overflow-y: auto; }
+
+.k-msg { border-left: 2px solid var(--k-border-strong); padding-left: var(--k-space-3); }
+/* O papel de quem falou é o que se procura ao varrer uma transcrição, então
+ * ele ganha cor na borda — não só um rótulo a mais para ler. */
+.k-msg--user { border-left-color: var(--k-accent); }
+.k-msg--assistant { border-left-color: var(--k-ok); }
+.k-msg--tool { border-left-color: var(--k-warn); }
+.k-msg__cab { display: flex; align-items: center; gap: var(--k-space-2); flex-wrap: wrap; }
+.k-msg__hora { color: var(--k-text-3); font-size: var(--k-size-xs); margin-left: auto; }
+.k-msg__corpo {
+  margin-top: var(--k-space-2); font-size: var(--k-size-sm); color: var(--k-text-2);
+  white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--k-mono); line-height: 1.55;
+}
+
+@media (max-width: 1000px) {
+  .k-ses { grid-template-columns: 1fr; }
+  .k-ses__detalhe { position: static; }
+  .k-ses__lista { max-height: 44dvh; }
 }

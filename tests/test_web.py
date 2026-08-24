@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from kairos_state.repositories.messages import MessageRepository
 from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
 
@@ -639,3 +640,112 @@ class TextoDoLoginTests(unittest.TestCase):
         texto = self.FONTE.read_text(encoding="utf-8").lower()
         self.assertNotIn("log do container", texto)
         self.assertIn("kairos token new", texto)
+
+
+class SkillsNavegacaoTests(unittest.TestCase):
+    """A API entrega o que o navegador de categorias precisa."""
+
+    def setUp(self):
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+        self.dados = self.client.get("/api/skills").json()
+
+    def test_a_resposta_traz_o_resumo_por_categoria(self):
+        """Sem isto a interface recontaria 201 itens a cada repintura."""
+        self.assertIn("categorias", self.dados)
+        self.assertEqual(self.dados["total"], len(self.dados["skills"]))
+        soma = sum(c["total"] for c in self.dados["categorias"])
+        self.assertEqual(soma, self.dados["total"], "a soma das categorias não fecha com o total")
+
+    def test_toda_skill_declara_a_categoria_do_resumo(self):
+        conhecidas = {c["id"] for c in self.dados["categorias"]}
+        for s in self.dados["skills"]:
+            with self.subTest(skill=s["id"]):
+                self.assertIn(s["category"], conhecidas)
+
+    def test_a_lista_traz_o_bastante_para_o_detalhe(self):
+        """Um request por cartão seria uma tempestade a cada troca de filtro."""
+        for chave in ("version", "author", "license", "tags", "platforms", "related"):
+            with self.subTest(chave=chave):
+                self.assertIn(chave, self.dados["skills"][0])
+
+    def test_as_tags_do_catalogo_sao_lidas(self):
+        """O parser lia tags só de `metadata.kairos`; o catálogo as traz no
+        nível de topo, e a forma ignorada some sem erro nenhum."""
+        com_tags = [s for s in self.dados["skills"] if s["tags"]]
+        self.assertGreater(len(com_tags), 100, "quase nenhuma skill expôs tags")
+
+    def test_filtrar_por_categoria_isola_o_conjunto(self):
+        for cat in ("finance", "creative"):
+            with self.subTest(categoria=cat):
+                da_cat = [s for s in self.dados["skills"] if s["category"] == cat]
+                declarado = next(c["total"] for c in self.dados["categorias"] if c["id"] == cat)
+                self.assertEqual(len(da_cat), declarado)
+                self.assertTrue(all(s["id"].startswith(f"{cat}/") for s in da_cat))
+
+
+class SessoesTests(unittest.TestCase):
+    """Lista, detalhe e transcrição — contra um banco com sessões de verdade."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._home_antigo = os.environ.get("KAIROS_HOME")
+        os.environ["KAIROS_HOME"] = self._tmp.name
+        self.addCleanup(self._restaurar)
+
+        from kairos_state import connect, initialize_schema
+        from kairos_state.repositories.sessions import SessionRepository
+
+        conn = connect(Path(self._tmp.name) / "state.db")
+        initialize_schema(conn)
+        sr = SessionRepository(conn)
+        mr = MessageRepository(conn)
+        agora = 1_700_000_000.0
+        sr.create(session_id="s-fechada", source="cli", started_at=agora, display_name="Fechada")
+        sr.create(session_id="s-aberta", source="web", started_at=agora + 10)
+        for i, (papel, texto) in enumerate(
+            [("user", "oi"), ("assistant", "olá"), ("user", "tudo bem?")]
+        ):
+            mr.append(session_id="s-fechada", role=papel, content=texto, timestamp=agora + i)
+        sr.end("s-fechada", "concluida", ended_at=agora + 100)
+        conn.commit()
+        conn.close()
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+
+    def _restaurar(self):
+        if self._home_antigo is None:
+            os.environ.pop("KAIROS_HOME", None)
+        else:
+            os.environ["KAIROS_HOME"] = self._home_antigo
+
+    def test_lista_traz_as_sessoes_com_estado(self):
+        d = self.client.get("/api/sessions").json()
+        self.assertEqual(d["total"], 2)
+        self.assertEqual(d["abertas"], 1)
+        estados = {s["id"]: s["status"] for s in d["sessions"]}
+        self.assertEqual(estados["s-fechada"], "encerrada")
+        self.assertEqual(estados["s-aberta"], "aberta")
+
+    def test_a_contagem_de_mensagens_vem_das_mensagens(self):
+        """`sessions.message_count` fica em zero — nenhum caminho de escrita o
+        incrementa. Confiar nele mostraria 0 com as mensagens todas lá."""
+        d = self.client.get("/api/sessions").json()
+        por_id = {s["id"]: s["message_count"] for s in d["sessions"]}
+        self.assertEqual(por_id["s-fechada"], 3)
+        self.assertEqual(por_id["s-aberta"], 0)
+
+    def test_detalhe_de_uma_sessao(self):
+        s = self.client.get("/api/sessions/s-fechada").json()
+        self.assertEqual(s["source"], "cli")
+        self.assertEqual(s["title"], "Fechada")
+        self.assertEqual(s["message_count"], 3)
+
+    def test_sessao_inexistente_devolve_404(self):
+        res = self.client.get("/api/sessions/nao-existe")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.json()["error"], "session_not_found")
+
+    def test_a_transcricao_preserva_a_ordem_e_os_papeis(self):
+        corpo = self.client.get("/api/sessions/s-fechada/messages").json()
+        msgs = corpo.get("messages", corpo)
+        self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])

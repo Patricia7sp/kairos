@@ -287,24 +287,77 @@ def _get_db():
 # --- SESSIONS ENDPOINTS ---
 
 
+def _linha_sessao(s) -> dict:
+    """A tabela já guarda contagens e custo — devolvê-los evita que a interface
+    peça as mensagens de cada sessão só para saber quantas são."""
+    chaves = s.keys()
+
+    def campo(nome, padrao=None):
+        return s[nome] if nome in chaves else padrao
+
+    return {
+        "id": s["id"],
+        "source": s["source"],
+        "title": campo("display_name") or "",
+        "model": campo("model") or "",
+        "started_at": s["started_at"],
+        "ended_at": s["ended_at"],
+        "end_reason": s["end_reason"],
+        # Sem `ended_at` a sessão nunca foi encerrada: está aberta.
+        "status": "encerrada" if s["ended_at"] else "aberta",
+        "message_count": campo("message_count", 0) or 0,
+        "tool_call_count": campo("tool_call_count", 0) or 0,
+        "input_tokens": campo("input_tokens", 0) or 0,
+        "output_tokens": campo("output_tokens", 0) or 0,
+    }
+
+
+def _contagem_de_mensagens(conn) -> dict[str, int]:
+    """Conta as mensagens ativas por sessão.
+
+    `sessions.message_count` existe na tabela, mas nenhum caminho de escrita o
+    incrementa — a coluna fica em zero enquanto as mensagens estão lá. Contar
+    da fonte é uma consulta agregada, não N+1, e não depende de todo produtor
+    lembrar de atualizar um contador.
+    """
+    linhas = conn.execute(
+        "SELECT session_id, COUNT(*) AS n FROM messages WHERE active = 1 GROUP BY session_id"
+    ).fetchall()
+    return {linha["session_id"]: linha["n"] for linha in linhas}
+
+
 @app.get("/api/sessions")
-async def list_sessions():
+async def list_sessions(limit: int = 50):
     conn = _get_db()
     try:
         repo = SessionRepository(conn)
-        sessions = repo.list_recent(limit=50)
+        contagens = _contagem_de_mensagens(conn)
+        sessoes = []
+        for s in repo.list_recent(limit=max(1, min(limit, 500))):
+            linha = _linha_sessao(s)
+            linha["message_count"] = contagens.get(linha["id"], linha["message_count"])
+            sessoes.append(linha)
         return {
-            "sessions": [
-                {
-                    "id": s["id"],
-                    "source": s["source"],
-                    "started_at": s["started_at"],
-                    "ended_at": s["ended_at"],
-                    "end_reason": s["end_reason"],
-                }
-                for s in sessions
-            ]
+            "sessions": sessoes,
+            "total": len(sessoes),
+            "abertas": sum(1 for s in sessoes if s["status"] == "aberta"),
         }
+    finally:
+        conn.close()
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    conn = _get_db()
+    try:
+        s = SessionRepository(conn).get(session_id)
+        if s is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
+        linha = _linha_sessao(s)
+        linha["message_count"] = _contagem_de_mensagens(conn).get(
+            session_id, linha["message_count"]
+        )
+        return linha
     finally:
         conn.close()
 
@@ -619,17 +672,39 @@ def _disabled_skills() -> set[str]:
 
 
 def _read_skill(path: Path) -> dict:
-    """Nome e descrição saem do frontmatter; o diretório é só o fallback."""
-    name, description = path.parent.name, ""
+    """Metadados do frontmatter; o nome do diretório é só o fallback.
+
+    A lista carrega o suficiente para filtrar, buscar e mostrar o detalhe sem
+    um segundo request por skill — com 201 delas, uma chamada por cartão seria
+    uma tempestade de requisições a cada troca de filtro.
+    """
+    dados = {
+        "name": path.parent.name,
+        "description": "",
+        "version": "",
+        "author": "",
+        "license": "",
+        "tags": [],
+        "platforms": [],
+        "related": [],
+    }
     try:
         from kairos_skills.frontmatter import parse_frontmatter
 
         fm, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
-        name = fm.name or name
-        description = fm.description or ""
+        dados.update(
+            name=fm.name or dados["name"],
+            description=fm.description or "",
+            version=fm.version or "",
+            author=fm.author or "",
+            license=fm.license or "",
+            tags=list(fm.tags or ()),
+            platforms=list(fm.platforms or ()),
+            related=list(fm.related_skills or ()),
+        )
     except Exception as exc:  # noqa: BLE001 — uma skill malformada não derruba a lista
         logger.warning("skills: frontmatter ilegível em %s: %s", path, exc)
-    return {"name": name, "description": description}
+    return dados
 
 
 @app.get("/api/skills")
@@ -658,7 +733,15 @@ async def list_skills():
                 "source": origem,
                 "path": str(md),
             }
-    return {"skills": sorted(encontradas.values(), key=lambda s: (s["category"], s["name"]))}
+    skills = sorted(encontradas.values(), key=lambda s: (s["category"], s["name"]))
+    categorias: dict[str, int] = {}
+    for s in skills:
+        categorias[s["category"]] = categorias.get(s["category"], 0) + 1
+    return {
+        "skills": skills,
+        "categorias": [{"id": nome, "total": n} for nome, n in sorted(categorias.items())],
+        "total": len(skills),
+    }
 
 
 def _skill_file(name: str, *, criar: bool = False) -> Path | None:

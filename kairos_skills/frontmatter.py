@@ -120,7 +120,29 @@ def parse_frontmatter(text: str) -> tuple[Frontmatter, str]:
         raise FrontmatterError("frontmatter deve ser um mapa")
 
     meta = (data.get("metadata") or {}).get("kairos") or {}
-    known = {"name", "description", "version", "author", "license", "platforms", "metadata"}
+    known = {
+        "name",
+        "description",
+        "version",
+        "author",
+        "license",
+        "platforms",
+        "metadata",
+        "tags",
+        "related_skills",
+    }
+
+    def lista(chave: str) -> tuple:
+        """`metadata.kairos` primeiro, nível de topo depois.
+
+        As duas formas circulam: o aninhamento vem do catálogo, o topo é o que
+        se escreve à mão em YAML. Aceitar só uma faz a outra ser silenciosamente
+        ignorada — a skill carrega, mas perde as tags e o roteamento por elas.
+        """
+        valor = meta.get(chave)
+        if valor is None:
+            valor = data.get(chave)
+        return tuple(valor or ())
 
     fm = Frontmatter(
         name=str(data.get("name", "")),
@@ -129,8 +151,8 @@ def parse_frontmatter(text: str) -> tuple[Frontmatter, str]:
         author=data.get("author"),
         license=data.get("license"),
         platforms=tuple(data.get("platforms") or ()),
-        tags=tuple(meta.get("tags") or ()),
-        related_skills=tuple(meta.get("related_skills") or ()),
+        tags=lista("tags"),
+        related_skills=lista("related_skills"),
         extra={k: v for k, v in data.items() if k not in known},
     )
     return fm, text[m.end() :]

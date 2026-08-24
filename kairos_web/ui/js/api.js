@@ -83,6 +83,8 @@ export const api = {
   alternarSkill: (name, enabled) => request("/api/skills/toggle", { method: "PUT", body: { name, enabled } }),
 
   sessoes:   () => request("/api/sessions"),
+  sessao:    (id) => request(`/api/sessions/${encodeURIComponent(id)}`),
+  mensagens: (id) => request(`/api/sessions/${encodeURIComponent(id)}/messages`),
   modelos:   () => request("/api/models"),
   provedores:() => request("/api/providers"),
   toolsets:  () => request("/api/tools/toolsets"),
