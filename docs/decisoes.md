@@ -1082,6 +1082,80 @@ cada montagem de prompt; sua ausência custa uma partida, não uma falha.
 
 ---
 
+## Tarefa 13 — agent
+
+### D-13.1 — A saída normal não recebe rótulo
+
+`ExitReason` tem 12 valores, todos de saída **antecipada**. O caminho feliz —
+resposta sem chamadas de ferramenta — sai com `exit_reason = None`.
+
+É deliberado: o campo existe para explicar por que um turno terminou antes do
+esperado. Rotular o caminho comum diluiria o sinal, e todo consumidor teria
+que filtrar o rótulo "normal" antes de aprender qualquer coisa.
+
+### D-13.2 — Dois limites independentes, porque se esgotam por motivos diferentes
+
+`max_iterations` é teto absoluto de chamadas — protege contra laço infinito.
+`IterationBudget` é consumível — protege contra custo. Um só não bastaria.
+
+E o **estorno** existe porque nem toda iteração chega ao provedor: preflight
+abortado ou compressão adiada gastariam orçamento sem gastar chamada, e o
+turno morreria antes de fazer o trabalho.
+
+O *grace call* dá uma última chance quando o orçamento esgota, e a flag é
+consumida no início da iteração — de modo que o laço saia depois dela,
+qualquer que seja o resultado.
+
+### D-13.3 — A invariante de compactação, e por que ela existe
+
+Com `compression.enabled: false`, **nenhum** gatilho automático dispara —
+**inclusive os reativos**. Antes da correção (portada de
+anomalyco/opencode#30749) o limiar proativo respeitava a configuração, mas um
+erro de estouro do provedor ainda comprimia e **rotacionava a sessão em
+silêncio**, por cima da escolha explícita do usuário.
+
+A mensagem de recusa dá a saída — `/compress`, `/new`, modelo maior, menos
+anexos — porque negar sem alternativa deixa o usuário travado.
+
+Duas isenções, com razões opostas:
+
+- **`/compress` forçado** não é limitado pela configuração: é ação do usuário.
+- **Erro de teto de saída** não é estouro de entrada. A recuperação é um retry
+  só de `max_tokens`, que não exige compressão nenhuma — e por isso dispara
+  mesmo com a compressão desligada.
+
+### D-13.4 — O cliente auxiliar é um roteador, não um modelo
+
+Cinco consumidores compartilham uma cadeia única em vez de duplicar lógica de
+fallback. As duas cadeias diferem numa ordem que parece detalhe e não é: na
+visão, o **endpoint custom vem depois** do Anthropic, porque ali ele está
+reservado a modelos locais (Qwen-VL, LLaVA, Pixtral); no texto, vem antes.
+
+**Codex OAuth nunca entra nas cadeias de fallback.** A OpenAI protege o
+endpoint atrás de uma allow-list de modelos não documentada e móvel — *"just
+try Codex with a hardcoded model" rots on its own*. Ele entra só como provedor
+principal ou por pedido explícito com modelo.
+
+E a guarda `free_only` existe porque fallback silencioso para modelo pago é a
+falha que mais surpreende: o usuário não pediu, não viu, e paga.
+
+### D-13.5 — Micro-compactação é opt-in, e o motivo é regra de desenho
+
+A passada **reescreve histórico já enviado**, quebrando o prefixo do
+prompt-cache **a cada turno** em vez de numa fronteira episódica. É exatamente
+o custo que `proactive_prune_min_reclaim_tokens` existe para amortizar.
+
+`every_n_turns` é travado em ≥ 1 com mensagem explícita: zero significaria
+reescrever o histórico continuamente.
+
+### D-13.6 — Invariante 1 fechado
+
+*"O prefixo de cache não muda mid-conversa (exceto compactação)"* passou de
+`DEFERRED` para `DOMAIN`, imposto por `compaction_trigger` e
+`should_micro_compact`. Restam **3** diferidos, todos de tarefas pendentes.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

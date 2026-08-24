@@ -434,7 +434,7 @@ class RegistryTests(unittest.TestCase):
         # Deve ENCOLHER a cada tarefa. Se este número subir, algo regrediu.
         # 6 e 11 fecharam na Tarefa 05 (o registro os pegou apontando para
         # uma tarefa já concluída — que é para isso que ele existe).
-        self.assertEqual({i.number for i in unenforced()}, {1, 12, 13, 14})
+        self.assertEqual({i.number for i in unenforced()}, {12, 13, 14})
 
     def test_nenhum_invariante_aponta_para_tarefa_ja_concluida(self):
         """A guarda que pegou os invariantes 6 e 11.
@@ -442,7 +442,7 @@ class RegistryTests(unittest.TestCase):
         Um invariante diferido para uma tarefa fechada é dívida invisível: o
         registro continua parecendo em ordem enquanto ninguém o impôs.
         """
-        CONCLUIDAS = {"01", "02", "03", "04", "05", "06", "07"}
+        CONCLUIDAS = {"01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13"}
         import re
 
         for inv in unenforced():

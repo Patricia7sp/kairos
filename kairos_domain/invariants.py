@@ -40,8 +40,9 @@ INVARIANTS: tuple[Invariant, ...] = (
         1,
         "O prefixo de cache não muda mid-conversa (exceto compactação)",
         "agent",
-        Enforcement.DEFERRED,
-        "Tarefa 13 — agent",
+        Enforcement.DOMAIN,
+        "kairos_agent.compaction.compaction_trigger "
+        "+ kairos_agent.micro_compaction.should_micro_compact",
     ),
     Invariant(
         2,

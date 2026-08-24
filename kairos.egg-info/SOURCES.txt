@@ -5,6 +5,11 @@ kairos.egg-info/SOURCES.txt
 kairos.egg-info/dependency_links.txt
 kairos.egg-info/requires.txt
 kairos.egg-info/top_level.txt
+kairos_agent/__init__.py
+kairos_agent/auxiliary.py
+kairos_agent/compaction.py
+kairos_agent/loop.py
+kairos_agent/micro_compaction.py
 kairos_container/__init__.py
 kairos_domain/__init__.py
 kairos_domain/compaction.py
@@ -56,6 +61,7 @@ tests/test_domain.py
 tests/test_gateway.py
 tests/test_i18n.py
 tests/test_machines.py
+tests/test_mcp.py
 tests/test_plugins.py
 tests/test_schema.py
 tests/test_skills.py

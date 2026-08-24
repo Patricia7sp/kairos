@@ -25,7 +25,8 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 10 — plugins | ✅ concluída |
 | 11 — providers-gateway | ✅ concluída |
 | 12 — mcp | ✅ concluída |
-| 13–21 | pendentes |
+| 13 — agent | ✅ concluída |
+| 14–21 | pendentes |
 
 ## Ambiente
 
