@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Türkçe
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  TEHLİKELİ KOMUT: {description}"
+  command: "Komut: {command}"
+  choose_short: "[a]bir kez izin ver  [s]oturum  [d]reddet"
+  choose_long: "Bu komuta izin verilsin mi? [o]bir kez / [s]oturum / [a]her zaman / [d]reddet / [n]asla"
+  denied: "Reddedildi. Komut çalıştırılmadı."
+  denied_permanent: "Kalıcı bir engelleme kuralı tarafından engellendi: {pattern}"
+  timeout: "{seconds} sn içinde yanıt alınamadı — varsayılan olarak reddedildi."
+  sensitive_path: "Hassas yol {path} otonom politika altında bile her zaman onay ister."
+  outside_workspace: "{path} çalışma alanı dışında — onay isteniyor."
+
+gateway:
+  drain_started: "Boşaltılıyor: {count} turun tamamlanması bekleniyor."
+  drain_cancelled: "Boşaltma iptal edildi — hizmete geri dönüldü."
+  restart_pending: "Yeniden başlatma bekleniyor; yeni iletiler kuyruğa alındı."
+  paired: "Eşleşti. Artık ajanla konuşabilirsiniz."
+  pairing_code: "Eşleşme kodunuz: {code}. {minutes} dakika içinde sona erecektir."
+  pairing_locked: "Çok fazla deneme. {minutes} dakika sonra tekrar deneyin."
+  unauthorized: "Bu sohbete yetki verilmedi."
+
+session:
+  compacted: "Bağlam sıkıştırıldı: {removed} ileti arşivlendi."
+  compaction_disabled: "Bağlam dolu ve otomatik sıkıştırma kapalı. /compress, /new veya daha büyük bir model kullanın."
+  turn_busy: "Bu konuşma için zaten başka bir tur çalışıyor."
+  storage_busy: "Depolama meşguldü — lütfen tekrar gönderin."
+  storage_readonly: "Depolama salt okunur. Disk alanını ve izinleri kontrol edin."
+
+i18n:
+  falls_back_to_english: "{surface} arayüzünde {language} çevirisi yok; İngilizce gösteriliyor."

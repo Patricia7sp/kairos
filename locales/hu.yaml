@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Magyar
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  VESZÉLYES PARANCS: {description}"
+  command: "Parancs: {command}"
+  choose_short: "[a]engedélyezés egyszer  [s]munkamenet  [d]elutasítás"
+  choose_long: "Engedélyezi ezt a parancsot? [o]egyszer / [s]munkamenet / [a]mindig / [d]elutasítás / [n]soha"
+  denied: "Elutasítva. A parancs nem futott le."
+  denied_permanent: "Állandó elutasítási szabály blokkolta: {pattern}"
+  timeout: "Nincs válasz {seconds} mp alatt — alapértelmezés szerint elutasítva."
+  sensitive_path: "A(z) {path} érzékeny útvonal mindig megerősítést kér, még autonóm szabályzat mellett is."
+  outside_workspace: "A(z) {path} a munkaterületen kívül található — megerősítés szükséges."
+
+gateway:
+  drain_started: "Kiürítés: várakozás {count} kör befejezésére."
+  drain_cancelled: "Kiürítés megszakítva — visszatérés a kiszolgáláshoz."
+  restart_pending: "Újraindítás függőben; az új üzenetek várólistára kerültek."
+  paired: "Párosítva. Most már beszélhet az ágenssel."
+  pairing_code: "A párosítási kódja: {code}. Érvényes még: {minutes} perc."
+  pairing_locked: "Túl sok kísérlet. Próbálja újra {minutes} perc múlva."
+  unauthorized: "Ez a csevegés nincs engedélyezve."
+
+session:
+  compacted: "Kontextus tömörítve: {removed} üzenet archiválva."
+  compaction_disabled: "A kontextus megtelt, és az automatikus tömörítés ki van kapcsolva. Használja a /compress, /new parancsot vagy egy nagyobb modellt."
+  turn_busy: "Ehhez a beszélgetéshez már fut egy másik kör."
+  storage_busy: "A tároló foglalt volt — kérjük, küldje el újra."
+  storage_readonly: "A tároló csak olvasható. Ellenőrizze a lemezterületet és a jogosultságokat."
+
+i18n:
+  falls_back_to_english: "A(z) {surface} felület nem rendelkezik {language} fordítással; angolul jelenik meg."

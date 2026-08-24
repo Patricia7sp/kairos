@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Gaeilge
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  ORDÚ CONTÚIRTEACH: {description}"
+  command: "Ordú: {command}"
+  choose_short: "[a]ceadaigh uair amháin  [s]seisiún  [d]diúltaigh"
+  choose_long: "An gceadaíonn tú an t-ordú seo? [o]uair amháin / [s]seisiún / [a]i gcónaí / [d]diúltaigh / [n]riamh"
+  denied: "Diúltaithe. Níor ritheadh an t-ordú."
+  denied_permanent: "Blocáilte ag buanrial diúltaithe: {pattern}"
+  timeout: "Gan freagra laistigh de {seconds}s — diúltaithe de réir réamhshocraithe."
+  sensitive_path: "Iarrann conair íogair {path} i gcónaí, fiú faoi pholasaí uathrialach."
+  outside_workspace: "Tá {path} lasmuigh den spás oibre — ag iarraidh fiú faoi pholasaí uathrialach."
+
+gateway:
+  drain_started: "Ag draenáil: ag fanacht le {count} seal críochnú."
+  drain_cancelled: "Draenáil cealaithe — ar ais ag freastal."
+  restart_pending: "Atosú ar feitheamh; tá teachtaireachtaí nua sa scuaine."
+  paired: "Péireáilte. Is féidir leat labhairt leis an ngníomhaire anois."
+  pairing_code: "Is é {code} do chód péireála. Rachaidh sé in éag i gceann {minutes} nóiméad."
+  pairing_locked: "An iomarca iarrachtaí. Bain triail eile as i gceann {minutes} nóiméad."
+  unauthorized: "Níl an comhrá seo údaraithe."
+
+session:
+  compacted: "Comhthéacs comhbhrúite: cuireadh {removed} teachtaireacht i gcartlann."
+  compaction_disabled: "Tá an comhthéacs lán agus tá uath-chomhbhrú múchta. Úsáid /compress, /new nó samhail níos mó."
+  turn_busy: "Tá seal eile ag rith cheana féin don chomhrá seo."
+  storage_busy: "Bhí an stóras gnóthach — seol arís é."
+  storage_readonly: "Tá an stóras inléite amháin. Seiceáil spás diosca agus ceadanna."
+
+i18n:
+  falls_back_to_english: "Níl aon aistriúchán {language} ag an dromchla {surface}; ag taispeáint Béarla."

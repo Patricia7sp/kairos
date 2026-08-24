@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — العربية
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  أمر خطير: {description}"
+  command: "الأمر: {command}"
+  choose_short: "[a]سماح لمرة واحدة  [s]جلسة  [d]رفض"
+  choose_long: "هل تسمح بهذا الأمر؟ [o]مرة واحدة / [s]جلسة / [a]دائماً / [d]رفض / [n]أبداً"
+  denied: "تم الرفض. لم يتم تشغيل الأمر."
+  denied_permanent: "تم الحظر بواسطة قاعدة رفض دائمة: {pattern}"
+  timeout: "لم يتم الرد خلال {seconds} ثانية — تم الرفض افتراضياً."
+  sensitive_path: "المسار الحساس {path} يتطلب دائماً التأكيد، حتى في ظل السياسة الذاتية."
+  outside_workspace: "{path} خارج مساحة العمل — يتطلب تأكيداً."
+
+gateway:
+  drain_started: "جاري التفريغ: بانتظار اكتمال {count} دورة."
+  drain_cancelled: "تم إلغاء التفريغ — العودة إلى الخدمة."
+  restart_pending: "إعادة التشغيل معلقة؛ الرسائل الجديدة في قائمة الانتظار."
+  paired: "تم الاقتران. يمكنك التحدث مع الوكيل الآن."
+  pairing_code: "رمز الاقتران الخاص بك هو {code}. تنتهي صلاحيته خلال {minutes} دقيقة."
+  pairing_locked: "محاولات كثيرة جداً. حاول مرة أخرى بعد {minutes} دقيقة."
+  unauthorized: "هذه المحادثة غير مصرح بها."
+
+session:
+  compacted: "تم ضغط السياق: تم أرشفة {removed} رسالة."
+  compaction_disabled: "السياق ممتلئ والضغط التلقائي معطل. استخدم /compress أو /new أو نموذجاً أكبر."
+  turn_busy: "هناك دورة أخرى قيد التشغيل بالفعل لهذه المحادثة."
+  storage_busy: "وحدة التخزين مشغولة — يرجى إعادة الإرسال."
+  storage_readonly: "وحدة التخزين للقراءة فقط. تحقق من مساحة القرص والأذونات."
+
+i18n:
+  falls_back_to_english: "لا تحتوي واجهة {surface} على ترجمة باللغة {language}؛ يتم العرض باللغة الإنجليزية."

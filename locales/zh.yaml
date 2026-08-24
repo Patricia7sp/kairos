@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — 简体中文
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  危险命令: {description}"
+  command: "命令: {command}"
+  choose_short: "[a]允许一次  [s]本会话  [d]拒绝"
+  choose_long: "是否允许执行此命令？[o]一次 / [s]本会话 / [a]始终 / [d]拒绝 / [n]从不"
+  denied: "已拒绝。命令未执行。"
+  denied_permanent: "被永久拒绝规则拦截: {pattern}"
+  timeout: "{seconds}秒内未响应 — 默认拒绝。"
+  sensitive_path: "敏感路径 {path} 始终需要确认，即使在自主策略下也是如此。"
+  outside_workspace: "{path} 位于工作区之外 — 即使在自主策略下也需要确认。"
+
+gateway:
+  drain_started: "排空中: 等待 {count} 个轮次完成。"
+  drain_cancelled: "排空已取消 — 恢复服务。"
+  restart_pending: "等待重启中；新消息已排队。"
+  paired: "配对成功。您现在可以与智能体对话了。"
+  pairing_code: "您的配对码是 {code}。有效期为 {minutes} 分钟。"
+  pairing_locked: "尝试次数过多。请在 {minutes} 分钟后重试。"
+  unauthorized: "此对话未经授权。"
+
+session:
+  compacted: "上下文已压缩: 已归档 {removed} 条消息。"
+  compaction_disabled: "上下文已满且自动压缩已关闭。请使用 /compress、/new 或更大的模型。"
+  turn_busy: "此对话已有其他轮次正在运行。"
+  storage_busy: "存储正忙 — 请重新发送。"
+  storage_readonly: "存储处于只读状态。请检查磁盘空间和权限。"
+
+i18n:
+  falls_back_to_english: "{surface} 界面未提供 {language} 翻译；正在显示英文。"

@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — 日本語
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  危険なコマンド: {description}"
+  command: "コマンド: {command}"
+  choose_short: "[a]今回のみ許可  [s]セッション中  [d]拒否"
+  choose_long: "このコマンドを許可しますか？ [o]今回のみ / [s]セッション中 / [a]常に許可 / [d]拒否 / [n]常に拒否"
+  denied: "拒否されました。コマンドは実行されませんでした。"
+  denied_permanent: "永続的な拒否ルールによってブロックされました: {pattern}"
+  timeout: "{seconds}秒以内に応答がありませんでした — デフォルトで拒否します。"
+  sensitive_path: "センシティブなパス {path} は、自律ポリシー下でも常に確認を求めます。"
+  outside_workspace: "{path} はワークスペース外です — 自律ポリシー下でも確認を求めます。"
+
+gateway:
+  drain_started: "ドレイン中: {count} 件のターンの完了を待機しています。"
+  drain_cancelled: "ドレインがキャンセルされました — サービスを再開します。"
+  restart_pending: "再起動保留中。新しいメッセージはキューに入りました。"
+  paired: "ペアリング完了。エージェントと対話できます。"
+  pairing_code: "ペアリングコードは {code} です。{minutes} 分で有効期限が切れます。"
+  pairing_locked: "試行回数が多すぎます。{minutes} 分後にもう一度お試しください。"
+  unauthorized: "このチャットは認証されていません。"
+
+session:
+  compacted: "コンテキストが圧縮されました: {removed} 件のメッセージがアーカイブされました。"
+  compaction_disabled: "コンテキストが一杯で、自動圧縮は無効です。/compress、/new、またはより大きなモデルをご利用ください。"
+  turn_busy: "この会話ではすでに別のターンが実行中です。"
+  storage_busy: "ストレージがビジー状態です — もう一度送信してください。"
+  storage_readonly: "ストレージは読み取り専用です。ディスク容量と権限を確認してください。"
+
+i18n:
+  falls_back_to_english: "{surface} サーフェスには {language} の翻訳がありません。英語で表示します。"

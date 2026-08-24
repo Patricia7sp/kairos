@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Français
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  COMMANDE DANGEREUSE : {description}"
+  command: "Commande : {command}"
+  choose_short: "[a]utoriser une fois  [s]ession  [d]écliner"
+  choose_long: "Autoriser cette commande ? [o]une fois / [s]ession / [a]toujours / [d]écliner / [n]jamais"
+  denied: "Refusé. La commande n'a pas été exécutée."
+  denied_permanent: "Bloqué par une règle de refus permanent : {pattern}"
+  timeout: "Pas de réponse en {seconds}s — refus par défaut."
+  sensitive_path: "Le chemin sensible {path} demande toujours confirmation, même en mode autonome."
+  outside_workspace: "{path} est en dehors de l'espace de travail — confirmation demandée."
+
+gateway:
+  drain_started: "Vidage en cours : en attente de la fin de {count} tour(s)."
+  drain_cancelled: "Vidage annulé — retour au service."
+  restart_pending: "Redémarrage en attente ; les nouveaux messages sont mis en file d'attente."
+  paired: "Jumelé. Vous pouvez maintenant discuter avec l'agent."
+  pairing_code: "Votre code de jumelage est {code}. Il expire dans {minutes} minutes."
+  pairing_locked: "Trop de tentatives. Réessayez dans {minutes} minutes."
+  unauthorized: "Ce chat n'est pas autorisé."
+
+session:
+  compacted: "Contexte compressé : {removed} message(s) archivé(s)."
+  compaction_disabled: "Le contexte est plein et la compression automatique est désactivée. Utilisez /compress, /new ou un modèle plus grand."
+  turn_busy: "Un autre tour est déjà en cours d'exécution pour cette conversation."
+  storage_busy: "Le stockage était occupé — veuillez renvoyer."
+  storage_readonly: "Le stockage est en lecture seule. Vérifiez l'espace disque et les permissions."
+
+i18n:
+  falls_back_to_english: "L'interface {surface} ne dispose pas de traduction pour {language} ; affichage en anglais."

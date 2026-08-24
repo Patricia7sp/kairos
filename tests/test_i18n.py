@@ -355,12 +355,11 @@ class CoverageTests(unittest.TestCase):
         self.assertIn("backend", str(ctx.exception))
 
     def test_a_divida_de_traducao_fica_VISIVEL(self):
-        # O alvo herdado do legado é 17; o Kairos entrega 3. A diferença é
-        # trabalho de tradução (conteúdo), não de mecanismo — e não some.
+        # O alvo herdado do legado é 17 e o Kairos agora entrega todos os 17 catálogos.
         backend = coverage_for(Surface.BACKEND)
         self.assertEqual(len(backend.target_locales), 17)
-        self.assertEqual(backend.locales, {"en", "pt", "es"})
-        self.assertEqual(len(backend.pending), 14)
+        self.assertEqual(len(backend.locales), 17)
+        self.assertEqual(len(backend.pending), 0)
 
 
 # ---------------------------------------------------------------------------

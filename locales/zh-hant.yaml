@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — 繁體中文
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  危險命令: {description}"
+  command: "命令: {command}"
+  choose_short: "[a]允許一次  [s]本工作階段  [d]拒絕"
+  choose_long: "是否允許執行此命令？[o]一次 / [s]本工作階段 / [a]一律允許 / [d]拒絕 / [n]一律拒絕"
+  denied: "已拒絕。命令未執行。"
+  denied_permanent: "已被永久拒絕規則攔截: {pattern}"
+  timeout: "{seconds}秒內未回應 — 預設拒絕。"
+  sensitive_path: "敏感路徑 {path} 始終需要確認，即使在自主策略下也是如此。"
+  outside_workspace: "{path} 位於工作區之外 — 即使在自主策略下也需要確認。"
+
+gateway:
+  drain_started: "排空中: 等待 {count} 個輪次完成。"
+  drain_cancelled: "排空已取消 — 恢復服務。"
+  restart_pending: "等待重啟中；新訊息已排隊。"
+  paired: "配對成功。您現在可以與智慧體對話了。"
+  pairing_code: "您的配對碼是 {code}。將在 {minutes} 分鐘後過期。"
+  pairing_locked: "嘗試次數過多。請在 {minutes} 分鐘後重試。"
+  unauthorized: "此對話未經授權。"
+
+session:
+  compacted: "上下文已壓縮: 已封存 {removed} 則訊息。"
+  compaction_disabled: "上下文已滿且自動壓縮已關閉。請使用 /compress、/new 或更大的模型。"
+  turn_busy: "此對話已有其他輪次正在運行。"
+  storage_busy: "存儲正忙 — 請重新發送。"
+  storage_readonly: "存儲處於唯讀狀態。請檢查磁碟空間和權限。"
+
+i18n:
+  falls_back_to_english: "{surface} 介面未提供 {language} 翻譯；正在顯示英文。"

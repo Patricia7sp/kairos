@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — 한국어
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  위험한 명령: {description}"
+  command: "명령: {command}"
+  choose_short: "[a]한 번 허용  [s]세션 동안  [d]거부"
+  choose_long: "이 명령을 허용하시겠습니까? [o]한 번 / [s]세션 동안 / [a]항상 허용 / [d]거부 / [n]항상 거부"
+  denied: "거부되었습니다. 명령이 실행되지 않았습니다."
+  denied_permanent: "영구 거부 규칙에 의해 차단됨: {pattern}"
+  timeout: "{seconds}초 동안 응답 없음 — 기본적으로 거부됩니다."
+  sensitive_path: "민감한 경로 {path}은(는) 자율 정책 하에서도 항상 확인을 요청합니다."
+  outside_workspace: "{path}은(는) 작업 공간 외부에 있습니다 — 확인이 필요합니다."
+
+gateway:
+  drain_started: "드레인 진행 중: {count}개 턴이 완료되기를 기다리는 중입니다."
+  drain_cancelled: "드레인이 취소되었습니다 — 서비스를 재개합니다."
+  restart_pending: "재시작 대기 중; 새 메시지가 대기열에 추가되었습니다."
+  paired: "페어링되었습니다. 이제 에이전트와 대화할 수 있습니다."
+  pairing_code: "페어링 코드는 {code}입니다. {minutes}분 후에 만료됩니다."
+  pairing_locked: "시도 횟수가 너무 많습니다. {minutes}분 후에 다시 시도하세요."
+  unauthorized: "승인되지 않은 채팅입니다."
+
+session:
+  compacted: "컨텍스트가 압축되었습니다: {removed}개 메시지가 보관되었습니다."
+  compaction_disabled: "컨텍스트가 가득 찼으며 자동 압축이 꺼져 있습니다. /compress, /new 또는 더 큰 모델을 사용하세요."
+  turn_busy: "이 대화에 대해 이미 다른 턴이 실행 중입니다."
+  storage_busy: "저장소가 사용 중이었습니다 — 다시 보내주세요."
+  storage_readonly: "저장소가 읽기 전용 상태입니다. 디스크 공간과 권한을 확인하세요."
+
+i18n:
+  falls_back_to_english: "{surface} 화면에 {language} 번역이 없어 영어로 표시됩니다."

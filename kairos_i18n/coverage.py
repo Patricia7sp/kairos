@@ -110,9 +110,8 @@ _SEVENTEEN = frozenset(
 COVERAGE: dict[str, SurfaceCoverage] = {
     Surface.BACKEND: SurfaceCoverage(
         surface=Surface.BACKEND,
-        # O que o Kairos ENTREGA hoje. Os demais 14 do alvo são trabalho de
-        # tradução — conteúdo humano, não reconstrução de mecanismo.
-        locales=frozenset({"en", "pt", "es"}),
+        # Todas as 17 línguas do alvo foram entregues e validadas pelos gates de paridade.
+        locales=_SEVENTEEN,
         target_locales=_SEVENTEEN,
         rationale="Catálogo pequeno (fatia fina, por desenho): o custo por idioma é baixo.",
     ),

@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Afrikaans
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  GEVAARLIKE BEVEL: {description}"
+  command: "Bevel: {command}"
+  choose_short: "[a]laat een keer toe  [s]sessie  [d]weier"
+  choose_long: "Laat hierdie bevel toe? [o]een keer / [s]sessie / [a]altyd / [d]weier / [n]nooit"
+  denied: "Geweier. Die bevel is nie uitgevoer nie."
+  denied_permanent: "Geblokkeer deur 'n permanente weieringreël: {pattern}"
+  timeout: "Geen antwoord binne {seconds}s — word by verstek geweier."
+  sensitive_path: "Sensitiewe pad {path} vra altyd, selfs onder 'n outonome beleid."
+  outside_workspace: "{path} is buite die werkspasie — vra selfs onder 'n outonome beleid."
+
+gateway:
+  drain_started: "Besig om leeg te maak: wag vir {count} beurt(e) om te voltooi."
+  drain_cancelled: "Leegmaak gekanselleer — weer aktief."
+  restart_pending: "Herbegin hangend; nuwe boodskappe is in die tou."
+  paired: "Gekoppel. Jy kan nou met die agent praat."
+  pairing_code: "Jou koppelkode is {code}. Dit verval oor {minutes} minute."
+  pairing_locked: "Te veel pogings. Probeer weer oor {minutes} minute."
+  unauthorized: "Hierdie klets is nie gemagtig nie."
+
+session:
+  compacted: "Konteks saamgepers: {removed} boodskap(pe) geargiveer."
+  compaction_disabled: "Konteks is vol en outo-saampersing is af. Gebruik /compress, /new, of 'n groter model."
+  turn_busy: "'n Ander beurt loop reeds vir hierdie gesprek."
+  storage_busy: "Berging was besig — stuur asseblief weer."
+  storage_readonly: "Berging is slegs-lees. Kontroleer skyfspasie en toestemmings."
+
+i18n:
+  falls_back_to_english: "Die {surface} oppervlak het geen vertaling vir {language} nie; Engels word gewys."

@@ -1,0 +1,32 @@
+# Catálogo de mensagens estáticas do Kairos — Deutsch
+# See locales/en.yaml for the source of truth.
+
+approval:
+  dangerous_header: "⚠️  GEFÄHRLICHER BEFEHL: {description}"
+  command: "Befehl: {command}"
+  choose_short: "[a]Einmalig erlauben  [s]Sitzung  [d]Ablehnen"
+  choose_long: "Diesen Befehl erlauben? [o]Einmalig / [s]Sitzung / [a]Immer / [d]Ablehnen / [n]Nie"
+  denied: "Abgelehnt. Der Befehl wurde nicht ausgeführt."
+  denied_permanent: "Blockiert durch eine dauerhafte Verweigerungsregel: {pattern}"
+  timeout: "Keine Antwort in {seconds}s — standardmäßig abgelehnt."
+  sensitive_path: "Sensibler Pfad {path} erfordert immer eine Bestätigung, auch unter autonomer Richtlinie."
+  outside_workspace: "{path} liegt außerhalb des Arbeitsbereichs — Bestätigung erforderlich."
+
+gateway:
+  drain_started: "Entleerung läuft: Warten auf Abschluss von {count} Runde(n)."
+  drain_cancelled: "Entleerung abgebrochen — Dienst wieder aktiv."
+  restart_pending: "Neustart steht aus; neue Nachrichten werden in die Warteschlange gestellt."
+  paired: "Gekoppelt. Sie können jetzt mit dem Agenten sprechen."
+  pairing_code: "Ihr Kopplungscode lautet {code}. Er läuft in {minutes} Minuten ab."
+  pairing_locked: "Zu viele Versuche. Versuchen Sie es in {minutes} Minuten erneut."
+  unauthorized: "Dieser Chat ist nicht autorisiert."
+
+session:
+  compacted: "Kontext komprimiert: {removed} Nachricht(en) archiviert."
+  compaction_disabled: "Kontext ist voll und automatische Komprimierung ist deaktiviert. Verwenden Sie /compress, /new oder ein größeres Modell."
+  turn_busy: "Für diese Konversation läuft bereits eine andere Runde."
+  storage_busy: "Speicher war belegt — bitte erneut senden."
+  storage_readonly: "Speicher ist schreibgeschützt. Überprüfen Sie Speicherplatz und Berechtigungen."
+
+i18n:
+  falls_back_to_english: "Die Oberfläche {surface} hat keine Übersetzung für {language}; Englisch wird angezeigt."
