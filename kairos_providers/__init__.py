@@ -35,6 +35,7 @@ from kairos_providers.contracts import (
     SelectionReason,
     SelectionScope,
 )
+from kairos_providers.curated_catalog import curated_models
 from kairos_providers.manager import ProviderManager, get_google_adc_token
 from kairos_providers.provider_registry import (
     ProviderAdapterRegistry,
@@ -73,6 +74,7 @@ __all__ = [
     "UnknownModelError",
     "UnknownProviderError",
     "build_request_kwargs",
+    "curated_models",
     "get_google_adc_token",
     "user_agent",
 ]

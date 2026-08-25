@@ -9,9 +9,11 @@ from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
     ModelCapabilities,
+    ModelKind,
     ModelStability,
     ProviderModelRef,
 )
+from kairos_providers.curated_catalog import curated_models
 
 
 class ModelCatalogTests(unittest.TestCase):
@@ -99,6 +101,27 @@ class ModelCatalogTests(unittest.TestCase):
         )
 
         self.assertEqual(catalog.find(ProviderModelRef("p", "m")).ref.model, "m")
+
+
+class CuratedCatalogTests(unittest.TestCase):
+    def test_inclui_recomendacoes_agentic_da_especificacao(self):
+        refs = {model.ref for model in curated_models()}
+
+        self.assertIn(ProviderModelRef("openai", "gpt-5.6-terra"), refs)
+        self.assertIn(ProviderModelRef("anthropic", "claude-sonnet-5"), refs)
+        self.assertIn(ProviderModelRef("gemini", "gemini-3.7-flash"), refs)
+        self.assertIn(ProviderModelRef("deepseek", "deepseek-v4-pro"), refs)
+
+    def test_curadoria_principal_contem_somente_chat(self):
+        self.assertTrue(all(model.capabilities.chat for model in curated_models()))
+
+    def test_antigravity_e_remote_agent_preview(self):
+        antigravity = next(
+            model for model in curated_models() if model.ref.model == "antigravity"
+        )
+
+        self.assertEqual(antigravity.ref.kind, ModelKind.REMOTE_AGENT)
+        self.assertEqual(antigravity.stability, ModelStability.PREVIEW)
 
 
 if __name__ == "__main__":
