@@ -100,6 +100,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_read_at                        REAL
 );
 
+-- Organização da biblioteca de sessões. Separada da linha canônica para que
+-- tags possam evoluir sem alterar a forma histórica da tabela `sessions`.
+CREATE TABLE IF NOT EXISTS session_tags (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tag        TEXT NOT NULL,
+    PRIMARY KEY (session_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
+
 -- ``api_content`` é o SIDECAR: o que vai para a API, separado do que é
 -- exibido. É o mecanismo que sustenta a Lei 1 (o cache de prompt por
 -- conversa é sagrado) — reescrever ``content`` para exibição não altera o

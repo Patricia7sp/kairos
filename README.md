@@ -205,3 +205,14 @@ export KAIROS_WEB_TOKEN="$(cat "$KAIROS_HOME/web-token")"
 ```
 
 Um teste verifica que nenhuma linha de log do servidor menciona o token.
+
+## Sessões no painel
+
+O menu **Sessões** consulta o histórico salvo em `state.db`. Ele permite buscar
+por título, origem, modelo ou conteúdo, filtrar por estado e tags, navegar por
+páginas, abrir a transcrição, editar tags, arquivar ou ocultar uma sessão sem
+apagar o transcript.
+
+No detalhe, a conversa pode ser exportada como JSON ou Markdown. Sessões
+ocultas continuam recuperáveis pelo filtro **Ocultas**; nenhuma ação da
+interface remove fisicamente dados.

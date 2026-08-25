@@ -63,6 +63,21 @@ class SchemaTestCase(unittest.TestCase):
     def test_messages_tem_23_colunas(self):
         self.assertEqual(len(self.columns("messages")), 23)
 
+    def test_session_tags_existe_com_chave_composta(self):
+        self.assertIn("session_tags", self.tables())
+        colunas = self.columns("session_tags")
+        self.assertEqual(set(colunas), {"session_id", "tag"})
+        self.assertEqual(colunas["session_id"]["pk"], 1)
+        self.assertEqual(colunas["tag"]["pk"], 2)
+
+    def test_session_tags_tem_fk_e_cascade(self):
+        self.db.execute("INSERT INTO sessions(id, source, started_at) VALUES ('s1','cli',1.0)")
+        self.db.execute("INSERT INTO session_tags(session_id, tag) VALUES ('s1','projeto')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO session_tags(session_id, tag) VALUES ('missing','x')")
+        self.db.execute("DELETE FROM sessions WHERE id='s1'")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM session_tags").fetchone()[0], 0)
+
     def test_session_model_usage_tem_pk_composta_de_6_colunas(self):
         pk = [
             r["name"] for r in self.db.execute("PRAGMA table_info(session_model_usage)") if r["pk"]

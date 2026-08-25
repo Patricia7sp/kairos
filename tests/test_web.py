@@ -726,6 +726,75 @@ class SessoesTests(unittest.TestCase):
         self.assertEqual(estados["s-fechada"], "encerrada")
         self.assertEqual(estados["s-aberta"], "aberta")
 
+    def test_lista_permite_busca_e_filtro_de_arquivadas(self):
+        from kairos_state import connect, default_db_path
+
+        conn = connect(default_db_path())
+        with conn:
+            conn.execute("UPDATE sessions SET archived = 1 WHERE id = ?", ("s-fechada",))
+        conn.close()
+
+        buscada = self.client.get("/api/sessions", params={"q": "Fechada"}).json()
+        self.assertEqual([s["id"] for s in buscada["sessions"]], ["s-fechada"])
+        arquivadas = self.client.get("/api/sessions", params={"status": "arquivadas"}).json()
+        self.assertEqual([s["id"] for s in arquivadas["sessions"]], ["s-fechada"])
+        abertas = self.client.get("/api/sessions", params={"status": "abertas"}).json()
+        self.assertEqual([s["id"] for s in abertas["sessions"]], ["s-aberta"])
+
+    def test_sessao_pode_ser_arquivada_sem_apagar_mensagens(self):
+        res = self.client.patch("/api/sessions/s-fechada", json={"archived": True})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["archived"])
+        mensagens = self.client.get("/api/sessions/s-fechada/messages").json()["messages"]
+        self.assertEqual(len(mensagens), 3)
+
+    def test_tags_sao_normalizadas_e_filtravel(self):
+        res = self.client.patch(
+            "/api/sessions/s-fechada",
+            json={"tags": [" Projeto ", "URGENTE", "projeto"]},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["tags"], ["projeto", "urgente"])
+        filtrada = self.client.get("/api/sessions", params={"tag": "projeto"}).json()
+        self.assertEqual([s["id"] for s in filtrada["sessions"]], ["s-fechada"])
+        self.assertEqual(filtrada["tag_counts"], [{"tag": "projeto", "count": 1}, {"tag": "urgente", "count": 1}])
+
+    def test_lista_tem_total_e_paginacao_e_oculta_reversivel(self):
+        self.assertEqual(self.client.patch("/api/sessions/s-aberta", json={"hidden": True}).status_code, 200)
+        visiveis = self.client.get("/api/sessions", params={"limit": 1}).json()
+        self.assertEqual(visiveis["total"], 1)
+        self.assertTrue(visiveis["has_more"] is False)
+        ocultas = self.client.get("/api/sessions", params={"status": "ocultas"}).json()
+        self.assertEqual([s["id"] for s in ocultas["sessions"]], ["s-aberta"])
+
+    def test_tags_da_visao_oculta_contam_sessoes_ocultas(self):
+        self.client.patch(
+            "/api/sessions/s-aberta", json={"hidden": True, "tags": ["secreta"]}
+        )
+
+        ocultas = self.client.get("/api/sessions", params={"status": "ocultas"}).json()
+
+        self.assertEqual(ocultas["tag_counts"], [{"tag": "secreta", "count": 1}])
+
+    def test_sessoes_fixadas_aparecem_primeiro(self):
+        self.client.patch("/api/sessions/s-fechada", json={"pinned": True})
+
+        sessoes = self.client.get("/api/sessions").json()["sessions"]
+
+        self.assertEqual([s["id"] for s in sessoes], ["s-fechada", "s-aberta"])
+        self.assertTrue(sessoes[0]["pinned"])
+
+    def test_contagem_de_mensagens_fica_restrita_a_pagina(self):
+        from kairos_state import connect, default_db_path
+        from kairos_web.server import _contagem_de_mensagens
+
+        conn = connect(default_db_path())
+        try:
+            self.assertEqual(_contagem_de_mensagens(conn, ["s-aberta"]), {})
+            self.assertEqual(_contagem_de_mensagens(conn, ["s-fechada"]), {"s-fechada": 3})
+        finally:
+            conn.close()
+
     def test_a_contagem_de_mensagens_vem_das_mensagens(self):
         """`sessions.message_count` fica em zero — nenhum caminho de escrita o
         incrementa. Confiar nele mostraria 0 com as mensagens todas lá."""
@@ -749,3 +818,42 @@ class SessoesTests(unittest.TestCase):
         corpo = self.client.get("/api/sessions/s-fechada/messages").json()
         msgs = corpo.get("messages", corpo)
         self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
+
+
+class SessoesInterfaceTests(unittest.TestCase):
+    """Contratos pequenos da interação da tabela e da transcrição."""
+
+    FONTE = Path(__file__).resolve().parent.parent / "kairos_web/ui/js/views/sessoes.js"
+
+    def test_linha_de_sessao_pode_ser_ativada_com_teclado(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn('addEventListener("keydown"', texto)
+        self.assertIn('ev.key !== "Enter" && ev.key !== " "', texto)
+
+    def test_transcricao_le_o_timestamp_que_a_api_entrega(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn("m.created_at", texto)
+
+    def test_interface_expoe_busca_filtro_e_exportacao(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn('data-busca-sessoes', texto)
+        self.assertIn('data-filtro-sessoes', texto)
+        self.assertIn('URL.createObjectURL', texto)
+
+    def test_interface_pode_alternar_arquivo(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn('api.atualizarSessao', texto)
+        self.assertIn('archived: !sessao.archived', texto)
+
+    def test_interface_pode_fixar_e_desafixar_sessao(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn('data-fixar-sessao', texto)
+        self.assertIn('pinned: !sessao.pinned', texto)
+
+    def test_interface_expoe_tags_paginacao_e_markdown(self):
+        texto = self.FONTE.read_text(encoding="utf-8")
+        self.assertIn('data-filtro-tag', texto)
+        self.assertIn('data-pagina-anterior', texto)
+        self.assertIn('data-pagina-proxima', texto)
+        self.assertIn('Exportar Markdown', texto)
+        self.assertIn('api.atualizarSessao(id, { tags })', texto)

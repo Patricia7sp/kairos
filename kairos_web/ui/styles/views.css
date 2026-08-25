@@ -180,6 +180,22 @@
 
 /* --- sessões ------------------------------------------------------------ */
 
+.k-ses__filtros {
+  display: flex; align-items: center; gap: var(--k-space-3); flex-wrap: wrap;
+  margin-bottom: var(--k-space-4);
+}
+.k-ses__busca { flex: 1 1 280px; }
+.k-ses__acoes { display: flex; align-items: center; gap: var(--k-space-2); flex-wrap: wrap; justify-content: flex-end; }
+.k-ses__acoes .k-btn { font-size: var(--k-size-xs); }
+.k-ses__tags { display: flex; gap: var(--k-space-1); flex-wrap: wrap; margin-top: var(--k-space-1); }
+.k-ses__tags .k-badge { font-size: 10px; padding: 1px 5px; }
+.k-ses__tags-edicao dd { display: flex; gap: var(--k-space-2); align-items: center; flex-wrap: wrap; }
+.k-ses__tags-edicao .k-input { min-width: 180px; flex: 1; }
+.k-ses__paginacao {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--k-space-3); padding: var(--k-space-3) 0; color: var(--k-text-3); font-size: var(--k-size-xs);
+}
+.k-ses__pag-botoes { display: flex; gap: var(--k-space-2); }
 .k-ses { display: grid; grid-template-columns: minmax(320px, 5fr) 7fr; gap: var(--k-space-4); align-items: start; }
 .k-ses__lista { max-height: 70dvh; overflow-y: auto; }
 .k-ses__lista tbody tr { cursor: pointer; }
@@ -212,4 +228,8 @@
   .k-ses { grid-template-columns: 1fr; }
   .k-ses__detalhe { position: static; }
   .k-ses__lista { max-height: 44dvh; }
+}
+
+@media (max-width: 560px) {
+  .k-ses__acoes { justify-content: flex-start; margin-top: var(--k-space-2); }
 }
