@@ -106,6 +106,7 @@ tests/test_builtin_tools.py
 tests/test_cjk.py
 tests/test_cli.py
 tests/test_cli_surface.py
+tests/test_compose_config.py
 tests/test_container.py
 tests/test_credential_migration.py
 tests/test_credential_vault.py
