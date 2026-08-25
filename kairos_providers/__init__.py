@@ -31,6 +31,11 @@ from kairos_providers.contracts import (
     SelectionScope,
 )
 from kairos_providers.manager import ProviderManager, get_google_adc_token
+from kairos_providers.provider_registry import (
+    ProviderAdapterRegistry,
+    RegisteredProvider,
+    UnknownProviderError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +50,20 @@ __all__ = [
     "ModelDescriptor",
     "ModelKind",
     "ModelStability",
+    "ProviderAdapterRegistry",
     "ProviderDescriptor",
     "ProviderManager",
     "ProviderModelRef",
     "ProviderProfile",
     "ProviderRegistry",
     "ProviderType",
+    "RegisteredProvider",
     "ResolvedModelSelection",
     "SelectionReason",
     "SelectionScope",
     "StreamChunk",
     "TokenUsage",
+    "UnknownProviderError",
     "build_request_kwargs",
     "get_google_adc_token",
     "user_agent",

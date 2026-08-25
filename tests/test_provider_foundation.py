@@ -10,9 +10,14 @@ from kairos_providers.contracts import (
     CatalogOrigin,
     ModelCapabilities,
     ModelStability,
+    ProviderDescriptor,
     ProviderModelRef,
     ResolvedModelSelection,
     SelectionReason,
+)
+from kairos_providers.provider_registry import (
+    ProviderAdapterRegistry,
+    UnknownProviderError,
 )
 
 
@@ -67,6 +72,33 @@ class ProviderContractTests(unittest.TestCase):
         )
 
         self.assertEqual(resolved.reason.value, "conversation_override")
+
+
+class ProviderAdapterRegistryTests(unittest.TestCase):
+    def test_registry_descreve_e_cria_adapter_sem_armazenar_credencial(self):
+        registry = ProviderAdapterRegistry()
+        descriptor = ProviderDescriptor(id="fake", display_name="Fake")
+        registry.register(descriptor, lambda **kwargs: {"model": kwargs["model"]})
+
+        self.assertEqual(registry.describe("fake"), descriptor)
+        self.assertEqual(registry.create("fake", model="m"), {"model": "m"})
+
+    def test_provider_desconhecido_falha_sem_fallback(self):
+        with self.assertRaisesRegex(UnknownProviderError, "missing"):
+            ProviderAdapterRegistry().create("missing")
+
+    def test_listagem_e_deterministica(self):
+        registry = ProviderAdapterRegistry()
+        registry.register(
+            ProviderDescriptor(id="z", display_name="Z"), lambda **_: object()
+        )
+        registry.register(
+            ProviderDescriptor(id="a", display_name="A"), lambda **_: object()
+        )
+
+        self.assertEqual(
+            [provider.id for provider in registry.list_descriptors()], ["a", "z"]
+        )
 
 
 if __name__ == "__main__":
