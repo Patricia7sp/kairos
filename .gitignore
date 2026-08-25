@@ -12,3 +12,6 @@ __pycache__/
 
 # frontend
 node_modules/
+
+# worktrees locais de desenvolvimento
+.worktrees/
