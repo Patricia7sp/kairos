@@ -18,23 +18,71 @@ from kairos_providers.base import (
     StreamChunk,
     TokenUsage,
 )
+from kairos_providers.catalog import (
+    CatalogSnapshot,
+    ModelCatalog,
+    UnknownModelError,
+)
+from kairos_providers.contracts import (
+    CatalogModel,
+    CatalogOrigin,
+    ModelCapabilities,
+    ModelKind,
+    ModelStability,
+    ProviderDescriptor,
+    ProviderModelRef,
+    ResolvedModelSelection,
+    SelectionReason,
+    SelectionScope,
+)
+from kairos_providers.curated_catalog import curated_models
 from kairos_providers.manager import ProviderManager, get_google_adc_token
+from kairos_providers.provider_registry import (
+    ProviderAdapterRegistry,
+    RegisteredProvider,
+    UnknownProviderError,
+)
+from kairos_providers.selection import (
+    ModelSelectionContext,
+    ModelSelectionResolver,
+    ModelSelectionUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "OMIT_TEMPERATURE",
     "BaseLLMProvider",
+    "CatalogModel",
+    "CatalogOrigin",
+    "CatalogSnapshot",
     "ConnectionStatus",
     "DiscoveryLayer",
+    "ModelCapabilities",
+    "ModelCatalog",
     "ModelDescriptor",
+    "ModelKind",
+    "ModelSelectionContext",
+    "ModelSelectionResolver",
+    "ModelSelectionUnavailableError",
+    "ModelStability",
+    "ProviderAdapterRegistry",
+    "ProviderDescriptor",
     "ProviderManager",
+    "ProviderModelRef",
     "ProviderProfile",
     "ProviderRegistry",
     "ProviderType",
+    "RegisteredProvider",
+    "ResolvedModelSelection",
+    "SelectionReason",
+    "SelectionScope",
     "StreamChunk",
     "TokenUsage",
+    "UnknownModelError",
+    "UnknownProviderError",
     "build_request_kwargs",
+    "curated_models",
     "get_google_adc_token",
     "user_agent",
 ]

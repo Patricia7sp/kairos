@@ -76,15 +76,18 @@ class ModelKind(StrEnum):
     MODEL = "model"
     REMOTE_AGENT = "remote_agent"
 
+
 class ModelStability(StrEnum):
     STABLE = "stable"
     PREVIEW = "preview"
     DEPRECATED = "deprecated"
 
+
 class CatalogOrigin(StrEnum):
     CURATED = "curated"
     DYNAMIC = "dynamic"
     CACHE = "cache"
+
 
 class SelectionScope(StrEnum):
     MESSAGE = "message"
@@ -93,12 +96,14 @@ class SelectionScope(StrEnum):
     PROFILE = "profile"
     GLOBAL = "global"
 
+
 class SelectionReason(StrEnum):
     MESSAGE_OVERRIDE = "message_override"
     CONVERSATION_OVERRIDE = "conversation_override"
     ACTIVITY_RULE = "activity_rule"
     PROFILE_DEFAULT = "profile_default"
     GLOBAL_DEFAULT = "global_default"
+
 
 @dataclass(frozen=True)
 class ProviderModelRef:
@@ -171,10 +176,12 @@ Expected: FAIL porque `ProviderAdapterRegistry` não existe.
 class UnknownProviderError(LookupError):
     pass
 
+
 @dataclass(frozen=True)
 class RegisteredProvider:
     descriptor: ProviderDescriptor
     factory: Callable[..., Any] = field(repr=False, compare=False)
+
 
 class ProviderAdapterRegistry:
     def __init__(self) -> None:
@@ -226,7 +233,14 @@ git commit -m "feat(providers): adiciona registry de adapters"
 
 ```python
 class ModelCatalogTests(unittest.TestCase):
-    def model(self, model="m", *, origin=CatalogOrigin.CURATED, context=100, stability=ModelStability.STABLE):
+    def model(
+        self,
+        model="m",
+        *,
+        origin=CatalogOrigin.CURATED,
+        context=100,
+        stability=ModelStability.STABLE,
+    ):
         return CatalogModel(
             ref=ProviderModelRef("p", model),
             display_name=model,
@@ -238,18 +252,23 @@ class ModelCatalogTests(unittest.TestCase):
     def test_dinamico_prevalece_e_preserva_origens(self):
         catalog = ModelCatalog()
         catalog.merge([self.model(context=100)], origin=CatalogOrigin.CURATED)
-        catalog.merge([self.model(origin=CatalogOrigin.DYNAMIC, context=200)], origin=CatalogOrigin.DYNAMIC)
+        catalog.merge(
+            [self.model(origin=CatalogOrigin.DYNAMIC, context=200)], origin=CatalogOrigin.DYNAMIC
+        )
         found = catalog.find(ProviderModelRef("p", "m"))
         self.assertEqual(found.capabilities.context_length, 200)
         self.assertEqual(found.origins, {CatalogOrigin.CURATED, CatalogOrigin.DYNAMIC})
 
     def test_preview_e_deprecated_ficam_ocultos_por_padrao(self):
         catalog = ModelCatalog()
-        catalog.merge([
-            self.model("stable"),
-            self.model("preview", stability=ModelStability.PREVIEW),
-            self.model("old", stability=ModelStability.DEPRECATED),
-        ], origin=CatalogOrigin.CURATED)
+        catalog.merge(
+            [
+                self.model("stable"),
+                self.model("preview", stability=ModelStability.PREVIEW),
+                self.model("old", stability=ModelStability.DEPRECATED),
+            ],
+            origin=CatalogOrigin.CURATED,
+        )
         self.assertEqual([m.ref.model for m in catalog.list_models("p")], ["stable"])
         self.assertEqual(
             [m.ref.model for m in catalog.list_models("p", include_preview=True)],
@@ -259,8 +278,12 @@ class ModelCatalogTests(unittest.TestCase):
     def test_snapshot_expirado_nao_substitui_cache_utilizavel(self):
         now = 1000.0
         catalog = ModelCatalog(clock=lambda: now)
-        catalog.load_snapshot(CatalogSnapshot(models=(self.model(),), fetched_at=900, expires_at=1100))
-        catalog.load_snapshot(CatalogSnapshot(models=(self.model("expired"),), fetched_at=800, expires_at=999))
+        catalog.load_snapshot(
+            CatalogSnapshot(models=(self.model(),), fetched_at=900, expires_at=1100)
+        )
+        catalog.load_snapshot(
+            CatalogSnapshot(models=(self.model("expired"),), fetched_at=800, expires_at=999)
+        )
         self.assertEqual(catalog.find(ProviderModelRef("p", "m")).ref.model, "m")
 ```
 
@@ -281,8 +304,10 @@ class CatalogSnapshot:
     def is_valid(self, now: float) -> bool:
         return now <= self.expires_at
 
+
 class UnknownModelError(LookupError):
     pass
+
 
 class ModelCatalog:
     def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
@@ -379,13 +404,15 @@ class ModelSelectionResolverTests(unittest.TestCase):
         self.resolver = ModelSelectionResolver(self.catalog)
 
     def test_mensagem_vence_todas_as_demais_camadas(self):
-        result = self.resolver.resolve(ModelSelectionContext(
-            message=self.refs["message"],
-            conversation=self.refs["conversation"],
-            activity=self.refs["activity"],
-            profile=self.refs["profile"],
-            global_default=self.refs["global"],
-        ))
+        result = self.resolver.resolve(
+            ModelSelectionContext(
+                message=self.refs["message"],
+                conversation=self.refs["conversation"],
+                activity=self.refs["activity"],
+                profile=self.refs["profile"],
+                global_default=self.refs["global"],
+            )
+        )
         self.assertEqual(result.ref, self.refs["message"])
         self.assertEqual(result.reason, SelectionReason.MESSAGE_OVERRIDE)
 
@@ -398,13 +425,17 @@ class ModelSelectionResolverTests(unittest.TestCase):
         ]
         for field, reason in cases:
             with self.subTest(field=field):
-                result = self.resolver.resolve(ModelSelectionContext(**{field: self.refs[field.removesuffix("_default")]}))
+                result = self.resolver.resolve(
+                    ModelSelectionContext(**{field: self.refs[field.removesuffix("_default")]})
+                )
                 self.assertEqual(result.reason, reason)
 
     def test_modelo_ausente_falha_sem_trocar_provider(self):
         missing = ProviderModelRef("paid", "missing")
         with self.assertRaisesRegex(ModelSelectionUnavailableError, "paid/missing"):
-            self.resolver.resolve(ModelSelectionContext(message=missing, global_default=self.refs["global"]))
+            self.resolver.resolve(
+                ModelSelectionContext(message=missing, global_default=self.refs["global"])
+            )
 ```
 
 - [ ] **Step 2: Rodar testes e confirmar RED**
@@ -422,6 +453,7 @@ class ModelSelectionContext:
     activity: ProviderModelRef | None = None
     profile: ProviderModelRef | None = None
     global_default: ProviderModelRef | None = None
+
 
 class ModelSelectionResolver:
     _ORDER = (
