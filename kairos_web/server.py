@@ -298,13 +298,16 @@ def _linha_sessao(s) -> dict:
     return {
         "id": s["id"],
         "source": s["source"],
-        "title": campo("display_name") or "",
+        "title": campo("display_name") or campo("title") or "",
         "model": campo("model") or "",
         "started_at": s["started_at"],
         "ended_at": s["ended_at"],
         "end_reason": s["end_reason"],
         # Sem `ended_at` a sessão nunca foi encerrada: está aberta.
         "status": "encerrada" if s["ended_at"] else "aberta",
+        "archived": bool(campo("archived", 0)),
+        "pinned": bool(campo("pinned", 0)),
+        "hidden": bool(campo("hidden", 0)),
         "message_count": campo("message_count", 0) or 0,
         "tool_call_count": campo("tool_call_count", 0) or 0,
         "input_tokens": campo("input_tokens", 0) or 0,
@@ -312,7 +315,7 @@ def _linha_sessao(s) -> dict:
     }
 
 
-def _contagem_de_mensagens(conn) -> dict[str, int]:
+def _contagem_de_mensagens(conn, ids: list[str]) -> dict[str, int]:
     """Conta as mensagens ativas por sessão.
 
     `sessions.message_count` existe na tabela, mas nenhum caminho de escrita o
@@ -320,27 +323,118 @@ def _contagem_de_mensagens(conn) -> dict[str, int]:
     da fonte é uma consulta agregada, não N+1, e não depende de todo produtor
     lembrar de atualizar um contador.
     """
+    if not ids:
+        return {}
+    lugares = ", ".join("?" for _ in ids)
     linhas = conn.execute(
-        "SELECT session_id, COUNT(*) AS n FROM messages WHERE active = 1 GROUP BY session_id"
+        f"SELECT session_id, COUNT(*) AS n FROM messages "  # noqa: S608 — apenas placeholders são interpolados
+        f"WHERE active = 1 AND session_id IN ({lugares}) GROUP BY session_id",
+        ids,
     ).fetchall()
     return {linha["session_id"]: linha["n"] for linha in linhas}
 
 
+def _tags_para_sessoes(conn, ids: list[str]) -> dict[str, list[str]]:
+    if not ids:
+        return {}
+    lugares = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT session_id, tag FROM session_tags WHERE session_id IN ({lugares}) ORDER BY tag",  # noqa: S608 — apenas placeholders são interpolados
+        ids,
+    ).fetchall()
+    tags: dict[str, list[str]] = {}
+    for row in rows:
+        tags.setdefault(row["session_id"], []).append(row["tag"])
+    return tags
+
+
+def _contagens_de_tags(conn, where: list[str], args: list[Any]) -> list[dict[str, Any]]:
+    sql = (
+        "SELECT st.tag, COUNT(*) AS n FROM session_tags st JOIN sessions s ON s.id = st.session_id"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY st.tag ORDER BY st.tag"
+    rows = conn.execute(sql, args).fetchall()
+    return [{"tag": row["tag"], "count": row["n"]} for row in rows]
+
+
 @app.get("/api/sessions")
-async def list_sessions(limit: int = 50):
+async def list_sessions(
+    limit: int = 50, offset: int = 0, q: str = "", status: str = "todas", tag: str = ""
+):
     conn = _get_db()
     try:
-        repo = SessionRepository(conn)
-        contagens = _contagem_de_mensagens(conn)
+        limite = max(1, min(limit, 100))
+        deslocamento = max(0, offset)
+        termo = q.strip()
+        tag_filtro = tag.strip().lower()
+        if len(tag_filtro) > 32:
+            return JSONResponse({"error": "invalid_session_tag"}, status_code=400)
+        estados = {"todas", "abertas", "encerradas", "arquivadas", "ocultas"}
+        if status not in estados:
+            return JSONResponse(
+                {"error": "invalid_session_status", "allowed": sorted(estados)},
+                status_code=400,
+            )
+        where: list[str] = []
+        args: list[Any] = []
+        if status == "ocultas":
+            where.append("s.hidden = 1")
+        else:
+            where.append("s.hidden = 0")
+        if status == "abertas":
+            where.append("s.ended_at IS NULL AND s.archived = 0")
+        elif status == "encerradas":
+            where.append("s.ended_at IS NOT NULL AND s.archived = 0")
+        elif status == "arquivadas":
+            where.append("s.archived = 1")
+        if termo:
+            like = f"%{termo}%"
+            where.append(
+                "(s.id LIKE ? OR COALESCE(NULLIF(s.display_name, ''), s.title, '') LIKE ? "
+                "OR COALESCE(s.source, '') LIKE ? OR COALESCE(s.model, '') LIKE ? "
+                "OR EXISTS (SELECT 1 FROM messages mq WHERE mq.session_id = s.id "
+                "AND mq.content LIKE ?))"
+            )
+            args.extend([like, like, like, like, like])
+        tag_where = list(where)
+        tag_args = list(args)
+        if tag_filtro:
+            where.append(
+                "EXISTS (SELECT 1 FROM session_tags stf WHERE stf.session_id = s.id AND stf.tag = ?)"
+            )
+            args.append(tag_filtro)
+        sql = "SELECT s.* FROM sessions s"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        total = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM sessions s WHERE " + " AND ".join(where),  # noqa: S608 — predicados vêm apenas dos ramos constantes acima; valores ficam parametrizados
+                args,
+            ).fetchone()[0]
+        )
+        sql += " ORDER BY s.pinned DESC, s.started_at DESC LIMIT ? OFFSET ?"
+        args.extend([limite, deslocamento])
+        rows = conn.execute(sql, args).fetchall()
+        ids = [s["id"] for s in rows]
+        contagens = _contagem_de_mensagens(conn, ids)
+        tags_por_sessao = _tags_para_sessoes(conn, ids)
         sessoes = []
-        for s in repo.list_recent(limit=max(1, min(limit, 500))):
+        for s in rows:
             linha = _linha_sessao(s)
             linha["message_count"] = contagens.get(linha["id"], linha["message_count"])
+            linha["tags"] = tags_por_sessao.get(linha["id"], [])
             sessoes.append(linha)
         return {
             "sessions": sessoes,
-            "total": len(sessoes),
+            "total": total,
+            "offset": deslocamento,
+            "limit": limite,
+            "has_more": deslocamento + len(sessoes) < total,
             "abertas": sum(1 for s in sessoes if s["status"] == "aberta"),
+            "tag_counts": _contagens_de_tags(conn, tag_where, tag_args),
+            "filtro": {"q": termo, "status": status, "tag": tag_filtro},
         }
     finally:
         conn.close()
@@ -354,10 +448,60 @@ async def get_session(session_id: str):
         if s is None:
             return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
         linha = _linha_sessao(s)
-        linha["message_count"] = _contagem_de_mensagens(conn).get(
+        linha["message_count"] = _contagem_de_mensagens(conn, [session_id]).get(
             session_id, linha["message_count"]
         )
+        linha["tags"] = _tags_para_sessoes(conn, [session_id]).get(session_id, [])
         return linha
+    finally:
+        conn.close()
+
+
+@app.patch("/api/sessions/{session_id}")
+async def update_session(session_id: str, payload: dict[str, Any]):
+    """Atualiza somente metadados de organização; o transcript é imutável aqui."""
+    permitidos = {"archived", "pinned", "hidden", "tags"}
+    desconhecidos = set(payload) - permitidos
+    if desconhecidos or not payload:
+        return JSONResponse(
+            {"error": "invalid_session_update", "allowed": sorted(permitidos)},
+            status_code=400,
+        )
+    flags = {k: v for k, v in payload.items() if k != "tags"}
+    if any(not isinstance(v, bool) for v in flags.values()):
+        return JSONResponse({"error": "session_flags_must_be_boolean"}, status_code=400)
+    tags_payload = payload.get("tags")
+    tags: list[str] | None = None
+    if tags_payload is not None:
+        if not isinstance(tags_payload, list) or any(not isinstance(v, str) for v in tags_payload):
+            return JSONResponse(
+                {"error": "session_tags_must_be_a_list_of_strings"}, status_code=400
+            )
+        tags = sorted({v.strip().lower() for v in tags_payload if v.strip()})
+        if len(tags) > 20 or any(len(v) > 32 for v in tags):
+            return JSONResponse({"error": "session_tags_limit_exceeded"}, status_code=400)
+
+    conn = _get_db()
+    try:
+        if SessionRepository(conn).get(session_id) is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
+        colunas = {"archived": "archived", "pinned": "pinned", "hidden": "hidden"}
+        with conn:
+            if flags:
+                assignments = ", ".join(f"{colunas[k]} = ?" for k in flags)
+                valores = [int(flags[k]) for k in flags]
+                valores.append(session_id)
+                conn.execute(f"UPDATE sessions SET {assignments} WHERE id = ?", valores)  # noqa: S608 — colunas vêm da lista permitida acima
+            if tags is not None:
+                conn.execute("DELETE FROM session_tags WHERE session_id = ?", (session_id,))
+                conn.executemany(
+                    "INSERT INTO session_tags(session_id, tag) VALUES (?, ?)",
+                    [(session_id, value) for value in tags],
+                )
+        linha = SessionRepository(conn).get(session_id)
+        linha_dict = _linha_sessao(linha)
+        linha_dict["tags"] = _tags_para_sessoes(conn, [session_id]).get(session_id, [])
+        return linha_dict
     finally:
         conn.close()
 
@@ -366,6 +510,8 @@ async def get_session(session_id: str):
 async def get_session_messages(session_id: str):
     conn = _get_db()
     try:
+        if SessionRepository(conn).get(session_id) is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
         rows = conn.execute(
             "SELECT id, role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp, id",
             (session_id,),

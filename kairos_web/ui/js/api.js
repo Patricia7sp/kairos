@@ -82,9 +82,19 @@ export const api = {
   salvarSkill:   (name, content) => request("/api/skills/content", { method: "PUT", body: { name, content } }),
   alternarSkill: (name, enabled) => request("/api/skills/toggle", { method: "PUT", body: { name, enabled } }),
 
-  sessoes:   () => request("/api/sessions"),
+  sessoes:   (filtros = {}) => {
+    const params = new URLSearchParams();
+    if (filtros.q) params.set("q", filtros.q);
+    if (filtros.status && filtros.status !== "todas") params.set("status", filtros.status);
+    if (filtros.tag) params.set("tag", filtros.tag);
+    if (filtros.offset) params.set("offset", String(filtros.offset));
+    if (filtros.limit) params.set("limit", String(filtros.limit));
+    const sufixo = params.toString();
+    return request(`/api/sessions${sufixo ? "?" + sufixo : ""}`);
+  },
   sessao:    (id) => request(`/api/sessions/${encodeURIComponent(id)}`),
   mensagens: (id) => request(`/api/sessions/${encodeURIComponent(id)}/messages`),
+  atualizarSessao: (id, campos) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: campos }),
   modelos:   () => request("/api/models"),
   provedores:() => request("/api/providers"),
   toolsets:  () => request("/api/tools/toolsets"),

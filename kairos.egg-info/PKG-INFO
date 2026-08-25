@@ -9,5 +9,6 @@ Requires-Dist: pyyaml>=6
 Requires-Dist: uvicorn>=0.52.4
 Requires-Dist: websockets>=17.0.1
 Provides-Extra: dev
+Requires-Dist: httpx2>=2.0.0; extra == "dev"
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: ruff>=0.16; extra == "dev"
