@@ -43,6 +43,12 @@ class StreamChunk:
 
 @dataclass(frozen=True)
 class ModelDescriptor:
+    """Metadados legados retornados pelos adapters.
+
+    Novos consumidores usam ``contracts.CatalogModel``; a conversão dos
+    adapters será feita sem quebrar esta interface pública.
+    """
+
     id: str
     name: str
     provider: str
