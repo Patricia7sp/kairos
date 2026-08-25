@@ -308,7 +308,7 @@ def cmd_profile(args) -> int:
     return ExitCode.NOT_IMPLEMENTED
 
 
-def cmd_auth(args) -> int:
+def cmd_auth(args) -> int:  # noqa: PLR0912 - subcomandos independentes mantidos num handler
     import getpass
 
     from kairos_cli.auth import AuthStore
@@ -341,6 +341,9 @@ def cmd_auth(args) -> int:
         _emit({"estado": vault.state}, as_json=args.json)
         return ExitCode.OK
     if args.auth_command == "vault-unlock":
+        if vault.state == VaultState.KEYRING:
+            _emit({"backend": "keyring", "estado": vault.state}, as_json=args.json)
+            return ExitCode.OK
         vault.unlock(getpass.getpass("Senha-mestra: "))
         _emit(
             {"estado": vault.state, "escopo": "senha verificada somente nesta execução"},

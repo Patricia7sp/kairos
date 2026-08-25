@@ -91,6 +91,8 @@ class EncryptedFileVault:
                 or n & (n - 1)
                 or not 1 <= r <= 32
                 or not 1 <= p <= 16
+                or 128 * n * r > 256 * 1024 * 1024
+                or n * r * p > 2**22
             ):
                 raise ValueError("formato inválido")
             key = _derive_key(

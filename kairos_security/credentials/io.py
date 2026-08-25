@@ -11,6 +11,7 @@ from pathlib import Path
 
 _locks_guard = threading.Lock()
 _locks: dict[str, threading.RLock] = {}
+_held = threading.local()
 
 
 @contextmanager
@@ -19,6 +20,10 @@ def credential_file_lock(path: Path) -> Iterator[None]:
     with _locks_guard:
         thread_lock = _locks.setdefault(key, threading.RLock())
     with thread_lock:
+        held = getattr(_held, "paths", set())
+        if key in held:
+            yield
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = path.with_suffix(path.suffix + ".lock")
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -29,8 +34,10 @@ def credential_file_lock(path: Path) -> Iterator[None]:
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
             except ImportError:
                 pass
+            _held.paths = held | {key}
             yield
         finally:
+            _held.paths = getattr(_held, "paths", set()) - {key}
             try:
                 import fcntl
 

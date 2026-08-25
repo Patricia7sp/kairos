@@ -34,12 +34,21 @@ def read_managed_passphrase() -> str | None:
         return None
     path = Path(configured)
     try:
-        info = path.lstat()
-        if path.is_symlink() or not stat.S_ISREG(info.st_mode):
-            raise PassphraseFileError("arquivo de passphrase deve ser regular e não simbólico")
-        if info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise PassphraseFileError("arquivo de passphrase exige proprietário atual e modo 0600")
-        value = path.read_text(encoding="utf-8").strip()
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                raise PassphraseFileError("arquivo de passphrase deve ser regular")
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise PassphraseFileError(
+                    "arquivo de passphrase exige proprietário atual e modo 0600"
+                )
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                descriptor = -1
+                value = handle.read().strip()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
     except OSError as exc:
         raise PassphraseFileError("arquivo de passphrase não pôde ser lido") from exc
     if not value:

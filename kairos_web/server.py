@@ -26,6 +26,7 @@ from kairos_security.credentials import (
     CredentialSecret,
     build_credential_service,
 )
+from kairos_security.credentials.io import credential_file_lock
 from kairos_state.repositories.messages import MessageRepository
 from kairos_state.repositories.sessions import SessionRepository
 
@@ -273,7 +274,6 @@ async def save_provider_key(req: SaveKeyRequest):
     kairos_home.mkdir(parents=True, exist_ok=True)
     auth_path = kairos_home / "auth.json"
 
-    store = _get_auth_store()
     api_key = req.api_key.strip()
     if not api_key:
         raise HTTPException(status_code=422, detail="api_key é obrigatória")
@@ -282,34 +282,38 @@ async def save_provider_key(req: SaveKeyRequest):
     # Valida usando somente memória; nenhum arquivo ou resposta recebe a chave.
     validation_manager = ProviderManager(auth_store={req.provider: [{"api_key": api_key}]})
     status = await validation_manager.get_provider(req.provider).test_connection()
-    try:
-        previous = store.vault.get(ref)
-    except CredentialNotFoundError:
-        previous = None
-    try:
-        metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="cofre de credenciais indisponível") from exc
-    previous_profile = store.profile.get(req.provider)
-    store.profile[req.provider] = [
-        {
-            "credential_id": ref.credential_id,
-            "auth_method": metadata.auth_method,
-            "masked_identifier": metadata.masked_identifier,
-        }
-    ]
-    try:
-        store.write_atomically(auth_path)
-    except Exception:
-        if previous is None:
-            store.vault.delete(ref)
-        else:
-            store.vault.put(ref, previous)
-        if previous_profile is None:
-            store.profile.pop(req.provider, None)
-        else:
-            store.profile[req.provider] = previous_profile
-        raise
+    with credential_file_lock(auth_path):
+        store = _get_auth_store()
+        try:
+            try:
+                previous = store.vault.get(ref)
+            except CredentialNotFoundError:
+                previous = None
+            metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="cofre de credenciais indisponível"
+            ) from exc
+        previous_profile = store.profile.get(req.provider)
+        store.profile[req.provider] = [
+            {
+                "credential_id": ref.credential_id,
+                "auth_method": metadata.auth_method,
+                "masked_identifier": metadata.masked_identifier,
+            }
+        ]
+        try:
+            store.write_atomically(auth_path)
+        except Exception:
+            if previous is None:
+                store.vault.delete(ref)
+            else:
+                store.vault.put(ref, previous)
+            if previous_profile is None:
+                store.profile.pop(req.provider, None)
+            else:
+                store.profile[req.provider] = previous_profile
+            raise
 
     return {
         "status": "saved",

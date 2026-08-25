@@ -6,11 +6,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from kairos_providers.base import ConnectionStatus
 from kairos_state.repositories.messages import MessageRepository
 from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
@@ -115,6 +118,41 @@ class WebServerApiTests(unittest.TestCase):
         status = self.client.get("/api/providers/vault-status")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["state"], "unlocked")
+
+    def test_saves_concorrentes_preservam_referencias_de_providers_distintos(self):
+        class AvailableProvider:
+            async def test_connection(self):
+                return ConnectionStatus(True, "test", "ok")
+
+        responses = []
+
+        def save(provider):
+            client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+            responses.append(
+                client.post(
+                    "/api/providers/save-key",
+                    json={"provider": provider, "api_key": f"sk-{provider}"},
+                )
+            )
+
+        with patch(
+            "kairos_web.server.ProviderManager.get_provider",
+            return_value=AvailableProvider(),
+        ):
+            threads = [
+                threading.Thread(target=save, args=("openai",)),
+                threading.Thread(target=save, args=("anthropic",)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        pool = json.loads((Path(self._tmp.name) / "auth.json").read_text(encoding="utf-8"))[
+            "credential_pool"
+        ]
+        self.assertEqual(set(pool), {"openai", "anthropic"})
 
     def test_sessions_list_endpoint(self):
         res = self.client.get("/api/sessions")
