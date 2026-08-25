@@ -249,6 +249,13 @@ class AuthStoreTests(HomeBase):
         creds, _ = self.store.credentials_for("inexistente")
         self.assertEqual(creds, [])
 
+    def test_cofre_configurado_rejeita_segredo_no_auth_json(self):
+        self.store.vault = object()
+        self.store.profile = {"openai": [{"api_key": "sk-nao-vazar"}]}
+
+        with self.assertRaisesRegex(ValueError, "segredo"):
+            self.store.write_atomically(self.home / "auth.json")
+
 
 class CredentialPoolTests(unittest.TestCase):
     def setUp(self):

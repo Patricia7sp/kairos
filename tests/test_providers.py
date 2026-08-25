@@ -67,6 +67,14 @@ class ProviderAdaptersTests(unittest.TestCase):
         all_models = manager.list_all_models()
         self.assertTrue(len(all_models) >= 10)
 
+    def test_provider_manager_resolve_referencia_pelo_cofre(self):
+        manager = ProviderManager(
+            auth_store={"openai": [{"credential_id": "primary"}]},
+            secret_resolver=lambda provider, credential_id: {"api_key": "sk-resolvida"},
+        )
+
+        self.assertEqual(manager.get_provider("openai").api_key, "sk-resolvida")
+
 
 if __name__ == "__main__":
     unittest.main()

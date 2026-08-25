@@ -19,7 +19,11 @@ class WebServerApiTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._orig_home = os.environ.get("KAIROS_HOME")
+        self._orig_vault_password = os.environ.get("KAIROS_VAULT_PASSWORD")
+        self._orig_disable_keyring = os.environ.get("KAIROS_DISABLE_KEYRING")
         os.environ["KAIROS_HOME"] = self._tmp.name
+        os.environ["KAIROS_VAULT_PASSWORD"] = "senha-mestra-de-teste"  # noqa: S105
+        os.environ["KAIROS_DISABLE_KEYRING"] = "1"
         self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
 
     def tearDown(self):
@@ -27,6 +31,14 @@ class WebServerApiTests(unittest.TestCase):
             os.environ["KAIROS_HOME"] = self._orig_home
         else:
             os.environ.pop("KAIROS_HOME", None)
+        if self._orig_vault_password is None:
+            os.environ.pop("KAIROS_VAULT_PASSWORD", None)
+        else:
+            os.environ["KAIROS_VAULT_PASSWORD"] = self._orig_vault_password
+        if self._orig_disable_keyring is None:
+            os.environ.pop("KAIROS_DISABLE_KEYRING", None)
+        else:
+            os.environ["KAIROS_DISABLE_KEYRING"] = self._orig_disable_keyring
         self._tmp.cleanup()
 
     def test_health_endpoint(self):
@@ -92,6 +104,13 @@ class WebServerApiTests(unittest.TestCase):
         self.assertTrue(auth_file.exists())
         content = json.loads(auth_file.read_text(encoding="utf-8"))
         self.assertIn("anthropic", content.get("credential_pool", {}))
+        serialized = auth_file.read_text(encoding="utf-8")
+        self.assertNotIn("sk-ant-test-1234567890", serialized)
+        self.assertNotIn("api_key", res.json())
+
+        status = self.client.get("/api/providers/vault-status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["state"], "unlocked")
 
     def test_sessions_list_endpoint(self):
         res = self.client.get("/api/sessions")

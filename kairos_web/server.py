@@ -20,6 +20,14 @@ from pydantic import BaseModel
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_providers.manager import ProviderManager
+from kairos_security.credentials import (
+    CredentialRef,
+    CredentialSecret,
+    CredentialService,
+    EncryptedFileVault,
+    SystemKeyringVault,
+    VaultState,
+)
 from kairos_state.repositories.messages import MessageRepository
 from kairos_state.repositories.sessions import SessionRepository
 
@@ -122,6 +130,36 @@ async def require_session_token(request, call_next):
     return await call_next(request)
 
 
+class _DisabledKeyring:
+    priority = 0
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise RuntimeError("keyring desabilitado")
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return None
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise RuntimeError("keyring desabilitado")
+
+
+def _get_credential_service(kairos_home: Path) -> CredentialService:
+    if os.environ.get("KAIROS_DISABLE_KEYRING") == "1":
+        keyring_client = _DisabledKeyring()
+    else:
+        import keyring
+
+        keyring_client = keyring.get_keyring()
+    system = SystemKeyringVault(keyring_client, index_path=kairos_home / "credential-index.json")
+    encrypted = EncryptedFileVault(kairos_home / "credentials.vault")
+    if not system.available and (password := os.environ.get("KAIROS_VAULT_PASSWORD")):
+        if encrypted.state == VaultState.NOT_CONFIGURED:
+            encrypted.initialize(password)
+        elif encrypted.state == VaultState.LOCKED:
+            encrypted.unlock(password)
+    return CredentialService(keyring=system, encrypted=encrypted)
+
+
 def _get_auth_store() -> AuthStore:
     kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
     auth_path = kairos_home / "auth.json"
@@ -131,7 +169,18 @@ def _get_auth_store() -> AuthStore:
             data = json.loads(auth_path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001, S110
             pass
-    return AuthStore(profile=data.get("credential_pool", {}))
+    return AuthStore(
+        profile=data.get("credential_pool", {}), vault=_get_credential_service(kairos_home)
+    )
+
+
+def _provider_manager(store: AuthStore) -> ProviderManager:
+    return ProviderManager(
+        auth_store=store.profile,
+        secret_resolver=lambda provider, credential_id: store.vault.get(
+            CredentialRef(provider, credential_id)
+        ),
+    )
 
 
 # --- REST ENDPOINTS ---
@@ -174,7 +223,7 @@ async def update_config(req: ConfigUpdateRequest):
 @app.get("/api/models")
 async def list_models():
     store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
+    manager = _provider_manager(store)
     models = manager.list_all_models()
     config = load_config()
     default_model = config.get("model", "claude-3-7-sonnet-20250219")
@@ -220,7 +269,7 @@ async def set_default_model(req: SetDefaultModelRequest):
 @app.get("/api/providers")
 async def get_providers_status():
     store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
+    manager = _provider_manager(store)
     statuses = await manager.test_all_connections()
 
     result = []
@@ -257,11 +306,25 @@ async def save_provider_key(req: SaveKeyRequest):
     auth_path = kairos_home / "auth.json"
 
     store = _get_auth_store()
-    store.profile[req.provider] = [{"api_key": req.api_key.strip()}]
+    api_key = req.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=422, detail="api_key é obrigatória")
+    ref = CredentialRef(req.provider, "primary")
+    try:
+        metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="cofre de credenciais indisponível") from exc
+    store.profile[req.provider] = [
+        {
+            "credential_id": ref.credential_id,
+            "auth_method": metadata.auth_method,
+            "masked_identifier": metadata.masked_identifier,
+        }
+    ]
     store.write_atomically(auth_path)
 
     # Testa nova conexão
-    manager = ProviderManager(auth_store=store.profile)
+    manager = _provider_manager(store)
     provider_inst = manager.get_provider(req.provider)
     status = await provider_inst.test_connection()
 
@@ -274,6 +337,24 @@ async def save_provider_key(req: SaveKeyRequest):
             "models_count": status.models_found,
         },
     }
+
+
+@app.get("/api/providers/vault-status")
+async def provider_vault_status():
+    store = _get_auth_store()
+    try:
+        credentials = [
+            {
+                "provider": item.ref.provider,
+                "credential_id": item.ref.credential_id,
+                "auth_method": item.auth_method,
+                "masked_identifier": item.masked_identifier,
+            }
+            for item in store.vault.list()
+        ]
+    except Exception:  # noqa: BLE001
+        credentials = []
+    return {"state": store.vault.state, "credentials": credentials}
 
 
 def _get_db():

@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 __all__ = [
     "PLACEHOLDER_SECRETS",
@@ -98,6 +99,7 @@ class AuthStore:
 
     profile: dict[str, list[dict]] = field(default_factory=dict)
     global_store: dict[str, list[dict]] = field(default_factory=dict)
+    vault: Any | None = None
 
     def credentials_for(self, provider: str) -> tuple[list[dict], Origin]:
         if provider in self.profile:
@@ -121,6 +123,8 @@ class AuthStore:
         o sintoma aparece como falha de autenticação — não como arquivo
         corrompido.
         """
+        if self.vault is not None and _contains_secret(self.profile):
+            raise ValueError("segredo não pode ser persistido no auth.json com cofre configurado")
         with auth_lock(path):
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(
@@ -128,6 +132,16 @@ class AuthStore:
                 encoding="utf-8",
             )
             os.replace(tmp, path)
+
+
+def _contains_secret(value: Any) -> bool:
+    if isinstance(value, dict):
+        if {str(key).lower() for key in value} & {"api_key", "token", "secret", "password"}:
+            return True
+        return any(_contains_secret(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_secret(item) for item in value)
+    return False
 
 
 @dataclass
