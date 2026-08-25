@@ -293,7 +293,7 @@ padrão.
 ## Fases de implementação
 
 1. Contratos, registry, catálogo e resolvedor. ✅
-2. Keyring, cofre e migração segura de credenciais.
+2. Keyring, cofre e migração segura de credenciais. ✅
 3. Adapters e modelos atuais dos providers.
 4. Persistência de seleção e `InteractionService` compartilhado.
 5. Página Provedores de IA e Chat operacional.
@@ -305,8 +305,11 @@ A fase 1 está implementada nos módulos `contracts.py`, `provider_registry.py`,
 `catalog.py`, `curated_catalog.py` e `selection.py` de `kairos_providers`. Ela
 entrega tipos canônicos, registry interno de factories, catálogo híbrido com
 precedência de fontes, curadoria agentic inicial e resolução explícita da
-seleção. Cofre, atualização dos adapters, persistência, UI e Chat continuam
-pendentes nas fases seguintes.
+seleção. A fase 2 adiciona keyring com sonda de disponibilidade, fallback
+criptografado AES-GCM/Scrypt, migração confirmada do `auth.json`, referências
+sem plaintext na API Web e comandos de operação do cofre. Atualização dos
+adapters, persistência compartilhada, UI e Chat continuam pendentes nas fases
+seguintes.
 
 ## Fora do escopo desta entrega
 

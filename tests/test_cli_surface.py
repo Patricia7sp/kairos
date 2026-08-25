@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from kairos_cli.commands import COMMANDS, Status, command_names, find_command, leaf_count
 from kairos_cli.handlers import HANDLERS, ExitCode
@@ -160,18 +161,30 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.parser.parse_args(["inventado"])
 
+    def test_unlock_nao_aceita_senha_por_argumento(self):
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(
+                ["auth", "vault-unlock", "--password", "segredo-na-linha-de-comando"]
+            )
+
 
 class ExecucaoTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._saved = os.environ.get("KAIROS_HOME")
         os.environ["KAIROS_HOME"] = self._tmp.name
+        self._saved_disable_keyring = os.environ.get("KAIROS_DISABLE_KEYRING")
+        os.environ["KAIROS_DISABLE_KEYRING"] = "1"
 
     def tearDown(self):
         if self._saved is None:
             os.environ.pop("KAIROS_HOME", None)
         else:
             os.environ["KAIROS_HOME"] = self._saved
+        if self._saved_disable_keyring is None:
+            os.environ.pop("KAIROS_DISABLE_KEYRING", None)
+        else:
+            os.environ["KAIROS_DISABLE_KEYRING"] = self._saved_disable_keyring
         self._tmp.cleanup()
 
     def test_version_pelo_FAST_PATH(self):
@@ -249,6 +262,62 @@ class ExecucaoTests(unittest.TestCase):
             main(["auth", "list"])
         self.assertNotIn("sk-NAO-VAZAR", buf.getvalue())
         self.assertIn("openai", buf.getvalue())
+
+    def test_vault_init_e_status_nao_imprimem_senha(self):
+        import contextlib
+        import io
+
+        output = io.StringIO()
+        with (
+            patch("getpass.getpass", side_effect=["senha-secreta", "senha-secreta"]),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(main(["auth", "vault-init"]), ExitCode.OK)
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(main(["auth", "vault-status"]), ExitCode.OK)
+
+        self.assertNotIn("senha-secreta", output.getvalue())
+        self.assertIn("locked", output.getvalue())
+
+    def test_migrate_sem_confirmacao_apenas_relata(self):
+        import contextlib
+        import io
+        import json as _json
+
+        (Path(self._tmp.name) / "auth.json").write_text(
+            _json.dumps({"credential_pool": {"openai": [{"api_key": "sk-legado"}]}}),
+            encoding="utf-8",
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(main(["auth", "migrate"]), ExitCode.OK)
+
+        self.assertIn("confirmação necessária", output.getvalue())
+        self.assertNotIn("sk-legado", output.getvalue())
+        self.assertIn("sk-legado", (Path(self._tmp.name) / "auth.json").read_text())
+
+    def test_migrate_confirmado_remove_plaintext_sem_imprimi_lo(self):
+        import contextlib
+        import io
+        import json as _json
+
+        with patch("getpass.getpass", side_effect=["senha-secreta", "senha-secreta"]):
+            self.assertEqual(main(["auth", "vault-init"]), ExitCode.OK)
+        auth_path = Path(self._tmp.name) / "auth.json"
+        auth_path.write_text(
+            _json.dumps({"credential_pool": {"openai": [{"api_key": "sk-legado"}]}}),
+            encoding="utf-8",
+        )
+        output = io.StringIO()
+        with (
+            patch("getpass.getpass", return_value="senha-secreta"),
+            contextlib.redirect_stdout(output),
+        ):
+            code = main(["auth", "migrate", "--confirm-remove-plaintext"])
+
+        self.assertEqual(code, ExitCode.OK)
+        self.assertNotIn("sk-legado", output.getvalue())
+        self.assertNotIn("sk-legado", auth_path.read_text(encoding="utf-8"))
 
 
 class ExecutavelTests(unittest.TestCase):

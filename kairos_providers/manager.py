@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from kairos_providers.adapters import (
@@ -42,8 +43,13 @@ def get_google_adc_token() -> str | None:
 class ProviderManager:
     """Gerencia e instancia provedores com base em credenciais salvas e variáveis de ambiente."""
 
-    def __init__(self, auth_store: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        auth_store: dict[str, Any] | None = None,
+        secret_resolver: Callable[[str, str], Mapping[str, str] | Any] | None = None,
+    ) -> None:
         self.auth_store = auth_store or {}
+        self.secret_resolver = secret_resolver
 
     def get_api_key(self, provider: str) -> str | None:
         env_map = {
@@ -63,6 +69,12 @@ class ProviderManager:
         if isinstance(creds, list) and creds:
             first = creds[0]
             if isinstance(first, dict):
+                credential_id = first.get("credential_id")
+                if credential_id and self.secret_resolver is not None:
+                    resolved = self.secret_resolver(provider, credential_id)
+                    values = resolved.reveal() if hasattr(resolved, "reveal") else resolved
+                    if isinstance(values, Mapping):
+                        return values.get("api_key") or values.get("token")
                 return first.get("api_key") or first.get("token")
         return None
 

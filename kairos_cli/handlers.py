@@ -308,13 +308,78 @@ def cmd_profile(args) -> int:
     return ExitCode.NOT_IMPLEMENTED
 
 
-def cmd_auth(args) -> int:
-    from kairos_cli.auth import AuthStore
+def cmd_auth(args) -> int:  # noqa: PLR0912 - subcomandos independentes mantidos num handler
+    import getpass
 
+    from kairos_cli.auth import AuthStore
+    from kairos_security.credentials import (
+        LegacyCredentialMigration,
+        VaultState,
+        build_credential_service,
+    )
+
+    home = _home()
+    caminho = home / "auth.json"
+    vault = build_credential_service(home)
+    if args.auth_command == "vault-status":
+        _emit({"backend": vault.backend_name, "estado": vault.state}, as_json=args.json)
+        return ExitCode.OK
+    if args.auth_command == "vault-init":
+        if vault.state == VaultState.KEYRING:
+            _emit({"backend": "keyring", "estado": vault.state}, as_json=args.json)
+            return ExitCode.OK
+        if vault.state != VaultState.NOT_CONFIGURED:
+            _emit({"erro": "cofre já configurado"}, as_json=args.json)
+            return ExitCode.ERROR
+        password = getpass.getpass("Senha-mestra: ")
+        confirmation = getpass.getpass("Confirme a senha-mestra: ")
+        if password != confirmation:
+            _emit({"erro": "confirmação não confere"}, as_json=args.json)
+            return ExitCode.ERROR
+        vault.initialize(password)
+        vault.lock()
+        _emit({"estado": vault.state}, as_json=args.json)
+        return ExitCode.OK
+    if args.auth_command == "vault-unlock":
+        if vault.state == VaultState.KEYRING:
+            _emit({"backend": "keyring", "estado": vault.state}, as_json=args.json)
+            return ExitCode.OK
+        vault.unlock(getpass.getpass("Senha-mestra: "))
+        _emit(
+            {"estado": vault.state, "escopo": "senha verificada somente nesta execução"},
+            as_json=args.json,
+        )
+        return ExitCode.OK
+    if args.auth_command == "migrate":
+        migration = LegacyCredentialMigration(caminho, vault)
+        report = migration.scan()
+        if not args.confirm_remove_plaintext:
+            _emit(
+                {
+                    "credenciais encontradas": report.credentials_found,
+                    "ação": "confirmação necessária: use --confirm-remove-plaintext",
+                },
+                as_json=args.json,
+            )
+            return ExitCode.OK
+        if vault.state == VaultState.NOT_CONFIGURED:
+            _emit({"erro": "inicialize o cofre antes da migração"}, as_json=args.json)
+            return ExitCode.ERROR
+        if vault.state == VaultState.LOCKED:
+            vault.unlock(getpass.getpass("Senha-mestra: "))
+        imported = migration.import_and_verify()
+        finalized = migration.finalize(confirm=True)
+        _emit(
+            {
+                "verificadas": imported.credentials_verified,
+                "finalizadas": finalized.credentials_finalized,
+            },
+            as_json=args.json,
+        )
+        return ExitCode.OK
     if args.auth_command != "list":
         return ExitCode.NOT_IMPLEMENTED
 
-    caminho = _home() / "auth.json"
     try:
         dados = json.loads(caminho.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

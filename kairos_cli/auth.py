@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 __all__ = [
     "PLACEHOLDER_SECRETS",
@@ -98,6 +98,7 @@ class AuthStore:
 
     profile: dict[str, list[dict]] = field(default_factory=dict)
     global_store: dict[str, list[dict]] = field(default_factory=dict)
+    vault: Any | None = None
 
     def credentials_for(self, provider: str) -> tuple[list[dict], Origin]:
         if provider in self.profile:
@@ -121,13 +122,28 @@ class AuthStore:
         o sintoma aparece como falha de autenticação — não como arquivo
         corrompido.
         """
-        with auth_lock(path):
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_text(
+        if self.vault is not None and _contains_secret(self.profile):
+            raise ValueError("segredo não pode ser persistido no auth.json com cofre configurado")
+        from kairos_security.credentials.io import (
+            credential_file_lock,
+            secure_atomic_write_text,
+        )
+
+        with credential_file_lock(path):
+            secure_atomic_write_text(
+                path,
                 json.dumps({"credential_pool": self.profile}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
-            os.replace(tmp, path)
+
+
+def _contains_secret(value: Any) -> bool:
+    if isinstance(value, dict):
+        if {str(key).lower() for key in value} & {"api_key", "token", "secret", "password"}:
+            return True
+        return any(_contains_secret(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_secret(item) for item in value)
+    return False
 
 
 @dataclass

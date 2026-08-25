@@ -68,6 +68,14 @@ kairos_security/__init__.py
 kairos_security/auditor.py
 kairos_security/formatter.py
 kairos_security/models.py
+kairos_security/credentials/__init__.py
+kairos_security/credentials/contracts.py
+kairos_security/credentials/encrypted.py
+kairos_security/credentials/factory.py
+kairos_security/credentials/io.py
+kairos_security/credentials/keyring_backend.py
+kairos_security/credentials/migration.py
+kairos_security/credentials/service.py
 kairos_skills/__init__.py
 kairos_skills/curator.py
 kairos_skills/frontmatter.py
@@ -99,6 +107,8 @@ tests/test_cjk.py
 tests/test_cli.py
 tests/test_cli_surface.py
 tests/test_container.py
+tests/test_credential_migration.py
+tests/test_credential_vault.py
 tests/test_cron.py
 tests/test_domain.py
 tests/test_evals.py

@@ -94,6 +94,12 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
         parser.add_argument(
             "--reveal", action="store_true", help="Imprime o token inteiro (pense antes)"
         )
+    elif command == "auth" and subcommand == "migrate":
+        parser.add_argument(
+            "--confirm-remove-plaintext",
+            action="store_true",
+            help="Confirma a remoção dos segredos legados após verificação",
+        )
     elif command == "security":
         parser.add_argument(
             "--target", help="Diretório de runtime a auditar (padrão: $KAIROS_HOME)"

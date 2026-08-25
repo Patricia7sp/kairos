@@ -567,12 +567,16 @@ class RealImageTests(unittest.TestCase):
         names = _re.findall(r'"([^"]+)"', declared.group(1))
         self.assertTrue(names)
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+        copied_roots = _re.findall(r"^COPY ([^ /]+)/", dockerfile, flags=_re.MULTILINE)
         for pkg in names:
             with self.subTest(package=pkg):
-                self.assertIn(
-                    f"COPY {pkg}/",
-                    dockerfile,
-                    f"{pkg} está no pyproject mas não é copiado no Dockerfile",
+                package_path = pkg.replace(".", "/")
+                self.assertTrue(
+                    any(
+                        package_path == root or package_path.startswith(f"{root}/")
+                        for root in copied_roots
+                    ),
+                    f"{pkg} está no pyproject mas nenhum pacote pai é copiado no Dockerfile",
                 )
 
     # -- o bug do gateway em dobro ----------------------------------------

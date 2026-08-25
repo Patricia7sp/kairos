@@ -20,6 +20,13 @@ from pydantic import BaseModel
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_providers.manager import ProviderManager
+from kairos_security.credentials import (
+    CredentialNotFoundError,
+    CredentialRef,
+    CredentialSecret,
+    build_credential_service,
+)
+from kairos_security.credentials.io import credential_file_lock
 from kairos_state.repositories.messages import MessageRepository
 from kairos_state.repositories.sessions import SessionRepository
 
@@ -131,7 +138,18 @@ def _get_auth_store() -> AuthStore:
             data = json.loads(auth_path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001, S110
             pass
-    return AuthStore(profile=data.get("credential_pool", {}))
+    return AuthStore(
+        profile=data.get("credential_pool", {}), vault=build_credential_service(kairos_home)
+    )
+
+
+def _provider_manager(store: AuthStore) -> ProviderManager:
+    return ProviderManager(
+        auth_store=store.profile,
+        secret_resolver=lambda provider, credential_id: store.vault.get(
+            CredentialRef(provider, credential_id)
+        ),
+    )
 
 
 # --- REST ENDPOINTS ---
@@ -174,7 +192,7 @@ async def update_config(req: ConfigUpdateRequest):
 @app.get("/api/models")
 async def list_models():
     store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
+    manager = _provider_manager(store)
     models = manager.list_all_models()
     config = load_config()
     default_model = config.get("model", "claude-3-7-sonnet-20250219")
@@ -220,7 +238,7 @@ async def set_default_model(req: SetDefaultModelRequest):
 @app.get("/api/providers")
 async def get_providers_status():
     store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
+    manager = _provider_manager(store)
     statuses = await manager.test_all_connections()
 
     result = []
@@ -256,24 +274,75 @@ async def save_provider_key(req: SaveKeyRequest):
     kairos_home.mkdir(parents=True, exist_ok=True)
     auth_path = kairos_home / "auth.json"
 
-    store = _get_auth_store()
-    store.profile[req.provider] = [{"api_key": req.api_key.strip()}]
-    store.write_atomically(auth_path)
+    api_key = req.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=422, detail="api_key é obrigatória")
+    ref = CredentialRef(req.provider, "primary")
 
-    # Testa nova conexão
-    manager = ProviderManager(auth_store=store.profile)
-    provider_inst = manager.get_provider(req.provider)
-    status = await provider_inst.test_connection()
+    # Valida usando somente memória; nenhum arquivo ou resposta recebe a chave.
+    validation_manager = ProviderManager(auth_store={req.provider: [{"api_key": api_key}]})
+    status = await validation_manager.get_provider(req.provider).test_connection()
+    with credential_file_lock(auth_path):
+        store = _get_auth_store()
+        try:
+            try:
+                previous = store.vault.get(ref)
+            except CredentialNotFoundError:
+                previous = None
+            metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="cofre de credenciais indisponível"
+            ) from exc
+        previous_profile = store.profile.get(req.provider)
+        store.profile[req.provider] = [
+            {
+                "credential_id": ref.credential_id,
+                "auth_method": metadata.auth_method,
+                "masked_identifier": metadata.masked_identifier,
+            }
+        ]
+        try:
+            store.write_atomically(auth_path)
+        except Exception:
+            if previous is None:
+                store.vault.delete(ref)
+            else:
+                store.vault.put(ref, previous)
+            if previous_profile is None:
+                store.profile.pop(req.provider, None)
+            else:
+                store.profile[req.provider] = previous_profile
+            raise
 
     return {
         "status": "saved",
         "provider": req.provider,
+        "credential_status": "active" if status.ok else "saved_unverified",
         "connection": {
             "ok": status.ok,
             "message": status.message,
             "models_count": status.models_found,
         },
     }
+
+
+@app.get("/api/providers/vault-status")
+async def provider_vault_status():
+    store = _get_auth_store()
+    try:
+        credentials = [
+            {
+                "provider": item.ref.provider,
+                "credential_id": item.ref.credential_id,
+                "auth_method": item.auth_method,
+                "masked_identifier": item.masked_identifier,
+            }
+            for item in store.vault.list()
+        ]
+    except Exception:  # noqa: BLE001
+        credentials = []
+    return {"state": store.vault.state, "credentials": credentials}
 
 
 def _get_db():
