@@ -28,9 +28,7 @@ class ModelCatalogTests(unittest.TestCase):
         return CatalogModel(
             ref=ProviderModelRef("p", model),
             display_name=model,
-            capabilities=ModelCapabilities(
-                chat=True, tools=True, context_length=context
-            ),
+            capabilities=ModelCapabilities(chat=True, tools=True, context_length=context),
             stability=stability,
             origins=frozenset({origin}),
         )
@@ -74,23 +72,16 @@ class ModelCatalogTests(unittest.TestCase):
             origin=CatalogOrigin.CURATED,
         )
 
+        self.assertEqual([model.ref.model for model in catalog.list_models("p")], ["stable"])
         self.assertEqual(
-            [model.ref.model for model in catalog.list_models("p")], ["stable"]
-        )
-        self.assertEqual(
-            [
-                model.ref.model
-                for model in catalog.list_models("p", include_preview=True)
-            ],
+            [model.ref.model for model in catalog.list_models("p", include_preview=True)],
             ["preview", "stable"],
         )
 
     def test_snapshot_expirado_nao_substitui_cache_utilizavel(self):
         catalog = ModelCatalog(clock=lambda: 1000.0)
         catalog.load_snapshot(
-            CatalogSnapshot(
-                models=(self.model(),), fetched_at=900.0, expires_at=1100.0
-            )
+            CatalogSnapshot(models=(self.model(),), fetched_at=900.0, expires_at=1100.0)
         )
         catalog.load_snapshot(
             CatalogSnapshot(
@@ -116,9 +107,7 @@ class CuratedCatalogTests(unittest.TestCase):
         self.assertTrue(all(model.capabilities.chat for model in curated_models()))
 
     def test_antigravity_e_remote_agent_preview(self):
-        antigravity = next(
-            model for model in curated_models() if model.ref.model == "antigravity"
-        )
+        antigravity = next(model for model in curated_models() if model.ref.model == "antigravity")
 
         self.assertEqual(antigravity.ref.kind, ModelKind.REMOTE_AGENT)
         self.assertEqual(antigravity.stability, ModelStability.PREVIEW)

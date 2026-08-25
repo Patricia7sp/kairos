@@ -1,7 +1,7 @@
 # Providers, catálogo de modelos e Chat web
 
 **Data:** 2026-08-25  
-**Estado:** aprovado em conversa; aguardando revisão do documento  
+**Estado:** fase 1 implementada; fases 2–6 pendentes
 **Escopo:** aplicação local, de usuário único
 
 ## Objetivo
@@ -292,12 +292,21 @@ padrão.
 
 ## Fases de implementação
 
-1. Contratos, registry, catálogo e resolvedor.
+1. Contratos, registry, catálogo e resolvedor. ✅
 2. Keyring, cofre e migração segura de credenciais.
 3. Adapters e modelos atuais dos providers.
 4. Persistência de seleção e `InteractionService` compartilhado.
 5. Página Provedores de IA e Chat operacional.
 6. Migração do terminal, robustez, documentação e suíte completa.
+
+### Estado da implementação
+
+A fase 1 está implementada nos módulos `contracts.py`, `provider_registry.py`,
+`catalog.py`, `curated_catalog.py` e `selection.py` de `kairos_providers`. Ela
+entrega tipos canônicos, registry interno de factories, catálogo híbrido com
+precedência de fontes, curadoria agentic inicial e resolução explícita da
+seleção. Cofre, atualização dos adapters, persistência, UI e Chat continuam
+pendentes nas fases seguintes.
 
 ## Fora do escopo desta entrega
 

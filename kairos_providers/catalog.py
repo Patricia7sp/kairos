@@ -36,9 +36,7 @@ class ModelCatalog:
         self._priorities: dict[ProviderModelRef, int] = {}
         self._snapshot: CatalogSnapshot | None = None
 
-    def merge(
-        self, models: Iterable[CatalogModel], *, origin: CatalogOrigin
-    ) -> None:
+    def merge(self, models: Iterable[CatalogModel], *, origin: CatalogOrigin) -> None:
         priority = _ORIGIN_PRIORITY[origin]
         for incoming in models:
             current = self._models.get(incoming.ref)
@@ -49,9 +47,7 @@ class ModelCatalog:
                 self._models[incoming.ref] = replace(incoming, origins=frozenset(origins))
                 self._priorities[incoming.ref] = priority
             else:
-                self._models[incoming.ref] = replace(
-                    current, origins=frozenset(origins)
-                )
+                self._models[incoming.ref] = replace(current, origins=frozenset(origins))
 
     def load_snapshot(self, snapshot: CatalogSnapshot) -> None:
         now = self._clock()

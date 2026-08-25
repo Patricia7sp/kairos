@@ -89,16 +89,10 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
 
     def test_listagem_e_deterministica(self):
         registry = ProviderAdapterRegistry()
-        registry.register(
-            ProviderDescriptor(id="z", display_name="Z"), lambda **_: object()
-        )
-        registry.register(
-            ProviderDescriptor(id="a", display_name="A"), lambda **_: object()
-        )
+        registry.register(ProviderDescriptor(id="z", display_name="Z"), lambda **_: object())
+        registry.register(ProviderDescriptor(id="a", display_name="A"), lambda **_: object())
 
-        self.assertEqual(
-            [provider.id for provider in registry.list_descriptors()], ["a", "z"]
-        )
+        self.assertEqual([provider.id for provider in registry.list_descriptors()], ["a", "z"])
 
 
 if __name__ == "__main__":

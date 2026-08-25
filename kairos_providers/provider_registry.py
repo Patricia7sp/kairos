@@ -25,9 +25,7 @@ class ProviderAdapterRegistry:
     def __init__(self) -> None:
         self._entries: dict[str, RegisteredProvider] = {}
 
-    def register(
-        self, descriptor: ProviderDescriptor, factory: Callable[..., Any]
-    ) -> None:
+    def register(self, descriptor: ProviderDescriptor, factory: Callable[..., Any]) -> None:
         self._entries[descriptor.id] = RegisteredProvider(descriptor, factory)
 
     def describe(self, provider: str) -> ProviderDescriptor:

@@ -88,19 +88,13 @@ class ModelSelectionResolverTests(unittest.TestCase):
     def test_modelo_ausente_falha_sem_trocar_provider(self):
         missing = ProviderModelRef("paid", "missing")
 
-        with self.assertRaisesRegex(
-            ModelSelectionUnavailableError, "paid/missing"
-        ):
+        with self.assertRaisesRegex(ModelSelectionUnavailableError, "paid/missing"):
             self.resolver.resolve(
-                ModelSelectionContext(
-                    message=missing, global_default=self.refs["global"]
-                )
+                ModelSelectionContext(message=missing, global_default=self.refs["global"])
             )
 
     def test_contexto_sem_nenhuma_selecao_falha_explicitamente(self):
-        with self.assertRaisesRegex(
-            ModelSelectionUnavailableError, "nenhuma seleção configurada"
-        ):
+        with self.assertRaisesRegex(ModelSelectionUnavailableError, "nenhuma seleção configurada"):
             self.resolver.resolve(ModelSelectionContext())
 
 
