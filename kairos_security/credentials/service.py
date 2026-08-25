@@ -21,6 +21,10 @@ class CredentialService:
         self._backend: CredentialVault = keyring if keyring.available else encrypted
 
     @property
+    def backend_name(self) -> str:
+        return "keyring" if isinstance(self._backend, SystemKeyringVault) else "encrypted"
+
+    @property
     def state(self) -> VaultState:
         return self._backend.state
 
@@ -41,6 +45,23 @@ class CredentialService:
 
     def delete(self, ref: CredentialRef) -> None:
         self._backend.delete(ref)
+
+    def initialize(self, passphrase: str) -> None:
+        initializer = getattr(self._backend, "initialize", None)
+        if initializer is None:
+            raise VaultError("backend ativo não exige inicialização")
+        initializer(passphrase)
+
+    def unlock(self, passphrase: str) -> None:
+        unlocker = getattr(self._backend, "unlock", None)
+        if unlocker is None:
+            raise VaultError("backend ativo não exige desbloqueio")
+        unlocker(passphrase)
+
+    def lock(self) -> None:
+        locker = getattr(self._backend, "lock", None)
+        if locker is not None:
+            locker()
 
 
 class ExternalCredentialSource:

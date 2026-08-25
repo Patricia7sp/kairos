@@ -19,10 +19,13 @@ class WebServerApiTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._orig_home = os.environ.get("KAIROS_HOME")
-        self._orig_vault_password = os.environ.get("KAIROS_VAULT_PASSWORD")
+        self._orig_passphrase_file = os.environ.get("KAIROS_VAULT_PASSPHRASE_FILE")
         self._orig_disable_keyring = os.environ.get("KAIROS_DISABLE_KEYRING")
         os.environ["KAIROS_HOME"] = self._tmp.name
-        os.environ["KAIROS_VAULT_PASSWORD"] = "senha-mestra-de-teste"  # noqa: S105
+        passphrase_file = Path(self._tmp.name) / "vault-passphrase"
+        passphrase_file.write_text("senha-mestra-de-teste\n", encoding="utf-8")
+        passphrase_file.chmod(0o600)
+        os.environ["KAIROS_VAULT_PASSPHRASE_FILE"] = str(passphrase_file)
         os.environ["KAIROS_DISABLE_KEYRING"] = "1"
         self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
 
@@ -31,10 +34,10 @@ class WebServerApiTests(unittest.TestCase):
             os.environ["KAIROS_HOME"] = self._orig_home
         else:
             os.environ.pop("KAIROS_HOME", None)
-        if self._orig_vault_password is None:
-            os.environ.pop("KAIROS_VAULT_PASSWORD", None)
+        if self._orig_passphrase_file is None:
+            os.environ.pop("KAIROS_VAULT_PASSPHRASE_FILE", None)
         else:
-            os.environ["KAIROS_VAULT_PASSWORD"] = self._orig_vault_password
+            os.environ["KAIROS_VAULT_PASSPHRASE_FILE"] = self._orig_passphrase_file
         if self._orig_disable_keyring is None:
             os.environ.pop("KAIROS_DISABLE_KEYRING", None)
         else:
@@ -98,6 +101,7 @@ class WebServerApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data.get("status"), "saved")
+        self.assertIn(data.get("credential_status"), {"active", "saved_unverified"})
 
         # Verifica se auth.json foi gravado com segurança
         auth_file = Path(self._tmp.name) / "auth.json"

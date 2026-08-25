@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,7 @@ from kairos_security.credentials.contracts import (
     CredentialSecret,
     CredentialVault,
 )
+from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 
 _SECRET_FIELDS = ("api_key", "token", "secret", "password")
 
@@ -63,44 +63,45 @@ class LegacyCredentialMigration:
             raise MigrationConfirmationRequired(
                 "confirmação necessária para remover credenciais em texto aberto"
             )
-        document = self._read()
-        entries = self._legacy_entries(document)
-        replacements: list[tuple[str, int, dict[str, str]]] = []
-        for provider, index, entry, ref in entries:
-            expected = self._string_payload(entry)
-            try:
-                actual = self.vault.get(ref).reveal()
-            except Exception as exc:
-                raise MigrationVerificationError(
-                    f"credencial não pôde ser verificada: {provider}/{ref.credential_id}"
-                ) from exc
-            if actual != expected:
-                raise MigrationVerificationError(
-                    f"credencial não pôde ser verificada: {provider}/{ref.credential_id}"
+        with credential_file_lock(self.auth_path):
+            document = self._read()
+            entries = self._legacy_entries(document)
+            replacements: list[tuple[str, int, dict[str, str]]] = []
+            for provider, index, entry, ref in entries:
+                expected = self._string_payload(entry)
+                try:
+                    actual = self.vault.get(ref).reveal()
+                except Exception as exc:
+                    raise MigrationVerificationError(
+                        f"credencial não pôde ser verificada: {provider}/{ref.credential_id}"
+                    ) from exc
+                if actual != expected:
+                    raise MigrationVerificationError(
+                        f"credencial não pôde ser verificada: {provider}/{ref.credential_id}"
+                    )
+                identifier = self._identifier(actual)
+                metadata = CredentialMetadata(
+                    ref,
+                    self._auth_method(entry),
+                    "vault",
+                    identifier,
                 )
-            identifier = self._identifier(actual)
-            metadata = CredentialMetadata(
-                ref,
-                self._auth_method(entry),
-                "vault",
-                identifier,
-            )
-            replacements.append(
-                (
-                    provider,
-                    index,
-                    {
-                        "credential_id": ref.credential_id,
-                        "auth_method": metadata.auth_method,
-                        "masked_identifier": metadata.masked_identifier,
-                    },
+                replacements.append(
+                    (
+                        provider,
+                        index,
+                        {
+                            "credential_id": ref.credential_id,
+                            "auth_method": metadata.auth_method,
+                            "masked_identifier": metadata.masked_identifier,
+                        },
+                    )
                 )
-            )
 
-        pool = document["credential_pool"]
-        for provider, index, replacement in replacements:
-            pool[provider][index] = replacement
-        self._write_atomically(document)
+            pool = document["credential_pool"]
+            for provider, index, replacement in replacements:
+                pool[provider][index] = replacement
+            self._write_atomically(document)
         return MigrationReport(credentials_finalized=len(replacements))
 
     def _read(self) -> dict[str, Any]:
@@ -142,15 +143,7 @@ class LegacyCredentialMigration:
         return next(iter(values.values()))
 
     def _write_atomically(self, document: dict[str, Any]) -> None:
-        tmp = self.auth_path.with_suffix(self.auth_path.suffix + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(document, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp, self.auth_path)
-            os.chmod(self.auth_path, 0o600)
-        finally:
-            if tmp.exists():
-                tmp.unlink()
+        secure_atomic_write_text(
+            self.auth_path,
+            json.dumps(document, ensure_ascii=False, indent=2),
+        )

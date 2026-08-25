@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from pathlib import Path
 from typing import Protocol
@@ -15,6 +14,7 @@ from kairos_security.credentials.contracts import (
     CredentialSecret,
     VaultState,
 )
+from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 
 
 class KeyringClient(Protocol):
@@ -48,22 +48,27 @@ class SystemKeyringVault:
         *,
         auth_method: str = "api_key",
     ) -> CredentialMetadata:
-        values = secret.reveal()
-        identifier = values.get("api_key") or values.get("token") or next(iter(values.values()))
-        payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        self._client.set_password(self._service(ref), ref.credential_id, payload)
-        entries = self._read_index()
-        entry = {
-            "provider": ref.provider,
-            "credential_id": ref.credential_id,
-            "auth_method": auth_method,
-        }
-        entries[self._entry_key(ref)] = entry
-        try:
-            self._write_index(entries)
-        except Exception:
-            self._client.delete_password(self._service(ref), ref.credential_id)
-            raise
+        with credential_file_lock(self.index_path):
+            values = secret.reveal()
+            identifier = values.get("api_key") or values.get("token") or next(iter(values.values()))
+            payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+            previous = self._client.get_password(self._service(ref), ref.credential_id)
+            self._client.set_password(self._service(ref), ref.credential_id, payload)
+            entries = self._read_index()
+            entry = {
+                "provider": ref.provider,
+                "credential_id": ref.credential_id,
+                "auth_method": auth_method,
+            }
+            entries[self._entry_key(ref)] = entry
+            try:
+                self._write_index(entries)
+            except Exception:
+                if previous is None:
+                    self._client.delete_password(self._service(ref), ref.credential_id)
+                else:
+                    self._client.set_password(self._service(ref), ref.credential_id, previous)
+                raise
         return CredentialMetadata(ref, auth_method, "keyring", identifier)
 
     def get(self, ref: CredentialRef) -> CredentialSecret:
@@ -75,27 +80,29 @@ class SystemKeyringVault:
         return CredentialSecret(json.loads(payload))
 
     def list(self, provider: str | None = None) -> list[CredentialMetadata]:
-        metadata = [
-            CredentialMetadata(
-                CredentialRef(entry["provider"], entry["credential_id"]),
-                entry["auth_method"],
-                "keyring",
-            )
-            for entry in self._read_index().values()
-            if provider is None or entry["provider"] == provider
-        ]
+        with credential_file_lock(self.index_path):
+            metadata = [
+                CredentialMetadata(
+                    CredentialRef(entry["provider"], entry["credential_id"]),
+                    entry["auth_method"],
+                    "keyring",
+                )
+                for entry in self._read_index().values()
+                if provider is None or entry["provider"] == provider
+            ]
         return sorted(metadata, key=lambda item: (item.ref.provider, item.ref.credential_id))
 
     def delete(self, ref: CredentialRef) -> None:
-        entries = self._read_index()
-        key = self._entry_key(ref)
-        if key not in entries:
-            raise CredentialNotFoundError(
-                f"credencial não encontrada: {ref.provider}/{ref.credential_id}"
-            )
-        self._client.delete_password(self._service(ref), ref.credential_id)
-        del entries[key]
-        self._write_index(entries)
+        with credential_file_lock(self.index_path):
+            entries = self._read_index()
+            key = self._entry_key(ref)
+            if key not in entries:
+                raise CredentialNotFoundError(
+                    f"credencial não encontrada: {ref.provider}/{ref.credential_id}"
+                )
+            self._client.delete_password(self._service(ref), ref.credential_id)
+            del entries[key]
+            self._write_index(entries)
 
     def _probe(self) -> bool:
         try:
@@ -123,24 +130,12 @@ class SystemKeyringVault:
         }
 
     def _write_index(self, entries: dict[str, dict[str, str]]) -> None:
-        self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.index_path.with_suffix(self.index_path.suffix + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(
-                    {"version": 1, "entries": list(entries.values())},
-                    handle,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp, self.index_path)
-            os.chmod(self.index_path, 0o600)
-        finally:
-            if tmp.exists():
-                tmp.unlink()
+        content = json.dumps(
+            {"version": 1, "entries": list(entries.values())},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        secure_atomic_write_text(self.index_path, content)
 
     @staticmethod
     def _service(ref: CredentialRef) -> str:

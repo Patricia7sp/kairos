@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +22,7 @@ from kairos_security.credentials import (
     VaultError,
     VaultLockedError,
     VaultState,
+    build_credential_service,
 )
 
 
@@ -48,6 +51,15 @@ class MemoryKeyring:
 
 class FailingKeyring(MemoryKeyring):
     priority = 0
+
+
+class FailingIndexVault(SystemKeyringVault):
+    fail_writes = False
+
+    def _write_index(self, entries):
+        if self.fail_writes:
+            raise OSError("falha de índice")
+        return super()._write_index(entries)
 
 
 class CredentialContractTests(unittest.TestCase):
@@ -159,6 +171,45 @@ class EncryptedFileVaultTests(unittest.TestCase):
         with self.assertRaises(CredentialNotFoundError):
             self.vault.get(openai)
 
+    def test_envelope_malformado_retorna_erro_estavel(self):
+        self.path.write_text("não é json", encoding="utf-8")
+
+        with self.assertRaises(InvalidMasterPasswordError):
+            self.vault.unlock("senha")
+
+    def test_parametros_kdf_nao_confiaveis_sao_rejeitados_antes_da_derivacao(self):
+        self.vault.initialize("senha")
+        envelope = json.loads(self.path.read_text(encoding="utf-8"))
+        envelope["kdf"]["name"] = "algoritmo-injetado"
+        self.path.write_text(json.dumps(envelope), encoding="utf-8")
+
+        with self.assertRaises(InvalidMasterPasswordError):
+            EncryptedFileVault(self.path, scrypt_n=2**10).unlock("senha")
+
+    def test_duas_instancias_concorrentes_nao_perdem_atualizacao(self):
+        self.vault.initialize("senha")
+        other = EncryptedFileVault(self.path, scrypt_n=2**10)
+        other.unlock("senha")
+        barrier = threading.Barrier(2)
+
+        def write(vault, provider):
+            barrier.wait()
+            vault.put(
+                CredentialRef(provider, "primary"),
+                CredentialSecret({"api_key": f"sk-{provider}"}),
+            )
+
+        threads = [
+            threading.Thread(target=write, args=(self.vault, "openai")),
+            threading.Thread(target=write, args=(other, "anthropic")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual({item.ref.provider for item in self.vault.list()}, {"openai", "anthropic"})
+
 
 class KeyringVaultTests(unittest.TestCase):
     def setUp(self):
@@ -240,6 +291,50 @@ class KeyringVaultTests(unittest.TestCase):
         self.assertEqual([item.ref for item in source.list("anthropic")], [ref])
         with self.assertRaisesRegex(VaultError, "somente leitura"):
             source.delete(ref)
+
+    def test_falha_de_indice_ao_sobrescrever_restaura_segredo_anterior(self):
+        client = MemoryKeyring()
+        index_path = self.root / "credential-index.json"
+        vault = FailingIndexVault(client, index_path=index_path)
+        ref = CredentialRef("openai", "primary")
+        vault.put(ref, CredentialSecret({"api_key": "sk-anterior"}))
+        vault.fail_writes = True
+
+        with self.assertRaises(OSError):
+            vault.put(ref, CredentialSecret({"api_key": "sk-nova"}))
+
+        self.assertEqual(vault.get(ref).reveal(), {"api_key": "sk-anterior"})
+
+
+class CredentialServiceFactoryTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self._environment = dict(os.environ)
+        os.environ["KAIROS_DISABLE_KEYRING"] = "1"
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._environment)
+        self._tmp.cleanup()
+
+    def test_senha_direta_em_variavel_nao_e_aceita(self):
+        os.environ["KAIROS_VAULT_PASSWORD"] = "senha-proibida"  # noqa: S105
+
+        service = build_credential_service(self.root)
+
+        self.assertEqual(service.state, VaultState.NOT_CONFIGURED)
+
+    def test_arquivo_de_passphrase_0600_inicializa_o_fallback(self):
+        passphrase = self.root / "vault-passphrase"
+        passphrase.write_text("senha-administrada\n", encoding="utf-8")
+        passphrase.chmod(0o600)
+        os.environ["KAIROS_VAULT_PASSPHRASE_FILE"] = str(passphrase)
+
+        service = build_credential_service(self.root)
+
+        self.assertEqual(service.state, VaultState.UNLOCKED)
+        self.assertNotIn(b"senha-administrada", (self.root / "credentials.vault").read_bytes())
 
 
 if __name__ == "__main__":

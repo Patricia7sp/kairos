@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -125,13 +124,16 @@ class AuthStore:
         """
         if self.vault is not None and _contains_secret(self.profile):
             raise ValueError("segredo não pode ser persistido no auth.json com cofre configurado")
-        with auth_lock(path):
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_text(
+        from kairos_security.credentials.io import (
+            credential_file_lock,
+            secure_atomic_write_text,
+        )
+
+        with credential_file_lock(path):
+            secure_atomic_write_text(
+                path,
                 json.dumps({"credential_pool": self.profile}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
-            os.replace(tmp, path)
 
 
 def _contains_secret(value: Any) -> bool:

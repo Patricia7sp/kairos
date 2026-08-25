@@ -313,18 +313,21 @@ def cmd_auth(args) -> int:
 
     from kairos_cli.auth import AuthStore
     from kairos_security.credentials import (
-        EncryptedFileVault,
         LegacyCredentialMigration,
         VaultState,
+        build_credential_service,
     )
 
     home = _home()
     caminho = home / "auth.json"
-    vault = EncryptedFileVault(home / "credentials.vault")
+    vault = build_credential_service(home)
     if args.auth_command == "vault-status":
-        _emit({"estado": vault.state}, as_json=args.json)
+        _emit({"backend": vault.backend_name, "estado": vault.state}, as_json=args.json)
         return ExitCode.OK
     if args.auth_command == "vault-init":
+        if vault.state == VaultState.KEYRING:
+            _emit({"backend": "keyring", "estado": vault.state}, as_json=args.json)
+            return ExitCode.OK
         if vault.state != VaultState.NOT_CONFIGURED:
             _emit({"erro": "cofre já configurado"}, as_json=args.json)
             return ExitCode.ERROR
@@ -339,7 +342,10 @@ def cmd_auth(args) -> int:
         return ExitCode.OK
     if args.auth_command == "vault-unlock":
         vault.unlock(getpass.getpass("Senha-mestra: "))
-        _emit({"estado": vault.state}, as_json=args.json)
+        _emit(
+            {"estado": vault.state, "escopo": "senha verificada somente nesta execução"},
+            as_json=args.json,
+        )
         return ExitCode.OK
     if args.auth_command == "migrate":
         migration = LegacyCredentialMigration(caminho, vault)
@@ -356,7 +362,8 @@ def cmd_auth(args) -> int:
         if vault.state == VaultState.NOT_CONFIGURED:
             _emit({"erro": "inicialize o cofre antes da migração"}, as_json=args.json)
             return ExitCode.ERROR
-        vault.unlock(getpass.getpass("Senha-mestra: "))
+        if vault.state == VaultState.LOCKED:
+            vault.unlock(getpass.getpass("Senha-mestra: "))
         imported = migration.import_and_verify()
         finalized = migration.finalize(confirm=True)
         _emit(

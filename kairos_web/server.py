@@ -21,12 +21,10 @@ from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_providers.manager import ProviderManager
 from kairos_security.credentials import (
+    CredentialNotFoundError,
     CredentialRef,
     CredentialSecret,
-    CredentialService,
-    EncryptedFileVault,
-    SystemKeyringVault,
-    VaultState,
+    build_credential_service,
 )
 from kairos_state.repositories.messages import MessageRepository
 from kairos_state.repositories.sessions import SessionRepository
@@ -130,36 +128,6 @@ async def require_session_token(request, call_next):
     return await call_next(request)
 
 
-class _DisabledKeyring:
-    priority = 0
-
-    def set_password(self, service: str, username: str, password: str) -> None:
-        raise RuntimeError("keyring desabilitado")
-
-    def get_password(self, service: str, username: str) -> str | None:
-        return None
-
-    def delete_password(self, service: str, username: str) -> None:
-        raise RuntimeError("keyring desabilitado")
-
-
-def _get_credential_service(kairos_home: Path) -> CredentialService:
-    if os.environ.get("KAIROS_DISABLE_KEYRING") == "1":
-        keyring_client = _DisabledKeyring()
-    else:
-        import keyring
-
-        keyring_client = keyring.get_keyring()
-    system = SystemKeyringVault(keyring_client, index_path=kairos_home / "credential-index.json")
-    encrypted = EncryptedFileVault(kairos_home / "credentials.vault")
-    if not system.available and (password := os.environ.get("KAIROS_VAULT_PASSWORD")):
-        if encrypted.state == VaultState.NOT_CONFIGURED:
-            encrypted.initialize(password)
-        elif encrypted.state == VaultState.LOCKED:
-            encrypted.unlock(password)
-    return CredentialService(keyring=system, encrypted=encrypted)
-
-
 def _get_auth_store() -> AuthStore:
     kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
     auth_path = kairos_home / "auth.json"
@@ -170,7 +138,7 @@ def _get_auth_store() -> AuthStore:
         except Exception:  # noqa: BLE001, S110
             pass
     return AuthStore(
-        profile=data.get("credential_pool", {}), vault=_get_credential_service(kairos_home)
+        profile=data.get("credential_pool", {}), vault=build_credential_service(kairos_home)
     )
 
 
@@ -310,10 +278,19 @@ async def save_provider_key(req: SaveKeyRequest):
     if not api_key:
         raise HTTPException(status_code=422, detail="api_key é obrigatória")
     ref = CredentialRef(req.provider, "primary")
+
+    # Valida usando somente memória; nenhum arquivo ou resposta recebe a chave.
+    validation_manager = ProviderManager(auth_store={req.provider: [{"api_key": api_key}]})
+    status = await validation_manager.get_provider(req.provider).test_connection()
+    try:
+        previous = store.vault.get(ref)
+    except CredentialNotFoundError:
+        previous = None
     try:
         metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="cofre de credenciais indisponível") from exc
+    previous_profile = store.profile.get(req.provider)
     store.profile[req.provider] = [
         {
             "credential_id": ref.credential_id,
@@ -321,16 +298,23 @@ async def save_provider_key(req: SaveKeyRequest):
             "masked_identifier": metadata.masked_identifier,
         }
     ]
-    store.write_atomically(auth_path)
-
-    # Testa nova conexão
-    manager = _provider_manager(store)
-    provider_inst = manager.get_provider(req.provider)
-    status = await provider_inst.test_connection()
+    try:
+        store.write_atomically(auth_path)
+    except Exception:
+        if previous is None:
+            store.vault.delete(ref)
+        else:
+            store.vault.put(ref, previous)
+        if previous_profile is None:
+            store.profile.pop(req.provider, None)
+        else:
+            store.profile[req.provider] = previous_profile
+        raise
 
     return {
         "status": "saved",
         "provider": req.provider,
+        "credential_status": "active" if status.ok else "saved_unverified",
         "connection": {
             "ok": status.ok,
             "message": status.message,
