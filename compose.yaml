@@ -22,9 +22,14 @@ services:
       # /opt/data é KAIROS_HOME: state.db, auth.json, skills e o marcador de
       # drenagem. Volume nomeado, não bind: o container faz chown no arranque.
       - kairos-data:/opt/data
+      # O fallback criptografado recebe a passphrase por arquivo administrado,
+      # nunca por argumento ou variável de ambiente inspecionável.
+      - /etc/komodo/secrets/kairos-vault-passphrase:/run/secrets/kairos-vault-passphrase:ro
 
     environment:
       KAIROS_DASHBOARD_PORT: "9119"
+      KAIROS_DISABLE_KEYRING: "1"
+      KAIROS_VAULT_PASSPHRASE_FILE: "/run/secrets/kairos-vault-passphrase"
       # UID/GID do dono do volume. O stage2 roda como root só para ajustá-los
       # e então cada serviço derruba privilégio no próprio `run`.
       KAIROS_UID: "10000"
