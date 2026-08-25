@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,11 +12,42 @@ from kairos_security.credentials import (
     CredentialNotFoundError,
     CredentialRef,
     CredentialSecret,
+    CredentialService,
     EncryptedFileVault,
+    ExternalCredentialSource,
     InvalidMasterPasswordError,
+    SystemKeyringVault,
+    VaultError,
     VaultLockedError,
     VaultState,
 )
+
+
+class MemoryKeyring:
+    priority = 1
+
+    def __init__(self) -> None:
+        self.passwords: dict[tuple[str, str], str] = {}
+        self.fail = False
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        if self.fail:
+            raise RuntimeError("keyring indisponível")
+        self.passwords[(service, username)] = password
+
+    def get_password(self, service: str, username: str) -> str | None:
+        if self.fail:
+            raise RuntimeError("keyring indisponível")
+        return self.passwords.get((service, username))
+
+    def delete_password(self, service: str, username: str) -> None:
+        if self.fail:
+            raise RuntimeError("keyring indisponível")
+        del self.passwords[(service, username)]
+
+
+class FailingKeyring(MemoryKeyring):
+    priority = 0
 
 
 class CredentialContractTests(unittest.TestCase):
@@ -126,6 +158,88 @@ class EncryptedFileVaultTests(unittest.TestCase):
 
         with self.assertRaises(CredentialNotFoundError):
             self.vault.get(openai)
+
+
+class KeyringVaultTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_keyring_disponivel_e_primeira_escolha(self):
+        client = MemoryKeyring()
+        encrypted = EncryptedFileVault(self.root / "credentials.vault", scrypt_n=2**10)
+        service = CredentialService(
+            keyring=SystemKeyringVault(client, index_path=self.root / "credential-index.json"),
+            encrypted=encrypted,
+        )
+        ref = CredentialRef("openai", "primary")
+
+        metadata = service.put(ref, CredentialSecret({"api_key": "sk-x"}))
+
+        self.assertEqual(service.state, VaultState.KEYRING)
+        self.assertEqual(service.get(ref).reveal(), {"api_key": "sk-x"})
+        self.assertEqual(metadata.ref, ref)
+
+    def test_indice_do_keyring_nao_contem_segredo(self):
+        index_path = self.root / "credential-index.json"
+        service = CredentialService(
+            keyring=SystemKeyringVault(MemoryKeyring(), index_path=index_path),
+            encrypted=EncryptedFileVault(self.root / "credentials.vault", scrypt_n=2**10),
+        )
+
+        service.put(
+            CredentialRef("openai", "primary"),
+            CredentialSecret({"api_key": "sk-nao-vazar"}),
+        )
+
+        content = index_path.read_text(encoding="utf-8")
+        self.assertNotIn("sk-nao-vazar", content)
+        self.assertEqual(json.loads(content)["entries"][0]["provider"], "openai")
+        self.assertEqual(index_path.stat().st_mode & 0o777, 0o600)
+
+    def test_keyring_indisponivel_cai_no_cofre_bloqueado(self):
+        encrypted = EncryptedFileVault(self.root / "credentials.vault", scrypt_n=2**10)
+        encrypted.initialize("senha-mestra")
+        encrypted.lock()
+
+        service = CredentialService(
+            keyring=SystemKeyringVault(
+                FailingKeyring(), index_path=self.root / "credential-index.json"
+            ),
+            encrypted=encrypted,
+        )
+
+        self.assertEqual(service.state, VaultState.LOCKED)
+
+    def test_backend_nao_alterna_silenciosamente_depois_da_selecao(self):
+        client = MemoryKeyring()
+        encrypted = EncryptedFileVault(self.root / "credentials.vault", scrypt_n=2**10)
+        encrypted.initialize("senha-mestra")
+        service = CredentialService(
+            keyring=SystemKeyringVault(client, index_path=self.root / "credential-index.json"),
+            encrypted=encrypted,
+        )
+        client.fail = True
+
+        with self.assertRaisesRegex(RuntimeError, "keyring indisponível"):
+            service.put(
+                CredentialRef("openai", "primary"),
+                CredentialSecret({"api_key": "sk-x"}),
+            )
+        self.assertEqual(encrypted.list(), [])
+
+    def test_fonte_externa_e_somente_leitura(self):
+        ref = CredentialRef("anthropic", "environment")
+        source = ExternalCredentialSource({ref: CredentialSecret({"api_key": "sk-external"})})
+
+        self.assertEqual(source.state, VaultState.EXTERNAL)
+        self.assertEqual(source.get(ref).reveal(), {"api_key": "sk-external"})
+        self.assertEqual([item.ref for item in source.list("anthropic")], [ref])
+        with self.assertRaisesRegex(VaultError, "somente leitura"):
+            source.delete(ref)
 
 
 if __name__ == "__main__":
