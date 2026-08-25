@@ -18,6 +18,18 @@ from kairos_providers.base import (
     StreamChunk,
     TokenUsage,
 )
+from kairos_providers.contracts import (
+    CatalogModel,
+    CatalogOrigin,
+    ModelCapabilities,
+    ModelKind,
+    ModelStability,
+    ProviderDescriptor,
+    ProviderModelRef,
+    ResolvedModelSelection,
+    SelectionReason,
+    SelectionScope,
+)
 from kairos_providers.manager import ProviderManager, get_google_adc_token
 
 logger = logging.getLogger(__name__)
@@ -25,13 +37,23 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "OMIT_TEMPERATURE",
     "BaseLLMProvider",
+    "CatalogModel",
+    "CatalogOrigin",
     "ConnectionStatus",
     "DiscoveryLayer",
+    "ModelCapabilities",
     "ModelDescriptor",
+    "ModelKind",
+    "ModelStability",
+    "ProviderDescriptor",
     "ProviderManager",
+    "ProviderModelRef",
     "ProviderProfile",
     "ProviderRegistry",
     "ProviderType",
+    "ResolvedModelSelection",
+    "SelectionReason",
+    "SelectionScope",
     "StreamChunk",
     "TokenUsage",
     "build_request_kwargs",
