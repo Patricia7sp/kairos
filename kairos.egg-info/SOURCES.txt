@@ -58,7 +58,12 @@ kairos_plugins/manifest.py
 kairos_plugins/storage.py
 kairos_providers/__init__.py
 kairos_providers/base.py
+kairos_providers/catalog.py
+kairos_providers/contracts.py
+kairos_providers/curated_catalog.py
 kairos_providers/manager.py
+kairos_providers/provider_registry.py
+kairos_providers/selection.py
 kairos_security/__init__.py
 kairos_security/auditor.py
 kairos_security/formatter.py
@@ -103,7 +108,10 @@ tests/test_i18n.py
 tests/test_integration.py
 tests/test_machines.py
 tests/test_mcp.py
+tests/test_model_selection.py
 tests/test_plugins.py
+tests/test_provider_catalog.py
+tests/test_provider_foundation.py
 tests/test_providers.py
 tests/test_schema.py
 tests/test_security_audit.py
