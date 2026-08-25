@@ -18,6 +18,11 @@ from kairos_providers.base import (
     StreamChunk,
     TokenUsage,
 )
+from kairos_providers.catalog import (
+    CatalogSnapshot,
+    ModelCatalog,
+    UnknownModelError,
+)
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
@@ -44,9 +49,11 @@ __all__ = [
     "BaseLLMProvider",
     "CatalogModel",
     "CatalogOrigin",
+    "CatalogSnapshot",
     "ConnectionStatus",
     "DiscoveryLayer",
     "ModelCapabilities",
+    "ModelCatalog",
     "ModelDescriptor",
     "ModelKind",
     "ModelStability",
@@ -63,6 +70,7 @@ __all__ = [
     "SelectionScope",
     "StreamChunk",
     "TokenUsage",
+    "UnknownModelError",
     "UnknownProviderError",
     "build_request_kwargs",
     "get_google_adc_token",
