@@ -15,6 +15,12 @@ from kairos_security.credentials.encrypted import (
     InvalidMasterPasswordError,
 )
 from kairos_security.credentials.keyring_backend import KeyringClient, SystemKeyringVault
+from kairos_security.credentials.migration import (
+    LegacyCredentialMigration,
+    MigrationConfirmationRequired,
+    MigrationReport,
+    MigrationVerificationError,
+)
 from kairos_security.credentials.service import CredentialService, ExternalCredentialSource
 
 __all__ = [
@@ -28,6 +34,10 @@ __all__ = [
     "ExternalCredentialSource",
     "InvalidMasterPasswordError",
     "KeyringClient",
+    "LegacyCredentialMigration",
+    "MigrationConfirmationRequired",
+    "MigrationReport",
+    "MigrationVerificationError",
     "SystemKeyringVault",
     "VaultError",
     "VaultLockedError",
