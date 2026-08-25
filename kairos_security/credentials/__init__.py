@@ -10,6 +10,10 @@ from kairos_security.credentials.contracts import (
     VaultLockedError,
     VaultState,
 )
+from kairos_security.credentials.encrypted import (
+    EncryptedFileVault,
+    InvalidMasterPasswordError,
+)
 
 __all__ = [
     "CredentialMetadata",
@@ -17,6 +21,8 @@ __all__ = [
     "CredentialRef",
     "CredentialSecret",
     "CredentialVault",
+    "EncryptedFileVault",
+    "InvalidMasterPasswordError",
     "VaultError",
     "VaultLockedError",
     "VaultState",

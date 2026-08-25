@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Kairos — reimplementação do Hermes a partir das specs do Reversa"
 requires-python = ">=3.11"
 dependencies = [
+    "cryptography>=46",
     "fastapi>=0.141.1",
     # Catálogos de i18n e config.yaml. O legado já a usava; no Kairos ela
     # entra na Tarefa 06 porque é a primeira que precisa ler YAML.
