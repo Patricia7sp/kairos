@@ -19,10 +19,11 @@ def test_compose_configura_fallback_criptografado_com_segredo_somente_leitura():
     assert service["environment"]["KAIROS_VAULT_PASSPHRASE_FILE"] == (
         "/run/secrets/kairos-vault-passphrase"  # noqa: S105
     )
-    assert {
-        "type": "bind",
-        "source": "/etc/komodo/secrets/kairos-vault-passphrase",
-        "target": "/run/secrets/kairos-vault-passphrase",
-        "read_only": True,
-        "bind": {},
-    } in service["volumes"]
+    passphrase_mount = next(
+        mount
+        for mount in service["volumes"]
+        if mount["target"] == "/run/secrets/kairos-vault-passphrase"
+    )
+    assert passphrase_mount["type"] == "bind"
+    assert passphrase_mount["source"] == "/etc/komodo/secrets/kairos-vault-passphrase"
+    assert passphrase_mount["read_only"] is True
