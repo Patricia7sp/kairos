@@ -757,10 +757,14 @@ class SessoesTests(unittest.TestCase):
         self.assertEqual(res.json()["tags"], ["projeto", "urgente"])
         filtrada = self.client.get("/api/sessions", params={"tag": "projeto"}).json()
         self.assertEqual([s["id"] for s in filtrada["sessions"]], ["s-fechada"])
-        self.assertEqual(filtrada["tag_counts"], [{"tag": "projeto", "count": 1}, {"tag": "urgente", "count": 1}])
+        self.assertEqual(
+            filtrada["tag_counts"], [{"tag": "projeto", "count": 1}, {"tag": "urgente", "count": 1}]
+        )
 
     def test_lista_tem_total_e_paginacao_e_oculta_reversivel(self):
-        self.assertEqual(self.client.patch("/api/sessions/s-aberta", json={"hidden": True}).status_code, 200)
+        self.assertEqual(
+            self.client.patch("/api/sessions/s-aberta", json={"hidden": True}).status_code, 200
+        )
         visiveis = self.client.get("/api/sessions", params={"limit": 1}).json()
         self.assertEqual(visiveis["total"], 1)
         self.assertTrue(visiveis["has_more"] is False)
@@ -768,9 +772,7 @@ class SessoesTests(unittest.TestCase):
         self.assertEqual([s["id"] for s in ocultas["sessions"]], ["s-aberta"])
 
     def test_tags_da_visao_oculta_contam_sessoes_ocultas(self):
-        self.client.patch(
-            "/api/sessions/s-aberta", json={"hidden": True, "tags": ["secreta"]}
-        )
+        self.client.patch("/api/sessions/s-aberta", json={"hidden": True, "tags": ["secreta"]})
 
         ocultas = self.client.get("/api/sessions", params={"status": "ocultas"}).json()
 
@@ -836,24 +838,24 @@ class SessoesInterfaceTests(unittest.TestCase):
 
     def test_interface_expoe_busca_filtro_e_exportacao(self):
         texto = self.FONTE.read_text(encoding="utf-8")
-        self.assertIn('data-busca-sessoes', texto)
-        self.assertIn('data-filtro-sessoes', texto)
-        self.assertIn('URL.createObjectURL', texto)
+        self.assertIn("data-busca-sessoes", texto)
+        self.assertIn("data-filtro-sessoes", texto)
+        self.assertIn("URL.createObjectURL", texto)
 
     def test_interface_pode_alternar_arquivo(self):
         texto = self.FONTE.read_text(encoding="utf-8")
-        self.assertIn('api.atualizarSessao', texto)
-        self.assertIn('archived: !sessao.archived', texto)
+        self.assertIn("api.atualizarSessao", texto)
+        self.assertIn("archived: !sessao.archived", texto)
 
     def test_interface_pode_fixar_e_desafixar_sessao(self):
         texto = self.FONTE.read_text(encoding="utf-8")
-        self.assertIn('data-fixar-sessao', texto)
-        self.assertIn('pinned: !sessao.pinned', texto)
+        self.assertIn("data-fixar-sessao", texto)
+        self.assertIn("pinned: !sessao.pinned", texto)
 
     def test_interface_expoe_tags_paginacao_e_markdown(self):
         texto = self.FONTE.read_text(encoding="utf-8")
-        self.assertIn('data-filtro-tag', texto)
-        self.assertIn('data-pagina-anterior', texto)
-        self.assertIn('data-pagina-proxima', texto)
-        self.assertIn('Exportar Markdown', texto)
-        self.assertIn('api.atualizarSessao(id, { tags })', texto)
+        self.assertIn("data-filtro-tag", texto)
+        self.assertIn("data-pagina-anterior", texto)
+        self.assertIn("data-pagina-proxima", texto)
+        self.assertIn("Exportar Markdown", texto)
+        self.assertIn("api.atualizarSessao(id, { tags })", texto)

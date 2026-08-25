@@ -350,8 +350,7 @@ def _tags_para_sessoes(conn, ids: list[str]) -> dict[str, list[str]]:
 
 def _contagens_de_tags(conn, where: list[str], args: list[Any]) -> list[dict[str, Any]]:
     sql = (
-        "SELECT st.tag, COUNT(*) AS n FROM session_tags st "
-        "JOIN sessions s ON s.id = st.session_id"
+        "SELECT st.tag, COUNT(*) AS n FROM session_tags st JOIN sessions s ON s.id = st.session_id"
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -475,7 +474,9 @@ async def update_session(session_id: str, payload: dict[str, Any]):
     tags: list[str] | None = None
     if tags_payload is not None:
         if not isinstance(tags_payload, list) or any(not isinstance(v, str) for v in tags_payload):
-            return JSONResponse({"error": "session_tags_must_be_a_list_of_strings"}, status_code=400)
+            return JSONResponse(
+                {"error": "session_tags_must_be_a_list_of_strings"}, status_code=400
+            )
         tags = sorted({v.strip().lower() for v in tags_payload if v.strip()})
         if len(tags) > 20 or any(len(v) > 32 for v in tags):
             return JSONResponse({"error": "session_tags_limit_exceeded"}, status_code=400)
