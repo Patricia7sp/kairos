@@ -42,6 +42,11 @@ from kairos_providers.provider_registry import (
     RegisteredProvider,
     UnknownProviderError,
 )
+from kairos_providers.selection import (
+    ModelSelectionContext,
+    ModelSelectionResolver,
+    ModelSelectionUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,9 @@ __all__ = [
     "ModelCatalog",
     "ModelDescriptor",
     "ModelKind",
+    "ModelSelectionContext",
+    "ModelSelectionResolver",
+    "ModelSelectionUnavailableError",
     "ModelStability",
     "ProviderAdapterRegistry",
     "ProviderDescriptor",
