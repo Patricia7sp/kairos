@@ -67,10 +67,10 @@ class ProviderModelRef:
 
 @dataclass(frozen=True)
 class ModelCapabilities:
-    chat: bool = True
-    tools: bool = False
-    vision: bool = False
-    streaming: bool = True
+    chat: bool | None = None
+    tools: bool | None = None
+    vision: bool | None = None
+    streaming: bool | None = None
     context_length: int | None = None
     max_output_tokens: int | None = None
 
@@ -84,7 +84,7 @@ class CatalogModel:
     origins: frozenset[CatalogOrigin] = frozenset()
 
     def is_selectable(self, *, include_preview: bool = False) -> bool:
-        if not self.capabilities.chat or self.stability is ModelStability.DEPRECATED:
+        if self.capabilities.chat is not True or self.stability is ModelStability.DEPRECATED:
             return False
         return include_preview or self.stability is not ModelStability.PREVIEW
 

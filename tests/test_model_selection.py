@@ -8,6 +8,8 @@ from kairos_providers.catalog import ModelCatalog
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
+    ModelCapabilities,
+    ModelStability,
     ProviderModelRef,
     SelectionReason,
 )
@@ -25,6 +27,7 @@ def catalog_with(*refs: ProviderModelRef) -> ModelCatalog:
             CatalogModel(
                 ref=ref,
                 display_name=ref.model,
+                capabilities=ModelCapabilities(chat=True),
                 origins=frozenset({CatalogOrigin.CURATED}),
             )
             for ref in refs
@@ -96,6 +99,64 @@ class ModelSelectionResolverTests(unittest.TestCase):
     def test_contexto_sem_nenhuma_selecao_falha_explicitamente(self):
         with self.assertRaisesRegex(ModelSelectionUnavailableError, "nenhuma seleção configurada"):
             self.resolver.resolve(ModelSelectionContext())
+
+    def test_modelo_depreciado_e_indisponivel(self):
+        ref = ProviderModelRef("p", "deprecated")
+        catalog = catalog_with(ref)
+        catalog.merge(
+            [
+                CatalogModel(
+                    ref=ref,
+                    display_name="Deprecated",
+                    capabilities=ModelCapabilities(chat=True),
+                    stability=ModelStability.DEPRECATED,
+                )
+            ],
+            origin=CatalogOrigin.DYNAMIC,
+        )
+
+        with self.assertRaisesRegex(ModelSelectionUnavailableError, "p/deprecated"):
+            ModelSelectionResolver(catalog).resolve(ModelSelectionContext(message=ref))
+
+    def test_modelo_sem_chat_e_indisponivel(self):
+        ref = ProviderModelRef("p", "embedding")
+        catalog = ModelCatalog()
+        catalog.merge(
+            [
+                CatalogModel(
+                    ref=ref,
+                    display_name="Embedding",
+                    capabilities=ModelCapabilities(chat=False),
+                )
+            ],
+            origin=CatalogOrigin.DYNAMIC,
+        )
+
+        with self.assertRaisesRegex(ModelSelectionUnavailableError, "p/embedding"):
+            ModelSelectionResolver(catalog).resolve(ModelSelectionContext(message=ref))
+
+    def test_preview_exige_habilitacao_explicita(self):
+        ref = ProviderModelRef("p", "preview")
+        catalog = ModelCatalog()
+        catalog.merge(
+            [
+                CatalogModel(
+                    ref=ref,
+                    display_name="Preview",
+                    capabilities=ModelCapabilities(chat=True),
+                    stability=ModelStability.PREVIEW,
+                )
+            ],
+            origin=CatalogOrigin.DYNAMIC,
+        )
+
+        with self.assertRaisesRegex(ModelSelectionUnavailableError, "p/preview"):
+            ModelSelectionResolver(catalog).resolve(ModelSelectionContext(message=ref))
+
+        resolved = ModelSelectionResolver(catalog, include_preview=True).resolve(
+            ModelSelectionContext(message=ref)
+        )
+        self.assertEqual(resolved.ref, ref)
 
 
 if __name__ == "__main__":

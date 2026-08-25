@@ -6,13 +6,39 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 
-from kairos_providers.contracts import CatalogModel, CatalogOrigin, ProviderModelRef
+from kairos_providers.contracts import (
+    CatalogModel,
+    CatalogOrigin,
+    ModelCapabilities,
+    ProviderModelRef,
+)
 
 _ORIGIN_PRIORITY = {
     CatalogOrigin.CACHE: 0,
     CatalogOrigin.CURATED: 1,
     CatalogOrigin.DYNAMIC: 2,
 }
+
+
+def _complete_capabilities(
+    primary: ModelCapabilities, fallback: ModelCapabilities
+) -> ModelCapabilities:
+    return ModelCapabilities(
+        chat=primary.chat if primary.chat is not None else fallback.chat,
+        tools=primary.tools if primary.tools is not None else fallback.tools,
+        vision=primary.vision if primary.vision is not None else fallback.vision,
+        streaming=(primary.streaming if primary.streaming is not None else fallback.streaming),
+        context_length=(
+            primary.context_length
+            if primary.context_length is not None
+            else fallback.context_length
+        ),
+        max_output_tokens=(
+            primary.max_output_tokens
+            if primary.max_output_tokens is not None
+            else fallback.max_output_tokens
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -44,10 +70,25 @@ class ModelCatalog:
             if current is not None:
                 origins |= current.origins
             if current is None or priority >= self._priorities[incoming.ref]:
-                self._models[incoming.ref] = replace(incoming, origins=frozenset(origins))
+                capabilities = (
+                    incoming.capabilities
+                    if current is None
+                    else _complete_capabilities(incoming.capabilities, current.capabilities)
+                )
+                self._models[incoming.ref] = replace(
+                    incoming,
+                    capabilities=capabilities,
+                    origins=frozenset(origins),
+                )
                 self._priorities[incoming.ref] = priority
             else:
-                self._models[incoming.ref] = replace(current, origins=frozenset(origins))
+                self._models[incoming.ref] = replace(
+                    current,
+                    capabilities=_complete_capabilities(
+                        current.capabilities, incoming.capabilities
+                    ),
+                    origins=frozenset(origins),
+                )
 
     def load_snapshot(self, snapshot: CatalogSnapshot) -> None:
         now = self._clock()

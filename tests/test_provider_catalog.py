@@ -48,6 +48,41 @@ class ModelCatalogTests(unittest.TestCase):
             frozenset({CatalogOrigin.CURATED, CatalogOrigin.DYNAMIC}),
         )
 
+    def test_dinamico_completa_capacidades_ausentes_com_curadoria(self):
+        catalog = ModelCatalog()
+        curated = CatalogModel(
+            ref=ProviderModelRef("p", "m"),
+            display_name="Curated",
+            capabilities=ModelCapabilities(
+                chat=True,
+                tools=True,
+                vision=False,
+                streaming=True,
+                context_length=100,
+                max_output_tokens=20,
+            ),
+            origins=frozenset({CatalogOrigin.CURATED}),
+        )
+        dynamic = CatalogModel(
+            ref=ProviderModelRef("p", "m"),
+            display_name="Dynamic",
+            capabilities=ModelCapabilities(
+                chat=True,
+                context_length=200,
+            ),
+            origins=frozenset({CatalogOrigin.DYNAMIC}),
+        )
+        catalog.merge([curated], origin=CatalogOrigin.CURATED)
+
+        catalog.merge([dynamic], origin=CatalogOrigin.DYNAMIC)
+
+        capabilities = catalog.find(ProviderModelRef("p", "m")).capabilities
+        self.assertEqual(capabilities.context_length, 200)
+        self.assertTrue(capabilities.tools)
+        self.assertFalse(capabilities.vision)
+        self.assertTrue(capabilities.streaming)
+        self.assertEqual(capabilities.max_output_tokens, 20)
+
     def test_curado_prevalece_sobre_cache(self):
         catalog = ModelCatalog()
         catalog.merge(
