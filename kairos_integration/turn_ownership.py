@@ -369,11 +369,15 @@ class SessionTurnOwnership:
                     break
                 await self._sleep(min(self._refresh_interval, remaining / 2))
                 while True:
-                    result = await self._backend.refresh(
+                    result = await self._refresh_before_deadline(
                         conversation_id,
                         holder,
-                        ttl_seconds=self._ttl_seconds,
+                        owner,
+                        lease_lost,
+                        expires_at,
                     )
+                    if result is None:
+                        return
                     now = self._clock()
                     if (
                         result.result is LeaseRefreshResult.REFRESHED
@@ -400,6 +404,62 @@ class SessionTurnOwnership:
         lease_lost.set()
         if owner is not None:
             owner.cancel()
+
+    async def _refresh_before_deadline(
+        self,
+        conversation_id: str,
+        holder: str,
+        owner: asyncio.Task[object] | None,
+        lease_lost: asyncio.Event,
+        expires_at: float,
+    ) -> LeaseRefreshOutcome | None:
+        refresh = asyncio.create_task(
+            self._backend.refresh(
+                conversation_id,
+                holder,
+                ttl_seconds=self._ttl_seconds,
+            )
+        )
+        deadline = asyncio.create_task(self._sleep_until(expires_at))
+        try:
+            done, _ = await asyncio.wait({refresh, deadline}, return_when=asyncio.FIRST_COMPLETED)
+            if refresh in done:
+                result = refresh.result()
+                if (
+                    result.result is LeaseRefreshResult.REFRESHED
+                    and result.expires_at is not None
+                    and self._clock() < result.expires_at
+                ):
+                    return result
+                if self._clock() < expires_at:
+                    return result
+
+            lease_lost.set()
+            if owner is not None:
+                owner.cancel()
+            await asyncio.shield(refresh)
+            return None
+        except asyncio.CancelledError:
+            refresh.cancel()
+            try:
+                await refresh
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.exception(
+                    "falha ao concluir renovação cancelada do turno %s: %s",
+                    conversation_id,
+                    exc,
+                )
+            raise
+        finally:
+            deadline.cancel()
+            with suppress(asyncio.CancelledError):
+                await deadline
+
+    async def _sleep_until(self, deadline: float) -> None:
+        while (remaining := deadline - self._clock()) > 0:
+            await self._sleep(remaining)
 
     async def _release_durable(self, conversation_id: str, holder: str) -> None:
         for attempt in range(self._release_max_attempts):

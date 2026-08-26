@@ -4,6 +4,7 @@ import asyncio
 import sqlite3
 import threading
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,67 @@ class BlockingAdapter(ImmediateAdapter):
         yield ProviderEvent(kind="finish", finish_reason="stop")
 
 
+class CancellationTrackingAdapter:
+    def __init__(self, clock) -> None:
+        self.clock = clock
+        self.requests = []
+        self.started = asyncio.Event()
+        self.stopped = asyncio.Event()
+        self.stopped_at = None
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.stopped_at = self.clock()
+            self.stopped.set()
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class OverlapCheckingAdapter(ImmediateAdapter):
+    def __init__(self, previous: CancellationTrackingAdapter) -> None:
+        super().__init__("sucessora")
+        self.previous = previous
+        self.overlapped = None
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.overlapped = not self.previous.stopped.is_set()
+        async for event in super().stream(request):
+            yield event
+
+
+class FastStreamingAdapter(ImmediateAdapter):
+    def __init__(self, event_count: int) -> None:
+        super().__init__("")
+        self.event_count = event_count
+        self.emitted = 0
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        for index in range(self.event_count):
+            self.emitted += 1
+            yield ProviderEvent(kind="text_delta", text=str(index))
+        await asyncio.Event().wait()
+
+
+class ProducerAbort(BaseException):
+    pass
+
+
+class BaseExceptionAdapter(ImmediateAdapter):
+    def __init__(self) -> None:
+        super().__init__("")
+        self.raised = asyncio.Event()
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        self.raised.set()
+        raise ProducerAbort("producer-abort")
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
 class FirstStreamBlocksAdapter(ImmediateAdapter):
     def __init__(self) -> None:
         super().__init__("")
@@ -113,6 +175,35 @@ class ManualTime:
     async def sleep(self, delay: float) -> None:
         self.value += delay
         await asyncio.sleep(0)
+
+
+class ControlledTime:
+    def __init__(self, value: float = 0) -> None:
+        self.value = value
+        self._waiters: list[tuple[float, asyncio.Future[None]]] = []
+
+    def now(self) -> float:
+        return self.value
+
+    async def sleep(self, delay: float) -> None:
+        if delay <= 0:
+            await asyncio.sleep(0)
+            return
+        deadline = self.value + delay
+        future = asyncio.get_running_loop().create_future()
+        waiter = (deadline, future)
+        self._waiters.append(waiter)
+        try:
+            await future
+        finally:
+            self._waiters.remove(waiter)
+
+    def advance_to(self, value: float) -> None:
+        assert value >= self.value
+        self.value = value
+        for deadline, future in tuple(self._waiters):
+            if deadline <= value and not future.done():
+                future.set_result(None)
 
 
 class RecordingBackend:
@@ -154,6 +245,19 @@ class PermanentReleaseContentionBackend(RecordingBackend):
         return LeaseReleaseResult.CONTENDED
 
 
+class GatedLossBackend(RecordingBackend):
+    def __init__(self, clock) -> None:
+        super().__init__(clock)
+        self.lose = asyncio.Event()
+
+    async def refresh(self, conversation_id, holder, *, ttl_seconds):
+        now = self.clock()
+        self.refreshes.append((conversation_id, holder, ttl_seconds, now))
+        self.refresh_called.set()
+        await self.lose.wait()
+        return LeaseRefreshOutcome(LeaseRefreshResult.LOST)
+
+
 def envelope(conversation_id: str = "s1", content: str = "oi") -> InteractionEnvelope:
     return InteractionEnvelope(conversation_id=conversation_id, source="web", content=content)
 
@@ -164,6 +268,7 @@ def service(
     *,
     backend=None,
     sessions=None,
+    usage=None,
     clock=None,
     sleep=None,
     ttl: float = 300,
@@ -176,7 +281,7 @@ def service(
         context_loader=ContextLoader(),
         sessions=sessions or SessionRepository(connection),
         messages=MessageRepository(connection),
-        usage=UsageRepository(connection),
+        usage=usage or UsageRepository(connection),
         turn_leases=backend,
         turn_lease_poll_interval=0,
         turn_lease_ttl_seconds=ttl,
@@ -304,7 +409,7 @@ async def test_two_service_graphs_race_new_session_inside_durable_ownership(tmp_
 async def test_heartbeat_refreshes_lease_during_long_turn_without_real_wait(tmp_path: Path):
     connection = connect(tmp_path / "state.db")
     initialize_schema(connection)
-    timer = ManualTime()
+    timer = ControlledTime()
     backend = RecordingBackend(timer.now, refresh_result=True)
     adapter = BlockingAdapter()
     interaction = service(
@@ -319,9 +424,13 @@ async def test_heartbeat_refreshes_lease_during_long_turn_without_real_wait(tmp_
     try:
         task = asyncio.create_task(collect(interaction.stream(envelope())))
         await adapter.started.wait()
+        while not timer._waiters:
+            await asyncio.sleep(0)
+        timer.advance_to(2)
         await backend.refresh_called.wait()
 
         assert backend.refreshes[0][-1] == 2
+        backend.hold_refresh.set()
         adapter.release.set()
         assert (await task)[-1].kind == "turn_end"
         assert len(backend.releases) == 1
@@ -463,7 +572,7 @@ async def test_acquire_rejects_deadline_expired_while_worker_result_is_delayed(t
     db_path = tmp_path / "state.db"
     connection = connect(db_path)
     initialize_schema(connection)
-    timer = ManualTime()
+    timer = ControlledTime()
     backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
     real_attempt = backend._try_acquire_sync
     committed = threading.Event()
@@ -493,7 +602,7 @@ async def test_acquire_rejects_deadline_expired_while_worker_result_is_delayed(t
     try:
         while not committed.is_set():
             await asyncio.sleep(0)
-        timer.value = 7
+        timer.advance_to(7)
         return_result.set()
 
         assert (await task)[-1].kind == "turn_end"
@@ -547,6 +656,110 @@ async def test_refresh_rejects_deadline_expired_while_worker_result_is_delayed(t
 
 
 @pytest.mark.anyio
+async def test_refresh_blocked_past_deadline_stops_owner_before_successor_provider(  # noqa: PLR0915
+    tmp_path: Path,
+):
+    db_path = tmp_path / "state.db"
+    first_connection = connect(db_path)
+    initialize_schema(first_connection)
+    second_connection = connect(db_path)
+    timer = ControlledTime(100)
+    first_backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    second_backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    real_refresh = first_backend._refresh_sync
+    refresh_entered = threading.Event()
+    allow_refresh = threading.Event()
+    refresh_finished = threading.Event()
+
+    def blocked_refresh(*args, **kwargs):
+        refresh_entered.set()
+        allow_refresh.wait()
+        try:
+            return real_refresh(*args, **kwargs)
+        finally:
+            refresh_finished.set()
+
+    first_backend._refresh_sync = blocked_refresh
+    first_adapter = CancellationTrackingAdapter(timer.now)
+    second_adapter = OverlapCheckingAdapter(first_adapter)
+    first_usage = UsageRepository(first_connection)
+    second_usage = UsageRepository(second_connection)
+    first = service(
+        first_connection,
+        first_adapter,
+        backend=first_backend,
+        usage=first_usage,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    second = service(
+        second_connection,
+        second_adapter,
+        backend=second_backend,
+        usage=second_usage,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    first_task = asyncio.create_task(collect(first.stream(envelope(content="primeiro"))))
+    try:
+        await first_adapter.started.wait()
+        while not timer._waiters:
+            await asyncio.sleep(0)
+        timer.advance_to(102)
+        while not refresh_entered.is_set():
+            await asyncio.sleep(0)
+
+        timer.advance_to(107)
+        for _ in range(100):
+            if first_adapter.stopped.is_set():
+                break
+            await asyncio.sleep(0)
+        stopped_before_refresh_return = first_adapter.stopped.is_set()
+
+        successor_events = await asyncio.wait_for(
+            collect(second.stream(envelope(content="segundo"))), timeout=0.5
+        )
+        rows_before_old_refresh_returns = [
+            (row["role"], row["payload"])
+            for row in MessageRepository(second_connection).for_api("s1")
+        ]
+
+        allow_refresh.set()
+        with pytest.raises(TurnLeaseLostError):
+            await asyncio.wait_for(first_task, timeout=0.5)
+
+        assert stopped_before_refresh_return
+        assert first_adapter.stopped_at == 107
+        assert second_adapter.overlapped is False
+        assert successor_events[-1].kind == "turn_end"
+        assert rows_before_old_refresh_returns == [
+            ("user", "primeiro"),
+            ("user", "segundo"),
+            ("assistant", "sucessora"),
+        ]
+        assert first_usage.pending_count() == 0
+        assert second_usage.pending_count() == 1
+        assert refresh_finished.is_set()
+        assert (
+            second_connection.execute(
+                "SELECT holder FROM session_turn_leases WHERE conversation_id = 's1'"
+            ).fetchone()
+            is None
+        )
+    finally:
+        allow_refresh.set()
+        first_task.cancel()
+        with suppress(asyncio.CancelledError, TurnLeaseLostError):
+            await first_task
+        first_connection.close()
+        second_connection.close()
+
+
+@pytest.mark.anyio
 async def test_lease_loss_waits_at_iterator_boundary_without_cancelling_consumer(tmp_path: Path):
     connection = connect(tmp_path / "state.db")
     initialize_schema(connection)
@@ -585,6 +798,69 @@ async def test_lease_loss_waits_at_iterator_boundary_without_cancelling_consumer
     finally:
         resume_consumer.set()
         await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_fast_provider_is_demand_paced_and_loss_precedes_unrequested_deltas(
+    tmp_path: Path,
+):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ControlledTime(100)
+    backend = GatedLossBackend(timer.now)
+    adapter = FastStreamingAdapter(event_count=1_000)
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    stream = interaction.stream(envelope())
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+
+        assert adapter.emitted == 1
+        while not timer._waiters:
+            await asyncio.sleep(0)
+        timer.advance_to(102)
+        await backend.refresh_called.wait()
+        backend.lose.set()
+        await backend.release_called.wait()
+
+        with pytest.raises(TurnLeaseLostError):
+            await anext(stream)
+        assert adapter.emitted == 1
+        assert [
+            (row["role"], row["payload"]) for row in MessageRepository(connection).for_api("s1")
+        ] == [("user", "oi")]
+    finally:
+        backend.lose.set()
+        await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_non_exception_base_exception_is_observable_without_waiting_for_queue(
+    tmp_path: Path,
+):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    adapter = BaseExceptionAdapter()
+    interaction = service(connection, adapter)
+    task = asyncio.create_task(collect(interaction.stream(envelope())))
+    try:
+        await adapter.raised.wait()
+        with pytest.raises(ProducerAbort, match="producer-abort"):
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError, ProducerAbort):
+            await task
         connection.close()
 
 

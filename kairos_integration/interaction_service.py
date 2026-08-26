@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field
 
 from kairos_integration.interaction_contract import (
@@ -70,6 +70,7 @@ class TurnAccumulator:
 
 @dataclass(frozen=True)
 class _StreamTerminal:
+    event: InteractionEvent | None = None
     error: BaseException | None = None
 
 
@@ -121,38 +122,65 @@ class InteractionService:
 
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa exatamente uma seleção e transmite seus eventos normalizados."""
-        queue: asyncio.Queue[InteractionEvent | _StreamTerminal] = asyncio.Queue()
+        demand: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        events: asyncio.Queue[InteractionEvent] = asyncio.Queue(maxsize=1)
         producer = asyncio.create_task(
-            self._produce_owned(envelope, queue),
+            self._produce_owned(envelope, demand, events),
             name=f"kairos-interaction-turn:{envelope.conversation_id}",
         )
         try:
             while True:
-                item = await queue.get()
-                if isinstance(item, _StreamTerminal):
-                    if item.error is not None:
-                        raise item.error
-                    return
-                yield item
+                await demand.put(None)
+                event_task = asyncio.create_task(events.get())
+                try:
+                    done, _ = await asyncio.wait(
+                        {event_task, producer}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if event_task in done:
+                        yield event_task.result()
+                        continue
+                    terminal = producer.result()
+                finally:
+                    if not event_task.done():
+                        event_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await event_task
+                if terminal.event is not None:
+                    yield terminal.event
+                if terminal.error is not None:
+                    raise terminal.error
+                return
         finally:
-            producer.cancel()
-            with suppress(asyncio.CancelledError):
-                await producer
+            if not producer.done():
+                producer.cancel()
+                with suppress(asyncio.CancelledError):
+                    await producer
+            elif not producer.cancelled():
+                error = producer.exception()
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    raise error
 
     async def _produce_owned(
         self,
         envelope: InteractionEnvelope,
-        queue: asyncio.Queue[InteractionEvent | _StreamTerminal],
-    ) -> None:
+        demand: asyncio.Queue[None],
+        events: asyncio.Queue[InteractionEvent],
+    ) -> _StreamTerminal:
         try:
             async with self._turn_ownership.acquire(envelope.conversation_id, envelope.source):
                 self._sessions.ensure(envelope.conversation_id, source=envelope.source)
-                async for event in self._stream_owned(envelope):
-                    await queue.put(event)
+                async with aclosing(self._stream_owned(envelope)) as owned_stream:
+                    while True:
+                        await demand.get()
+                        try:
+                            event = await anext(owned_stream)
+                        except StopAsyncIteration:
+                            return _StreamTerminal()
+                        if event.kind in {"turn_end", "turn_error"}:
+                            return _StreamTerminal(event=event)
+                        await events.put(event)
         except Exception as exc:  # noqa: BLE001 - transporta falha pelo limite do iterador
-            await queue.put(_StreamTerminal(exc))
-        else:
-            await queue.put(_StreamTerminal())
+            return _StreamTerminal(error=exc)
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa um turno depois de adquirir ownership exclusivo da conversa."""
