@@ -10,6 +10,8 @@ import threading
 from collections import defaultdict
 from dataclasses import dataclass
 
+from kairos_providers.base import TokenUsage
+from kairos_providers.contracts import ResolvedModelSelection
 from kairos_state.contention import Budget
 from kairos_state.writes import write_with_retry
 
@@ -92,6 +94,39 @@ class UsageRepository:
         with self._lock:
             self._pending[key].merge(delta)
             self._routes[key] = route
+
+    def record_event(
+        self,
+        session_id: str,
+        selection: ResolvedModelSelection,
+        *,
+        billing_provider: str,
+        billing_base_url: str,
+        billing_mode: str,
+        usage: TokenUsage | None = None,
+        api_call_count: int = 0,
+        cache_write_tokens: int = 0,
+        task: str = "chat",
+    ) -> None:
+        delta = TokenDelta(
+            api_call_count=api_call_count,
+            input_tokens=usage.input_tokens if usage is not None else 0,
+            output_tokens=usage.output_tokens if usage is not None else 0,
+            cache_read_tokens=usage.cache_read_tokens if usage is not None else 0,
+            cache_write_tokens=cache_write_tokens,
+            reasoning_tokens=usage.reasoning_tokens if usage is not None else 0,
+        )
+        self.queue(
+            BillingRoute(
+                session_id=session_id,
+                model=selection.ref.model,
+                billing_provider=billing_provider,
+                billing_base_url=billing_base_url,
+                billing_mode=billing_mode,
+                task=task,
+            ),
+            delta,
+        )
 
     def pending_count(self) -> int:
         with self._lock:

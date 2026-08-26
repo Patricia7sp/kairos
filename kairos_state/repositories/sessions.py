@@ -6,13 +6,17 @@ RF-06, RF-10, RF-11. Reconstruído de `_reversa_sdd/hermes-state/` §4.
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import time
+from dataclasses import dataclass
+from typing import Any
 
+from kairos_providers.contracts import ProviderModelRef, SelectionReason
 from kairos_state.contention import Budget
 from kairos_state.writes import write_with_retry
 
-__all__ = ["COMPRESSION_LINEAGE_SQL", "SessionRepository"]
+__all__ = ["COMPRESSION_LINEAGE_SQL", "PersistedSelection", "SessionRepository"]
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +64,13 @@ SELECT id, depth FROM lineage ORDER BY depth DESC
 #: Teto de recursão. Uma linhagem legítima tem dezenas de degraus; milhares
 #: indicam ciclo por corrupção, e a CTE giraria até estourar memória.
 MAX_LINEAGE_DEPTH = 1_000
+
+
+@dataclass(frozen=True)
+class PersistedSelection:
+    ref: ProviderModelRef
+    parameters: dict[str, Any]
+    reason: SelectionReason
 
 
 class SessionRepository:
@@ -147,6 +158,62 @@ class SessionRepository:
             return session_id
         return self.create(session_id, source=source, **kwargs)
 
+    # -- seleção de modelo -------------------------------------------------
+
+    def selection(self, session_id: str) -> PersistedSelection | None:
+        row = self.get(session_id)
+        if row is None:
+            return None
+
+        config = _load_json_object(row["model_config"])
+        provider = config.get("provider")
+        model = row["model"]
+        if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
+            return None
+
+        try:
+            reason = SelectionReason(config.get("reason", SelectionReason.CONVERSATION_OVERRIDE))
+        except ValueError:
+            reason = SelectionReason.CONVERSATION_OVERRIDE
+
+        parameters = config.get("parameters")
+        if not isinstance(parameters, dict):
+            parameters = {}
+
+        return PersistedSelection(
+            ref=ProviderModelRef(provider, model),
+            parameters=dict(parameters),
+            reason=reason,
+        )
+
+    def set_selection(
+        self,
+        session_id: str,
+        ref: ProviderModelRef,
+        parameters: dict[str, Any],
+        *,
+        reason: SelectionReason = SelectionReason.CONVERSATION_OVERRIDE,
+    ) -> None:
+        row = self.get(session_id)
+        config = _load_json_object(row["model_config"] if row is not None else None)
+        config.update(
+            {
+                "provider": ref.provider,
+                "parameters": dict(parameters),
+                "reason": reason.value,
+            }
+        )
+        payload = json.dumps(config, sort_keys=True)
+
+        def op():
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE sessions SET model = ?, model_config = ? WHERE id = ?",
+                    (ref.model, payload, session_id),
+                )
+
+        write_with_retry(op, budget=Budget.TRANSCRIPT, detail="set_selection")
+
     # -- linhagem -----------------------------------------------------------
 
     def compression_lineage(self, session_id: str) -> list[str]:
@@ -160,3 +227,15 @@ class SessionRepository:
             {"session_id": session_id, "max_depth": MAX_LINEAGE_DEPTH},
         ).fetchall()
         return [r["id"] for r in rows]
+
+
+def _load_json_object(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(loaded, dict):
+        return dict(loaded)
+    return {}
