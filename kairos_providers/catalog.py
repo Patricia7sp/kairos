@@ -60,7 +60,7 @@ class ModelCatalog:
         self._clock = clock
         self._models: dict[ProviderModelRef, CatalogModel] = {}
         self._priorities: dict[ProviderModelRef, int] = {}
-        self._snapshot: CatalogSnapshot | None = None
+        self._snapshots: dict[str, CatalogSnapshot] = {}
 
     def merge(self, models: Iterable[CatalogModel], *, origin: CatalogOrigin) -> None:
         priority = _ORIGIN_PRIORITY[origin]
@@ -94,13 +94,16 @@ class ModelCatalog:
         now = self._clock()
         if not snapshot.is_valid(now):
             return
-        if (
-            self._snapshot is not None
-            and self._snapshot.is_valid(now)
-            and snapshot.fetched_at < self._snapshot.fetched_at
+        providers = {model.ref.provider for model in snapshot.models}
+        if any(
+            (current := self._snapshots.get(provider)) is not None
+            and current.is_valid(now)
+            and snapshot.fetched_at < current.fetched_at
+            for provider in providers
         ):
             return
-        self._snapshot = snapshot
+        for provider in providers:
+            self._snapshots[provider] = snapshot
         self.merge(snapshot.models, origin=CatalogOrigin.CACHE)
 
     def find(self, ref: ProviderModelRef) -> CatalogModel:
