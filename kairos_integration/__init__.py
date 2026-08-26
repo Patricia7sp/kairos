@@ -1,6 +1,10 @@
 """Integração das superfícies sobre o núcleo."""
 
 from kairos_integration.composition import ComposedInteractionService, build_interaction_service
+from kairos_integration.event_protocol import (
+    INTERACTION_PROTOCOL_VERSION,
+    interaction_event_to_json,
+)
 from kairos_integration.interaction_contract import (
     InteractionEnvelope,
     InteractionEvent,
@@ -24,6 +28,7 @@ from kairos_integration.surfaces import (
 )
 
 __all__ = [
+    "INTERACTION_PROTOCOL_VERSION",
     "PROCESS_TOPOLOGIES",
     "SURFACES",
     "SURFACE_PROFILES",
@@ -43,4 +48,5 @@ __all__ = [
     "assert_narrow_waist",
     "assert_prompt_cache_intact",
     "build_interaction_service",
+    "interaction_event_to_json",
 ]

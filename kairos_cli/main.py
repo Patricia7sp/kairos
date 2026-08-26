@@ -83,6 +83,13 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
+        parser.add_argument(
+            "--session",
+            default="cli-default",
+            help="ID da conversa persistida (padrão: cli-default)",
+        )
+        parser.add_argument("--provider", help="provider do override deste turno")
+        parser.add_argument("--model", help="modelo do override deste turno")
     elif command == "gateway" and subcommand in ("run", None):
         parser.add_argument("--once", action="store_true", help="Roda um único tick e sai")
         parser.add_argument(
