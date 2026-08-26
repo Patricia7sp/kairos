@@ -195,6 +195,132 @@ def test_listagem_nao_cria_clientes_nem_inicializa_cofre(tmp_path, monkeypatch):
 
 
 class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sondagens_concorrentes_usam_gateways_efemeros_independentes(self):
+        """Fechar uma sondagem não pode encerrar o cliente ainda usado pela outra."""
+
+        class ProbeGateway:
+            def __init__(self) -> None:
+                self.client = TrackingClient()
+
+            async def test_all_connections(self, **_kwargs):
+                started.append(self)
+                if len(started) == 1:
+                    first_started.set()
+                if len(started) == 2:
+                    both_started.set()
+                await release_probe.wait()
+                returning.append(self)
+                if len(returning) == 2:
+                    both_returning.set()
+                await allow_return.wait()
+                if self.client.closed:
+                    raise AssertionError("cliente fechado durante outra sondagem")
+                return {"openai": ConnectionStatus(True, "openai", "ok", 1)}
+
+            async def aclose(self):
+                await self.client.aclose()
+
+        created: list[ProbeGateway] = []
+        started: list[ProbeGateway] = []
+        returning: list[ProbeGateway] = []
+        first_started = asyncio.Event()
+        both_started = asyncio.Event()
+        release_probe = asyncio.Event()
+        both_returning = asyncio.Event()
+        allow_return = asyncio.Event()
+
+        def factory(_home: Path) -> ProbeGateway:
+            gateway = ProbeGateway()
+            created.append(gateway)
+            return gateway
+
+        with TemporaryDirectory() as tmpdir, patch(
+            "kairos_providers.manager.build_provider_gateway", side_effect=factory
+        ):
+            manager = ProviderManager(home=Path(tmpdir))
+            first = asyncio.create_task(manager.test_all_connections())
+            await first_started.wait()
+            second = asyncio.create_task(manager.test_all_connections())
+            await both_started.wait()
+
+            self.assertEqual(len(created), 2)
+            self.assertFalse(any(gateway.client.closed for gateway in created))
+            release_probe.set()
+            await both_returning.wait()
+            self.assertFalse(any(gateway.client.closed for gateway in created))
+            allow_return.set()
+            results = await asyncio.gather(first, second)
+
+        self.assertTrue(all(result["openai"].ok for result in results))
+        self.assertTrue(all(gateway.client.closed for gateway in created))
+
+    async def test_sondagens_sequenciais_criam_e_fecham_gateway_por_chamada(self):
+        """Repetir a sondagem não reutiliza um gateway já fechado."""
+
+        class Gateway:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def test_all_connections(self, **_kwargs):
+                return {}
+
+            async def aclose(self):
+                self.closed = True
+
+        created: list[Gateway] = []
+
+        def factory(_home: Path) -> Gateway:
+            gateway = Gateway()
+            created.append(gateway)
+            return gateway
+
+        with TemporaryDirectory() as tmpdir, patch(
+            "kairos_providers.manager.build_provider_gateway", side_effect=factory
+        ):
+            manager = ProviderManager(home=Path(tmpdir))
+            await manager.test_all_connections()
+            await manager.test_all_connections()
+
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(gateway.closed for gateway in created))
+        self.assertIsNone(manager._gateway)
+
+    async def test_sondagem_nao_fecha_gateway_guardado_para_listagem(self):
+        """O gateway lazy de catálogo continua disponível após uma sondagem efêmera."""
+
+        class ListingGateway:
+            def __init__(self) -> None:
+                self.catalog = ModelCatalog()
+                self.closed = False
+
+            async def test_all_connections(self, **_kwargs):
+                raise AssertionError("gateway de listagem não deve ser usado para sondar")
+
+            async def aclose(self):
+                self.closed = True
+
+        class ProbeGateway:
+            closed = False
+
+            async def test_all_connections(self, **_kwargs):
+                return {}
+
+            async def aclose(self):
+                self.closed = True
+
+        listing = ListingGateway()
+        probe = ProbeGateway()
+        with TemporaryDirectory() as tmpdir, patch(
+            "kairos_providers.manager.build_provider_gateway", side_effect=[listing, probe]
+        ):
+            manager = ProviderManager(home=Path(tmpdir))
+            manager.list_all_models()
+            await manager.test_all_connections()
+
+        self.assertFalse(listing.closed)
+        self.assertTrue(probe.closed)
+        self.assertIs(manager._gateway, listing)
+
     async def test_fecha_gateway_criado_para_testar_conexoes(self):
         """Deixar o gateway efêmero aberto mantém clientes HTTP vivos após a sondagem."""
 

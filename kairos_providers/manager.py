@@ -35,7 +35,7 @@ class ProviderManager:
         self.auth_store = auth_store or {}
         self.secret_resolver = secret_resolver
         self._gateway = gateway
-        self._owns_gateway = gateway is None
+        self._gateway_is_injected = gateway is not None
         self._home = home or Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
 
     def get_api_key(self, provider: str) -> str | None:
@@ -50,19 +50,22 @@ class ProviderManager:
         return [_legacy_descriptor(model) for model in self._gateway_for_legacy_calls.catalog.list_models()]
 
     async def test_all_connections(self) -> dict[str, ConnectionStatus]:
-        gateway = self._gateway_for_legacy_calls
+        if self._gateway_is_injected:
+            return await self._gateway_for_legacy_calls.test_all_connections(
+                credential_resolver=self._legacy_credential_values
+            )
+
+        gateway = build_provider_gateway(self._home)
         try:
             return await gateway.test_all_connections(
                 credential_resolver=self._legacy_credential_values
             )
         finally:
-            if self._owns_gateway:
-                await gateway.aclose()
-                self._gateway = None
+            await gateway.aclose()
 
     async def aclose(self) -> None:
         """Fecha o gateway criado pelo manager, preservando gateways injetados."""
-        if self._owns_gateway and self._gateway is not None:
+        if not self._gateway_is_injected and self._gateway is not None:
             await self._gateway.aclose()
             self._gateway = None
 
@@ -76,7 +79,6 @@ class ProviderManager:
     def _gateway_for_legacy_calls(self) -> ProviderGateway:
         if self._gateway is None:
             self._gateway = build_provider_gateway(self._home)
-            self._owns_gateway = True
         return self._gateway
 
     def _legacy_credential_values(self, provider: str) -> dict[str, str]:
