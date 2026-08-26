@@ -74,6 +74,56 @@ class FakeAdapter:
         self.adapter_closes += 1
 
 
+class NonClosableIterator:
+    """A conforming AsyncIterator deliberately without an optional aclose()."""
+
+    def __init__(self, events: list[ProviderEvent | ProviderError]) -> None:
+        self._events = iter(events)
+
+    def __aiter__(self) -> NonClosableIterator:
+        return self
+
+    async def __anext__(self) -> ProviderEvent:
+        try:
+            event = next(self._events)
+        except StopIteration:
+            raise StopAsyncIteration from None
+        if isinstance(event, ProviderError):
+            raise event
+        return event
+
+
+class ExplicitClosableIterator(NonClosableIterator):
+    def __init__(
+        self,
+        events: list[ProviderEvent | ProviderError],
+        *,
+        close_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(events)
+        self.close_calls = 0
+        self.close_error = close_error
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        if self.close_error is not None:
+            raise self.close_error
+
+
+class IteratorAdapter:
+    def __init__(self, iterator: NonClosableIterator) -> None:
+        self.iterator = iterator
+        self.requests = []
+        self.adapter_closes = 0
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        return self.iterator
+
+    async def aclose(self) -> None:
+        self.adapter_closes += 1
+
+
 class AttemptGateway:
     def __init__(self, adapters: list[FakeAdapter]) -> None:
         self._adapters = adapters
@@ -179,6 +229,67 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1].kind, "turn_end")
         self.assertEqual([first.iterator_closes, second.iterator_closes], [1, 1])
         self.assertEqual([first.adapter_closes, second.adapter_closes], [0, 0])
+
+    async def test_non_closable_async_iterator_completes_a_normal_turn(self) -> None:
+        """Requiring aclose() would reject the ProviderAdapter AsyncIterator contract."""
+        iterator = NonClosableIterator(
+            [
+                ProviderEvent(kind="text_delta", text="ok"),
+                ProviderEvent(kind="finish", finish_reason="stop"),
+            ]
+        )
+        adapter = IteratorAdapter(iterator)
+        service, _resolver, _gateway, _usage = self.service([adapter], retry_policy=RetryPolicy())
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "turn_end"])
+        self.assertEqual(adapter.adapter_closes, 0)
+
+    async def test_explicit_iterator_aclose_runs_once_on_normal_completion(self) -> None:
+        """Forgetting or duplicating normal cleanup can leak or corrupt iterator resources."""
+        iterator = ExplicitClosableIterator([ProviderEvent(kind="finish", finish_reason="stop")])
+        service, _resolver, _gateway, _usage = self.service(
+            [IteratorAdapter(iterator)], retry_policy=RetryPolicy()
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual(events[-1].kind, "turn_end")
+        self.assertEqual(iterator.close_calls, 1)
+
+    async def test_explicit_iterator_aclose_runs_once_for_each_retry_attempt(self) -> None:
+        """Retry must close each attempt, without closing either iterator twice."""
+
+        async def sleep(_delay: float) -> None:
+            return None
+
+        first = ExplicitClosableIterator([ProviderError(ProviderErrorKind.NETWORK, retryable=True)])
+        second = ExplicitClosableIterator([ProviderEvent(kind="finish", finish_reason="stop")])
+        service, _resolver, _gateway, _usage = self.service(
+            [IteratorAdapter(first), IteratorAdapter(second)],
+            retry_policy=RetryPolicy(sleep=sleep, clock=lambda: 0.0),
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual(events[-1].kind, "turn_end")
+        self.assertEqual([first.close_calls, second.close_calls], [1, 1])
+
+    async def test_normal_iterator_cleanup_failure_remains_observable(self) -> None:
+        """A cleanup failure without a primary unwind must remain the terminal error."""
+        iterator = ExplicitClosableIterator(
+            [ProviderEvent(kind="finish", finish_reason="stop")],
+            close_error=RuntimeError("cleanup-failure"),
+        )
+        service, _resolver, _gateway, _usage = self.service(
+            [IteratorAdapter(iterator)], retry_policy=RetryPolicy()
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "cleanup-failure"):
+            _ = [event async for event in service.stream(envelope())]
+
+        self.assertEqual(iterator.close_calls, 1)
 
     async def test_retry_reuses_request_frozen_before_backoff_mutates_session_and_history(
         self,

@@ -172,6 +172,84 @@ class CleanupGateAdapter(ImmediateAdapter):
         yield ProviderEvent(kind="finish", finish_reason="stop")
 
 
+class NestedCleanupErrorIterator:
+    def __init__(self) -> None:
+        self.emitted = False
+        self.cleanup_count = 0
+
+    def __aiter__(self) -> NestedCleanupErrorIterator:
+        return self
+
+    async def __anext__(self) -> ProviderEvent:
+        if not self.emitted:
+            self.emitted = True
+            return ProviderEvent(kind="text_delta", text="primeira")
+        await asyncio.Event().wait()
+        raise StopAsyncIteration  # pragma: no cover - bloqueia até cancelamento
+
+    async def aclose(self) -> None:
+        self.cleanup_count += 1
+        try:
+            raise RuntimeError("nested-cleanup-context")
+        except RuntimeError as exc:
+            raise CleanupAbort("nested-cleanup-error") from exc
+
+
+class NestedCleanupErrorAdapter(ImmediateAdapter):
+    def __init__(self) -> None:
+        super().__init__("")
+        self.iterator = NestedCleanupErrorIterator()
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        return self.iterator
+
+
+class ExplicitCloseGateIterator:
+    def __init__(self) -> None:
+        self.emitted = False
+        self.close_calls = 0
+        self.close_started = asyncio.Event()
+        self.close_release = asyncio.Event()
+        self.close_completed = asyncio.Event()
+
+    def __aiter__(self) -> ExplicitCloseGateIterator:
+        return self
+
+    async def __anext__(self) -> ProviderEvent:
+        if not self.emitted:
+            self.emitted = True
+            return ProviderEvent(kind="text_delta", text="primeira")
+        await asyncio.Event().wait()
+        raise StopAsyncIteration  # pragma: no cover - bloqueia até cancelamento
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.close_started.set()
+        await self.close_release.wait()
+        self.close_completed.set()
+
+
+class ExplicitCloseGateAdapter(ImmediateAdapter):
+    def __init__(self) -> None:
+        super().__init__("")
+        self.calls = 0
+        self.first_iterator = ExplicitCloseGateIterator()
+        self.successor_started = asyncio.Event()
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        self.calls += 1
+        if self.calls == 1:
+            return self.first_iterator
+
+        async def successor() -> AsyncIterator[ProviderEvent]:
+            self.successor_started.set()
+            yield ProviderEvent(kind="finish", finish_reason="stop")
+
+        return successor()
+
+
 class FirstStreamBlocksAdapter(ImmediateAdapter):
     def __init__(self) -> None:
         super().__init__("")
@@ -990,6 +1068,119 @@ async def test_public_iterator_close_awaits_provider_cleanup_and_preserves_close
 
 
 @pytest.mark.anyio
+async def test_second_close_cancellation_cannot_release_owner_before_iterator_cleanup(
+    tmp_path: Path,
+):
+    """A repeated cancel must not interrupt aclose() and admit an overlapping successor."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ControlledTime()
+    backend = RecordingBackend(timer.now)
+    adapter = ExplicitCloseGateAdapter()
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+    )
+    stream = interaction.stream(envelope(content="primeiro"))
+    close_task = None
+    successor = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        close_task = asyncio.create_task(stream.aclose())
+        await adapter.first_iterator.close_started.wait()
+        successor = asyncio.create_task(collect(interaction.stream(envelope(content="segundo"))))
+        await asyncio.sleep(0)
+
+        close_task.cancel()
+        await asyncio.sleep(0)
+        close_task.cancel()
+        await asyncio.sleep(0)
+
+        assert not backend.release_called.is_set()
+        assert not adapter.successor_started.is_set()
+        assert not adapter.first_iterator.close_completed.is_set()
+
+        adapter.first_iterator.close_release.set()
+        await close_task
+        assert (await successor)[-1].kind == "turn_end"
+        assert adapter.first_iterator.close_completed.is_set()
+        assert adapter.first_iterator.close_calls == 1
+    finally:
+        adapter.first_iterator.close_release.set()
+        if close_task is not None:
+            with suppress(asyncio.CancelledError):
+                await close_task
+        if successor is not None:
+            successor.cancel()
+            with suppress(asyncio.CancelledError):
+                await successor
+        await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_nested_cleanup_error_cannot_replace_generator_exit(tmp_path: Path):
+    """Walking only one exception context level would leak cleanup failure from aclose()."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    adapter = NestedCleanupErrorAdapter()
+    stream = service(connection, adapter).stream(envelope())
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+
+        await stream.aclose()
+
+        assert adapter.iterator.cleanup_count == 1
+    finally:
+        with suppress(CleanupAbort):
+            await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_nested_cleanup_error_cannot_replace_lease_loss(tmp_path: Path):
+    """Lease loss remains the terminal cause even through a nested cleanup error chain."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ControlledTime(100)
+    backend = GatedLossBackend(timer.now)
+    adapter = NestedCleanupErrorAdapter()
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    stream = interaction.stream(envelope())
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        while not timer._waiters:
+            await asyncio.sleep(0)
+        timer.advance_to(102)
+        await backend.refresh_called.wait()
+        backend.lose.set()
+
+        with pytest.raises(TurnLeaseLostError, match="s1"):
+            await anext(stream)
+
+        assert adapter.iterator.cleanup_count == 1
+    finally:
+        backend.lose.set()
+        with suppress(CleanupAbort):
+            await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
 async def test_non_exception_base_exception_is_observable_without_waiting_for_queue(
     tmp_path: Path,
 ):
@@ -1017,6 +1208,7 @@ async def test_permanent_release_contention_does_not_hang_cancel_or_local_fifo(
     initialize_schema(connection)
     timer = ManualTime()
     backend = PermanentReleaseContentionBackend(timer.now)
+    backend.hold_refresh.set()
     adapter = FirstStreamBlocksAdapter()
     interaction = service(
         connection,

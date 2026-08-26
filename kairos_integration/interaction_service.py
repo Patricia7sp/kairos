@@ -36,6 +36,50 @@ __all__ = ["InteractionService"]
 logger = logging.getLogger(__name__)
 
 
+async def _invoke_provider_close(close: Callable[[], Awaitable[object]]) -> BaseException | None:
+    """Run optional iterator cleanup without leaking a detached task exception."""
+    try:
+        await close()
+    except BaseException as exc:  # noqa: BLE001 - owner interprets cleanup outcome
+        return exc
+    return None
+
+
+async def _finish_provider_stream(
+    provider_stream: AsyncIterator[ProviderEvent],
+    primary: BaseException | None,
+) -> None:
+    """Finish one provider iterator before restoring its primary unwind signal."""
+    close = getattr(provider_stream, "aclose", None)
+    cleanup_error: BaseException | None = None
+    cleanup_cancel: asyncio.CancelledError | None = None
+
+    if callable(close):
+        close_task = asyncio.create_task(
+            _invoke_provider_close(close),
+            name="kairos-provider-stream-close",
+        )
+        while not close_task.done():
+            try:
+                await asyncio.shield(close_task)
+            except asyncio.CancelledError as exc:
+                cleanup_cancel = cleanup_cancel or exc
+        cleanup_error = close_task.result()
+
+    unwind = primary if primary is not None else cleanup_cancel
+    if cleanup_error is not None:
+        if isinstance(cleanup_error, (KeyboardInterrupt, SystemExit)):
+            raise cleanup_error
+        if unwind is None:
+            raise cleanup_error
+        logger.error(
+            "falha ao fechar iterador do provider; preservando desenrolamento primário",
+            exc_info=(type(cleanup_error), cleanup_error, cleanup_error.__traceback__),
+        )
+    if unwind is not None:
+        raise unwind from cleanup_error
+
+
 @dataclass
 class TurnAccumulator:
     """Estado mutável de um único stream, nunca exposto às superfícies."""
@@ -204,27 +248,21 @@ class InteractionService:
             adapter = self._gateway.create_adapter(snapshot.ref)
             attempt_usage: TokenUsage | None = None
             try:
+                provider_stream = adapter.stream(request)
+                primary: BaseException | None = None
                 try:
-                    async with aclosing(adapter.stream(request)) as provider_stream:
-                        async for provider_event in provider_stream:
-                            if provider_event.kind == "usage":
-                                attempt_usage = provider_event.usage
-                                continue
-                            accumulator.accept(provider_event)
-                            event = InteractionEvent.from_provider(provider_event)
-                            if event is not None:
-                                yield event
-                except BaseException as exc:
-                    primary = exc.__context__
-                    if isinstance(
-                        primary, (asyncio.CancelledError, GeneratorExit)
-                    ) and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                        logger.error(
-                            "falha ao fechar iterador do provider; preservando cancelamento",
-                            exc_info=(type(exc), exc, exc.__traceback__),
-                        )
-                        raise primary from exc
-                    raise
+                    async for provider_event in provider_stream:
+                        if provider_event.kind == "usage":
+                            attempt_usage = provider_event.usage
+                            continue
+                        accumulator.accept(provider_event)
+                        event = InteractionEvent.from_provider(provider_event)
+                        if event is not None:
+                            yield event
+                except BaseException as exc:  # noqa: BLE001 - captures the primary unwind
+                    primary = exc
+                finally:
+                    await _finish_provider_stream(provider_stream, primary)
             except ProviderError as exc:
                 accumulator.add_attempt_usage(attempt_usage)
                 if self._retry_policy.can_retry(
