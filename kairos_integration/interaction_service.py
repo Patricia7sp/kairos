@@ -47,15 +47,17 @@ class TurnAccumulator:
             self.reasoning += event.reasoning
         elif event.kind == "tool_call" and event.tool_call is not None:
             self.tool_calls.append(event.tool_call)
-        elif event.kind == "usage" and event.usage is not None:
-            self.usage = self._merge_usage(event.usage)
         elif event.kind == "finish":
             self.finish_reason = event.finish_reason
 
-    def _merge_usage(self, usage: TokenUsage) -> TokenUsage:
+    def add_attempt_usage(self, usage: TokenUsage | None) -> None:
+        """Accumulate one final provider snapshot per completed attempt."""
+        if usage is None:
+            return
         if self.usage is None:
-            return usage
-        return TokenUsage(
+            self.usage = usage
+            return
+        self.usage = TokenUsage(
             input_tokens=self.usage.input_tokens + usage.input_tokens,
             output_tokens=self.usage.output_tokens + usage.output_tokens,
             cache_read_tokens=self.usage.cache_read_tokens + usage.cache_read_tokens,
@@ -95,6 +97,11 @@ class InteractionService:
         snapshot = self._resolve_snapshot(envelope)
         selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
         self._persist_user(envelope, selection)
+        request = AdapterRequest(
+            model=snapshot.ref,
+            messages=self._history(envelope.conversation_id),
+            parameters=snapshot.parameters,
+        )
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
 
         accumulator = TurnAccumulator()
@@ -102,28 +109,33 @@ class InteractionService:
         while True:
             attempts += 1
             adapter = self._gateway.create_adapter(snapshot.ref)
-            request = AdapterRequest(
-                model=snapshot.ref,
-                messages=self._history(envelope.conversation_id),
-                parameters=snapshot.parameters,
-            )
+            attempt_usage: TokenUsage | None = None
             try:
                 async for provider_event in adapter.stream(request):
+                    if provider_event.kind == "usage":
+                        attempt_usage = provider_event.usage
+                        continue
                     accumulator.accept(provider_event)
                     event = InteractionEvent.from_provider(provider_event)
                     if event is not None:
                         yield event
             except ProviderError as exc:
+                accumulator.add_attempt_usage(attempt_usage)
                 if self._retry_policy.can_retry(exc, accumulator) and self._retry_policy.has_attempts_remaining(
                     attempts
                 ):
                     await self._retry_policy.backoff(attempts)
                     continue
+                if attempt_usage is not None:
+                    yield InteractionEvent(kind="usage", usage=attempt_usage)
                 self._persist_error(envelope.conversation_id, accumulator, selection, exc)
                 self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
                 yield InteractionEvent.turn_error(exc)
                 return
 
+            accumulator.add_attempt_usage(attempt_usage)
+            if attempt_usage is not None:
+                yield InteractionEvent(kind="usage", usage=attempt_usage)
             self._persist_assistant(envelope.conversation_id, accumulator, selection)
             self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
             yield InteractionEvent.turn_end(accumulator.finish_reason)

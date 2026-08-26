@@ -150,6 +150,28 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         ).fetchone()
         self.assertEqual(tuple(row), (2, 3, 2))
 
+    async def test_retry_reuses_request_frozen_before_backoff_mutates_session_and_history(self) -> None:
+        """Rebuilding retry history would let a concurrent turn change this turn's prompt."""
+        async def sleep(_delay: float) -> None:
+            SessionRepository(self.db).set_selection(
+                "s1",
+                ProviderModelRef("other", "changed"),
+                {"temperature": 0.9},
+                reason=SelectionReason.GLOBAL_DEFAULT,
+            )
+            MessageRepository(self.db).append("s1", "user", content="intruso", api_content="intruso")
+
+        first = FakeAdapter([ProviderError(ProviderErrorKind.NETWORK, retryable=True)])
+        second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service, _resolver, _gateway, _usage = self.service(
+            [first, second], retry_policy=RetryPolicy(sleep=sleep, clock=lambda: 0.0)
+        )
+
+        _ = [event async for event in service.stream(envelope())]
+
+        self.assertIs(first.requests[0], second.requests[0])
+        self.assertEqual([message.content[0].value for message in second.requests[0].messages], ["oi"])
+
     async def test_retry_preserves_usage_from_each_pre_output_attempt(self) -> None:
         """Replacing attempt usage would undercount a provider call that reported usage before failing."""
         async def sleep(_delay: float) -> None:
@@ -160,12 +182,14 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
                 FakeAdapter(
                     [
                         ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=2)),
+                        ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=4)),
                         ProviderError(ProviderErrorKind.NETWORK, retryable=True),
                     ]
                 ),
                 FakeAdapter(
                     [
                         ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=1)),
+                        ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=6, output_tokens=1)),
                         ProviderEvent(kind="finish", finish_reason="stop"),
                     ]
                 ),
@@ -175,14 +199,15 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in service.stream(envelope())]
 
-        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "usage", "turn_end"])
+        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_end"])
+        self.assertEqual(events[1].usage, TokenUsage(input_tokens=6, output_tokens=1))
         self.assertEqual(len(gateway.refs), 2)
         usage.flush(now=1.0)
         row = self.db.execute(
             "SELECT api_call_count, input_tokens, output_tokens FROM session_model_usage WHERE session_id = ?",
             ("s1",),
         ).fetchone()
-        self.assertEqual(tuple(row), (2, 5, 1))
+        self.assertEqual(tuple(row), (2, 10, 1))
 
     async def test_retryable_error_after_text_is_not_retried(self) -> None:
         """Replaying an accepted text delta duplicates user-visible assistant output."""
