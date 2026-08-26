@@ -337,7 +337,9 @@ def _remember_tool_call(event: Mapping[str, Any], calls: dict[int, _PendingToolC
     input_data = block.get("input")
     if not isinstance(id_, str) or not id_ or not isinstance(name, str) or not name:
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
-    arguments = json.dumps(input_data, separators=(",", ":"), ensure_ascii=False) if input_data else ""
+    arguments = (
+        json.dumps(input_data, separators=(",", ":"), ensure_ascii=False) if input_data else ""
+    )
     calls[index] = _PendingToolCall(id_, name, arguments)
 
 
@@ -375,7 +377,9 @@ def _input_usage(event: Mapping[str, Any]) -> tuple[int, int]:
     usage = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(usage, dict):
         return 0, 0
-    return _int_or_zero(usage.get("input_tokens")), _int_or_zero(usage.get("cache_read_input_tokens"))
+    return _int_or_zero(usage.get("input_tokens")), _int_or_zero(
+        usage.get("cache_read_input_tokens")
+    )
 
 
 def _usage_from(

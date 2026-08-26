@@ -271,8 +271,10 @@ def _tool_for(tool: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _is_chat_model(model_id: object) -> bool:
-    return isinstance(model_id, str) and bool(model_id.strip()) and not any(
-        marker in model_id.casefold() for marker in _NON_CHAT_MODEL_MARKERS
+    return (
+        isinstance(model_id, str)
+        and bool(model_id.strip())
+        and not any(marker in model_id.casefold() for marker in _NON_CHAT_MODEL_MARKERS)
     )
 
 
@@ -345,7 +347,9 @@ def _usage_from(document: Mapping[str, Any]) -> TokenUsage | None:
             prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None
         ),
         reasoning_tokens=_int_or_zero(
-            completion_details.get("reasoning_tokens") if isinstance(completion_details, dict) else None
+            completion_details.get("reasoning_tokens")
+            if isinstance(completion_details, dict)
+            else None
         ),
     )
 
@@ -405,7 +409,10 @@ def _events_from_document(
 def _final_events(state: _SSEState) -> tuple[ProviderEvent, ...]:
     if state.pending_calls and state.finish_reason != "tool_calls":
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
-    events = [ProviderEvent(kind="tool_call", tool_call=call) for call in _take_pending_calls(state.pending_calls)]
+    events = [
+        ProviderEvent(kind="tool_call", tool_call=call)
+        for call in _take_pending_calls(state.pending_calls)
+    ]
     if state.usage is not None:
         events.append(ProviderEvent(kind="usage", usage=state.usage))
     events.append(ProviderEvent(kind="finish", finish_reason=state.finish_reason or "stop"))

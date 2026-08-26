@@ -162,6 +162,30 @@ def test_manager_conexao_delegada_prioriza_chave_do_ambiente(tmp_path, monkeypat
     assert received == [{"api_key": "sk-ambiente"}]
 
 
+def test_manager_conexao_gemini_preserva_adc_sem_api_key(tmp_path):
+    """Reduzir toda autenticação legada a api_key descarta o OAuth do ADC."""
+    received: list[dict[str, str]] = []
+    registry = ProviderAdapterRegistry()
+
+    def factory(**kwargs):
+        received.append(kwargs)
+        return RecordingConnectionAdapter()
+
+    registry.register(ProviderDescriptor("gemini", "Google Gemini", ("api_key", "oauth")), factory)
+    gateway = ProviderGateway(
+        registry,
+        ModelCatalog(),
+        EmptyCredentials(),
+        CatalogSnapshotStore(tmp_path / "model-catalog.json"),
+    )
+
+    with patch("kairos_providers.manager.get_google_adc_token", return_value="ya29.adc"):
+        statuses = asyncio.run(ProviderManager(gateway=gateway).test_all_connections())
+
+    assert statuses["gemini"].ok is True
+    assert received == [{"oauth_token": "ya29.adc"}]
+
+
 def test_manager_preserva_custom_provider_arbitrario_e_default_localhost():
     """Rejeitar IDs customizados quebra integrações OpenAI-compatible existentes."""
     manager = ProviderManager()
@@ -234,8 +258,9 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             created.append(gateway)
             return gateway
 
-        with TemporaryDirectory() as tmpdir, patch(
-            "kairos_providers.manager.build_provider_gateway", side_effect=factory
+        with (
+            TemporaryDirectory() as tmpdir,
+            patch("kairos_providers.manager.build_provider_gateway", side_effect=factory),
         ):
             manager = ProviderManager(home=Path(tmpdir))
             first = asyncio.create_task(manager.test_all_connections())
@@ -274,8 +299,9 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             created.append(gateway)
             return gateway
 
-        with TemporaryDirectory() as tmpdir, patch(
-            "kairos_providers.manager.build_provider_gateway", side_effect=factory
+        with (
+            TemporaryDirectory() as tmpdir,
+            patch("kairos_providers.manager.build_provider_gateway", side_effect=factory),
         ):
             manager = ProviderManager(home=Path(tmpdir))
             await manager.test_all_connections()
@@ -310,8 +336,9 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         listing = ListingGateway()
         probe = ProbeGateway()
-        with TemporaryDirectory() as tmpdir, patch(
-            "kairos_providers.manager.build_provider_gateway", side_effect=[listing, probe]
+        with (
+            TemporaryDirectory() as tmpdir,
+            patch("kairos_providers.manager.build_provider_gateway", side_effect=[listing, probe]),
         ):
             manager = ProviderManager(home=Path(tmpdir))
             manager.list_all_models()
@@ -334,8 +361,9 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.closed = True
 
         gateway = Gateway()
-        with TemporaryDirectory() as tmpdir, patch(
-            "kairos_providers.manager.build_provider_gateway", return_value=gateway
+        with (
+            TemporaryDirectory() as tmpdir,
+            patch("kairos_providers.manager.build_provider_gateway", return_value=gateway),
         ):
             manager = ProviderManager(home=Path(tmpdir))
             await manager.test_all_connections()

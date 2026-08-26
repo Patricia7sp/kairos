@@ -41,12 +41,7 @@ class OllamaNativeAdapter:
         self, http: httpx.AsyncClient, base_url: str, *, allow_remote: bool = False
     ) -> None:
         url = httpx.URL(base_url)
-        if (
-            url.scheme not in {"http", "https"}
-            or not url.host
-            or url.username
-            or url.password
-        ):
+        if url.scheme not in {"http", "https"} or not url.host or url.username or url.password:
             raise ValueError("base_url do Ollama é inválida")
         if url.query or url.fragment:
             raise ValueError("base_url do Ollama não pode conter credenciais")
@@ -170,7 +165,9 @@ def _capabilities_for(record: dict[str, Any], name: str) -> ModelCapabilities:
         families = details.get("families")
         if isinstance(families, list):
             details_values.extend(value for value in families if isinstance(value, str))
-    if any(marker in value.casefold() for value in details_values for marker in ("embed", "rerank")):
+    if any(
+        marker in value.casefold() for value in details_values for marker in ("embed", "rerank")
+    ):
         return ModelCapabilities(chat=False, tools=False, streaming=False)
     return ModelCapabilities()
 
@@ -267,7 +264,11 @@ def _options_for(parameters: Mapping[str, Any]) -> dict[str, Any]:
 def _text_events(document: Mapping[str, Any]) -> tuple[ProviderEvent, ...]:
     message = document.get("message")
     content = message.get("content") if isinstance(message, dict) else None
-    return (ProviderEvent(kind="text_delta", text=content),) if isinstance(content, str) and content else ()
+    return (
+        (ProviderEvent(kind="text_delta", text=content),)
+        if isinstance(content, str) and content
+        else ()
+    )
 
 
 def _remember_tool_calls(

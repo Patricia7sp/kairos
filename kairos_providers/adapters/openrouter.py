@@ -102,7 +102,9 @@ class OpenRouterAdapter:
         return f"{type(self).__name__}(http=<configured>, api_key=<redacted>)"
 
     async def discover_models(self) -> tuple[CatalogModel, ...]:
-        response = await self._request("GET", "/models?output_modalities=text&input_modalities=text")
+        response = await self._request(
+            "GET", "/models?output_modalities=text&input_modalities=text"
+        )
         try:
             document = response.json()
         except json.JSONDecodeError as exc:
@@ -125,7 +127,9 @@ class OpenRouterAdapter:
             models = await self.discover_models()
         except ProviderError as exc:
             return ConnectionStatus(False, self.descriptor.id, exc.message, 0)
-        return ConnectionStatus(True, self.descriptor.id, "Conexão com OpenRouter validada", len(models))
+        return ConnectionStatus(
+            True, self.descriptor.id, "Conexão com OpenRouter validada", len(models)
+        )
 
     async def stream(self, request: AdapterRequest) -> AsyncIterator[ProviderEvent]:
         payload = _payload_for(request)
@@ -235,7 +239,9 @@ def _payload_for(request: AdapterRequest) -> dict[str, Any]:
     if request.model.provider != "openrouter":
         raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
     payload = {
-        name: value for name, value in request.parameters.items() if name in _SUPPORTED_REQUEST_PARAMETERS
+        name: value
+        for name, value in request.parameters.items()
+        if name in _SUPPORTED_REQUEST_PARAMETERS
     }
     payload.update(
         {
@@ -319,7 +325,9 @@ async def _events_from_sse(response: httpx.Response) -> AsyncIterator[ProviderEv
     raise ProviderError(ProviderErrorKind.NETWORK, retryable=True)
 
 
-def _events_from_document(document: Mapping[str, Any], state: _SSEState) -> tuple[ProviderEvent, ...]:
+def _events_from_document(
+    document: Mapping[str, Any], state: _SSEState
+) -> tuple[ProviderEvent, ...]:
     if document.get("error") is not None:
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
     if (usage := _usage_from(document)) is not None:
@@ -380,7 +388,10 @@ def _explicit_string(record: Mapping[str, Any], field_name: str) -> str | None:
 def _final_events(state: _SSEState) -> tuple[ProviderEvent, ...]:
     if state.pending_calls and state.finish_reason != "tool_calls":
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
-    events = [ProviderEvent(kind="tool_call", tool_call=call) for call in _take_pending_calls(state.pending_calls)]
+    events = [
+        ProviderEvent(kind="tool_call", tool_call=call)
+        for call in _take_pending_calls(state.pending_calls)
+    ]
     if state.usage is not None:
         events.append(ProviderEvent(kind="usage", usage=state.usage))
     events.append(ProviderEvent(kind="finish", finish_reason=state.finish_reason or "stop"))
@@ -453,7 +464,9 @@ def _usage_from(document: Mapping[str, Any]) -> TokenUsage | None:
             prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None
         ),
         reasoning_tokens=_nonnegative_int(
-            completion_details.get("reasoning_tokens") if isinstance(completion_details, dict) else None
+            completion_details.get("reasoning_tokens")
+            if isinstance(completion_details, dict)
+            else None
         ),
     )
 
@@ -485,7 +498,12 @@ def _decimal_or_none(value: object) -> Decimal | None:
 def _validated_referer(value: str | None) -> str | None:
     if value is None:
         return None
-    if not isinstance(value, str) or not value or len(value) > 2_048 or any(c in value for c in "\r\n"):
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 2_048
+        or any(c in value for c in "\r\n")
+    ):
         raise ValueError("HTTP-Referer inválido")
     parts = urlsplit(value)
     if (
@@ -503,6 +521,11 @@ def _validated_referer(value: str | None) -> str | None:
 def _validated_title(value: str | None) -> str | None:
     if value is None:
         return None
-    if not isinstance(value, str) or not value.strip() or len(value) > 128 or any(c in value for c in "\r\n"):
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 128
+        or any(c in value for c in "\r\n")
+    ):
         raise ValueError("X-OpenRouter-Title inválido")
     return value

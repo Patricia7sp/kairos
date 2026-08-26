@@ -40,9 +40,7 @@ def request_with_history_and_tool() -> AdapterRequest:
             CanonicalMessage(
                 role="assistant",
                 content=(ContentPart("text", "Vou consultar."),),
-                tool_calls=(
-                    CanonicalToolCall("call_previous", "weather", '{"city":"Lisboa"}'),
-                ),
+                tool_calls=(CanonicalToolCall("call_previous", "weather", '{"city":"Lisboa"}'),),
             ),
             CanonicalMessage(
                 role="tool",
@@ -78,7 +76,9 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "POST")
-            self.assertEqual(request.url.path, "/v1beta/models/gemini-3.7-flash:streamGenerateContent")
+            self.assertEqual(
+                request.url.path, "/v1beta/models/gemini-3.7-flash:streamGenerateContent"
+            )
             self.assertEqual(request.url.params, httpx.QueryParams({"alt": "sse"}))
             self.assertNotIn(secret, str(request.url))
             self.assertEqual(request.headers["x-goog-api-key"], secret)
@@ -141,7 +141,13 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                             {
                                 "content": {
                                     "parts": [
-                                        {"functionCall": {"id": "call_weather", "name": "weather", "args": {"city": "Lisboa"}}}
+                                        {
+                                            "functionCall": {
+                                                "id": "call_weather",
+                                                "name": "weather",
+                                                "args": {"city": "Lisboa"},
+                                            }
+                                        }
                                     ]
                                 },
                                 "finishReason": "STOP",
@@ -153,11 +159,17 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(GeminiNativeAdapter(client, api_key=secret).stream(request_with_history_and_tool()))
+            events = await collect(
+                GeminiNativeAdapter(client, api_key=secret).stream(request_with_history_and_tool())
+            )
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[0].text, "São ")
-        self.assertEqual(events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}'))
+        self.assertEqual(
+            events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}')
+        )
         self.assertEqual(events[2].usage.input_tokens, 12)  # type: ignore[union-attr]
         self.assertEqual(events[2].usage.output_tokens, 4)  # type: ignore[union-attr]
         self.assertEqual(events[3].finish_reason, "stop")
@@ -186,10 +198,23 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                 200,
                 json={
                     "models": [
-                        {"name": "models/gemini-3.7-flash", "displayName": "Gemini Flash", "supportedGenerationMethods": ["generateContent"]},
-                        {"name": "models/gemini-unknown", "supportedGenerationMethods": ["generateContent"]},
-                        {"name": "models/gemini-embed", "supportedGenerationMethods": ["embedContent"]},
-                        {"name": "models/palm-chat", "supportedGenerationMethods": ["generateContent"]},
+                        {
+                            "name": "models/gemini-3.7-flash",
+                            "displayName": "Gemini Flash",
+                            "supportedGenerationMethods": ["generateContent"],
+                        },
+                        {
+                            "name": "models/gemini-unknown",
+                            "supportedGenerationMethods": ["generateContent"],
+                        },
+                        {
+                            "name": "models/gemini-embed",
+                            "supportedGenerationMethods": ["embedContent"],
+                        },
+                        {
+                            "name": "models/palm-chat",
+                            "supportedGenerationMethods": ["generateContent"],
+                        },
                     ]
                 },
             )
@@ -197,7 +222,9 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         async with client_for(httpx.MockTransport(handler)) as client:
             models = await GeminiNativeAdapter(client, api_key="secret").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["gemini-3.7-flash", "gemini-unknown"])
+        self.assertEqual(
+            [model.ref.model for model in models], ["gemini-3.7-flash", "gemini-unknown"]
+        )
         self.assertEqual(models[0].display_name, "Gemini 3.7 Flash")
         self.assertTrue(models[0].capabilities.tools)
         self.assertFalse(models[1].capabilities.tools)
@@ -207,14 +234,32 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(
                 200,
                 content=sse(
-                    {"candidates": [{"content": {"parts": [{"functionCall": {"id": "truncated", "name": "weather", "args": {}}}]}}]}
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "functionCall": {
+                                                "id": "truncated",
+                                                "name": "weather",
+                                                "args": {},
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
                 ),
             )
 
         events = []
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                async for event in GeminiNativeAdapter(client, api_key="secret").stream(simple_request()):
+                async for event in GeminiNativeAdapter(client, api_key="secret").stream(
+                    simple_request()
+                ):
                     events.append(event)
 
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
@@ -238,7 +283,9 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(secret, repr(adapter))
 
     async def test_sem_credencial_reporta_indisponivel_sem_chamar_rede(self):
-        async with client_for(httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))) as client:
+        async with client_for(
+            httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))
+        ) as client:
             status = await GeminiNativeAdapter(client).test_connection()
 
         self.assertFalse(status.ok)

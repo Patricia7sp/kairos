@@ -37,6 +37,7 @@ def test_models_expoe_preco_gratuidade_capacidades_e_origem(client):
     model = client.get("/api/models?provider=openrouter&free_only=true").json()["models"][0]
     assert set(model) >= {"id", "provider", "is_free", "pricing", "capabilities", "origins"}
 
+
 def test_provider_response_nao_contem_segredo(client):
     payload = client.get("/api/providers").text
     assert "sk-test" not in payload
@@ -320,6 +321,7 @@ git commit -m "feat(web): renderiza streaming tools e erros parciais"
 def test_spa_nao_referencia_rota_api_inexistente():
     paths = extract_api_paths_from_ui()
     assert paths <= registered_fastapi_paths()
+
 
 def test_raiz_tem_chat_e_legacy_nao_e_link_principal(client):
     html = client.get("/").text

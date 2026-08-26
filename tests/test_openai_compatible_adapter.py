@@ -84,9 +84,7 @@ def request_with_history_and_tool() -> AdapterRequest:
 def simple_request(provider: str = "deepseek", model: str = "deepseek-chat") -> AdapterRequest:
     return AdapterRequest(
         model=ProviderModelRef(provider, model),
-        messages=(
-            CanonicalMessage(role="user", content=(ContentPart(kind="text", value="Olá"),)),
-        ),
+        messages=(CanonicalMessage(role="user", content=(ContentPart(kind="text", value="Olá"),)),),
     )
 
 
@@ -137,7 +135,10 @@ class OpenAICompatibleProfileTests(unittest.TestCase):
     def test_trusted_remote_rejeita_valores_que_nao_sao_bool_antes_do_host_check(self):
         """Truthy/falsy não booleanos não podem decidir a fronteira administrativa de SSRF."""
         for value in ("false", "true", 0, 1):
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "trusted_remote deve ser bool"):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(ValueError, "trusted_remote deve ser bool"),
+            ):
                 custom_profile(base_url="https://provider.example/v1", trusted_remote=value)  # type: ignore[arg-type]
 
     def test_deepseek_e_groq_sao_perfis_declarativos(self):
@@ -181,7 +182,11 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                                 },
                             ],
                         },
-                        {"role": "tool", "tool_call_id": "call_previous", "content": "22°C e limpo"},
+                        {
+                            "role": "tool",
+                            "tool_call_id": "call_previous",
+                            "content": "22°C e limpo",
+                        },
                     ],
                     "tools": [
                         {
@@ -215,7 +220,10 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                                             "index": 0,
                                             "id": "call_weather",
                                             "type": "function",
-                                            "function": {"name": "weather", "arguments": '{"city":"Lis'},
+                                            "function": {
+                                                "name": "weather",
+                                                "arguments": '{"city":"Lis',
+                                            },
                                         }
                                     ]
                                 },
@@ -227,9 +235,7 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                         "choices": [
                             {
                                 "delta": {
-                                    "tool_calls": [
-                                        {"index": 0, "function": {"arguments": 'boa"}'}}
-                                    ]
+                                    "tool_calls": [{"index": 0, "function": {"arguments": 'boa"}'}}]
                                 },
                                 "finish_reason": "tool_calls",
                             }
@@ -251,9 +257,13 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[0].text, "São ")
-        self.assertEqual(events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}'))
+        self.assertEqual(
+            events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}')
+        )
         self.assertEqual(events[2].usage.input_tokens, 12)  # type: ignore[union-attr]
         self.assertEqual(events[2].usage.cache_read_tokens, 2)  # type: ignore[union-attr]
         self.assertEqual(events[3].finish_reason, "tool_calls")
@@ -270,14 +280,20 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(http_request.content)
             self.assertNotIn("temperature", payload)
             self.assertEqual(payload["max_tokens"], 64)
-            return httpx.Response(200, content=sse({"choices": [{"delta": {}, "finish_reason": "stop"}]}, "[DONE]"))
+            return httpx.Response(
+                200, content=sse({"choices": [{"delta": {}, "finish_reason": "stop"}]}, "[DONE]")
+            )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(request))
+            events = await collect(
+                OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(request)
+            )
 
         self.assertEqual([event.kind for event in events], ["finish"])
 
-    async def test_discovery_preserva_curadoria_e_trata_modelo_dinamico_com_capacidade_conservadora(self):
+    async def test_discovery_preserva_curadoria_e_trata_modelo_dinamico_com_capacidade_conservadora(
+        self,
+    ):
         """Inferir tools de um ID desconhecido permitiria selecionar capacidade não comprovada."""
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -294,9 +310,13 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            models = await OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").discover_models()
+            models = await OpenAICompatibleAdapter(
+                DEEPSEEK_PROFILE, client, "secret"
+            ).discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["deepseek-v4-pro", "deepseek-experimental"])
+        self.assertEqual(
+            [model.ref.model for model in models], ["deepseek-v4-pro", "deepseek-experimental"]
+        )
         self.assertTrue(models[0].capabilities.tools)
         self.assertFalse(models[1].capabilities.tools)
         self.assertTrue(models[1].capabilities.streaming)
@@ -330,9 +350,9 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
         observed = []
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                async for event in OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(
-                    simple_request()
-                ):
+                async for event in OpenAICompatibleAdapter(
+                    DEEPSEEK_PROFILE, client, "secret"
+                ).stream(simple_request()):
                     observed.append(event)
 
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
@@ -352,11 +372,21 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         for delta in invalid_deltas:
             with self.subTest(delta=delta):
-                def handler(_request: httpx.Request, delta: dict[str, object] = delta) -> httpx.Response:
+
+                def handler(
+                    _request: httpx.Request, delta: dict[str, object] = delta
+                ) -> httpx.Response:
                     return httpx.Response(
                         200,
                         content=sse(
-                            {"choices": [{"delta": {"tool_calls": [delta]}, "finish_reason": "tool_calls"}]},
+                            {
+                                "choices": [
+                                    {
+                                        "delta": {"tool_calls": [delta]},
+                                        "finish_reason": "tool_calls",
+                                    }
+                                ]
+                            },
                             "[DONE]",
                         ),
                     )
@@ -384,12 +414,23 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         for delta in invalid_deltas:
             with self.subTest(delta=delta):
-                def handler(_request: httpx.Request, delta: dict[str, object] = delta) -> httpx.Response:
+
+                def handler(
+                    _request: httpx.Request, delta: dict[str, object] = delta
+                ) -> httpx.Response:
                     return httpx.Response(
                         200,
                         content=sse(
-                            {"choices": [{"delta": {"tool_calls": [delta]}, "finish_reason": None}]},
-                            {"choices": [{"delta": {"content": "não chegar"}, "finish_reason": "stop"}]},
+                            {
+                                "choices": [
+                                    {"delta": {"tool_calls": [delta]}, "finish_reason": None}
+                                ]
+                            },
+                            {
+                                "choices": [
+                                    {"delta": {"content": "não chegar"}, "finish_reason": "stop"}
+                                ]
+                            },
                             "[DONE]",
                         ),
                     )
@@ -432,7 +473,9 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "choices": [
                             {
-                                "delta": {"tool_calls": [{"index": 0, "function": {"arguments": {}}}]},
+                                "delta": {
+                                    "tool_calls": [{"index": 0, "function": {"arguments": {}}}]
+                                },
                                 "finish_reason": "tool_calls",
                             }
                         ]
@@ -475,13 +518,19 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                             }
                         ]
                     },
-                    {"choices": [{"delta": {"tool_calls": [{"index": 0}]}, "finish_reason": "tool_calls"}]},
+                    {
+                        "choices": [
+                            {"delta": {"tool_calls": [{"index": 0}]}, "finish_reason": "tool_calls"}
+                        ]
+                    },
                     "[DONE]",
                 ),
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(simple_request()))
+            events = await collect(
+                OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(simple_request())
+            )
 
         self.assertEqual([event.kind for event in events], ["tool_call", "finish"])
         self.assertEqual(events[0].tool_call, CanonicalToolCall("call_1", "weather", "{}"))
@@ -501,7 +550,9 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(terminal_handler)) as client:
-            events = await collect(OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, secret).stream(simple_request()))
+            events = await collect(
+                OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, secret).stream(simple_request())
+            )
         self.assertEqual([event.kind for event in events], ["text_delta", "finish"])
         self.assertEqual(events[0].text, "antes")
 
@@ -510,7 +561,11 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async with client_for(httpx.MockTransport(error_handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                await collect(OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, secret).stream(simple_request()))
+                await collect(
+                    OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, secret).stream(
+                        simple_request()
+                    )
+                )
         self.assertIs(context.exception.kind, ProviderErrorKind.AUTH)
         self.assertNotIn(secret, str(context.exception))
         self.assertNotIn(secret, repr(context.exception))
@@ -525,7 +580,11 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                await collect(OpenAICompatibleAdapter(profile, client, "secret").stream(simple_request("custom")))
+                await collect(
+                    OpenAICompatibleAdapter(profile, client, "secret").stream(
+                        simple_request("custom")
+                    )
+                )
         self.assertIs(context.exception.kind, ProviderErrorKind.INCOMPATIBLE)
 
     async def test_cancelamento_propagado(self):
@@ -537,4 +596,8 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(asyncio.CancelledError):
-                await collect(OpenAICompatibleAdapter(profile, client, "secret").stream(simple_request("custom")))
+                await collect(
+                    OpenAICompatibleAdapter(profile, client, "secret").stream(
+                        simple_request("custom")
+                    )
+                )

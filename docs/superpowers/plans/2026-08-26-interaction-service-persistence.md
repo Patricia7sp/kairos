@@ -37,9 +37,12 @@
 def test_troca_de_modelo_preserva_historico_e_afeta_proximo_turno(db):
     sessions = SessionRepository(db)
     sessions.create("s1", source="web", model="old")
-    sessions.set_selection("s1", ProviderModelRef("openrouter", "openrouter/free"), {"free_only": True})
+    sessions.set_selection(
+        "s1", ProviderModelRef("openrouter", "openrouter/free"), {"free_only": True}
+    )
     assert sessions.selection("s1").ref == ProviderModelRef("openrouter", "openrouter/free")
     assert MessageRepository(db).for_api("s1") == []
+
 
 def test_mensagem_guarda_selecao_efetiva_em_display_metadata(db):
     message_id = MessageRepository(db).append_turn_message("s1", "assistant", "ok", selection())
@@ -61,9 +64,12 @@ class PersistedSelection:
     parameters: dict[str, Any]
     reason: SelectionReason
 
+
 def set_selection(self, session_id, ref, parameters):
     payload = json.dumps({"provider": ref.provider, "parameters": parameters}, sort_keys=True)
-    write_with_retry(lambda: self._update_model(session_id, ref.model, payload), budget=Budget.TRANSCRIPT)
+    write_with_retry(
+        lambda: self._update_model(session_id, ref.model, payload), budget=Budget.TRANSCRIPT
+    )
 ```
 
 - [ ] **Step 4: Verify repositories**
@@ -96,6 +102,7 @@ def test_snapshot_e_imutavel():
     with pytest.raises(FrozenInstanceError):
         snap.ref = ProviderModelRef("openai", "other")
 
+
 def test_envelope_exige_conversa_e_conteudo():
     with pytest.raises(ValueError):
         InteractionEnvelope(conversation_id="", source="web", content="")
@@ -118,6 +125,7 @@ class InteractionEnvelope:
     activity: str | None = None
     override: ProviderModelRef | None = None
     parameters: Mapping[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class InteractionSelectionSnapshot:
@@ -160,6 +168,7 @@ def test_contexto_monta_cinco_camadas_sem_escolher_fallback(db):
     assert context.profile == ref("p")
     assert context.global_default == ref("g")
 
+
 def test_sem_configuracao_nao_inventa_anthropic(db):
     context = loader(db).load(envelope())
     assert all(value is None for value in vars(context).values())
@@ -200,7 +209,9 @@ git commit -m "feat(interaction): carrega precedencia de selecao"
 
 ```python
 async def test_turno_resolve_uma_vez_streama_e_persiste(db):
-    service, resolver = service_with_fake_adapter(db, events=[text("olá"), usage(3, 2), finish("stop")])
+    service, resolver = service_with_fake_adapter(
+        db, events=[text("olá"), usage(3, 2), finish("stop")]
+    )
     events = [event async for event in service.stream(envelope())]
     assert [e.kind for e in events] == ["turn_start", "delta", "usage", "turn_end"]
     assert resolver.calls == 1
@@ -259,6 +270,7 @@ git commit -m "feat(interaction): executa e persiste turnos canonicos"
 ```python
 async def test_network_error_antes_de_delta_repete_uma_vez():
     assert await run(flaky_before_output()).attempts == 2
+
 
 async def test_erro_depois_de_tool_call_nunca_repete():
     result = await run(tool_then_network_error())

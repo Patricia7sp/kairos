@@ -43,11 +43,16 @@ class ProviderManager:
 
     def get_provider(self, provider_name: str, **kwargs: Any) -> BaseLLMProvider:
         """Retorna o adapter antigo até Chat e CLI migrarem para o gateway."""
-        return build_legacy_provider(provider_name, api_key=self.get_api_key(provider_name), **kwargs)
+        return build_legacy_provider(
+            provider_name, api_key=self.get_api_key(provider_name), **kwargs
+        )
 
     def list_all_models(self) -> list[ModelDescriptor]:
         """Converte ``CatalogModel`` na fronteira exigida por clientes legados."""
-        return [_legacy_descriptor(model) for model in self._gateway_for_legacy_calls.catalog.list_models()]
+        return [
+            _legacy_descriptor(model)
+            for model in self._gateway_for_legacy_calls.catalog.list_models()
+        ]
 
     async def test_all_connections(self) -> dict[str, ConnectionStatus]:
         if self._gateway_is_injected:
@@ -83,7 +88,11 @@ class ProviderManager:
 
     def _legacy_credential_values(self, provider: str) -> dict[str, str]:
         api_key = self.get_api_key(provider)
-        return {"api_key": api_key} if api_key else {}
+        if api_key:
+            return {"api_key": api_key}
+        if provider == "gemini" and (oauth_token := get_google_adc_token()):
+            return {"oauth_token": oauth_token}
+        return {}
 
 
 def _legacy_descriptor(model: CatalogModel) -> ModelDescriptor:

@@ -39,6 +39,7 @@ def test_provider_error_repr_nao_expoe_segredo():
     err = ProviderError(ProviderErrorKind.AUTH, "credencial inválida", retryable=False)
     assert "sk-test" not in repr(err)
 
+
 def test_catalog_model_identifica_preco_gratuito():
     model = catalog_model(price=ModelPrice(prompt=0, completion=0, request=0))
     assert model.is_free is True
@@ -61,11 +62,13 @@ class ProviderErrorKind(StrEnum):
     INCOMPATIBLE = "incompatible"
     INTERNAL = "internal"
 
+
 @dataclass(frozen=True)
 class ModelPrice:
     prompt: Decimal | None = None
     completion: Decimal | None = None
     request: Decimal | None = None
+
 
 @dataclass(frozen=True)
 class AdapterRequest:
@@ -74,8 +77,10 @@ class AdapterRequest:
     tools: tuple[dict[str, Any], ...] = ()
     parameters: Mapping[str, Any] = field(default_factory=dict)
 
+
 class ProviderAdapter(Protocol):
     descriptor: ProviderDescriptor
+
     async def discover_models(self) -> tuple[CatalogModel, ...]: ...
     async def test_connection(self) -> ConnectionStatus: ...
     def stream(self, request: AdapterRequest) -> AsyncIterator[ProviderEvent]: ...
@@ -120,6 +125,7 @@ async def test_refresh_falha_mantem_snapshot_cacheado(tmp_path):
     result = await gateway.refresh("openai")
     assert result.source is CatalogOrigin.CACHE
     assert [m.ref.model for m in result.models] == ["gpt-ok"]
+
 
 def test_create_adapter_resolve_segredo_sem_guardar_no_registry():
     adapter = gateway.create_adapter(ProviderModelRef("openai", "gpt-ok"))
@@ -183,6 +189,7 @@ async def test_responses_stream_normaliza_texto_tool_e_usage(mock_transport):
     events = [event async for event in adapter.stream(request_with_tool())]
     assert [e.kind for e in events] == ["text_delta", "tool_call", "usage", "finish"]
     assert events[2].usage.input_tokens == 12
+
 
 async def test_openai_auth_error_e_estavel(mock_transport):
     with pytest.raises(ProviderError) as ctx:
@@ -269,6 +276,7 @@ async def test_gemini_normaliza_function_call(mock_transport):
     events = await collect(gemini(mock_transport).stream(request_with_tool()))
     assert next(e for e in events if e.kind == "tool_call").tool_call.name == "weather"
 
+
 async def test_ollama_sem_daemon_e_unavailable(mock_transport):
     status = await ollama(connection_error_transport()).test_connection()
     assert status.ok is False
@@ -312,6 +320,7 @@ git commit -m "feat(providers): moderniza Gemini e Ollama"
 def test_custom_endpoint_rejeita_header_nao_permitido():
     with pytest.raises(ValueError, match="header não permitido"):
         custom_profile(headers={"Authorization": "roubar"})
+
 
 async def test_deepseek_usa_profile_sem_branch_no_gateway(mock_transport):
     adapter = compatible(DEEPSEEK_PROFILE, mock_transport)
@@ -357,6 +366,7 @@ async def test_openrouter_mapeia_gratuito_tools_e_preco(mock_transport):
     free = next(m for m in models if m.ref.model.endswith(":free"))
     assert free.is_free is True
     assert free.capabilities.tools is True
+
 
 async def test_openrouter_envia_politica_segura(mock_transport):
     await collect(openrouter(mock_transport).stream(simple_request()))
@@ -406,7 +416,16 @@ git commit -m "feat(providers): integra OpenRouter e modelos gratuitos"
 def test_composition_registra_todos_os_providers(tmp_path):
     gateway = build_provider_gateway(tmp_path)
     ids = [d.id for d in gateway.registry.list_descriptors()]
-    assert ids == ["anthropic", "custom", "deepseek", "gemini", "groq", "ollama", "openai", "openrouter"]
+    assert ids == [
+        "anthropic",
+        "custom",
+        "deepseek",
+        "gemini",
+        "groq",
+        "ollama",
+        "openai",
+        "openrouter",
+    ]
 ```
 
 - [ ] **Step 2: Verify RED**

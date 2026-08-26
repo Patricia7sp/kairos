@@ -108,7 +108,9 @@ class OpenRouterAdapterTests(unittest.IsolatedAsyncioTestCase):
         async with client_for(httpx.MockTransport(handler)) as client:
             models = await OpenRouterAdapter(client, "secret").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["acme/chat:free", "openrouter/free"])
+        self.assertEqual(
+            [model.ref.model for model in models], ["acme/chat:free", "openrouter/free"]
+        )
         free = models[0]
         self.assertTrue(free.is_free)
         self.assertTrue(free.capabilities.tools)
@@ -238,7 +240,10 @@ class OpenRouterAdapterTests(unittest.IsolatedAsyncioTestCase):
                                         {
                                             "index": 0,
                                             "id": "call_weather",
-                                            "function": {"name": "weather", "arguments": '{"city":"Lis'},
+                                            "function": {
+                                                "name": "weather",
+                                                "arguments": '{"city":"Lis',
+                                            },
                                         }
                                     ]
                                 },
@@ -249,7 +254,9 @@ class OpenRouterAdapterTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "choices": [
                             {
-                                "delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'boa"}'}}]},
+                                "delta": {
+                                    "tool_calls": [{"index": 0, "function": {"arguments": 'boa"}'}}]
+                                },
                                 "finish_reason": "tool_calls",
                             }
                         ]
@@ -263,7 +270,9 @@ class OpenRouterAdapterTests(unittest.IsolatedAsyncioTestCase):
         async with client_for(httpx.MockTransport(handler)) as client:
             events = await collect(OpenRouterAdapter(client, "secret").stream(request))
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[1].tool_call.id, "call_weather")  # type: ignore[union-attr]
         self.assertEqual(events[1].tool_call.arguments, '{"city":"Lisboa"}')  # type: ignore[union-attr]
         self.assertEqual(events[-1].finish_reason, "tool_calls")

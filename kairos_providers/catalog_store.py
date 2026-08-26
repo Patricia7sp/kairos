@@ -77,7 +77,9 @@ class CatalogSnapshotStore:
         try:
             os.fchmod(descriptor, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(document, stream, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                json.dump(
+                    document, stream, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary_path, self._path)
@@ -164,7 +166,11 @@ def _model_from_data(data: object) -> CatalogModel:
     ref = data["ref"]
     capabilities = data["capabilities"]
     price = data["price"]
-    if not isinstance(ref, dict) or not isinstance(capabilities, dict) or not isinstance(price, dict):
+    if (
+        not isinstance(ref, dict)
+        or not isinstance(capabilities, dict)
+        or not isinstance(price, dict)
+    ):
         raise ValueError("modelo inválido")
     origins = data.get("origins", [])
     if not isinstance(origins, list) or not all(isinstance(origin, str) for origin in origins):

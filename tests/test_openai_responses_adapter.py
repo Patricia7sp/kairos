@@ -138,7 +138,9 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = OpenAIResponsesAdapter(client, secret)
             events = await collect(adapter.stream(request_with_tool()))
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[0].text, "São ")
         self.assertEqual(events[1].tool_call.id, "call_1")  # type: ignore[union-attr]
         self.assertEqual(events[1].tool_call.name, "hora_local")  # type: ignore[union-attr]
@@ -269,7 +271,9 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(OpenAIResponsesAdapter(client, "secret").stream(simple_request()))
+            events = await collect(
+                OpenAIResponsesAdapter(client, "secret").stream(simple_request())
+            )
 
         self.assertEqual([event.kind for event in events], ["text_delta", "usage", "finish"])
         self.assertEqual(events[0].text, "antes")

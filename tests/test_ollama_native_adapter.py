@@ -42,7 +42,9 @@ def request_with_history_and_tool() -> AdapterRequest:
                 content=(),
                 tool_calls=(CanonicalToolCall("call_previous", "weather", '{"city":"Lisboa"}'),),
             ),
-            CanonicalMessage(role="tool", tool_call_id="call_previous", content=(ContentPart("text", "22°C"),)),
+            CanonicalMessage(
+                role="tool", tool_call_id="call_previous", content=(ContentPart("text", "22°C"),)
+            ),
         ),
         tools=(
             {
@@ -77,12 +79,27 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                         {
                             "role": "assistant",
                             "tool_calls": [
-                                {"id": "call_previous", "type": "function", "function": {"name": "weather", "arguments": {"city": "Lisboa"}}}
+                                {
+                                    "id": "call_previous",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "weather",
+                                        "arguments": {"city": "Lisboa"},
+                                    },
+                                }
                             ],
                         },
                         {"role": "tool", "tool_call_id": "call_previous", "content": "22°C"},
                     ],
-                    "tools": [{"type": "function", "function": {"name": "weather", "parameters": {"type": "object", "properties": {}}}}],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "weather",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
                     "options": {"temperature": 0.2, "num_predict": 128},
                     "stream": True,
                 },
@@ -91,7 +108,20 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                 200,
                 content=ndjson(
                     {"message": {"role": "assistant", "content": "São "}, "done": False},
-                    {"message": {"tool_calls": [{"id": "call_weather", "function": {"name": "weather", "arguments": {"city": "Lisboa"}}}]}, "done": False},
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call_weather",
+                                    "function": {
+                                        "name": "weather",
+                                        "arguments": {"city": "Lisboa"},
+                                    },
+                                }
+                            ]
+                        },
+                        "done": False,
+                    },
                     {"done": True, "done_reason": "stop", "prompt_eval_count": 9, "eval_count": 3},
                 ),
             )
@@ -103,9 +133,13 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[0].text, "São ")
-        self.assertEqual(events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}'))
+        self.assertEqual(
+            events[1].tool_call, CanonicalToolCall("call_weather", "weather", '{"city":"Lisboa"}')
+        )
         self.assertEqual(events[2].usage.input_tokens, 9)  # type: ignore[union-attr]
         self.assertEqual(events[2].usage.output_tokens, 3)  # type: ignore[union-attr]
         self.assertEqual(events[3].finish_reason, "stop")
@@ -134,17 +168,19 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(models[1].is_selectable())
 
     async def test_base_url_lan_exige_opt_in_explicito_sem_resolver_dns(self):
-        async with client_for(httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))) as client:
+        async with client_for(
+            httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))
+        ) as client:
             with self.assertRaisesRegex(ValueError, "allow_remote"):
                 OllamaNativeAdapter(client, "http://192.168.10.20:11434")
-            adapter = OllamaNativeAdapter(
-                client, "http://192.168.10.20:11434", allow_remote=True
-            )
+            adapter = OllamaNativeAdapter(client, "http://192.168.10.20:11434", allow_remote=True)
 
         self.assertIn("base_url=<configured>", repr(adapter))
 
     async def test_base_url_loopback_e_aceita_sem_opt_in(self):
-        async with client_for(httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))) as client:
+        async with client_for(
+            httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))
+        ) as client:
             adapter = OllamaNativeAdapter(client, "http://[::1]:11434")
 
         self.assertIn("base_url=<configured>", repr(adapter))
@@ -163,7 +199,17 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_eof_sem_done_e_rede_e_nao_confirma_tool(self):
         def handler(_request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, content=ndjson({"message": {"tool_calls": [{"function": {"name": "weather", "arguments": {}}}]}, "done": False}))
+            return httpx.Response(
+                200,
+                content=ndjson(
+                    {
+                        "message": {
+                            "tool_calls": [{"function": {"name": "weather", "arguments": {}}}]
+                        },
+                        "done": False,
+                    }
+                ),
+            )
 
         events = []
         async with client_for(httpx.MockTransport(handler)) as client:

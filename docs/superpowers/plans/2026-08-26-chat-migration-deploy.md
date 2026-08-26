@@ -40,6 +40,7 @@ async def test_adapter_contract_matrix(provider, fake_http):
     assert await adapter.discover_models()
     assert [e.kind async for e in adapter.stream(simple_request())][-1] == "finish"
 
+
 async def test_web_e_cli_persistem_o_mesmo_turno(tmp_path):
     web_state = await run_web_turn(tmp_path / "web")
     cli_state = await run_cli_turn(tmp_path / "cli")
@@ -86,6 +87,7 @@ git commit -m "test(chat): adiciona gate de paridade e providers"
 ```python
 def test_legacy_route_nao_existe(client):
     assert client.get("/legacy/").status_code == 404
+
 
 def test_server_nao_importa_provider_manager_direto():
     source = Path("kairos_web/server.py").read_text()

@@ -248,7 +248,9 @@ def _payload_for(request: AdapterRequest, provider: str) -> dict[str, Any]:  # n
                 raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
             parts.extend(_function_call_part(call) for call in message.tool_calls)
         if parts:
-            contents.append({"role": "model" if message.role == "assistant" else "user", "parts": parts})
+            contents.append(
+                {"role": "model" if message.role == "assistant" else "user", "parts": parts}
+            )
 
     payload: dict[str, Any] = {"contents": contents}
     if system_parts:
@@ -281,7 +283,13 @@ def _text_parts(parts: tuple[ContentPart, ...]) -> list[str]:
 
 
 def _function_call_part(call: CanonicalToolCall) -> dict[str, Any]:
-    return {"functionCall": {"id": call.id, "name": call.name, "args": _arguments_object(call.arguments)}}
+    return {
+        "functionCall": {
+            "id": call.id,
+            "name": call.name,
+            "args": _arguments_object(call.arguments),
+        }
+    }
 
 
 def _arguments_object(arguments: str) -> dict[str, Any]:
@@ -360,7 +368,9 @@ def _tool_call_from(value: object, ordinal: int) -> CanonicalToolCall:
     arguments = value.get("args", {})
     if not isinstance(arguments, dict):
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
-    return CanonicalToolCall(call_id, name, json.dumps(arguments, ensure_ascii=False, separators=(",", ":")))
+    return CanonicalToolCall(
+        call_id, name, json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+    )
 
 
 def _finish_reason(value: object) -> str | None:

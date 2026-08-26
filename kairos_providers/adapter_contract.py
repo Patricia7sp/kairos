@@ -46,6 +46,8 @@ _DEFAULT_ERROR_MESSAGES: Mapping[ProviderErrorKind, str] = {
     ProviderErrorKind.INCOMPATIBLE: "requisição incompatível com o provedor",
     ProviderErrorKind.INTERNAL: "falha interna do provedor",
 }
+
+
 class ProviderError(Exception):
     """Falha normalizada e segura para logs e superfícies de cliente."""
 

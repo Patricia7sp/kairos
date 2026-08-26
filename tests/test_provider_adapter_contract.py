@@ -23,9 +23,7 @@ def test_provider_error_normaliza_payload_sem_expor_credencial():
         "request_headers": {"Authorization": f"Bearer {sentinel}"},
     }
 
-    error = ProviderError.from_upstream(
-        ProviderErrorKind.AUTH, upstream_payload, retryable=False
-    )
+    error = ProviderError.from_upstream(ProviderErrorKind.AUTH, upstream_payload, retryable=False)
 
     assert error.kind is ProviderErrorKind.AUTH
     assert error.retryable is False

@@ -89,7 +89,11 @@ class OpenAIResponsesAdapter:
         models: list[CatalogModel] = []
         for record in records:
             model_id = record.get("id") if isinstance(record, dict) else None
-            if not isinstance(model_id, str) or not model_id.strip() or not _is_chat_text_model(model_id):
+            if (
+                not isinstance(model_id, str)
+                or not model_id.strip()
+                or not _is_chat_text_model(model_id)
+            ):
                 continue
 
             known = curated.get(model_id)
@@ -216,9 +220,9 @@ def _is_chat_text_model(model_id: str) -> bool:
     a chat apenas por não constarem de uma denylist.
     """
     normalized = model_id.casefold()
-    return any(pattern.fullmatch(normalized) for pattern in _RESPONSE_TEXT_MODEL_PATTERNS) and not any(
-        marker in normalized for marker in _NON_TEXTUAL_MODEL_MARKERS
-    )
+    return any(
+        pattern.fullmatch(normalized) for pattern in _RESPONSE_TEXT_MODEL_PATTERNS
+    ) and not any(marker in normalized for marker in _NON_TEXTUAL_MODEL_MARKERS)
 
 
 def _input_for(request: AdapterRequest) -> list[dict[str, Any]]:
@@ -303,7 +307,9 @@ def _normalize_event(
 
 def _text_events(event: Mapping[str, Any]) -> tuple[ProviderEvent, ...]:
     delta = event.get("delta")
-    return (ProviderEvent(kind="text_delta", text=delta),) if isinstance(delta, str) and delta else ()
+    return (
+        (ProviderEvent(kind="text_delta", text=delta),) if isinstance(delta, str) and delta else ()
+    )
 
 
 def _remember_function_call(
@@ -367,7 +373,10 @@ def _finished_function_call(
 def _completed_events(
     event: Mapping[str, Any], pending_calls: dict[str, dict[str, str]]
 ) -> tuple[ProviderEvent, ...]:
-    events = [ProviderEvent(kind="tool_call", tool_call=call) for call in _take_pending_calls(pending_calls)]
+    events = [
+        ProviderEvent(kind="tool_call", tool_call=call)
+        for call in _take_pending_calls(pending_calls)
+    ]
     usage = _usage_from(event)
     if usage is not None:
         events.append(ProviderEvent(kind="usage", usage=usage))

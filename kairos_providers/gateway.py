@@ -98,7 +98,9 @@ class ProviderGateway:
             descriptor.id: await self._test_connection(
                 descriptor.id,
                 credential_values=(
-                    dict(credential_resolver(descriptor.id)) if credential_resolver is not None else None
+                    dict(credential_resolver(descriptor.id))
+                    if credential_resolver is not None
+                    else None
                 ),
             )
             for descriptor in self.registry.list_descriptors()

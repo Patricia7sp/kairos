@@ -81,9 +81,7 @@ def request_with_tool() -> AdapterRequest:
 def simple_request() -> AdapterRequest:
     return AdapterRequest(
         model=ProviderModelRef("anthropic", "claude-haiku-4-5-20251001"),
-        messages=(
-            CanonicalMessage(role="user", content=(ContentPart(kind="text", value="Olá"),)),
-        ),
+        messages=(CanonicalMessage(role="user", content=(ContentPart(kind="text", value="Olá"),)),),
     )
 
 
@@ -189,9 +187,13 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(AnthropicMessagesAdapter(client, secret).stream(request_with_tool()))
+            events = await collect(
+                AnthropicMessagesAdapter(client, secret).stream(request_with_tool())
+            )
 
-        self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
+        self.assertEqual(
+            [event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"]
+        )
         self.assertEqual(events[0].text, "São ")
         self.assertEqual(events[1].tool_call.id, "toolu_01")  # type: ignore[union-attr]
         self.assertEqual(events[1].tool_call.name, "hora_local")  # type: ignore[union-attr]
@@ -264,7 +266,12 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "role": "assistant",
                         "content": [
-                            {"type": "tool_use", "id": "toolu_1", "name": "temperatura", "input": {}},
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "temperatura",
+                                "input": {},
+                            },
                             {"type": "tool_use", "id": "toolu_2", "name": "umidade", "input": {}},
                         ],
                     },
@@ -335,7 +342,9 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
         events = []
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                async for event in AnthropicMessagesAdapter(client, "secret").stream(simple_request()):
+                async for event in AnthropicMessagesAdapter(client, "secret").stream(
+                    simple_request()
+                ):
                     events.append(event)
 
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
