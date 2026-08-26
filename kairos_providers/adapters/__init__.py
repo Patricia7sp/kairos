@@ -7,6 +7,7 @@ from kairos_providers.adapters.ollama_adapter import OllamaAdapter
 from kairos_providers.adapters.ollama_native import OllamaNativeAdapter
 from kairos_providers.adapters.openai_adapter import OpenAICompatibleAdapter
 from kairos_providers.adapters.openai_responses import OpenAIResponsesAdapter
+from kairos_providers.adapters.openrouter import OpenRouterAdapter, OpenRouterRoutingPolicy
 
 __all__ = [
     "AnthropicAdapter",
@@ -16,4 +17,6 @@ __all__ = [
     "OllamaNativeAdapter",
     "OpenAICompatibleAdapter",
     "OpenAIResponsesAdapter",
+    "OpenRouterAdapter",
+    "OpenRouterRoutingPolicy",
 ]

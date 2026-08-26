@@ -99,6 +99,27 @@ class CatalogSnapshotStoreTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertIn('"1.25"', path.read_text(encoding="utf-8"))
 
+    def test_snapshot_preserva_metadados_publicos_openrouter(self):
+        """Reabrir o cache não pode apagar capacidades específicas do modelo descoberto."""
+        model = CatalogModel(
+            ref=ProviderModelRef("openrouter", "acme/chat:free"),
+            display_name="Acme Free",
+            capabilities=ModelCapabilities(chat=True, tools=True, context_length=64_000),
+            price=ModelPrice(prompt=Decimal("0"), completion=Decimal("0"), request=Decimal("0")),
+            supported_parameters=frozenset({"temperature", "tools"}),
+            input_modalities=frozenset({"text", "image"}),
+            output_modalities=frozenset({"text"}),
+            expiration_date="2026-12-31",
+        )
+        snapshot_with_metadata = CatalogSnapshot((model,), fetched_at=100.0, expires_at=200.0)
+        with TemporaryDirectory() as tmpdir:
+            store = CatalogSnapshotStore(Path(tmpdir) / "model-catalog.json")
+            store.save("openrouter", snapshot_with_metadata)
+            loaded = store.load("openrouter")
+
+        assert loaded is not None
+        self.assertEqual(loaded.models, snapshot_with_metadata.models)
+
     def test_reescrita_remove_campos_inesperados_do_snapshot(self):
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "model-catalog.json"

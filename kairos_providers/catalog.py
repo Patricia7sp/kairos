@@ -41,6 +41,17 @@ def _complete_capabilities(
     )
 
 
+def _complete_model_metadata(primary: CatalogModel, fallback: CatalogModel) -> CatalogModel:
+    """Mantém metadados válidos quando uma fonte de maior prioridade os omite."""
+    return replace(
+        primary,
+        supported_parameters=primary.supported_parameters or fallback.supported_parameters,
+        input_modalities=primary.input_modalities or fallback.input_modalities,
+        output_modalities=primary.output_modalities or fallback.output_modalities,
+        expiration_date=primary.expiration_date or fallback.expiration_date,
+    )
+
+
 @dataclass(frozen=True)
 class CatalogSnapshot:
     models: tuple[CatalogModel, ...]
@@ -75,15 +86,16 @@ class ModelCatalog:
                     if current is None
                     else _complete_capabilities(incoming.capabilities, current.capabilities)
                 )
+                model = incoming if current is None else _complete_model_metadata(incoming, current)
                 self._models[incoming.ref] = replace(
-                    incoming,
+                    model,
                     capabilities=capabilities,
                     origins=frozenset(origins),
                 )
                 self._priorities[incoming.ref] = priority
             else:
                 self._models[incoming.ref] = replace(
-                    current,
+                    _complete_model_metadata(current, incoming),
                     capabilities=_complete_capabilities(
                         current.capabilities, incoming.capabilities
                     ),

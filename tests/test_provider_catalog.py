@@ -83,6 +83,33 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertTrue(capabilities.streaming)
         self.assertEqual(capabilities.max_output_tokens, 20)
 
+    def test_dinamico_nao_apaga_metadados_omitidos_pela_descoberta(self):
+        """Uma resposta parcial da API não pode esconder parâmetros e modalidades ainda válidos."""
+        catalog = ModelCatalog()
+        curated = CatalogModel(
+            ref=ProviderModelRef("openrouter", "example/chat"),
+            display_name="Example",
+            capabilities=ModelCapabilities(chat=True),
+            supported_parameters=frozenset({"temperature", "tools"}),
+            input_modalities=frozenset({"text", "image"}),
+            output_modalities=frozenset({"text"}),
+            expiration_date="2026-12-31",
+        )
+        dynamic = CatalogModel(
+            ref=curated.ref,
+            display_name="Example dynamic",
+            capabilities=ModelCapabilities(chat=True),
+            origins=frozenset({CatalogOrigin.DYNAMIC}),
+        )
+        catalog.merge([curated], origin=CatalogOrigin.CURATED)
+        catalog.merge([dynamic], origin=CatalogOrigin.DYNAMIC)
+
+        found = catalog.find(curated.ref)
+        self.assertEqual(found.supported_parameters, curated.supported_parameters)
+        self.assertEqual(found.input_modalities, curated.input_modalities)
+        self.assertEqual(found.output_modalities, curated.output_modalities)
+        self.assertEqual(found.expiration_date, curated.expiration_date)
+
     def test_curado_prevalece_sobre_cache(self):
         catalog = ModelCatalog()
         catalog.merge(

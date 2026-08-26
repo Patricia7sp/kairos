@@ -62,6 +62,17 @@ def test_catalog_model_identifica_preco_gratuito():
     assert model.is_free is True
 
 
+def test_catalog_model_nao_infere_gratuidade_com_componente_desconhecido():
+    """Preço parcial zero não comprova que o modelo seja gratuito para o usuário."""
+    model = CatalogModel(
+        ref=ProviderModelRef("openrouter", "example/unknown-price"),
+        display_name="Example",
+        price=ModelPrice(prompt=Decimal("0"), completion=Decimal("0")),
+    )
+
+    assert model.is_free is False
+
+
 def test_requisicao_e_evento_usam_payload_canonico_independente_do_provider():
     """Adapters recebem partes canônicas e emitem um evento que o gateway entende."""
     request = AdapterRequest(

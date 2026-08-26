@@ -123,6 +123,10 @@ def _model_to_data(model: CatalogModel) -> dict[str, Any]:
         },
         "display_name": model.display_name,
         "origins": sorted(origin.value for origin in model.origins),
+        "supported_parameters": sorted(model.supported_parameters),
+        "input_modalities": sorted(model.input_modalities),
+        "output_modalities": sorted(model.output_modalities),
+        "expiration_date": model.expiration_date,
         "price": {
             "completion": _decimal_to_string(model.price.completion),
             "prompt": _decimal_to_string(model.price.prompt),
@@ -165,6 +169,12 @@ def _model_from_data(data: object) -> CatalogModel:
     origins = data.get("origins", [])
     if not isinstance(origins, list) or not all(isinstance(origin, str) for origin in origins):
         raise ValueError("origins inválido")
+    supported_parameters = _string_set(data.get("supported_parameters", []))
+    input_modalities = _string_set(data.get("input_modalities", []))
+    output_modalities = _string_set(data.get("output_modalities", []))
+    expiration_date = data.get("expiration_date")
+    if expiration_date is not None and not isinstance(expiration_date, str):
+        raise ValueError("expiration_date inválido")
     return CatalogModel(
         ref=ProviderModelRef(
             provider=str(ref["provider"]),
@@ -187,6 +197,10 @@ def _model_from_data(data: object) -> CatalogModel:
             completion=_decimal_from_data(price.get("completion")),
             request=_decimal_from_data(price.get("request")),
         ),
+        supported_parameters=supported_parameters,
+        input_modalities=input_modalities,
+        output_modalities=output_modalities,
+        expiration_date=expiration_date,
     )
 
 
@@ -196,3 +210,9 @@ def _decimal_from_data(value: object) -> Decimal | None:
     if not isinstance(value, str):
         raise ValueError("preço inválido")
     return Decimal(value)
+
+
+def _string_set(value: object) -> frozenset[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("metadado de modelo inválido")
+    return frozenset(value)

@@ -96,6 +96,10 @@ class CatalogModel:
     stability: ModelStability = ModelStability.STABLE
     origins: frozenset[CatalogOrigin] = frozenset()
     price: ModelPrice = field(default_factory=ModelPrice)
+    supported_parameters: frozenset[str] = frozenset()
+    input_modalities: frozenset[str] = frozenset()
+    output_modalities: frozenset[str] = frozenset()
+    expiration_date: str | None = None
 
     def is_selectable(self, *, include_preview: bool = False) -> bool:
         if self.capabilities.chat is not True or self.stability is ModelStability.DEPRECATED:
@@ -105,12 +109,10 @@ class CatalogModel:
     @property
     def is_free(self) -> bool:
         """Indica modelos explicitamente gratuitos ou com preço integralmente zero."""
-        if self.ref.model.endswith(":free"):
+        if self.ref.model.endswith(":free") or self.ref.model == "openrouter/free":
             return True
         prices = (self.price.prompt, self.price.completion, self.price.request)
-        return any(price is not None for price in prices) and all(
-            price in (None, Decimal("0")) for price in prices
-        )
+        return all(price == Decimal("0") for price in prices)
 
 
 @dataclass(frozen=True)
