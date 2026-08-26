@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kairos_integration import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
+from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import (
     CanonicalMessage,
     CanonicalToolCall,
@@ -143,6 +144,7 @@ def service_with_fake_adapter(
 
 
 def service_with_adapters(db, adapters) -> InteractionService:
+    db_path = Path(db.execute("PRAGMA database_list").fetchone()["file"])
     return InteractionService(
         gateway=SequenceGateway(adapters),
         resolver=CountingResolver(),
@@ -150,7 +152,7 @@ def service_with_adapters(db, adapters) -> InteractionService:
         sessions=SessionRepository(db),
         messages=MessageRepository(db),
         usage=UsageRepository(db),
-        turn_leases=LeaseRepository.turn_leases(db),
+        turn_leases=SQLiteAsyncTurnLeaseBackend(db_path),
         turn_lease_poll_interval=0,
     )
 

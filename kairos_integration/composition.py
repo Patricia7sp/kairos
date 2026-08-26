@@ -13,17 +13,13 @@ import yaml
 
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.selection_context import SelectionContextLoader
+from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import ModelSelectionResolver
 from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.composition import build_provider_gateway
 from kairos_state import connect
 from kairos_state.migrations import migrate
-from kairos_state.repositories import (
-    LeaseRepository,
-    MessageRepository,
-    SessionRepository,
-    UsageRepository,
-)
+from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 __all__ = ["ComposedInteractionService", "build_interaction_service"]
 
@@ -127,7 +123,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             sessions=sessions,
             messages=MessageRepository(connection),
             usage=UsageRepository(connection),
-            turn_leases=LeaseRepository.turn_leases(connection),
+            turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
         )
     except BaseException as build_error:
         cleanup_errors: list[BaseException] = []

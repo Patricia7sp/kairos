@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from uuid import uuid4
 
 from kairos_integration.interaction_contract import (
     InteractionEnvelope,
@@ -16,6 +13,7 @@ from kairos_integration.interaction_contract import (
 )
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
+from kairos_integration.turn_ownership import AsyncTurnLeaseBackend, SessionTurnOwnership
 from kairos_providers import (
     AdapterRequest,
     CanonicalMessage,
@@ -28,12 +26,7 @@ from kairos_providers import (
     TokenUsage,
 )
 from kairos_providers.gateway import ProviderGateway
-from kairos_state.repositories import (
-    LeaseRepository,
-    MessageRepository,
-    SessionRepository,
-    UsageRepository,
-)
+from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 __all__ = ["InteractionService"]
 
@@ -73,58 +66,6 @@ class TurnAccumulator:
         )
 
 
-@dataclass
-class _TurnQueueEntry:
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    users: int = 0
-
-
-class _SessionTurnOwnership:
-    """Fair per-session ownership with an optional durable process lease."""
-
-    def __init__(
-        self,
-        repository: LeaseRepository | None,
-        *,
-        poll_interval: float,
-    ) -> None:
-        if poll_interval < 0:
-            raise ValueError("turn_lease_poll_interval não pode ser negativo")
-        self._repository = repository
-        self._poll_interval = poll_interval
-        self._entries: dict[str, _TurnQueueEntry] = {}
-        self._entries_guard = asyncio.Lock()
-
-    @asynccontextmanager
-    async def acquire(self, conversation_id: str) -> AsyncIterator[None]:
-        async with self._entries_guard:
-            entry = self._entries.setdefault(conversation_id, _TurnQueueEntry())
-            entry.users += 1
-
-        local_acquired = False
-        durable_acquired = False
-        holder = uuid4().hex
-        try:
-            await entry.lock.acquire()
-            local_acquired = True
-            if self._repository is not None:
-                while not self._repository.try_acquire(conversation_id, holder):
-                    await asyncio.sleep(self._poll_interval)
-                durable_acquired = True
-            yield
-        finally:
-            try:
-                if durable_acquired:
-                    self._repository.release(conversation_id, holder)
-            finally:
-                if local_acquired:
-                    entry.lock.release()
-                async with self._entries_guard:
-                    entry.users -= 1
-                    if entry.users == 0 and self._entries.get(conversation_id) is entry:
-                        del self._entries[conversation_id]
-
-
 class InteractionService:
     """Executa, transmite e persiste um turno com uma seleção já congelada."""
 
@@ -140,8 +81,12 @@ class InteractionService:
         billing_base_url: str = "",
         billing_mode: str = "unknown",
         retry_policy: RetryPolicy | None = None,
-        turn_leases: LeaseRepository | None = None,
+        turn_leases: AsyncTurnLeaseBackend | None = None,
         turn_lease_poll_interval: float = 0.01,
+        turn_lease_ttl_seconds: float = 300,
+        turn_lease_refresh_interval: float | None = None,
+        turn_lease_clock: Callable[[], float] | None = None,
+        turn_lease_sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -152,15 +97,23 @@ class InteractionService:
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
-        self._turn_ownership = _SessionTurnOwnership(
+        ownership_options = {}
+        if turn_lease_clock is not None:
+            ownership_options["clock"] = turn_lease_clock
+        if turn_lease_sleep is not None:
+            ownership_options["sleep"] = turn_lease_sleep
+        self._turn_ownership = SessionTurnOwnership(
             turn_leases,
             poll_interval=turn_lease_poll_interval,
+            ttl_seconds=turn_lease_ttl_seconds,
+            refresh_interval=turn_lease_refresh_interval,
+            **ownership_options,
         )
 
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa exatamente uma seleção e transmite seus eventos normalizados."""
-        self._sessions.ensure(envelope.conversation_id, source=envelope.source)
-        async with self._turn_ownership.acquire(envelope.conversation_id):
+        async with self._turn_ownership.acquire(envelope.conversation_id, envelope.source):
+            self._sessions.ensure(envelope.conversation_id, source=envelope.source)
             async for event in self._stream_owned(envelope):
                 yield event
 
