@@ -7,6 +7,7 @@ do cofre somente quando precisa instanciar um adapter.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 import shutil
@@ -120,6 +121,7 @@ class _ProviderHttpClients:
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._closing = False
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
         self._client_factory = client_factory or self._new_http_client
 
     def for_provider(self, provider: str) -> httpx.AsyncClient:
@@ -141,7 +143,18 @@ class _ProviderHttpClients:
     async def aclose(self) -> None:
         if self._closed:
             return
-        self._closing = True
+        task = self._close_task
+        if task is None or task.done():
+            self._closing = True
+            task = asyncio.create_task(
+                self._close_attempt(),
+                name="kairos-provider-clients-close",
+            )
+            task.add_done_callback(self._consume_close_result)
+            self._close_task = task
+        await asyncio.shield(task)
+
+    async def _close_attempt(self) -> None:
         errors: list[BaseException] = []
         for provider, client in tuple(self._clients.items()):
             try:
@@ -153,6 +166,14 @@ class _ProviderHttpClients:
         if errors:
             raise BaseExceptionGroup("falha ao fechar clientes de providers", errors)
         self._closed = True
+
+    @staticmethod
+    def _consume_close_result(task: asyncio.Task[None]) -> None:
+        """Evita exceção órfã quando o único waiter é cancelado."""
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
 
 
 class _ComposedProviderGateway(ProviderGateway):

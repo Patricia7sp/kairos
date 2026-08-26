@@ -227,3 +227,104 @@ def test_aclose_tenta_gateway_e_repete_flush_que_falhou(tmp_path, monkeypatch):
     assert row == (1, 7, 3)
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         service._connection.execute("SELECT 1")
+
+
+def test_aclose_concorrente_compartilha_um_cleanup(tmp_path, monkeypatch):
+    """Dois callers sobrepostos não podem duplicar flush, gateway ou DB close."""
+
+    class BarrierGateway(StreamingGateway):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def aclose(self):
+            self.close_attempts += 1
+            self.started.set()
+            await self.release.wait()
+            self.closed = True
+
+    gateway = BarrierGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    real_flush = service._usage.flush
+    flush_attempts = 0
+
+    def counting_flush():
+        nonlocal flush_attempts
+        flush_attempts += 1
+        return real_flush()
+
+    service._usage.flush = counting_flush
+
+    async def close_together():
+        start = asyncio.Event()
+
+        async def close_after_barrier():
+            await start.wait()
+            await service.aclose()
+
+        callers = [asyncio.create_task(close_after_barrier()) for _ in range(2)]
+        start.set()
+        await gateway.started.wait()
+        await asyncio.sleep(0)
+        attempts_during_overlap = (flush_attempts, gateway.close_attempts)
+        gateway.release.set()
+        results = await asyncio.gather(*callers, return_exceptions=True)
+        assert attempts_during_overlap == (1, 1)
+        assert results == [None, None]
+
+    asyncio.run(close_together())
+
+    assert flush_attempts == 1
+    assert gateway.close_attempts == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        service._connection.execute("SELECT 1")
+
+
+def test_cancelar_um_caller_nao_cancela_cleanup_compartilhado(tmp_path, monkeypatch):
+    """Cancelar o primeiro waiter não pode deixar o segundo preso nem repetir cleanup."""
+
+    class BarrierGateway(StreamingGateway):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def aclose(self):
+            self.close_attempts += 1
+            self.started.set()
+            await self.release.wait()
+            self.closed = True
+
+    gateway = BarrierGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    real_flush = service._usage.flush
+    flush_attempts = 0
+
+    def counting_flush():
+        nonlocal flush_attempts
+        flush_attempts += 1
+        return real_flush()
+
+    service._usage.flush = counting_flush
+
+    async def cancel_leader():
+        leader = asyncio.create_task(service.aclose())
+        await gateway.started.wait()
+        waiter = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+        leader.cancel()
+        leader_result = (await asyncio.gather(leader, return_exceptions=True))[0]
+        gateway.release.set()
+        waiter_result = (
+            await asyncio.wait_for(asyncio.gather(waiter, return_exceptions=True), timeout=1)
+        )[0]
+        assert isinstance(leader_result, asyncio.CancelledError)
+        assert waiter_result is None
+
+    asyncio.run(cancel_leader())
+
+    assert flush_attempts == 1
+    assert gateway.close_attempts == 1

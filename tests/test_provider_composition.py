@@ -85,6 +85,23 @@ class CancellingOnceClient(FailingOnceClient):
         self.closed = True
 
 
+class BarrierFailingOnceClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        attempt = self.close_attempts
+        self.started.set()
+        await self.release.wait()
+        if attempt == 1:
+            raise RuntimeError("falha compartilhada")
+        self.closed = True
+
+
 def test_google_adc_timeout_degrada_para_ausente():
     """Um gcloud instalado mas sem resposta não pode derrubar o status HTTP."""
     with (
@@ -487,3 +504,35 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(cancelling.close_attempts, 2)
         self.assertTrue(cancelling.closed)
+
+    async def test_aclose_concorrente_compartilha_tentativa_e_retry(self):
+        """Dois closes sobrepostos não podem fechar nem remover o mesmo cliente duas vezes."""
+        client = BarrierFailingOnceClient()
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+            start = asyncio.Event()
+
+            async def close_after_barrier():
+                await start.wait()
+                await gateway.aclose()
+
+            callers = [asyncio.create_task(close_after_barrier()) for _ in range(2)]
+            start.set()
+            await client.started.wait()
+            await asyncio.sleep(0)
+            attempts_during_overlap = client.close_attempts
+            client.release.set()
+            results = await asyncio.gather(*callers, return_exceptions=True)
+
+            self.assertEqual(attempts_during_overlap, 1)
+            self.assertTrue(all(isinstance(result, BaseExceptionGroup) for result in results))
+            self.assertEqual(client.close_attempts, 1)
+            await gateway.aclose()
+
+        self.assertEqual(client.close_attempts, 2)
+        self.assertTrue(client.closed)

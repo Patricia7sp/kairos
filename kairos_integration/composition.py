@@ -64,11 +64,23 @@ class ComposedInteractionService(InteractionService):
         self.gateway = self._gateway
         self._connection = connection
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
 
     async def aclose(self) -> None:
         """Fecha, uma única vez, somente os recursos criados por esta composição."""
         if self._closed:
             return
+        task = self._close_task
+        if task is None or task.done():
+            task = asyncio.create_task(
+                self._close_attempt(),
+                name="kairos-interaction-service-close",
+            )
+            task.add_done_callback(self._consume_close_result)
+            self._close_task = task
+        await asyncio.shield(task)
+
+    async def _close_attempt(self) -> None:
         errors: list[BaseException] = []
         usage_flushed = False
         try:
@@ -88,6 +100,14 @@ class ComposedInteractionService(InteractionService):
         if errors:
             raise BaseExceptionGroup("falha ao fechar InteractionService", errors)
         self._closed = True
+
+    @staticmethod
+    def _consume_close_result(task: asyncio.Task[None]) -> None:
+        """Evita exceção órfã quando o único waiter é cancelado."""
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
 
     async def __aenter__(self) -> ComposedInteractionService:
         return self
