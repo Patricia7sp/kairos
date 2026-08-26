@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from kairos_providers.base import ConnectionStatus
 from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
-from kairos_providers.composition import build_provider_gateway
+from kairos_providers.composition import build_provider_gateway, get_google_adc_token
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
@@ -62,6 +63,18 @@ class TrackingClient:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+def test_google_adc_timeout_degrada_para_ausente():
+    """Um gcloud instalado mas sem resposta não pode derrubar o status HTTP."""
+    with (
+        patch("kairos_providers.composition.shutil.which", return_value="/usr/bin/gcloud"),
+        patch(
+            "kairos_providers.composition.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("gcloud", 3.0),
+        ),
+    ):
+        assert get_google_adc_token() is None
 
 
 def test_composition_registra_todos_os_providers(tmp_path):

@@ -290,7 +290,7 @@ def get_google_adc_token() -> str | None:
             timeout=3.0,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
