@@ -33,6 +33,20 @@ def test_provider_error_normaliza_payload_sem_expor_credencial():
     assert sentinel not in repr(error)
 
 
+def test_provider_error_direto_nao_expoe_credencial_opaca():
+    """Manter texto do caller vazaria tokens fora dos padrões conhecidos."""
+    sentinel = "AIzaSyProviderCredentialSentinel"
+
+    error = ProviderError(
+        ProviderErrorKind.AUTH,
+        f"A credencial {sentinel} foi recusada pelo provider",
+        retryable=False,
+    )
+
+    assert sentinel not in str(error)
+    assert sentinel not in repr(error)
+
+
 def test_catalog_model_identifica_preco_gratuito():
     """Um preço integralmente zero precisa habilitar o filtro de modelos gratuitos."""
     model = CatalogModel(

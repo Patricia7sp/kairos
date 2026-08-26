@@ -7,7 +7,6 @@ impede que credenciais de respostas de erro atravessem a fronteira pública.
 
 from __future__ import annotations
 
-import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -47,12 +46,6 @@ _DEFAULT_ERROR_MESSAGES: Mapping[ProviderErrorKind, str] = {
     ProviderErrorKind.INCOMPATIBLE: "requisição incompatível com o provedor",
     ProviderErrorKind.INTERNAL: "falha interna do provedor",
 }
-_SECRET_PATTERN = re.compile(
-    r"(?:sk-[A-Za-z0-9_-]+|bearer\s+\S+|(?:api[_ -]?key|authorization)\s*[:=]\s*\S+)",
-    re.IGNORECASE,
-)
-
-
 class ProviderError(Exception):
     """Falha normalizada e segura para logs e superfícies de cliente."""
 
@@ -63,9 +56,12 @@ class ProviderError(Exception):
         *,
         retryable: bool,
     ) -> None:
+        # Mantém a assinatura pública, mas texto de provider pode conter um
+        # segredo opaco que não é possível identificar de forma confiável.
+        del message
         self.kind = kind
         self.retryable = retryable
-        self.message = _SECRET_PATTERN.sub("[redacted]", message or _DEFAULT_ERROR_MESSAGES[kind])
+        self.message = _DEFAULT_ERROR_MESSAGES[kind]
         super().__init__(self.message)
 
     @classmethod
