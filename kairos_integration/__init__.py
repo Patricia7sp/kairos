@@ -1,5 +1,12 @@
 """Integração das superfícies sobre o núcleo."""
 
+from kairos_integration.interaction_contract import (
+    InteractionEnvelope,
+    InteractionEvent,
+    InteractionEventKind,
+    InteractionResult,
+    InteractionSelectionSnapshot,
+)
 from kairos_integration.surfaces import (
     PROCESS_TOPOLOGIES,
     SURFACE_PROFILES,
@@ -19,6 +26,11 @@ __all__ = [
     "SURFACES",
     "SURFACE_PROFILES",
     "CoreIsALibrary",
+    "InteractionEnvelope",
+    "InteractionEvent",
+    "InteractionEventKind",
+    "InteractionResult",
+    "InteractionSelectionSnapshot",
     "LawViolation",
     "ProcessMap",
     "ProcessTopology",
