@@ -125,3 +125,17 @@ class SelectionContextLoaderTests(unittest.TestCase):
         ).load(envelope(activity="vision"))
 
         self.assertEqual(context.activity, ProviderModelRef("gemini", "gemini-2.0-flash"))
+
+    def test_modelo_auxiliar_qualificado_preserva_provider_proprio(self) -> None:
+        context = self.loader(
+            profile_configs={
+                "work": {
+                    "provider": "gemini",
+                    "auxiliary_models": {
+                        "vision": "openai/gpt-4.1",
+                    },
+                }
+            }
+        ).load(envelope(activity="vision"))
+
+        self.assertEqual(context.activity, ProviderModelRef("openai", "gpt-4.1"))

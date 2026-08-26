@@ -81,7 +81,11 @@ def _activity_ref(config: Mapping[str, Any], activity: str | None) -> ProviderMo
     if not isinstance(activity_models, Mapping):
         return None
     model = activity_models.get(activity)
-    if isinstance(model, str) and isinstance(config.get("provider"), str):
+    if (
+        isinstance(model, str)
+        and "/" not in model
+        and isinstance(config.get("provider"), str)
+    ):
         model = {
             "provider": config["provider"],
             "model": model,
