@@ -1,12 +1,48 @@
 import asyncio
 import sqlite3
+from typing import get_type_hints
 
 import pytest
 
-from kairos_integration import build_interaction_service, composition
+from kairos_integration import (
+    ComposedInteractionService,
+    build_interaction_service,
+    composition,
+)
 from kairos_integration.interaction_contract import InteractionEnvelope
-from kairos_providers import ModelCatalog, ProviderModelRef
+from kairos_providers import (
+    CatalogOrigin,
+    ModelCatalog,
+    ProviderEvent,
+    ProviderModelRef,
+    TokenUsage,
+    curated_models,
+)
 from kairos_providers.gateway import ProviderGateway
+
+
+class StreamingAdapter:
+    async def stream(self, _request):
+        yield ProviderEvent(
+            kind="usage",
+            usage=TokenUsage(input_tokens=7, output_tokens=3),
+        )
+        yield ProviderEvent(kind="finish", finish_reason="stop")
+
+
+class StreamingGateway:
+    def __init__(self):
+        self.catalog = ModelCatalog()
+        self.catalog.merge(curated_models(), origin=CatalogOrigin.CURATED)
+        self.closed = False
+        self.close_attempts = 0
+
+    def create_adapter(self, _ref):
+        return StreamingAdapter()
+
+    async def aclose(self):
+        self.close_attempts += 1
+        self.closed = True
 
 
 def test_composition_usa_gateway_e_state_compartilhados(tmp_path):
@@ -15,6 +51,17 @@ def test_composition_usa_gateway_e_state_compartilhados(tmp_path):
 
     assert isinstance(service.gateway, ProviderGateway)
     assert service.home == tmp_path
+    asyncio.run(service.aclose())
+
+
+def test_builder_declara_tipo_publico_com_lifecycle(tmp_path):
+    """Apagar o tipo composto da assinatura esconde o fechamento de Web e CLI."""
+    service = build_interaction_service(tmp_path)
+
+    assert get_type_hints(build_interaction_service)["return"] is ComposedInteractionService
+    assert isinstance(service, ComposedInteractionService)
+    assert callable(service.aclose)
+
     asyncio.run(service.aclose())
 
 
@@ -75,3 +122,108 @@ def test_composition_fecha_somente_os_recursos_que_criou(tmp_path, monkeypatch):
     )
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         asyncio.run(anext(service.stream(envelope)))
+
+
+def test_aclose_persiste_uso_enfileirado_por_stream(tmp_path, monkeypatch):
+    """Fechar o banco sem drenar a fila perde os contadores do último turno."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = StreamingGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+
+    async def stream_and_close():
+        events = [
+            event
+            async for event in service.stream(
+                InteractionEnvelope(conversation_id="s1", source="test", content="olá")
+            )
+        ]
+        assert events[-1].kind == "turn_end"
+        await service.aclose()
+
+    asyncio.run(stream_and_close())
+
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        row = connection.execute(
+            "SELECT api_call_count, input_tokens, output_tokens FROM session_model_usage"
+        ).fetchone()
+    assert row == (1, 7, 3)
+    assert gateway.closed
+
+
+def test_falha_de_construcao_pos_gateway_fecha_gateway_e_banco(tmp_path, monkeypatch):
+    """Falhar após transferir ownership não pode vazar nenhum recurso já criado."""
+    gateway = StreamingGateway()
+    connections = []
+    real_connect = composition.connect
+
+    def tracking_connect(path):
+        connection = real_connect(path)
+        connections.append(connection)
+        return connection
+
+    def fail_construction(**_kwargs):
+        raise RuntimeError("falha depois do gateway")
+
+    monkeypatch.setattr(composition, "connect", tracking_connect)
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    monkeypatch.setattr(composition, "ComposedInteractionService", fail_construction)
+
+    async def build_inside_running_loop():
+        with pytest.raises(RuntimeError, match="falha depois do gateway"):
+            build_interaction_service(tmp_path)
+
+    asyncio.run(build_inside_running_loop())
+
+    assert gateway.closed
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connections[0].execute("SELECT 1")
+
+
+def test_aclose_tenta_gateway_e_repete_flush_que_falhou(tmp_path, monkeypatch):
+    """Marcar closed antes do flush impede recuperar uso após falha transitória."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = StreamingGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    real_flush = service._usage.flush
+    flush_attempts = 0
+
+    def flaky_flush():
+        nonlocal flush_attempts
+        flush_attempts += 1
+        if flush_attempts == 1:
+            raise RuntimeError("flush indisponível")
+        return real_flush()
+
+    service._usage.flush = flaky_flush
+
+    async def stream_and_retry_close():
+        async for _event in service.stream(
+            InteractionEnvelope(conversation_id="s1", source="test", content="olá")
+        ):
+            pass
+        with pytest.raises(BaseExceptionGroup, match="InteractionService"):
+            await service.aclose()
+        assert gateway.close_attempts == 1
+        assert service._usage.pending_count() == 1
+        service._connection.execute("SELECT 1")
+        await service.aclose()
+
+    asyncio.run(stream_and_retry_close())
+
+    assert flush_attempts == 2
+    assert gateway.close_attempts == 2
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        row = connection.execute(
+            "SELECT api_call_count, input_tokens, output_tokens FROM session_model_usage"
+        ).fetchone()
+    assert row == (1, 7, 3)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        service._connection.execute("SELECT 1")

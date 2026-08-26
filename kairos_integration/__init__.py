@@ -1,6 +1,6 @@
 """Integração das superfícies sobre o núcleo."""
 
-from kairos_integration.composition import build_interaction_service
+from kairos_integration.composition import ComposedInteractionService, build_interaction_service
 from kairos_integration.interaction_contract import (
     InteractionEnvelope,
     InteractionEvent,
@@ -27,6 +27,7 @@ __all__ = [
     "PROCESS_TOPOLOGIES",
     "SURFACES",
     "SURFACE_PROFILES",
+    "ComposedInteractionService",
     "CoreIsALibrary",
     "InteractionEnvelope",
     "InteractionEvent",

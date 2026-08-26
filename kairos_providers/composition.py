@@ -118,11 +118,12 @@ class _ProviderHttpClients:
 
     def __init__(self, client_factory: Callable[[], httpx.AsyncClient] | None = None) -> None:
         self._clients: dict[str, httpx.AsyncClient] = {}
+        self._closing = False
         self._closed = False
         self._client_factory = client_factory or self._new_http_client
 
     def for_provider(self, provider: str) -> httpx.AsyncClient:
-        if self._closed:
+        if self._closing or self._closed:
             raise RuntimeError("gateway de providers já foi encerrado")
         client = self._clients.get(provider)
         if client is None:
@@ -140,9 +141,18 @@ class _ProviderHttpClients:
     async def aclose(self) -> None:
         if self._closed:
             return
+        self._closing = True
+        errors: list[BaseException] = []
+        for provider, client in tuple(self._clients.items()):
+            try:
+                await client.aclose()
+            except BaseException as exc:  # noqa: BLE001 - tenta os demais sob cancelamento
+                errors.append(exc)
+            else:
+                del self._clients[provider]
+        if errors:
+            raise BaseExceptionGroup("falha ao fechar clientes de providers", errors)
         self._closed = True
-        for client in self._clients.values():
-            await client.aclose()
 
 
 class _ComposedProviderGateway(ProviderGateway):

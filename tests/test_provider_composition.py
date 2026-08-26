@@ -65,6 +65,26 @@ class TrackingClient:
         self.closed = True
 
 
+class FailingOnceClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        if self.close_attempts == 1:
+            raise RuntimeError("falha transitória no close")
+        await super().aclose()
+
+
+class CancellingOnceClient(FailingOnceClient):
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        if self.close_attempts == 1:
+            raise asyncio.CancelledError
+        self.closed = True
+
+
 def test_google_adc_timeout_degrada_para_ausente():
     """Um gcloud instalado mas sem resposta não pode derrubar o status HTTP."""
     with (
@@ -417,3 +437,53 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(clients), 1)
         self.assertTrue(clients[0].closed)
+
+    async def test_gateway_tenta_todos_os_closes_e_permite_repetir_falhas(self):
+        """Um cliente falhar não pode impedir os demais nem bloquear uma nova tentativa."""
+        failing = FailingOnceClient()
+        healthy = TrackingClient()
+        clients = iter((failing, healthy))
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: next(clients),
+            )
+            gateway.registry.create("ollama")
+            gateway.registry.create("openai", api_key="")
+
+            with self.assertRaises(BaseExceptionGroup):
+                await gateway.aclose()
+
+            self.assertEqual(failing.close_attempts, 1)
+            self.assertTrue(healthy.closed)
+            with self.assertRaisesRegex(RuntimeError, "encerrado"):
+                gateway.registry.create("ollama")
+
+            await gateway.aclose()
+
+        self.assertEqual(failing.close_attempts, 2)
+        self.assertTrue(failing.closed)
+
+    async def test_gateway_tenta_demais_clientes_apos_cancelamento(self):
+        """Cancelamento de um close também deve preservar os demais e permitir retry."""
+        cancelling = CancellingOnceClient()
+        healthy = TrackingClient()
+        clients = iter((cancelling, healthy))
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: next(clients),
+            )
+            gateway.registry.create("ollama")
+            gateway.registry.create("openai", api_key="")
+
+            with self.assertRaises(BaseExceptionGroup):
+                await gateway.aclose()
+
+            self.assertTrue(healthy.closed)
+            await gateway.aclose()
+
+        self.assertEqual(cancelling.close_attempts, 2)
+        self.assertTrue(cancelling.closed)
