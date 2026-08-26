@@ -54,15 +54,11 @@ class SelectionContextLoader:
         if not isinstance(profile_config, Mapping):
             profile_config = {}
         persisted = self._sessions.selection(envelope.conversation_id)
-        activity_models = profile_config.get("auxiliary_models")
-        activity_ref = None
-        if isinstance(activity_models, Mapping) and envelope.activity is not None:
-            activity_ref = parse_ref(activity_models.get(envelope.activity))
 
         return ModelSelectionContext(
             message=parse_ref(envelope.override),
             conversation=parse_ref(persisted.ref if persisted is not None else None),
-            activity=activity_ref,
+            activity=_activity_ref(profile_config, envelope.activity),
             profile=parse_ref(_config_ref(profile_config)),
             global_default=parse_ref(_config_ref(self._global_config)),
         )
@@ -76,3 +72,18 @@ def _config_ref(config: Mapping[str, Any]) -> Any:
             "model": model,
         }
     return model
+
+
+def _activity_ref(config: Mapping[str, Any], activity: str | None) -> ProviderModelRef | None:
+    if activity is None:
+        return None
+    activity_models = config.get("auxiliary_models")
+    if not isinstance(activity_models, Mapping):
+        return None
+    model = activity_models.get(activity)
+    if isinstance(model, str) and isinstance(config.get("provider"), str):
+        model = {
+            "provider": config["provider"],
+            "model": model,
+        }
+    return parse_ref(model)

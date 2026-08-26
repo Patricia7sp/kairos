@@ -111,3 +111,17 @@ class SelectionContextLoaderTests(unittest.TestCase):
         ).load(envelope(profile=None))
 
         self.assertEqual(context.global_default, ProviderModelRef("gemini", "gemini-2.0-flash"))
+
+    def test_modelo_auxiliar_com_provider_irmao_no_mesmo_config_vira_ref(self) -> None:
+        context = self.loader(
+            profile_configs={
+                "work": {
+                    "provider": "gemini",
+                    "auxiliary_models": {
+                        "vision": "gemini-2.0-flash",
+                    },
+                }
+            }
+        ).load(envelope(activity="vision"))
+
+        self.assertEqual(context.activity, ProviderModelRef("gemini", "gemini-2.0-flash"))
