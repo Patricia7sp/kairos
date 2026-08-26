@@ -831,3 +831,166 @@ As with any asyncio resource, a caller that forcibly invokes `loop.close()` with
 pending-task cancellation/drain protocol cannot be made safe by library coordination. Supported
 `asyncio.run()`/server shutdown is covered deterministically, and no blocking concern remains for
 the requested lifecycle semantics.
+
+## Fix Round 5
+
+### Important finding: runtime cancellation was globally disabled
+
+`_PersistentCleanupTask.cancel()` returned `False` for every caller. That kept normal
+`asyncio.run()` shutdown from aborting loop-affine cleanup, but it also disabled cancellation used
+inside the cleanup itself. In particular:
+
+- `asyncio.timeout()` calls `cancel()` on the current task to interrupt the timed await;
+- `asyncio.TaskGroup` cancels its parent task when a child fails so the body exits promptly;
+- AnyIO-style cancellation scopes rely on the same normal runtime task-cancellation contract.
+
+With the unconditional override, a timeout or failed TaskGroup child could leave the cleanup body
+waiting until some unrelated event occurred, including forever when no fallback existed.
+
+CPython 3.11.16 provides a stable distinction without inspecting caller stacks. `Runner.close()`
+calls `asyncio.runners._cancel_all_tasks(loop)` after `run_until_complete(main)` has stopped the
+loop. `_cancel_all_tasks()` calls `task.cancel()` while `loop.is_running()` is false, then resumes
+the loop with `run_until_complete(gather(...))` to drain pending tasks. By contrast,
+`Timeout._on_timeout()` and `TaskGroup._on_task_done()` call `cancel()` while the owner loop is
+running.
+
+The supervisor now refuses cancellation only while its loop is stopped. While the loop is
+running, it delegates to `asyncio.Task.cancel(msg)`. This preserves Runner shutdown survival while
+restoring native timeout, TaskGroup, and cancellation-scope behavior. There is no caller-stack
+inspection and cleanup still runs on the initiating resource loop.
+
+The prior interaction/provider tests that monkeypatched the launcher to call `task.cancel()` were
+removed. They simulated cancellation from inside a running loop, which is exactly the runtime case
+that must now work. Their shutdown coverage was replaced by regressions using an unmodified
+`asyncio.run()` lifecycle.
+
+### Deterministic regressions and RED evidence
+
+New shared-coordinator coverage lives in `tests/test_async_cleanup.py`:
+
+- `test_asyncio_run_shutdown_drena_cleanup_antes_do_primeiro_passo` schedules the close waiter,
+  yields exactly once so the supervisor is reserved behind the main-task continuation, asserts the
+  cleanup has not taken its first step, and then returns from the real `asyncio.run()` main
+  coroutine. Runner shutdown drains the cleanup.
+- `test_timeout_dentro_do_cleanup_cancela_task_supervisora` uses `asyncio.timeout(0)` around a
+  bounded event wait. A short fallback makes the old defect fail deterministically instead of
+  hanging the test process.
+- `test_taskgroup_cancela_corpo_do_cleanup_quando_filho_falha` has a TaskGroup child fail while the
+  cleanup body is waiting. It asserts the parent await receives `CancelledError`; a short fallback
+  again turns cancellation swallowing into a bounded assertion failure.
+- `test_cancelar_waiter_nao_cancela_cleanup_compartilhado` cancels one observer while another waits
+  for the same blocked attempt, then verifies one cleanup attempt completes for the remaining
+  waiter.
+
+The composition integration regression
+`test_shutdown_real_do_asyncio_run_drena_cleanup_no_loop_proprietario` additionally proves that a
+pre-body cleanup launched during real Runner shutdown stays on the owner thread/loop, is observed
+by a foreign-loop waiter, and performs usage flush, gateway close, and SQLite close exactly once.
+The existing cross-loop waiter-cancellation regressions remain in place.
+
+RED command before the production change:
+
+```bash
+uv run pytest -q tests/test_async_cleanup.py
+```
+
+Result:
+
+```text
+.FF.
+FAILED test_timeout_dentro_do_cleanup_cancela_task_supervisora - assert False
+FAILED test_taskgroup_cancela_corpo_do_cleanup_quando_filho_falha - assert False
+2 failed, 2 passed in 0.20s
+```
+
+The Runner-shutdown and waiter-isolation tests already passed, confirming the defect was confined
+to runtime cancellation rather than the shared-outcome design.
+
+GREEN after delegating running-loop cancellation:
+
+```text
+4 passed in 0.13s
+```
+
+Focused cancellation/shutdown integration:
+
+```bash
+uv run pytest -q tests/test_async_cleanup.py tests/test_interaction_composition.py \
+  -k 'asyncio_run or timeout_dentro or taskgroup_cancela or cancelar_waiter'
+```
+
+Result:
+
+```text
+6 passed, 12 deselected in 0.23s
+```
+
+### Preserved lifecycle guarantees
+
+No attempt reservation, launch, publication, retry, resource-close, or waiter-observation path was
+changed. The prior guarantees therefore remain covered by the focused lifecycle suite:
+
+- scheduling failure publishes its outcome and permits retry;
+- launch remains outside the state lock and bypasses custom/eager task factories;
+- cleanup uses the initiating event loop and loop-affine provider resources;
+- overlapping and cross-loop waiters share one attempt;
+- canceling any waiter does not cancel the shared cleanup;
+- failed attempts are retryable, successful attempts are idempotent, and provider clients are
+  attempted at most once per attempt;
+- usage flush, gateway close, SQLite close, exact-home composition, provider adapters, and
+  construction rollback retain their existing semantics.
+
+The optional completed-task/context retention minor was not changed in this round so it could not
+obscure the cancellation correction.
+
+### Verification
+
+Focused lifecycle/provider/composition suite:
+
+```bash
+uv run pytest -q tests/test_async_cleanup.py tests/test_interaction_composition.py \
+  tests/test_interaction_service.py tests/test_provider_composition.py \
+  tests/test_provider_gateway.py tests/test_interaction_persistence.py tests/test_state.py
+```
+
+Result:
+
+```text
+114 passed in 0.91s
+```
+
+Lint, owned-file formatting, and whitespace:
+
+```bash
+uv run ruff check .
+uv run ruff format kairos_providers/_async_cleanup.py tests/test_async_cleanup.py \
+  tests/test_interaction_composition.py tests/test_provider_composition.py
+uv run ruff format --check kairos_providers/_async_cleanup.py tests/test_async_cleanup.py \
+  tests/test_interaction_composition.py tests/test_provider_composition.py
+git diff --check
+```
+
+Result: `All checks passed!`, the four round-owned Python files were unchanged/already formatted,
+and `git diff --check` produced no output. A repository-wide `ruff format --check .` also identified
+six pre-existing formatting differences in files outside this round; they were deliberately not
+rewritten as part of the cancellation fix.
+
+Full suite, run once after the final code and tests:
+
+```bash
+uv run pytest -q
+```
+
+Result:
+
+```text
+1011 passed, 19 skipped, 5546 subtests passed in 15.42s
+```
+
+### Changed files
+
+- `kairos_providers/_async_cleanup.py`
+- `tests/test_async_cleanup.py` (new)
+- `tests/test_interaction_composition.py`
+- `tests/test_provider_composition.py`
+- `.superpowers/sdd/2026-08-26-interaction-service-persistence/task-6-report.md`

@@ -107,7 +107,6 @@ class ThreadBarrierClient(TrackingClient):
     def __init__(self) -> None:
         super().__init__()
         self.close_attempts = 0
-        self.close_thread_id = None
         self.started = threading.Event()
         self.release = threading.Event()
         self._lock = threading.Lock()
@@ -115,24 +114,12 @@ class ThreadBarrierClient(TrackingClient):
     async def aclose(self) -> None:
         with self._lock:
             self.close_attempts += 1
-            self.close_thread_id = threading.get_ident()
             attempt = self.close_attempts
         self.started.set()
         while not self.release.is_set():
             await asyncio.sleep(0.001)
         if attempt == 1:
             raise RuntimeError("falha cross-loop compartilhada")
-        self.closed = True
-
-
-class SuccessfulThreadBarrierClient(ThreadBarrierClient):
-    async def aclose(self) -> None:
-        with self._lock:
-            self.close_attempts += 1
-            self.close_thread_id = threading.get_ident()
-        self.started.set()
-        while not self.release.is_set():
-            await asyncio.sleep(0.001)
         self.closed = True
 
 
@@ -619,75 +606,6 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.close_attempts, 1)
         asyncio.run(gateway.aclose())
         self.assertEqual(client.close_attempts, 2)
-        self.assertTrue(client.closed)
-
-    def test_owner_loop_sai_mas_cleanup_e_waiter_estrangeiro_terminam(self):
-        """Shutdown do loop mantém o close no loop afim até o cliente terminar."""
-        from kairos_providers import _async_cleanup
-
-        client = SuccessfulThreadBarrierClient()
-        results: dict[str, object] = {}
-        foreign_joined = threading.Event()
-        real_launch = _async_cleanup._launch_cleanup_task
-
-        def cancel_before_start(coroutine, *, name):
-            task = real_launch(coroutine, name=name)
-            results["runner_cancelled"] = task.cancel()
-            return task
-
-        with (
-            TemporaryDirectory() as tmpdir,
-            patch.object(_async_cleanup, "_launch_cleanup_task", cancel_before_start),
-        ):
-            gateway = build_provider_gateway(
-                Path(tmpdir),
-                client_factory=lambda: client,
-            )
-            gateway.registry.create("ollama")
-
-            def run_owner() -> None:
-                results["owner_thread_id"] = threading.get_ident()
-
-                async def cancel_waiter_and_exit() -> object:
-                    waiter = asyncio.create_task(gateway.aclose())
-                    while not client.started.is_set():
-                        await asyncio.sleep(0.001)
-                    waiter.cancel()
-                    return (await asyncio.gather(waiter, return_exceptions=True))[0]
-
-                results["owner_waiter"] = asyncio.run(cancel_waiter_and_exit())
-
-            def run_foreign_waiter() -> None:
-                async def wait_for_close() -> None:
-                    waiter = asyncio.create_task(gateway.aclose())
-                    await asyncio.sleep(0)
-                    foreign_joined.set()
-                    await waiter
-
-                try:
-                    results["foreign"] = asyncio.run(wait_for_close())
-                except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
-                    results["foreign"] = exc
-
-            owner = threading.Thread(target=run_owner, daemon=True)
-            owner.start()
-            self.assertTrue(client.started.wait(timeout=2))
-            foreign = threading.Thread(target=run_foreign_waiter, daemon=True)
-            foreign.start()
-            self.assertTrue(foreign_joined.wait(timeout=2))
-            owner.join(timeout=0.05)
-            self.assertTrue(owner.is_alive())
-            client.release.set()
-            owner.join(timeout=2)
-            foreign.join(timeout=2)
-
-        self.assertFalse(owner.is_alive())
-        self.assertFalse(foreign.is_alive())
-        self.assertIs(results["runner_cancelled"], False)
-        self.assertIsInstance(results["owner_waiter"], asyncio.CancelledError)
-        self.assertIsNone(results["foreign"])
-        self.assertEqual(client.close_thread_id, results["owner_thread_id"])
-        self.assertEqual(client.close_attempts, 1)
         self.assertTrue(client.closed)
 
     def test_falha_ao_agendar_cleanup_publica_resultado_e_permite_retry(self):

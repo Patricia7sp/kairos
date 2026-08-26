@@ -472,62 +472,50 @@ def test_cancelar_waiter_em_outro_loop_nao_cancela_cleanup_global():
     assert connection.close_attempts == 1
 
 
-def test_owner_loop_sai_mas_cleanup_e_waiter_estrangeiro_terminam(monkeypatch):
-    """Shutdown do loop não pode cancelar o runner antes de seu primeiro passo."""
-    from kairos_providers import _async_cleanup
-
+def test_shutdown_real_do_asyncio_run_drena_cleanup_no_loop_proprietario():
+    """Runner drena o close pre-body no loop afim e um waiter estrangeiro o observa."""
     service, gateway, usage, connection = thread_safe_service()
     results: dict[str, object] = {}
     foreign_joined = threading.Event()
-    real_launch = _async_cleanup._launch_cleanup_task
-
-    def cancel_before_start(coroutine, *, name):
-        task = real_launch(coroutine, name=name)
-        results["runner_cancelled"] = task.cancel()
-        return task
 
     def run_owner() -> None:
         results["owner_thread_id"] = threading.get_ident()
 
-        async def cancel_waiter_and_exit() -> object:
+        async def launch_and_return() -> None:
             waiter = asyncio.create_task(service.aclose())
-            while not gateway.started.is_set():
-                await asyncio.sleep(0.001)
-            waiter.cancel()
-            return (await asyncio.gather(waiter, return_exceptions=True))[0]
+            await asyncio.sleep(0)
+            results["started_before_shutdown"] = gateway.started.is_set()
+            results["waiter_done_before_shutdown"] = waiter.done()
 
-        results["owner_waiter"] = asyncio.run(cancel_waiter_and_exit())
+        results["owner"] = asyncio.run(launch_and_return())
 
     def run_foreign_waiter() -> None:
         async def wait_for_close() -> None:
-            waiter = asyncio.create_task(service.aclose())
-            await asyncio.sleep(0)
             foreign_joined.set()
-            await waiter
+            await service.aclose()
 
         try:
             results["foreign"] = asyncio.run(wait_for_close())
         except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
             results["foreign"] = exc
 
-    with monkeypatch.context() as patch_context:
-        patch_context.setattr(_async_cleanup, "_launch_cleanup_task", cancel_before_start)
-        owner = threading.Thread(target=run_owner, daemon=True)
-        owner.start()
-        assert gateway.started.wait(timeout=2)
-        foreign = threading.Thread(target=run_foreign_waiter, daemon=True)
-        foreign.start()
-        assert foreign_joined.wait(timeout=2)
-        owner.join(timeout=0.05)
-        assert owner.is_alive(), "asyncio.run deveria aguardar o cleanup resistente"
-        gateway.release.set()
-        owner.join(timeout=2)
-        foreign.join(timeout=2)
+    owner = threading.Thread(target=run_owner, daemon=True)
+    owner.start()
+    assert gateway.started.wait(timeout=2)
+    assert results["started_before_shutdown"] is False
+    assert results["waiter_done_before_shutdown"] is False
+    assert owner.is_alive(), "asyncio.run deveria aguardar o cleanup iniciado no shutdown"
+
+    foreign = threading.Thread(target=run_foreign_waiter, daemon=True)
+    foreign.start()
+    assert foreign_joined.wait(timeout=2)
+    gateway.release.set()
+    owner.join(timeout=2)
+    foreign.join(timeout=2)
 
     assert not owner.is_alive()
     assert not foreign.is_alive()
-    assert results["runner_cancelled"] is False
-    assert isinstance(results["owner_waiter"], asyncio.CancelledError)
+    assert results["owner"] is None
     assert results["foreign"] is None
     assert gateway.close_thread_id == results["owner_thread_id"]
     assert usage.flush_attempts == 1

@@ -21,14 +21,16 @@ class _PersistentCleanupTask(asyncio.Task[BaseException | None]):
     """Task que mantém o loop afim vivo até o cleanup terminar.
 
     ``asyncio.run`` cancela todas as tasks pendentes antes de fechar o loop.
-    Aceitar esse cancelamento interromperia justamente o cleanup que precisa
-    rodar nesse loop. O resultado do cleanup continua podendo ser falha ou
-    ``CancelledError`` produzido por uma dependência; só cancelamento externo
-    da task supervisora é recusado.
+    Essa fase acontece com o loop parado; recusar somente esse cancelamento
+    permite que o Runner volte a dirigir o loop e drene o cleanup. Durante a
+    execução normal do loop, timeout, TaskGroup e cancellation scopes mantêm a
+    semântica nativa de ``asyncio.Task.cancel``.
     """
 
     def cancel(self, msg: Any | None = None) -> bool:
-        return False
+        if not self.get_loop().is_running():
+            return False
+        return super().cancel(msg)
 
 
 def _launch_cleanup_task(
