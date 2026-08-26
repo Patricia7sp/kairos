@@ -219,7 +219,15 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
                 json={
                     "data": [
                         {"id": "gpt-5.6-terra"},
+                        {"id": "gpt-4.1-mini"},
+                        {"id": "gpt-4o-mini"},
+                        {"id": "gpt-3.5-turbo-0125"},
                         {"id": "o4-mini"},
+                        {"id": "gpt-3.5-turbo-instruct"},
+                        {"id": "gpt-3.5-turbo-1106"},
+                        {"id": "gpt-4-32k"},
+                        {"id": "gpt-4o-search-preview"},
+                        {"id": "gpt-oss-120b"},
                         {"id": "babbage-002"},
                         {"id": "davinci-002"},
                         {"id": "computer-use-preview"},
@@ -232,7 +240,10 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
         async with client_for(httpx.MockTransport(handler)) as client:
             models = await OpenAIResponsesAdapter(client, "secret").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["gpt-5.6-terra", "o4-mini"])
+        self.assertEqual(
+            [model.ref.model for model in models],
+            ["gpt-5.6-terra", "gpt-4.1-mini", "gpt-4o-mini", "gpt-3.5-turbo-0125", "o4-mini"],
+        )
         self.assertTrue(models[0].capabilities.chat)
         self.assertTrue(models[0].capabilities.tools)
         self.assertTrue(models[1].capabilities.chat)

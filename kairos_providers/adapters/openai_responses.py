@@ -41,9 +41,17 @@ _NON_TEXTUAL_MODEL_MARKERS = (
     "sora",
     "realtime",
     "audio",
+    "search",
+    "deep-research",
 )
-_RESPONSE_TEXT_MODEL_PATTERN = re.compile(
-    r"(?:gpt-[a-z0-9][a-z0-9.-]*|o(?:1|3|4)(?:-[a-z0-9][a-z0-9.-]*)?)"
+_RESPONSE_TEXT_MODEL_PATTERNS = (
+    re.compile(r"gpt-5(?:[.-][a-z0-9][a-z0-9.-]*)?"),
+    re.compile(r"gpt-4\.1(?:-[a-z0-9][a-z0-9.-]*)?"),
+    re.compile(r"gpt-4o(?:-[a-z0-9][a-z0-9.-]*)?"),
+    re.compile(r"gpt-4-turbo(?:-[a-z0-9][a-z0-9.-]*)?"),
+    re.compile(r"gpt-4-0613"),
+    re.compile(r"gpt-3\.5-turbo(?:-0125)?"),
+    re.compile(r"o(?:1|3|4)(?:-[a-z0-9][a-z0-9.-]*)?"),
 )
 
 
@@ -202,12 +210,13 @@ def _is_chat_text_model(model_id: str) -> bool:
     """Aceita apenas famílias Responses textuais conhecidas pela aplicação.
 
     A Models API não anuncia capacidades; assim, IDs só entram no catálogo
-    quando pertencem às famílias textuais `gpt-*` ou `o1`/`o3`/`o4`. A
-    allowlist também impede que IDs legados, fine-tunes e modelos especializados
-    sejam promovidos a chat apenas por não constarem de uma denylist.
+    quando pertencem às famílias documentadas de GPT-5, GPT-4.1, GPT-4o,
+    GPT-4 Turbo, GPT-3.5 Turbo 0125 ou `o1`/`o3`/`o4`. A allowlist impede que
+    IDs legados, instruct, fine-tunes e modelos especializados sejam promovidos
+    a chat apenas por não constarem de uma denylist.
     """
     normalized = model_id.casefold()
-    return bool(_RESPONSE_TEXT_MODEL_PATTERN.fullmatch(normalized)) and not any(
+    return any(pattern.fullmatch(normalized) for pattern in _RESPONSE_TEXT_MODEL_PATTERNS) and not any(
         marker in normalized for marker in _NON_TEXTUAL_MODEL_MARKERS
     )
 
