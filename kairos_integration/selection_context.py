@@ -63,6 +63,16 @@ class SelectionContextLoader:
             message=parse_ref(envelope.override),
             conversation=parse_ref(persisted.ref if persisted is not None else None),
             activity=activity_ref,
-            profile=parse_ref(profile_config.get("model")),
-            global_default=parse_ref(self._global_config.get("model")),
+            profile=parse_ref(_config_ref(profile_config)),
+            global_default=parse_ref(_config_ref(self._global_config)),
         )
+
+
+def _config_ref(config: Mapping[str, Any]) -> Any:
+    model = config.get("model")
+    if isinstance(model, str) and isinstance(config.get("provider"), str):
+        return {
+            "provider": config["provider"],
+            "model": model,
+        }
+    return model

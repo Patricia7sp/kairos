@@ -44,10 +44,16 @@ class SelectionContextLoaderTests(unittest.TestCase):
         profile: ProviderModelRef | None = None,
         activity: ProviderModelRef | None = None,
         global_default: ProviderModelRef | None = None,
+        profile_configs: dict[str, object] | None = None,
+        global_config: dict[str, object] | None = None,
     ) -> SelectionContextLoader:
-        profile_configs: dict[str, object] = {}
+        built_profile_configs = profile_configs or {}
         if profile is not None or activity is not None:
-            profile_config: dict[str, object] = {}
+            profile_config: dict[str, object] = dict(
+                built_profile_configs.get("work", {})
+                if isinstance(built_profile_configs.get("work"), dict)
+                else {}
+            )
             if profile is not None:
                 profile_config["model"] = {
                     "provider": profile.provider,
@@ -57,17 +63,17 @@ class SelectionContextLoaderTests(unittest.TestCase):
                 profile_config["auxiliary_models"] = {
                     "vision": f"{activity.provider}/{activity.model}"
                 }
-            profile_configs["work"] = profile_config
-        global_config: dict[str, object] = {}
+            built_profile_configs["work"] = profile_config
+        built_global_config = global_config or {}
         if global_default is not None:
-            global_config["model"] = {
+            built_global_config["model"] = {
                 "provider": global_default.provider,
                 "model": global_default.model,
             }
         return SelectionContextLoader(
             self.sessions,
-            profile_configs=profile_configs,
-            global_config=global_config,
+            profile_configs=built_profile_configs,
+            global_config=built_global_config,
         )
 
     def test_contexto_monta_cinco_camadas_sem_escolher_fallback(self) -> None:
@@ -95,3 +101,13 @@ class SelectionContextLoaderTests(unittest.TestCase):
         context = self.loader().load(envelope(profile=None))
 
         self.assertTrue(all(value is None for value in vars(context).values()))
+
+    def test_modelo_global_com_provider_irmao_vira_ref(self) -> None:
+        context = self.loader(
+            global_config={
+                "provider": "gemini",
+                "model": "gemini-2.0-flash",
+            }
+        ).load(envelope(profile=None))
+
+        self.assertEqual(context.global_default, ProviderModelRef("gemini", "gemini-2.0-flash"))
