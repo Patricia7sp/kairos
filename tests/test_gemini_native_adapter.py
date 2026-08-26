@@ -187,6 +187,7 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
                 json={
                     "models": [
                         {"name": "models/gemini-3.7-flash", "displayName": "Gemini Flash", "supportedGenerationMethods": ["generateContent"]},
+                        {"name": "models/gemini-unknown", "supportedGenerationMethods": ["generateContent"]},
                         {"name": "models/gemini-embed", "supportedGenerationMethods": ["embedContent"]},
                         {"name": "models/palm-chat", "supportedGenerationMethods": ["generateContent"]},
                     ]
@@ -196,9 +197,10 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         async with client_for(httpx.MockTransport(handler)) as client:
             models = await GeminiNativeAdapter(client, api_key="secret").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["gemini-3.7-flash"])
+        self.assertEqual([model.ref.model for model in models], ["gemini-3.7-flash", "gemini-unknown"])
         self.assertEqual(models[0].display_name, "Gemini 3.7 Flash")
         self.assertTrue(models[0].capabilities.tools)
+        self.assertFalse(models[1].capabilities.tools)
 
     async def test_eof_sem_finish_e_erro_de_rede_sem_confirmar_tool(self):
         def handler(_request: httpx.Request) -> httpx.Response:

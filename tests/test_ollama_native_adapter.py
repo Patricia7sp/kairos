@@ -97,7 +97,11 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            events = await collect(OllamaNativeAdapter(client, "http://ollama.test/").stream(request_with_history_and_tool()))
+            events = await collect(
+                OllamaNativeAdapter(client, "http://127.0.0.1:11434/").stream(
+                    request_with_history_and_tool()
+                )
+            )
 
         self.assertEqual([event.kind for event in events], ["text_delta", "tool_call", "usage", "finish"])
         self.assertEqual(events[0].text, "São ")
@@ -109,13 +113,41 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_discover_models_usa_somente_tags_instaladas(self):
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/tags")
-            return httpx.Response(200, json={"models": [{"name": "llama3.3"}, {"name": "qwen2.5:7b"}]})
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {"name": "llama3.3"},
+                        {"name": "nomic-embed-text", "details": {"family": "embedding"}},
+                    ]
+                },
+            )
 
         async with client_for(httpx.MockTransport(handler)) as client:
-            models = await OllamaNativeAdapter(client, "http://ollama.test").discover_models()
+            models = await OllamaNativeAdapter(client, "http://127.0.0.1:11434").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["llama3.3", "qwen2.5:7b"])
-        self.assertTrue(all(model.capabilities.chat and model.capabilities.streaming for model in models))
+        self.assertEqual([model.ref.model for model in models], ["llama3.3", "nomic-embed-text"])
+        self.assertIsNone(models[0].capabilities.chat)
+        self.assertIsNone(models[0].capabilities.tools)
+        self.assertFalse(models[0].is_selectable())
+        self.assertFalse(models[1].capabilities.chat)
+        self.assertFalse(models[1].is_selectable())
+
+    async def test_base_url_lan_exige_opt_in_explicito_sem_resolver_dns(self):
+        async with client_for(httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))) as client:
+            with self.assertRaisesRegex(ValueError, "allow_remote"):
+                OllamaNativeAdapter(client, "http://192.168.10.20:11434")
+            adapter = OllamaNativeAdapter(
+                client, "http://192.168.10.20:11434", allow_remote=True
+            )
+
+        self.assertIn("base_url=<configured>", repr(adapter))
+
+    async def test_base_url_loopback_e_aceita_sem_opt_in(self):
+        async with client_for(httpx.MockTransport(lambda _request: self.fail("não deve chamar HTTP"))) as client:
+            adapter = OllamaNativeAdapter(client, "http://[::1]:11434")
+
+        self.assertIn("base_url=<configured>", repr(adapter))
 
     async def test_daemon_ausente_e_unavailable_sem_credencial(self):
         def handler(_request: httpx.Request) -> httpx.Response:
@@ -136,7 +168,9 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
         events = []
         async with client_for(httpx.MockTransport(handler)) as client:
             with self.assertRaises(ProviderError) as context:
-                async for event in OllamaNativeAdapter(client, "http://ollama.test").stream(simple_request()):
+                async for event in OllamaNativeAdapter(client, "http://127.0.0.1:11434").stream(
+                    simple_request()
+                ):
                     events.append(event)
 
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
@@ -145,6 +179,8 @@ class OllamaNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_404_vira_model_error(self):
         async with client_for(httpx.MockTransport(lambda _request: httpx.Response(404))) as client:
             with self.assertRaises(ProviderError) as context:
-                await collect(OllamaNativeAdapter(client, "http://ollama.test").stream(simple_request()))
+                await collect(
+                    OllamaNativeAdapter(client, "http://127.0.0.1:11434").stream(simple_request())
+                )
 
         self.assertIs(context.exception.kind, ProviderErrorKind.MODEL)

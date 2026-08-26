@@ -92,7 +92,7 @@ class GeminiNativeAdapter:
                 CatalogModel(
                     ref=ProviderModelRef(self.descriptor.id, model_id),
                     display_name=display_name if isinstance(display_name, str) else model_id,
-                    capabilities=ModelCapabilities(chat=True, tools=True, streaming=True),
+                    capabilities=ModelCapabilities(chat=True, tools=False, streaming=True),
                     origins=frozenset({CatalogOrigin.DYNAMIC}),
                 )
             )

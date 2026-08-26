@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
@@ -36,7 +37,9 @@ class OllamaNativeAdapter:
 
     descriptor = ProviderDescriptor("ollama", "Ollama", ())
 
-    def __init__(self, http: httpx.AsyncClient, base_url: str) -> None:
+    def __init__(
+        self, http: httpx.AsyncClient, base_url: str, *, allow_remote: bool = False
+    ) -> None:
         url = httpx.URL(base_url)
         if (
             url.scheme not in {"http", "https"}
@@ -47,6 +50,8 @@ class OllamaNativeAdapter:
             raise ValueError("base_url do Ollama é inválida")
         if url.query or url.fragment:
             raise ValueError("base_url do Ollama não pode conter credenciais")
+        if not allow_remote and not _is_loopback_host(url.host):
+            raise ValueError("base_url remoto do Ollama requer allow_remote=True")
         self._http = http
         self._base_url = str(url).rstrip("/")
 
@@ -71,7 +76,7 @@ class OllamaNativeAdapter:
                 CatalogModel(
                     ref=ProviderModelRef(self.descriptor.id, name),
                     display_name=name,
-                    capabilities=ModelCapabilities(chat=True, tools=True, streaming=True),
+                    capabilities=_capabilities_for(record, name),
                     origins=frozenset({CatalogOrigin.DYNAMIC}),
                 )
             )
@@ -143,6 +148,31 @@ class OllamaNativeAdapter:
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}{path}"
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.casefold() in {"localhost", "localhost."}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _capabilities_for(record: dict[str, Any], name: str) -> ModelCapabilities:
+    """Tags não informam capacidades; só marca families explicitamente não-chat."""
+    details = record.get("details")
+    details_values: list[str] = [name]
+    if isinstance(details, dict):
+        family = details.get("family")
+        if isinstance(family, str):
+            details_values.append(family)
+        families = details.get("families")
+        if isinstance(families, list):
+            details_values.extend(value for value in families if isinstance(value, str))
+    if any(marker in value.casefold() for value in details_values for marker in ("embed", "rerank")):
+        return ModelCapabilities(chat=False, tools=False, streaming=False)
+    return ModelCapabilities()
 
 
 def _payload_for(request: AdapterRequest, provider: str) -> dict[str, Any]:
