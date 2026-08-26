@@ -1,5 +1,7 @@
 import asyncio
 import sqlite3
+import threading
+from pathlib import Path
 from typing import get_type_hints
 
 import pytest
@@ -328,3 +330,141 @@ def test_cancelar_um_caller_nao_cancela_cleanup_compartilhado(tmp_path, monkeypa
 
     assert flush_attempts == 1
     assert gateway.close_attempts == 1
+
+
+class ThreadSafeUsage:
+    def __init__(self):
+        self.flush_attempts = 0
+        self._lock = threading.Lock()
+
+    def flush(self):
+        with self._lock:
+            self.flush_attempts += 1
+        return 0
+
+
+class ThreadSafeConnection:
+    def __init__(self):
+        self.close_attempts = 0
+        self._lock = threading.Lock()
+
+    def close(self):
+        with self._lock:
+            self.close_attempts += 1
+
+
+class ThreadBarrierGateway:
+    def __init__(self):
+        self.close_attempts = 0
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+
+    async def aclose(self):
+        with self._lock:
+            self.close_attempts += 1
+        self.started.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.001)
+
+
+def thread_safe_service():
+    gateway = ThreadBarrierGateway()
+    usage = ThreadSafeUsage()
+    connection = ThreadSafeConnection()
+    service = ComposedInteractionService(
+        home=Path("/thread-test"),
+        connection=connection,
+        gateway=gateway,
+        resolver=object(),
+        context_loader=object(),
+        sessions=object(),
+        messages=object(),
+        usage=usage,
+    )
+    return service, gateway, usage, connection
+
+
+def run_close_in_thread(
+    service, results: dict[str, object], name: str, joined: threading.Event | None = None
+):
+    async def close():
+        task = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+        if joined is not None:
+            joined.set()
+        await task
+
+    try:
+        results[name] = asyncio.run(close())
+    except BaseException as exc:  # noqa: BLE001 - captura CancelledError do thread waiter
+        results[name] = exc
+
+
+def test_service_aclose_em_loops_de_threads_compartilha_tentativa():
+    """Loops distintos devem observar um cleanup global, sem Future estrangeira."""
+    service, gateway, usage, connection = thread_safe_service()
+    results: dict[str, object] = {}
+    second_joined = threading.Event()
+
+    first = threading.Thread(
+        target=run_close_in_thread,
+        args=(service, results, "first"),
+        daemon=True,
+    )
+    first.start()
+    assert gateway.started.wait(timeout=2)
+    second = threading.Thread(
+        target=run_close_in_thread,
+        args=(service, results, "second", second_joined),
+        daemon=True,
+    )
+    second.start()
+    assert second_joined.wait(timeout=2)
+    gateway.release.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert results == {"first": None, "second": None}
+    assert usage.flush_attempts == 1
+    assert gateway.close_attempts == 1
+    assert connection.close_attempts == 1
+
+
+def test_cancelar_waiter_em_outro_loop_nao_cancela_cleanup_global():
+    """Cancelamento loop-local não pode cancelar o attempt usado por outro loop."""
+    service, gateway, usage, connection = thread_safe_service()
+    results: dict[str, object] = {}
+
+    leader = threading.Thread(
+        target=run_close_in_thread,
+        args=(service, results, "leader"),
+        daemon=True,
+    )
+    leader.start()
+    assert gateway.started.wait(timeout=2)
+
+    def run_cancelled_waiter() -> None:
+        async def cancel_waiter():
+            task = asyncio.create_task(service.aclose())
+            await asyncio.sleep(0)
+            task.cancel()
+            return (await asyncio.gather(task, return_exceptions=True))[0]
+
+        results["cancelled"] = asyncio.run(cancel_waiter())
+
+    cancelled = threading.Thread(target=run_cancelled_waiter, daemon=True)
+    cancelled.start()
+    cancelled.join(timeout=2)
+    assert not cancelled.is_alive()
+    gateway.release.set()
+    leader.join(timeout=2)
+
+    assert not leader.is_alive()
+    assert results["leader"] is None
+    assert isinstance(results["cancelled"], asyncio.CancelledError)
+    assert usage.flush_attempts == 1
+    assert gateway.close_attempts == 1
+    assert connection.close_attempts == 1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -99,6 +100,26 @@ class BarrierFailingOnceClient(TrackingClient):
         await self.release.wait()
         if attempt == 1:
             raise RuntimeError("falha compartilhada")
+        self.closed = True
+
+
+class ThreadBarrierClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+
+    async def aclose(self) -> None:
+        with self._lock:
+            self.close_attempts += 1
+            attempt = self.close_attempts
+        self.started.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.001)
+        if attempt == 1:
+            raise RuntimeError("falha cross-loop compartilhada")
         self.closed = True
 
 
@@ -534,5 +555,55 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.close_attempts, 1)
             await gateway.aclose()
 
+        self.assertEqual(client.close_attempts, 2)
+        self.assertTrue(client.closed)
+
+    def test_aclose_em_loops_de_threads_compartilha_tentativa(self):
+        """Waiters de loops distintos não podem aguardar Task estrangeira nem duplicar close."""
+        client = ThreadBarrierClient()
+        results: dict[str, object] = {}
+        second_joined = threading.Event()
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+
+            def run_close(name: str, joined: threading.Event | None = None) -> None:
+                async def close() -> None:
+                    task = asyncio.create_task(gateway.aclose())
+                    await asyncio.sleep(0)
+                    if joined is not None:
+                        joined.set()
+                    await task
+
+                try:
+                    results[name] = asyncio.run(close())
+                except BaseException as exc:  # noqa: BLE001 - registra outcome cross-loop
+                    results[name] = exc
+
+            first = threading.Thread(target=run_close, args=("first",), daemon=True)
+            first.start()
+            self.assertTrue(client.started.wait(timeout=2))
+            second = threading.Thread(
+                target=run_close,
+                args=("second", second_joined),
+                daemon=True,
+            )
+            second.start()
+            self.assertTrue(second_joined.wait(timeout=2))
+            client.release.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertTrue(
+            all(isinstance(results[name], BaseExceptionGroup) for name in ("first", "second"))
+        )
+        self.assertEqual(client.close_attempts, 1)
+        asyncio.run(gateway.aclose())
         self.assertEqual(client.close_attempts, 2)
         self.assertTrue(client.closed)
