@@ -7,20 +7,18 @@ do cofre somente quando precisa instanciar um adapter.
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import os
 import shutil
 import subprocess
-import threading
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future as ConcurrentFuture
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.adapters import (
     AnthropicAdapter,
     AnthropicMessagesAdapter,
@@ -122,15 +120,12 @@ class _ProviderHttpClients:
     def __init__(self, client_factory: Callable[[], httpx.AsyncClient] | None = None) -> None:
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._closing = False
-        self._closed = False
-        self._close_lock = threading.Lock()
-        self._close_result: ConcurrentFuture[None] | None = None
-        self._close_runner: asyncio.Task[None] | None = None
+        self._close = AsyncCleanupCoordinator(task_name="kairos-provider-clients-close")
         self._client_factory = client_factory or self._new_http_client
 
     def for_provider(self, provider: str) -> httpx.AsyncClient:
-        with self._close_lock:
-            if self._closing or self._closed:
+        with self._close.lock:
+            if self._closing or self._close.succeeded:
                 raise RuntimeError("gateway de providers já foi encerrado")
             client = self._clients.get(provider)
             if client is None:
@@ -146,33 +141,10 @@ class _ProviderHttpClients:
         )
 
     async def aclose(self) -> None:
-        with self._close_lock:
-            if self._closed:
-                return
-            result = self._close_result
-            if result is None or result.done():
-                result = ConcurrentFuture()
-                self._close_result = result
-                self._closing = True
-                self._close_runner = asyncio.create_task(
-                    self._publish_close_result(result),
-                    name="kairos-provider-clients-close",
-                )
-        await self._await_close_result(result)
+        await self._close.run(self._close_attempt, on_reserve=self._begin_closing)
 
-    @staticmethod
-    async def _await_close_result(result: ConcurrentFuture[None]) -> None:
-        while not result.done():
-            await asyncio.sleep(0.001)
-        result.result()
-
-    async def _publish_close_result(self, result: ConcurrentFuture[None]) -> None:
-        try:
-            await self._close_attempt()
-        except BaseException as exc:  # noqa: BLE001 - publica falha/cancelamento aos waiters
-            result.set_exception(exc)
-        else:
-            result.set_result(None)
+    def _begin_closing(self) -> None:
+        self._closing = True
 
     async def _close_attempt(self) -> None:
         errors: list[BaseException] = []
@@ -185,8 +157,6 @@ class _ProviderHttpClients:
                 del self._clients[provider]
         if errors:
             raise BaseExceptionGroup("falha ao fechar clientes de providers", errors)
-        with self._close_lock:
-            self._closed = True
 
 
 class _ComposedProviderGateway(ProviderGateway):

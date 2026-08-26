@@ -6,7 +6,6 @@ import asyncio
 import sqlite3
 import threading
 from collections.abc import Awaitable, Callable, Mapping
-from concurrent.futures import Future as ConcurrentFuture
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ import yaml
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_providers import ModelSelectionResolver
+from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.composition import build_provider_gateway
 from kairos_state import connect
 from kairos_state.migrations import migrate
@@ -64,39 +64,11 @@ class ComposedInteractionService(InteractionService):
         self.home = home
         self.gateway = self._gateway
         self._connection = connection
-        self._closed = False
-        self._close_lock = threading.Lock()
-        self._close_result: ConcurrentFuture[None] | None = None
-        self._close_runner: asyncio.Task[None] | None = None
+        self._close = AsyncCleanupCoordinator(task_name="kairos-interaction-service-close")
 
     async def aclose(self) -> None:
         """Fecha, uma única vez, somente os recursos criados por esta composição."""
-        with self._close_lock:
-            if self._closed:
-                return
-            result = self._close_result
-            if result is None or result.done():
-                result = ConcurrentFuture()
-                self._close_result = result
-                self._close_runner = asyncio.create_task(
-                    self._publish_close_result(result),
-                    name="kairos-interaction-service-close",
-                )
-        await self._await_close_result(result)
-
-    @staticmethod
-    async def _await_close_result(result: ConcurrentFuture[None]) -> None:
-        while not result.done():
-            await asyncio.sleep(0.001)
-        result.result()
-
-    async def _publish_close_result(self, result: ConcurrentFuture[None]) -> None:
-        try:
-            await self._close_attempt()
-        except BaseException as exc:  # noqa: BLE001 - publica falha/cancelamento aos waiters
-            result.set_exception(exc)
-        else:
-            result.set_result(None)
+        await self._close.run(self._close_attempt)
 
     async def _close_attempt(self) -> None:
         errors: list[BaseException] = []
@@ -117,8 +89,6 @@ class ComposedInteractionService(InteractionService):
                 errors.append(exc)
         if errors:
             raise BaseExceptionGroup("falha ao fechar InteractionService", errors)
-        with self._close_lock:
-            self._closed = True
 
     async def __aenter__(self) -> ComposedInteractionService:
         return self

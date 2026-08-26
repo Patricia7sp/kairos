@@ -356,6 +356,7 @@ class ThreadSafeConnection:
 class ThreadBarrierGateway:
     def __init__(self):
         self.close_attempts = 0
+        self.close_thread_id = None
         self.started = threading.Event()
         self.release = threading.Event()
         self._lock = threading.Lock()
@@ -363,6 +364,7 @@ class ThreadBarrierGateway:
     async def aclose(self):
         with self._lock:
             self.close_attempts += 1
+            self.close_thread_id = threading.get_ident()
         self.started.set()
         while not self.release.is_set():
             await asyncio.sleep(0.001)
@@ -465,6 +467,117 @@ def test_cancelar_waiter_em_outro_loop_nao_cancela_cleanup_global():
     assert not leader.is_alive()
     assert results["leader"] is None
     assert isinstance(results["cancelled"], asyncio.CancelledError)
+    assert usage.flush_attempts == 1
+    assert gateway.close_attempts == 1
+    assert connection.close_attempts == 1
+
+
+def test_owner_loop_sai_mas_cleanup_e_waiter_estrangeiro_terminam(monkeypatch):
+    """Shutdown do loop não pode cancelar o runner antes de seu primeiro passo."""
+    from kairos_providers import _async_cleanup
+
+    service, gateway, usage, connection = thread_safe_service()
+    results: dict[str, object] = {}
+    foreign_joined = threading.Event()
+    real_launch = _async_cleanup._launch_cleanup_task
+
+    def cancel_before_start(coroutine, *, name):
+        task = real_launch(coroutine, name=name)
+        results["runner_cancelled"] = task.cancel()
+        return task
+
+    def run_owner() -> None:
+        results["owner_thread_id"] = threading.get_ident()
+
+        async def cancel_waiter_and_exit() -> object:
+            waiter = asyncio.create_task(service.aclose())
+            while not gateway.started.is_set():
+                await asyncio.sleep(0.001)
+            waiter.cancel()
+            return (await asyncio.gather(waiter, return_exceptions=True))[0]
+
+        results["owner_waiter"] = asyncio.run(cancel_waiter_and_exit())
+
+    def run_foreign_waiter() -> None:
+        async def wait_for_close() -> None:
+            waiter = asyncio.create_task(service.aclose())
+            await asyncio.sleep(0)
+            foreign_joined.set()
+            await waiter
+
+        try:
+            results["foreign"] = asyncio.run(wait_for_close())
+        except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
+            results["foreign"] = exc
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(_async_cleanup, "_launch_cleanup_task", cancel_before_start)
+        owner = threading.Thread(target=run_owner, daemon=True)
+        owner.start()
+        assert gateway.started.wait(timeout=2)
+        foreign = threading.Thread(target=run_foreign_waiter, daemon=True)
+        foreign.start()
+        assert foreign_joined.wait(timeout=2)
+        owner.join(timeout=0.05)
+        assert owner.is_alive(), "asyncio.run deveria aguardar o cleanup resistente"
+        gateway.release.set()
+        owner.join(timeout=2)
+        foreign.join(timeout=2)
+
+    assert not owner.is_alive()
+    assert not foreign.is_alive()
+    assert results["runner_cancelled"] is False
+    assert isinstance(results["owner_waiter"], asyncio.CancelledError)
+    assert results["foreign"] is None
+    assert gateway.close_thread_id == results["owner_thread_id"]
+    assert usage.flush_attempts == 1
+    assert gateway.close_attempts == 1
+    assert connection.close_attempts == 1
+
+
+def test_falha_ao_agendar_cleanup_publica_resultado_e_permite_retry(monkeypatch):
+    """Falha de launch não pode deixar um outcome pendente nem duplicar cleanup."""
+    from kairos_providers import _async_cleanup
+
+    service, gateway, usage, connection = thread_safe_service()
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(
+            _async_cleanup,
+            "_launch_cleanup_task",
+            lambda _coroutine, *, name: (_ for _ in ()).throw(RuntimeError(name)),
+        )
+        with pytest.raises(RuntimeError, match="kairos-interaction-service-close"):
+            asyncio.run(service.aclose())
+
+    gateway.release.set()
+    asyncio.run(asyncio.wait_for(service.aclose(), timeout=1))
+
+    assert usage.flush_attempts == 1
+    assert gateway.close_attempts == 1
+    assert connection.close_attempts == 1
+
+
+def test_cleanup_nao_usa_task_factory_eager_do_caller():
+    """Uma factory customizada não pode executar cleanup durante a reserva bloqueada."""
+    service, gateway, usage, connection = thread_safe_service()
+    gateway.release.set()
+
+    async def close_with_hostile_factory() -> None:
+        loop = asyncio.get_running_loop()
+
+        def hostile_factory(_loop, coroutine, **_kwargs):
+            coroutine.close()
+            raise AssertionError("task factory do caller executou cleanup")
+
+        loop.set_task_factory(hostile_factory)
+        try:
+            await service.aclose()
+        finally:
+            loop.set_task_factory(None)
+
+    asyncio.run(close_with_hostile_factory())
+
     assert usage.flush_attempts == 1
     assert gateway.close_attempts == 1
     assert connection.close_attempts == 1
