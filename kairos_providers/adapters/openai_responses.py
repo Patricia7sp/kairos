@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -29,7 +30,7 @@ __all__ = ["OpenAIResponsesAdapter"]
 
 
 _OPENAI_API_BASE = "https://api.openai.com/v1"
-_NON_CHAT_MODEL_MARKERS = (
+_NON_TEXTUAL_MODEL_MARKERS = (
     "embedding",
     "moderation",
     "transcribe",
@@ -40,6 +41,9 @@ _NON_CHAT_MODEL_MARKERS = (
     "sora",
     "realtime",
     "audio",
+)
+_RESPONSE_TEXT_MODEL_PATTERN = re.compile(
+    r"(?:gpt-[a-z0-9][a-z0-9.-]*|o(?:1|3|4)(?:-[a-z0-9][a-z0-9.-]*)?)"
 )
 
 
@@ -131,6 +135,8 @@ class OpenAIResponsesAdapter:
                     for canonical in normalized:
                         yield canonical
                     finished = finished or completed
+                    if completed:
+                        break
         except httpx.TimeoutException as exc:
             raise ProviderError(ProviderErrorKind.NETWORK, retryable=True) from exc
         except httpx.HTTPError as exc:
@@ -193,18 +199,27 @@ class OpenAIResponsesAdapter:
 
 
 def _is_chat_text_model(model_id: str) -> bool:
+    """Aceita apenas famílias Responses textuais conhecidas pela aplicação.
+
+    A Models API não anuncia capacidades; assim, IDs só entram no catálogo
+    quando pertencem às famílias textuais `gpt-*` ou `o1`/`o3`/`o4`. A
+    allowlist também impede que IDs legados, fine-tunes e modelos especializados
+    sejam promovidos a chat apenas por não constarem de uma denylist.
+    """
     normalized = model_id.casefold()
-    return not any(marker in normalized for marker in _NON_CHAT_MODEL_MARKERS)
+    return bool(_RESPONSE_TEXT_MODEL_PATTERN.fullmatch(normalized)) and not any(
+        marker in normalized for marker in _NON_TEXTUAL_MODEL_MARKERS
+    )
 
 
 def _input_for(request: AdapterRequest) -> list[dict[str, Any]]:
     input_items: list[dict[str, Any]] = []
     for message in request.messages:
-        text_parts = []
+        text_values: list[str] = []
         for part in message.content:
             if part.kind != "text" or not isinstance(part.value, str):
                 raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
-            text_parts.append({"type": "input_text", "text": part.value})
+            text_values.append(part.value)
 
         if message.role == "tool":
             if message.tool_call_id is None:
@@ -213,12 +228,23 @@ def _input_for(request: AdapterRequest) -> list[dict[str, Any]]:
                 {
                     "type": "function_call_output",
                     "call_id": message.tool_call_id,
-                    "output": "".join(part["text"] for part in text_parts),
+                    "output": "".join(text_values),
                 }
             )
-        elif text_parts:
-            input_items.append({"role": message.role, "content": text_parts})
+        elif message.role in {"user", "system", "developer", "assistant"}:
+            if text_values:
+                content_type = "output_text" if message.role == "assistant" else "input_text"
+                input_items.append(
+                    {
+                        "role": message.role,
+                        "content": [{"type": content_type, "text": value} for value in text_values],
+                    }
+                )
+        else:
+            raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
 
+        if message.tool_calls and message.role != "assistant":
+            raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
         for call in message.tool_calls:
             input_items.append(
                 {

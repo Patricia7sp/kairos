@@ -10,6 +10,7 @@ import httpx
 from kairos_providers import (
     AdapterRequest,
     CanonicalMessage,
+    CanonicalToolCall,
     ContentPart,
     ProviderError,
     ProviderErrorKind,
@@ -146,8 +147,68 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[2].usage.output_tokens, 4)  # type: ignore[union-attr]
         self.assertEqual(events[3].finish_reason, "completed")
 
-    async def test_discover_models_usa_api_e_capacidades_curadas(self):
-        """Ignorar /models ou a curadoria deixaria o catálogo sem modelos selecionáveis."""
+    async def test_serializa_historico_assistant_e_tool_com_itens_responses(self):
+        """Usar input_text para resposta ou tool histórico torna o próximo turno inválido."""
+        request = AdapterRequest(
+            model=ProviderModelRef("openai", "gpt-5.6-terra"),
+            messages=(
+                CanonicalMessage(
+                    role="user",
+                    content=(ContentPart(kind="text", value="Como está o tempo?"),),
+                ),
+                CanonicalMessage(
+                    role="assistant",
+                    content=(ContentPart(kind="text", value="Vou consultar."),),
+                    tool_calls=(
+                        CanonicalToolCall(
+                            id="call_weather",
+                            name="tempo",
+                            arguments='{"cidade":"Lisboa"}',
+                        ),
+                    ),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    tool_call_id="call_weather",
+                    content=(ContentPart(kind="text", value="22°C e limpo"),),
+                ),
+            ),
+        )
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            self.assertEqual(
+                json.loads(http_request.content)["input"],
+                [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Como está o tempo?"}],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Vou consultar."}],
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_weather",
+                        "name": "tempo",
+                        "arguments": '{"cidade":"Lisboa"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_weather",
+                        "output": "22°C e limpo",
+                    },
+                ],
+            )
+            return httpx.Response(200, content=sse({"type": "response.completed", "response": {}}))
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(OpenAIResponsesAdapter(client, "secret").stream(request))
+
+        self.assertEqual([event.kind for event in events], ["finish"])
+
+    async def test_discover_models_aceita_apenas_familias_textuais_responses_comprovadas(self):
+        """Aceitar qualquer ID da Models API exporia modelos sem chat/Responses comprovado."""
 
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "GET")
@@ -155,17 +216,52 @@ class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers["authorization"], "Bearer secret")
             return httpx.Response(
                 200,
-                json={"data": [{"id": "gpt-5.6-terra"}, {"id": "gpt-unlisted"}]},
+                json={
+                    "data": [
+                        {"id": "gpt-5.6-terra"},
+                        {"id": "o4-mini"},
+                        {"id": "babbage-002"},
+                        {"id": "davinci-002"},
+                        {"id": "computer-use-preview"},
+                        {"id": "text-embedding-3-small"},
+                        {"id": "ft:gpt-5.6-terra:org:custom"},
+                    ]
+                },
             )
 
         async with client_for(httpx.MockTransport(handler)) as client:
             models = await OpenAIResponsesAdapter(client, "secret").discover_models()
 
-        self.assertEqual([model.ref.model for model in models], ["gpt-5.6-terra", "gpt-unlisted"])
+        self.assertEqual([model.ref.model for model in models], ["gpt-5.6-terra", "o4-mini"])
         self.assertTrue(models[0].capabilities.chat)
         self.assertTrue(models[0].capabilities.tools)
         self.assertTrue(models[1].capabilities.chat)
         self.assertTrue(models[1].capabilities.streaming)
+
+    async def test_response_completed_interrompe_consumo_de_eventos_tardios(self):
+        """Ler SSE depois do terminal poderia persistir texto posterior inválido no turno."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {"type": "response.output_text.delta", "delta": "antes"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "status": "completed",
+                            "usage": {"input_tokens": 3, "output_tokens": 1},
+                        },
+                    },
+                    {"type": "response.output_text.delta", "delta": "tarde"},
+                ),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(OpenAIResponsesAdapter(client, "secret").stream(simple_request()))
+
+        self.assertEqual([event.kind for event in events], ["text_delta", "usage", "finish"])
+        self.assertEqual(events[0].text, "antes")
 
     async def test_openai_auth_error_e_estavel_sem_segredo(self):
         """Propagar corpo/header de 401 exporia credenciais e impediria ação de autenticação."""
