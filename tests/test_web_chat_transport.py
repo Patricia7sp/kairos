@@ -4,6 +4,7 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from kairos_integration import (
     InteractionSelectionSnapshot,
     InteractionToolResult,
 )
+from kairos_integration.turn_ownership import TurnLeaseLostError
 from kairos_providers import (
     CanonicalToolCall,
     CatalogOrigin,
@@ -66,6 +68,58 @@ class CleanupInteractionService(FakeInteractionService):
             yield InteractionEvent.turn_end("after-client-close")
         finally:
             self.stream_closed.set()
+
+
+class BoundaryLeaseLossService(FakeInteractionService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lease_lost = asyncio.Event()
+        self.stream_closed = asyncio.Event()
+
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        queue: asyncio.Queue[BaseException] = asyncio.Queue()
+
+        async def signal_loss() -> None:
+            await self.lease_lost.wait()
+            await queue.put(TurnLeaseLostError("detalhe-interno"))
+
+        producer = asyncio.create_task(signal_loss())
+        try:
+            yield InteractionEvent.turn_end("first")
+            raise await queue.get()
+        finally:
+            producer.cancel()
+            self.stream_closed.set()
+
+
+class BlockingSendWebSocket:
+    def __init__(self, service: FakeInteractionService) -> None:
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(interaction_service=service),
+        )
+        self.send_started = asyncio.Event()
+        self.allow_send = asyncio.Event()
+        self.closed_code: int | None = None
+        self.accepted = False
+        self._received = False
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def receive_text(self) -> str:
+        if not self._received:
+            self._received = True
+            return '{"type":"message","protocol":1,"content":"oi"}'
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def send_text(self, _payload: str) -> None:
+        self.send_started.set()
+        await self.allow_send.wait()
+
+    async def close(self, code: int) -> None:
+        self.closed_code = code
 
 
 class PersistingAdapter:
@@ -324,6 +378,26 @@ def test_websocket_fecha_stream_quando_cliente_desconecta() -> None:
         del state.interaction_service
 
     assert fake.stream_closed.wait(timeout=1)
+
+
+@pytest.mark.anyio
+async def test_lease_loss_durante_send_bloqueado_fecha_1011_e_desfaz_stream() -> None:
+    service = BoundaryLeaseLossService()
+    websocket = BlockingSendWebSocket(service)
+    handler = asyncio.create_task(server._chat_session(websocket))
+
+    await websocket.send_started.wait()
+    service.lease_lost.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert not handler.done()
+    websocket.allow_send.set()
+    await handler
+
+    assert websocket.accepted
+    assert websocket.closed_code == 1011
+    assert service.stream_closed.is_set()
 
 
 def test_tradutor_recusa_evento_canonico_sem_payload_obrigatorio() -> None:

@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AsyncTurnLeaseBackend",
+    "LeaseAcquireOutcome",
     "LeaseAcquireResult",
+    "LeaseRefreshOutcome",
     "LeaseRefreshResult",
     "LeaseReleaseResult",
     "SQLiteAsyncTurnLeaseBackend",
@@ -45,6 +47,22 @@ class LeaseReleaseResult(StrEnum):
     CONTENDED = "contended"
 
 
+@dataclass(frozen=True)
+class LeaseAcquireOutcome:
+    """Resultado da aquisição e deadline realmente persistido, quando adquirido."""
+
+    result: LeaseAcquireResult
+    expires_at: float | None = None
+
+
+@dataclass(frozen=True)
+class LeaseRefreshOutcome:
+    """Resultado da renovação e deadline realmente persistido, quando renovado."""
+
+    result: LeaseRefreshResult
+    expires_at: float | None = None
+
+
 class TurnLeaseLostError(RuntimeError):
     """O turno perdeu ownership durável e não pode continuar persistindo."""
 
@@ -57,8 +75,7 @@ class AsyncTurnLeaseBackend(Protocol):
         holder: str,
         *,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseAcquireResult: ...
+    ) -> LeaseAcquireOutcome: ...
 
     async def refresh(
         self,
@@ -66,8 +83,7 @@ class AsyncTurnLeaseBackend(Protocol):
         holder: str,
         *,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseRefreshResult: ...
+    ) -> LeaseRefreshOutcome: ...
 
     async def release(self, conversation_id: str, holder: str) -> LeaseReleaseResult: ...
 
@@ -75,8 +91,9 @@ class AsyncTurnLeaseBackend(Protocol):
 class SQLiteAsyncTurnLeaseBackend:
     """Lease SQLite via conexões curtas criadas somente dentro do worker."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, clock: Clock = time.time) -> None:
         self.db_path = Path(db_path)
+        self._clock = clock
 
     async def try_acquire(
         self,
@@ -85,15 +102,13 @@ class SQLiteAsyncTurnLeaseBackend:
         holder: str,
         *,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseAcquireResult:
+    ) -> LeaseAcquireOutcome:
         return await self._offload(
             self._try_acquire_sync,
             conversation_id,
             source,
             holder,
             ttl_seconds,
-            now,
         )
 
     async def refresh(
@@ -102,14 +117,12 @@ class SQLiteAsyncTurnLeaseBackend:
         holder: str,
         *,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseRefreshResult:
+    ) -> LeaseRefreshOutcome:
         return await self._offload(
             self._refresh_sync,
             conversation_id,
             holder,
             ttl_seconds,
-            now,
         )
 
     async def release(self, conversation_id: str, holder: str) -> LeaseReleaseResult:
@@ -136,11 +149,12 @@ class SQLiteAsyncTurnLeaseBackend:
         source: str,
         holder: str,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseAcquireResult:
+    ) -> LeaseAcquireOutcome:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            now = self._clock()
+            expires_at = now + ttl_seconds
             connection.execute(
                 "INSERT INTO sessions(id, source, started_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
@@ -155,16 +169,19 @@ class SQLiteAsyncTurnLeaseBackend:
                 "expires_at = excluded.expires_at "
                 "WHERE session_turn_leases.expires_at <= ? "
                 "OR session_turn_leases.holder = excluded.holder",
-                (conversation_id, holder, now, now + ttl_seconds, now),
+                (conversation_id, holder, now, expires_at, now),
             )
             connection.commit()
-            return (
-                LeaseAcquireResult.ACQUIRED if cursor.rowcount > 0 else LeaseAcquireResult.CONTENDED
+            return LeaseAcquireOutcome(
+                LeaseAcquireResult.ACQUIRED
+                if cursor.rowcount > 0
+                else LeaseAcquireResult.CONTENDED,
+                expires_at if cursor.rowcount > 0 else None,
             )
         except sqlite3.OperationalError as exc:
             connection.rollback()
             if is_busy_error(exc):
-                return LeaseAcquireResult.CONTENDED
+                return LeaseAcquireOutcome(LeaseAcquireResult.CONTENDED)
             raise
         finally:
             connection.close()
@@ -174,22 +191,26 @@ class SQLiteAsyncTurnLeaseBackend:
         conversation_id: str,
         holder: str,
         ttl_seconds: float,
-        now: float,
-    ) -> LeaseRefreshResult:
+    ) -> LeaseRefreshOutcome:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            now = self._clock()
+            expires_at = now + ttl_seconds
             cursor = connection.execute(
                 "UPDATE session_turn_leases SET expires_at = ? "
                 "WHERE conversation_id = ? AND holder = ? AND expires_at > ?",
-                (now + ttl_seconds, conversation_id, holder, now),
+                (expires_at, conversation_id, holder, now),
             )
             connection.commit()
-            return LeaseRefreshResult.REFRESHED if cursor.rowcount > 0 else LeaseRefreshResult.LOST
+            return LeaseRefreshOutcome(
+                LeaseRefreshResult.REFRESHED if cursor.rowcount > 0 else LeaseRefreshResult.LOST,
+                expires_at if cursor.rowcount > 0 else None,
+            )
         except sqlite3.OperationalError as exc:
             connection.rollback()
             if is_busy_error(exc):
-                return LeaseRefreshResult.CONTENDED
+                return LeaseRefreshOutcome(LeaseRefreshResult.CONTENDED)
             raise
         finally:
             connection.close()
@@ -234,6 +255,7 @@ class SessionTurnOwnership:
         poll_interval: float = 0.01,
         ttl_seconds: float = 300,
         refresh_interval: float | None = None,
+        release_max_attempts: int = 5,
         clock: Clock = time.time,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
@@ -245,10 +267,13 @@ class SessionTurnOwnership:
             raise ValueError("turn_lease_ttl_seconds deve ser positivo")
         if refresh_interval <= 0 or refresh_interval >= ttl_seconds:
             raise ValueError("turn_lease_refresh_interval deve estar entre zero e o TTL")
+        if release_max_attempts <= 0:
+            raise ValueError("turn_lease_release_max_attempts deve ser positivo")
         self._backend = backend
         self._poll_interval = poll_interval
         self._ttl_seconds = ttl_seconds
         self._refresh_interval = refresh_interval
+        self._release_max_attempts = release_max_attempts
         self._clock = clock
         self._sleep = sleep
         self._entries: dict[str, _TurnQueueEntry] = {}
@@ -308,25 +333,25 @@ class SessionTurnOwnership:
 
     async def _acquire_durable(self, conversation_id: str, source: str, holder: str) -> float:
         while True:
-            attempt_time = self._clock()
             task = asyncio.create_task(
                 self._backend.try_acquire(
                     conversation_id,
                     source,
                     holder,
                     ttl_seconds=self._ttl_seconds,
-                    now=attempt_time,
                 )
             )
             try:
                 result = await asyncio.shield(task)
             except asyncio.CancelledError:
                 result = await task
-                if result is LeaseAcquireResult.ACQUIRED:
+                if result.result is LeaseAcquireResult.ACQUIRED:
                     await self._release_durable(conversation_id, holder)
                 raise
-            if result is LeaseAcquireResult.ACQUIRED:
-                return attempt_time + self._ttl_seconds
+            if result.result is LeaseAcquireResult.ACQUIRED:
+                if result.expires_at is not None and self._clock() < result.expires_at:
+                    return result.expires_at
+                await self._release_durable(conversation_id, holder)
             await self._sleep(self._poll_interval)
 
     async def _heartbeat(
@@ -339,19 +364,30 @@ class SessionTurnOwnership:
     ) -> None:
         try:
             while True:
-                await self._sleep(self._refresh_interval)
+                remaining = expires_at - self._clock()
+                if remaining <= 0:
+                    break
+                await self._sleep(min(self._refresh_interval, remaining / 2))
                 while True:
-                    refresh_time = self._clock()
                     result = await self._backend.refresh(
                         conversation_id,
                         holder,
                         ttl_seconds=self._ttl_seconds,
-                        now=refresh_time,
                     )
-                    if result is LeaseRefreshResult.REFRESHED:
-                        expires_at = refresh_time + self._ttl_seconds
+                    now = self._clock()
+                    if (
+                        result.result is LeaseRefreshResult.REFRESHED
+                        and result.expires_at is not None
+                        and now < result.expires_at
+                    ):
+                        expires_at = result.expires_at
                         break
-                    if result is LeaseRefreshResult.LOST or refresh_time >= expires_at:
+                    if result.result is LeaseRefreshResult.REFRESHED:
+                        lease_lost.set()
+                        if owner is not None:
+                            owner.cancel()
+                        return
+                    if result.result is LeaseRefreshResult.LOST or now >= expires_at:
                         lease_lost.set()
                         if owner is not None:
                             owner.cancel()
@@ -366,8 +402,24 @@ class SessionTurnOwnership:
             owner.cancel()
 
     async def _release_durable(self, conversation_id: str, holder: str) -> None:
-        while True:
-            result = await self._backend.release(conversation_id, holder)
-            if result is LeaseReleaseResult.RELEASED:
-                return
-            await self._sleep(self._poll_interval)
+        for attempt in range(self._release_max_attempts):
+            try:
+                result = await self._backend.release(conversation_id, holder)
+            except Exception:
+                logger.exception(
+                    "falha ao liberar lease do turno %s (tentativa %d/%d)",
+                    conversation_id,
+                    attempt + 1,
+                    self._release_max_attempts,
+                )
+            else:
+                if result is LeaseReleaseResult.RELEASED:
+                    return
+            if attempt + 1 < self._release_max_attempts:
+                await self._sleep(self._poll_interval)
+        logger.warning(
+            "lease do turno %s não pôde ser liberado após %d tentativas; "
+            "aguardará expiração natural",
+            conversation_id,
+            self._release_max_attempts,
+        )

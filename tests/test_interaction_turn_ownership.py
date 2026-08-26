@@ -11,7 +11,9 @@ import pytest
 from kairos_integration import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.turn_ownership import (
+    LeaseAcquireOutcome,
     LeaseAcquireResult,
+    LeaseRefreshOutcome,
     LeaseRefreshResult,
     LeaseReleaseResult,
     SQLiteAsyncTurnLeaseBackend,
@@ -74,6 +76,21 @@ class BlockingAdapter(ImmediateAdapter):
         yield ProviderEvent(kind="finish", finish_reason="stop")
 
 
+class FirstStreamBlocksAdapter(ImmediateAdapter):
+    def __init__(self) -> None:
+        super().__init__("")
+        self.calls = 0
+        self.first_started = asyncio.Event()
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        self.calls += 1
+        if self.calls == 1:
+            self.first_started.set()
+            await asyncio.Event().wait()
+        yield ProviderEvent(kind="finish", finish_reason="stop")
+
+
 class LeaseAssertingSessions(SessionRepository):
     """The durable row must exist before normal session ensure executes."""
 
@@ -99,28 +116,42 @@ class ManualTime:
 
 
 class RecordingBackend:
-    def __init__(self, refresh_result: bool = True) -> None:
+    def __init__(self, clock, refresh_result: bool = True) -> None:
+        self.clock = clock
         self.refresh_result = refresh_result
         self.acquisitions = []
         self.refreshes = []
         self.releases = []
+        self.release_called = asyncio.Event()
         self.refresh_called = asyncio.Event()
         self.hold_refresh = asyncio.Event()
 
-    async def try_acquire(self, conversation_id, source, holder, *, ttl_seconds, now):
+    async def try_acquire(self, conversation_id, source, holder, *, ttl_seconds):
+        now = self.clock()
         self.acquisitions.append((conversation_id, source, holder, ttl_seconds, now))
-        return LeaseAcquireResult.ACQUIRED
+        return LeaseAcquireOutcome(LeaseAcquireResult.ACQUIRED, now + ttl_seconds)
 
-    async def refresh(self, conversation_id, holder, *, ttl_seconds, now):
+    async def refresh(self, conversation_id, holder, *, ttl_seconds):
+        now = self.clock()
         self.refreshes.append((conversation_id, holder, ttl_seconds, now))
         self.refresh_called.set()
         if self.refresh_result:
             await self.hold_refresh.wait()
-        return LeaseRefreshResult.REFRESHED if self.refresh_result else LeaseRefreshResult.LOST
+        if self.refresh_result:
+            return LeaseRefreshOutcome(LeaseRefreshResult.REFRESHED, now + ttl_seconds)
+        return LeaseRefreshOutcome(LeaseRefreshResult.LOST)
 
     async def release(self, conversation_id, holder):
         self.releases.append((conversation_id, holder))
+        self.release_called.set()
         return LeaseReleaseResult.RELEASED
+
+
+class PermanentReleaseContentionBackend(RecordingBackend):
+    async def release(self, conversation_id, holder):
+        self.releases.append((conversation_id, holder))
+        self.release_called.set()
+        return LeaseReleaseResult.CONTENDED
 
 
 def envelope(conversation_id: str = "s1", content: str = "oi") -> InteractionEnvelope:
@@ -137,6 +168,7 @@ def service(
     sleep=None,
     ttl: float = 300,
     refresh_interval: float | None = None,
+    release_max_attempts: int = 5,
 ) -> InteractionService:
     return InteractionService(
         gateway=Gateway(adapter),
@@ -151,6 +183,7 @@ def service(
         turn_lease_refresh_interval=refresh_interval,
         turn_lease_clock=clock,
         turn_lease_sleep=sleep,
+        turn_lease_release_max_attempts=release_max_attempts,
     )
 
 
@@ -272,7 +305,7 @@ async def test_heartbeat_refreshes_lease_during_long_turn_without_real_wait(tmp_
     connection = connect(tmp_path / "state.db")
     initialize_schema(connection)
     timer = ManualTime()
-    backend = RecordingBackend(refresh_result=True)
+    backend = RecordingBackend(timer.now, refresh_result=True)
     adapter = BlockingAdapter()
     interaction = service(
         connection,
@@ -301,7 +334,7 @@ async def test_lost_heartbeat_aborts_turn_before_assistant_persistence(tmp_path:
     connection = connect(tmp_path / "state.db")
     initialize_schema(connection)
     timer = ManualTime()
-    backend = RecordingBackend(refresh_result=False)
+    backend = RecordingBackend(timer.now, refresh_result=False)
     adapter = BlockingAdapter()
     interaction = service(
         connection,
@@ -328,25 +361,262 @@ async def test_sqlite_refresh_extends_expiry_without_wall_clock_wait(tmp_path: P
     db_path = tmp_path / "state.db"
     connection = connect(db_path)
     initialize_schema(connection)
-    backend = SQLiteAsyncTurnLeaseBackend(db_path)
+    timer = ManualTime()
+    timer.value = 100
+    backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
     try:
-        assert (
-            await backend.try_acquire("s1", "web", "first", ttl_seconds=6, now=100)
-            is LeaseAcquireResult.ACQUIRED
-        )
-        assert (
-            await backend.refresh("s1", "first", ttl_seconds=6, now=104)
-            is LeaseRefreshResult.REFRESHED
-        )
-        assert (
-            await backend.try_acquire("s1", "web", "second", ttl_seconds=6, now=107)
-            is LeaseAcquireResult.CONTENDED
-        )
-        assert (
-            await backend.try_acquire("s1", "web", "second", ttl_seconds=6, now=111)
-            is LeaseAcquireResult.ACQUIRED
-        )
+        acquired = await backend.try_acquire("s1", "web", "first", ttl_seconds=6)
+        assert acquired.result is LeaseAcquireResult.ACQUIRED
+        assert acquired.expires_at == 106
+        timer.value = 104
+        refreshed = await backend.refresh("s1", "first", ttl_seconds=6)
+        assert refreshed.result is LeaseRefreshResult.REFRESHED
+        assert refreshed.expires_at == 110
+        timer.value = 107
+        contended = await backend.try_acquire("s1", "web", "second", ttl_seconds=6)
+        assert contended.result is LeaseAcquireResult.CONTENDED
+        timer.value = 111
+        reacquired = await backend.try_acquire("s1", "web", "second", ttl_seconds=6)
+        assert reacquired.result is LeaseAcquireResult.ACQUIRED
+        assert reacquired.expires_at == 117
     finally:
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_sqlite_acquire_samples_deadline_inside_delayed_worker(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    connection = connect(db_path)
+    initialize_schema(connection)
+    timer = ManualTime()
+    backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    real_attempt = backend._try_acquire_sync
+    entered = threading.Event()
+    release = threading.Event()
+
+    def delayed(*args, **kwargs):
+        entered.set()
+        release.wait(timeout=1)
+        return real_attempt(*args, **kwargs)
+
+    backend._try_acquire_sync = delayed
+    try:
+        task = asyncio.create_task(backend.try_acquire("s1", "web", "holder", ttl_seconds=6))
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        timer.value = 100
+        release.set()
+        outcome = await task
+        assert outcome.expires_at == 106
+
+        expires_at = connection.execute(
+            "SELECT expires_at FROM session_turn_leases WHERE conversation_id = 's1'"
+        ).fetchone()[0]
+        assert expires_at == 106
+    finally:
+        release.set()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_sqlite_refresh_samples_deadline_inside_delayed_worker(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    connection = connect(db_path)
+    initialize_schema(connection)
+    timer = ManualTime()
+    timer.value = 100
+    backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    assert (
+        await backend.try_acquire("s1", "web", "holder", ttl_seconds=20)
+    ).result is LeaseAcquireResult.ACQUIRED
+    real_refresh = backend._refresh_sync
+    entered = threading.Event()
+    release = threading.Event()
+
+    def delayed(*args, **kwargs):
+        entered.set()
+        release.wait(timeout=1)
+        return real_refresh(*args, **kwargs)
+
+    backend._refresh_sync = delayed
+    try:
+        task = asyncio.create_task(backend.refresh("s1", "holder", ttl_seconds=20))
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        timer.value = 110
+        release.set()
+        outcome = await task
+        assert outcome.result is LeaseRefreshResult.REFRESHED
+        assert outcome.expires_at == 130
+
+        expires_at = connection.execute(
+            "SELECT expires_at FROM session_turn_leases WHERE conversation_id = 's1'"
+        ).fetchone()[0]
+        assert expires_at == 130
+    finally:
+        release.set()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_acquire_rejects_deadline_expired_while_worker_result_is_delayed(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    connection = connect(db_path)
+    initialize_schema(connection)
+    timer = ManualTime()
+    backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    real_attempt = backend._try_acquire_sync
+    committed = threading.Event()
+    return_result = threading.Event()
+    calls = 0
+
+    def delayed_after_commit(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        outcome = real_attempt(*args, **kwargs)
+        if calls == 1:
+            committed.set()
+            return_result.wait(timeout=1)
+        return outcome
+
+    backend._try_acquire_sync = delayed_after_commit
+    interaction = service(
+        connection,
+        ImmediateAdapter(),
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    task = asyncio.create_task(collect(interaction.stream(envelope())))
+    try:
+        while not committed.is_set():
+            await asyncio.sleep(0)
+        timer.value = 7
+        return_result.set()
+
+        assert (await task)[-1].kind == "turn_end"
+        assert calls == 2
+    finally:
+        return_result.set()
+        task.cancel()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_refresh_rejects_deadline_expired_while_worker_result_is_delayed(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    connection = connect(db_path)
+    initialize_schema(connection)
+    timer = ManualTime()
+    backend = SQLiteAsyncTurnLeaseBackend(db_path, clock=timer.now)
+    real_refresh = backend._refresh_sync
+    committed = threading.Event()
+    return_result = threading.Event()
+
+    def delayed_after_commit(*args, **kwargs):
+        outcome = real_refresh(*args, **kwargs)
+        committed.set()
+        return_result.wait(timeout=1)
+        return outcome
+
+    backend._refresh_sync = delayed_after_commit
+    interaction = service(
+        connection,
+        BlockingAdapter(),
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    task = asyncio.create_task(collect(interaction.stream(envelope())))
+    try:
+        while not committed.is_set():
+            await asyncio.sleep(0)
+        timer.value = 9
+        return_result.set()
+
+        with pytest.raises(TurnLeaseLostError):
+            await task
+    finally:
+        return_result.set()
+        task.cancel()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_lease_loss_waits_at_iterator_boundary_without_cancelling_consumer(tmp_path: Path):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ManualTime()
+    backend = RecordingBackend(timer.now, refresh_result=False)
+    adapter = BlockingAdapter()
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    stream = interaction.stream(envelope())
+    consumer_paused = asyncio.Event()
+    resume_consumer = asyncio.Event()
+
+    async def consume() -> None:
+        assert (await anext(stream)).kind == "turn_start"
+        consumer_paused.set()
+        await resume_consumer.wait()
+        with pytest.raises(TurnLeaseLostError):
+            await anext(stream)
+
+    task = asyncio.create_task(consume())
+    try:
+        await consumer_paused.wait()
+        await backend.release_called.wait()
+
+        assert not task.done()
+        resume_consumer.set()
+        await task
+        assert len(backend.releases) == 1
+    finally:
+        resume_consumer.set()
+        await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_permanent_release_contention_does_not_hang_cancel_or_local_fifo(
+    tmp_path: Path,
+):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ManualTime()
+    backend = PermanentReleaseContentionBackend(timer.now)
+    adapter = FirstStreamBlocksAdapter()
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        release_max_attempts=2,
+    )
+    first = asyncio.create_task(collect(interaction.stream(envelope(content="primeiro"))))
+    await adapter.first_started.wait()
+    second = asyncio.create_task(collect(interaction.stream(envelope(content="segundo"))))
+    first.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert (await asyncio.wait_for(second, timeout=0.5))[-1].kind == "turn_end"
+        assert len(backend.releases) == 4
+    finally:
+        first.cancel()
+        second.cancel()
         connection.close()
 
 
@@ -369,7 +639,7 @@ async def test_slow_contended_acquire_does_not_block_unrelated_coroutine(tmp_pat
         if attempts == 1:
             worker_entered.set()
             worker_release.wait(timeout=1)
-            return LeaseAcquireResult.CONTENDED
+            return LeaseAcquireOutcome(LeaseAcquireResult.CONTENDED)
         return real_attempt(*args, **kwargs)
 
     backend._try_acquire_sync = contended_once
