@@ -48,6 +48,9 @@ class ProviderGateway:
         except ProviderError:
             return self._load_cached(provider)
 
+        if any(model.ref.provider != provider for model in models):
+            raise ValueError("descoberta retornou modelo de outro provider")
+
         now = self._clock()
         snapshot = CatalogSnapshot(models, now, now + self._ttl)
         self._snapshots.save(provider, snapshot)

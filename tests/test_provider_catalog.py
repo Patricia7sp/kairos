@@ -128,6 +128,25 @@ class ModelCatalogTests(unittest.TestCase):
 
         self.assertEqual(catalog.find(ProviderModelRef("p", "m")).ref.model, "m")
 
+    def test_snapshots_de_providers_distintos_tem_ordem_independente(self):
+        catalog = ModelCatalog(clock=lambda: 1000.0)
+        openai = CatalogModel(
+            ref=ProviderModelRef("openai", "gpt"),
+            display_name="GPT",
+            capabilities=ModelCapabilities(chat=True),
+        )
+        anthropic = CatalogModel(
+            ref=ProviderModelRef("anthropic", "claude"),
+            display_name="Claude",
+            capabilities=ModelCapabilities(chat=True),
+        )
+
+        catalog.load_snapshot(CatalogSnapshot((openai,), fetched_at=900.0, expires_at=1100.0))
+        catalog.load_snapshot(CatalogSnapshot((anthropic,), fetched_at=800.0, expires_at=1100.0))
+
+        self.assertEqual(catalog.find(openai.ref).display_name, "GPT")
+        self.assertEqual(catalog.find(anthropic.ref).display_name, "Claude")
+
 
 class CuratedCatalogTests(unittest.TestCase):
     def test_inclui_recomendacoes_agentic_da_especificacao(self):

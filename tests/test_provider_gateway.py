@@ -66,6 +66,13 @@ class DiscoveringAdapter:
         return snapshot("openai", "gpt-new").models
 
 
+class MismatchedDiscoveryAdapter:
+    descriptor = ProviderDescriptor("openai", "OpenAI")
+
+    async def discover_models(self):
+        return snapshot("anthropic", "claude-wrong-provider").models
+
+
 def gateway_with_adapter(adapter, store: CatalogSnapshotStore) -> ProviderGateway:
     registry = ProviderAdapterRegistry()
     registry.register(adapter.descriptor, lambda **_kwargs: adapter)
@@ -117,6 +124,15 @@ class CatalogSnapshotStoreTests(unittest.TestCase):
 
             self.assertIsNone(store.load("openai"))
 
+    def test_rejeita_snapshot_com_modelo_de_outro_provider_antes_de_gravar(self):
+        with TemporaryDirectory() as tmpdir:
+            store = CatalogSnapshotStore(Path(tmpdir) / "model-catalog.json")
+
+            with self.assertRaisesRegex(ValueError, "provider"):
+                store.save("openai", snapshot("anthropic", "claude-wrong-provider"))
+
+            self.assertIsNone(store.load("openai"))
+
 
 class ProviderGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_refresh_falha_mantem_snapshot_cacheado(self):
@@ -143,6 +159,18 @@ class ProviderGatewayTests(unittest.IsolatedAsyncioTestCase):
                 result.models[0].ref,
             )
             self.assertEqual(store.load("openai").models, result.models)  # type: ignore[union-attr]
+
+    async def test_refresh_rejeita_modelo_de_outro_provider_sem_persistir_ou_mesclar(self):
+        with TemporaryDirectory() as tmpdir:
+            store = CatalogSnapshotStore(Path(tmpdir) / "model-catalog.json")
+            gateway = gateway_with_adapter(MismatchedDiscoveryAdapter(), store)
+
+            with self.assertRaisesRegex(ValueError, "provider"):
+                await gateway.refresh("openai")
+
+            self.assertIsNone(store.load("openai"))
+            with self.assertRaisesRegex(LookupError, "claude-wrong-provider"):
+                gateway.catalog.find(ProviderModelRef("anthropic", "claude-wrong-provider"))
 
     def test_create_adapter_resolve_segredo_sem_guardar_no_registry(self):
         created: list[dict[str, str]] = []

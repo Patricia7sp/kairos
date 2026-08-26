@@ -39,6 +39,7 @@ class CatalogSnapshotStore:
         return snapshot
 
     def save(self, provider: str, snapshot: CatalogSnapshot) -> None:
+        _validate_snapshot_provider(provider, snapshot)
         document = self._read_document()
         document.setdefault("snapshots", {})[provider] = _snapshot_to_data(snapshot)
         self._write_atomically(document)
@@ -95,6 +96,11 @@ def _fsync_directory(directory: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _validate_snapshot_provider(provider: str, snapshot: CatalogSnapshot) -> None:
+    if any(model.ref.provider != provider for model in snapshot.models):
+        raise ValueError("snapshot contém modelo de outro provider")
 
 
 def _snapshot_to_data(snapshot: CatalogSnapshot) -> dict[str, Any]:
