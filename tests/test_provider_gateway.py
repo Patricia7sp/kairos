@@ -196,7 +196,7 @@ class ProviderGatewayTests(unittest.IsolatedAsyncioTestCase):
     def test_create_adapter_resolve_segredo_sem_guardar_no_registry(self):
         created: list[dict[str, str]] = []
         registry = ProviderAdapterRegistry()
-        descriptor = ProviderDescriptor("openai", "OpenAI")
+        descriptor = ProviderDescriptor("openai", "OpenAI", ("api_key",))
 
         def factory(**kwargs):
             created.append(kwargs)

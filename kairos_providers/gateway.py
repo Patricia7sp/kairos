@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,11 +63,18 @@ class ProviderGateway:
 
     async def test_connection(self, provider: str) -> ConnectionStatus:
         """Testa somente o provider pedido, sem escolher um substituto."""
+        return await self._test_connection(provider)
+
+    async def _test_connection(
+        self, provider: str, *, credential_values: Mapping[str, Any] | None = None
+    ) -> ConnectionStatus:
         descriptor = self.registry.describe(provider)
-        try:
-            has_credentials = bool(self._credentials.list(provider))
-        except VaultError:
-            has_credentials = False
+        if credential_values is None:
+            try:
+                credential_values = self._credential_values(provider)
+            except VaultError:
+                credential_values = {}
+        has_credentials = bool(credential_values)
         if descriptor.auth_methods and not has_credentials:
             return ConnectionStatus(
                 False,
@@ -77,20 +84,53 @@ class ProviderGateway:
                 auth_method=descriptor.auth_methods[0],
                 state="unavailable",
             )
-        return await self._adapter_for_discovery(provider).test_connection()
+        return await self._adapter_for_discovery(
+            provider, credential_values=credential_values
+        ).test_connection()
 
-    async def test_all_connections(self) -> dict[str, ConnectionStatus]:
+    async def test_all_connections(
+        self,
+        *,
+        credential_resolver: Callable[[str], Mapping[str, Any]] | None = None,
+    ) -> dict[str, ConnectionStatus]:
         """Expõe o estado de cada provider registrado para a ponte legada."""
         return {
-            descriptor.id: await self.test_connection(descriptor.id)
+            descriptor.id: await self._test_connection(
+                descriptor.id,
+                credential_values=(
+                    dict(credential_resolver(descriptor.id)) if credential_resolver is not None else None
+                ),
+            )
             for descriptor in self.registry.list_descriptors()
         }
 
-    def _adapter_for_discovery(self, provider: str) -> ProviderAdapter:
-        return self._create_adapter(provider)
+    async def aclose(self) -> None:
+        """Fecha recursos próprios; subclasses compostas fecham seus clientes."""
 
-    def _create_adapter(self, provider: str, *, model: str | None = None) -> ProviderAdapter:
-        kwargs = self._credential_values(provider)
+    async def __aenter__(self) -> ProviderGateway:
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        await self.aclose()
+
+    def _adapter_for_discovery(
+        self, provider: str, *, credential_values: Mapping[str, Any] | None = None
+    ) -> ProviderAdapter:
+        return self._create_adapter(provider, credential_values=credential_values)
+
+    def _create_adapter(
+        self,
+        provider: str,
+        *,
+        model: str | None = None,
+        credential_values: Mapping[str, Any] | None = None,
+    ) -> ProviderAdapter:
+        if credential_values is not None:
+            kwargs = dict(credential_values)
+        elif self.registry.describe(provider).auth_methods:
+            kwargs = self._credential_values(provider)
+        else:
+            kwargs = {}
         if model is not None:
             kwargs["model"] = model
         return self.registry.create(provider, **kwargs)

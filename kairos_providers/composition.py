@@ -41,7 +41,7 @@ from kairos_providers.provider_profiles import (
     OpenAICompatibleProfile,
     custom_profile,
 )
-from kairos_providers.provider_registry import ProviderAdapterRegistry, UnknownProviderError
+from kairos_providers.provider_registry import ProviderAdapterRegistry
 from kairos_security.credentials import build_credential_service
 
 __all__ = [
@@ -90,6 +90,25 @@ class ProviderCompositionConfig:
             raise ValueError("Ollama remoto requer configuração administrativa explícita")
 
 
+class _LazyCredentialService:
+    """Atrasa a abertura/inicialização do cofre até uma consulta de credencial."""
+
+    def __init__(self, home: Path) -> None:
+        self._home = home
+        self._service: Any | None = None
+
+    def list(self, provider: str) -> Any:
+        return self._get().list(provider)
+
+    def get(self, ref: Any) -> Any:
+        return self._get().get(ref)
+
+    def _get(self) -> Any:
+        if self._service is None:
+            self._service = build_credential_service(self._home)
+        return self._service
+
+
 class _ProviderHttpClients:
     """Owner dos clientes compartilhados até ``gateway.aclose()``.
 
@@ -97,21 +116,26 @@ class _ProviderHttpClients:
     construir o gateway ou listar seu catálogo, portanto, não abre conexão.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, client_factory: Callable[[], httpx.AsyncClient] | None = None) -> None:
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._closed = False
+        self._client_factory = client_factory or self._new_http_client
 
     def for_provider(self, provider: str) -> httpx.AsyncClient:
         if self._closed:
             raise RuntimeError("gateway de providers já foi encerrado")
         client = self._clients.get(provider)
         if client is None:
-            client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=120.0, write=120.0, pool=10.0),
-                follow_redirects=False,
-            )
+            client = self._client_factory()
             self._clients[provider] = client
         return client
+
+    @staticmethod
+    def _new_http_client() -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=120.0, write=120.0, pool=10.0),
+            follow_redirects=False,
+        )
 
     async def aclose(self) -> None:
         if self._closed:
@@ -134,12 +158,15 @@ class _ComposedProviderGateway(ProviderGateway):
 
 
 def build_provider_gateway(
-    home: Path, *, config: ProviderCompositionConfig | None = None
+    home: Path,
+    *,
+    config: ProviderCompositionConfig | None = None,
+    client_factory: Callable[[], httpx.AsyncClient] | None = None,
 ) -> ProviderGateway:
     """Monta registry, catálogo e cofre sem consultar nenhum endpoint remoto."""
     configuration = config or ProviderCompositionConfig()
     registry = ProviderAdapterRegistry()
-    clients = _ProviderHttpClients()
+    clients = _ProviderHttpClients(client_factory)
     _register_adapters(registry, clients, configuration)
 
     catalog = ModelCatalog()
@@ -153,7 +180,7 @@ def build_provider_gateway(
     return _ComposedProviderGateway(
         registry,
         catalog,
-        build_credential_service(home),
+        _LazyCredentialService(home),
         snapshots,
         clients=clients,
     )
@@ -272,13 +299,9 @@ def build_legacy_provider(
     provider: str, *, api_key: str | None, **kwargs: Any
 ) -> LegacyOpenAICompatibleAdapter | AnthropicAdapter | GoogleGeminiAdapter | OllamaAdapter:
     """Compatibilidade temporária para superfícies que ainda usam BaseLLMProvider."""
-    if provider == "custom":
-        factory = _legacy_custom
-    else:
-        try:
-            factory = _LEGACY_FACTORIES[provider]
-        except KeyError as exc:
-            raise UnknownProviderError(provider) from exc
+    factory = _LEGACY_FACTORIES.get(provider, _legacy_custom)
+    if factory is _legacy_custom:
+        kwargs.setdefault("name", provider)
     return factory(api_key=api_key, **kwargs)
 
 
@@ -343,7 +366,7 @@ def _legacy_ollama(*, api_key: str | None, **kwargs: Any) -> OllamaAdapter:
 def _legacy_custom(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
     return LegacyOpenAICompatibleAdapter(
         name=kwargs.pop("name", "custom"),
-        base_url=kwargs.get("base_url", "http://127.0.0.1:8000/v1"),
+        base_url=kwargs.get("base_url", "http://localhost:8000/v1"),
         api_key=api_key,
         default_model=kwargs.get("model", "custom"),
     )
