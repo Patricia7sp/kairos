@@ -69,6 +69,7 @@ class ConnectionStatus:
     models_found: int = 0
     auth_method: str = "api_key"
     details: dict[str, Any] = field(default_factory=dict)
+    state: str = "available"
 
 
 class BaseLLMProvider(ABC):
