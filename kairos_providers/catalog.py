@@ -41,6 +41,17 @@ def _complete_capabilities(
     )
 
 
+def _complete_model_metadata(primary: CatalogModel, fallback: CatalogModel) -> CatalogModel:
+    """Mantém metadados válidos quando uma fonte de maior prioridade os omite."""
+    return replace(
+        primary,
+        supported_parameters=primary.supported_parameters or fallback.supported_parameters,
+        input_modalities=primary.input_modalities or fallback.input_modalities,
+        output_modalities=primary.output_modalities or fallback.output_modalities,
+        expiration_date=primary.expiration_date or fallback.expiration_date,
+    )
+
+
 @dataclass(frozen=True)
 class CatalogSnapshot:
     models: tuple[CatalogModel, ...]
@@ -60,7 +71,7 @@ class ModelCatalog:
         self._clock = clock
         self._models: dict[ProviderModelRef, CatalogModel] = {}
         self._priorities: dict[ProviderModelRef, int] = {}
-        self._snapshot: CatalogSnapshot | None = None
+        self._snapshots: dict[str, CatalogSnapshot] = {}
 
     def merge(self, models: Iterable[CatalogModel], *, origin: CatalogOrigin) -> None:
         priority = _ORIGIN_PRIORITY[origin]
@@ -75,15 +86,16 @@ class ModelCatalog:
                     if current is None
                     else _complete_capabilities(incoming.capabilities, current.capabilities)
                 )
+                model = incoming if current is None else _complete_model_metadata(incoming, current)
                 self._models[incoming.ref] = replace(
-                    incoming,
+                    model,
                     capabilities=capabilities,
                     origins=frozenset(origins),
                 )
                 self._priorities[incoming.ref] = priority
             else:
                 self._models[incoming.ref] = replace(
-                    current,
+                    _complete_model_metadata(current, incoming),
                     capabilities=_complete_capabilities(
                         current.capabilities, incoming.capabilities
                     ),
@@ -94,13 +106,16 @@ class ModelCatalog:
         now = self._clock()
         if not snapshot.is_valid(now):
             return
-        if (
-            self._snapshot is not None
-            and self._snapshot.is_valid(now)
-            and snapshot.fetched_at < self._snapshot.fetched_at
+        providers = {model.ref.provider for model in snapshot.models}
+        if any(
+            (current := self._snapshots.get(provider)) is not None
+            and current.is_valid(now)
+            and snapshot.fetched_at < current.fetched_at
+            for provider in providers
         ):
             return
-        self._snapshot = snapshot
+        for provider in providers:
+            self._snapshots[provider] = snapshot
         self.merge(snapshot.models, origin=CatalogOrigin.CACHE)
 
     def find(self, ref: ProviderModelRef) -> CatalogModel:

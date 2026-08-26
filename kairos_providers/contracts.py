@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import StrEnum
 
 
@@ -76,17 +77,42 @@ class ModelCapabilities:
 
 
 @dataclass(frozen=True)
+class ModelPrice:
+    """Preço normalizado de prompt, completion ou requisição.
+
+    ``None`` significa que a fonte não informou aquele componente de preço.
+    """
+
+    prompt: Decimal | None = None
+    completion: Decimal | None = None
+    request: Decimal | None = None
+
+
+@dataclass(frozen=True)
 class CatalogModel:
     ref: ProviderModelRef
     display_name: str
     capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
     stability: ModelStability = ModelStability.STABLE
     origins: frozenset[CatalogOrigin] = frozenset()
+    price: ModelPrice = field(default_factory=ModelPrice)
+    supported_parameters: frozenset[str] = frozenset()
+    input_modalities: frozenset[str] = frozenset()
+    output_modalities: frozenset[str] = frozenset()
+    expiration_date: str | None = None
 
     def is_selectable(self, *, include_preview: bool = False) -> bool:
         if self.capabilities.chat is not True or self.stability is ModelStability.DEPRECATED:
             return False
         return include_preview or self.stability is not ModelStability.PREVIEW
+
+    @property
+    def is_free(self) -> bool:
+        """Indica modelos explicitamente gratuitos ou com preço integralmente zero."""
+        if self.ref.model.endswith(":free") or self.ref.model == "openrouter/free":
+            return True
+        prices = (self.price.prompt, self.price.completion, self.price.request)
+        return all(price == Decimal("0") for price in prices)
 
 
 @dataclass(frozen=True)

@@ -83,6 +83,33 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertTrue(capabilities.streaming)
         self.assertEqual(capabilities.max_output_tokens, 20)
 
+    def test_dinamico_nao_apaga_metadados_omitidos_pela_descoberta(self):
+        """Uma resposta parcial da API não pode esconder parâmetros e modalidades ainda válidos."""
+        catalog = ModelCatalog()
+        curated = CatalogModel(
+            ref=ProviderModelRef("openrouter", "example/chat"),
+            display_name="Example",
+            capabilities=ModelCapabilities(chat=True),
+            supported_parameters=frozenset({"temperature", "tools"}),
+            input_modalities=frozenset({"text", "image"}),
+            output_modalities=frozenset({"text"}),
+            expiration_date="2026-12-31",
+        )
+        dynamic = CatalogModel(
+            ref=curated.ref,
+            display_name="Example dynamic",
+            capabilities=ModelCapabilities(chat=True),
+            origins=frozenset({CatalogOrigin.DYNAMIC}),
+        )
+        catalog.merge([curated], origin=CatalogOrigin.CURATED)
+        catalog.merge([dynamic], origin=CatalogOrigin.DYNAMIC)
+
+        found = catalog.find(curated.ref)
+        self.assertEqual(found.supported_parameters, curated.supported_parameters)
+        self.assertEqual(found.input_modalities, curated.input_modalities)
+        self.assertEqual(found.output_modalities, curated.output_modalities)
+        self.assertEqual(found.expiration_date, curated.expiration_date)
+
     def test_curado_prevalece_sobre_cache(self):
         catalog = ModelCatalog()
         catalog.merge(
@@ -127,6 +154,25 @@ class ModelCatalogTests(unittest.TestCase):
         )
 
         self.assertEqual(catalog.find(ProviderModelRef("p", "m")).ref.model, "m")
+
+    def test_snapshots_de_providers_distintos_tem_ordem_independente(self):
+        catalog = ModelCatalog(clock=lambda: 1000.0)
+        openai = CatalogModel(
+            ref=ProviderModelRef("openai", "gpt"),
+            display_name="GPT",
+            capabilities=ModelCapabilities(chat=True),
+        )
+        anthropic = CatalogModel(
+            ref=ProviderModelRef("anthropic", "claude"),
+            display_name="Claude",
+            capabilities=ModelCapabilities(chat=True),
+        )
+
+        catalog.load_snapshot(CatalogSnapshot((openai,), fetched_at=900.0, expires_at=1100.0))
+        catalog.load_snapshot(CatalogSnapshot((anthropic,), fetched_at=800.0, expires_at=1100.0))
+
+        self.assertEqual(catalog.find(openai.ref).display_name, "GPT")
+        self.assertEqual(catalog.find(anthropic.ref).display_name, "Claude")
 
 
 class CuratedCatalogTests(unittest.TestCase):

@@ -1,153 +1,115 @@
-"""Gerenciador e Roteador de Provedores de LLM."""
+"""Ponte temporária entre os consumidores legados e o ProviderGateway."""
 
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 from collections.abc import Callable, Mapping
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
-from kairos_providers.adapters import (
-    AnthropicAdapter,
-    GoogleGeminiAdapter,
-    OllamaAdapter,
-    OpenAICompatibleAdapter,
+from kairos_providers.base import BaseLLMProvider, ConnectionStatus, ModelDescriptor
+from kairos_providers.composition import (
+    build_legacy_provider,
+    build_provider_gateway,
+    get_google_adc_token,
+    resolve_legacy_api_key,
 )
-from kairos_providers.base import (
-    BaseLLMProvider,
-    ConnectionStatus,
-    ModelDescriptor,
-)
+from kairos_providers.contracts import CatalogModel
+from kairos_providers.gateway import ProviderGateway
 
-
-def get_google_adc_token() -> str | None:
-    """Tenta obter o token OAuth oficial do Google Cloud ADC se o gcloud estiver logado."""
-    if not shutil.which("gcloud"):
-        return None
-    try:
-        res = subprocess.run(
-            ["gcloud", "auth", "application-default", "print-access-token"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            timeout=3.0,
-            check=False,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip()
-    except Exception:  # noqa: BLE001, S110
-        pass
-    return None
+__all__ = ["ProviderManager", "get_google_adc_token"]
 
 
 class ProviderManager:
-    """Gerencia e instancia provedores com base em credenciais salvas e variáveis de ambiente."""
+    """Mantém a API legada, delegando catálogo e conexões ao gateway moderno."""
 
     def __init__(
         self,
         auth_store: dict[str, Any] | None = None,
         secret_resolver: Callable[[str, str], Mapping[str, str] | Any] | None = None,
+        *,
+        gateway: ProviderGateway | None = None,
+        home: Path | None = None,
     ) -> None:
         self.auth_store = auth_store or {}
         self.secret_resolver = secret_resolver
+        self._gateway = gateway
+        self._gateway_is_injected = gateway is not None
+        self._home = home or Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
 
     def get_api_key(self, provider: str) -> str | None:
-        env_map = {
-            "openai": ["OPENAI_API_KEY"],
-            "anthropic": ["ANTHROPIC_API_KEY"],
-            "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-            "openrouter": ["OPENROUTER_API_KEY"],
-            "deepseek": ["DEEPSEEK_API_KEY"],
-            "groq": ["GROQ_API_KEY"],
-        }
-        for var in env_map.get(provider, []):
-            val = os.environ.get(var)
-            if val and val.strip():
-                return val.strip()
-
-        creds = self.auth_store.get(provider, [])
-        if isinstance(creds, list) and creds:
-            first = creds[0]
-            if isinstance(first, dict):
-                credential_id = first.get("credential_id")
-                if credential_id and self.secret_resolver is not None:
-                    resolved = self.secret_resolver(provider, credential_id)
-                    values = resolved.reveal() if hasattr(resolved, "reveal") else resolved
-                    if isinstance(values, Mapping):
-                        return values.get("api_key") or values.get("token")
-                return first.get("api_key") or first.get("token")
-        return None
+        return resolve_legacy_api_key(provider, self.auth_store, self.secret_resolver)
 
     def get_provider(self, provider_name: str, **kwargs: Any) -> BaseLLMProvider:
-        api_key = self.get_api_key(provider_name)
-
-        if provider_name == "openai":
-            return OpenAICompatibleAdapter(
-                name="openai",
-                base_url="https://api.openai.com/v1",
-                api_key=api_key,
-                default_model=kwargs.get("model", "gpt-4o"),
-            )
-        if provider_name == "anthropic":
-            return AnthropicAdapter(
-                name="anthropic",
-                api_key=api_key,
-                default_model=kwargs.get("model", "claude-3-7-sonnet-20250219"),
-            )
-        if provider_name == "gemini":
-            adc_token = get_google_adc_token()
-            return GoogleGeminiAdapter(
-                name="gemini",
-                api_key=api_key,
-                oauth_token=adc_token,
-                default_model=kwargs.get("model", "gemini-2.0-flash"),
-            )
-        if provider_name == "openrouter":
-            return OpenAICompatibleAdapter(
-                name="openrouter",
-                base_url="https://openrouter.ai/api/v1",
-                api_key=api_key,
-                default_model=kwargs.get("model", "anthropic/claude-3.7-sonnet"),
-            )
-        if provider_name == "deepseek":
-            return OpenAICompatibleAdapter(
-                name="deepseek",
-                base_url="https://api.deepseek.com/v1",
-                api_key=api_key,
-                default_model=kwargs.get("model", "deepseek-chat"),
-            )
-        if provider_name == "groq":
-            return OpenAICompatibleAdapter(
-                name="groq",
-                base_url="https://api.groq.com/openai/v1",
-                api_key=api_key,
-                default_model=kwargs.get("model", "llama-3.3-70b-versatile"),
-            )
-        if provider_name == "ollama":
-            return OllamaAdapter(
-                name="ollama",
-                default_model=kwargs.get("model", "llama3.3"),
-            )
-
-        return OpenAICompatibleAdapter(
-            name=provider_name,
-            base_url=kwargs.get("base_url", "http://localhost:8000/v1"),
-            api_key=api_key,
-            default_model=kwargs.get("model", "custom"),
+        """Retorna o adapter antigo até Chat e CLI migrarem para o gateway."""
+        return build_legacy_provider(
+            provider_name, api_key=self.get_api_key(provider_name), **kwargs
         )
 
     def list_all_models(self) -> list[ModelDescriptor]:
-        providers = ["openai", "anthropic", "gemini", "deepseek", "groq", "ollama"]
-        models: list[ModelDescriptor] = []
-        for p in providers:
-            inst = self.get_provider(p)
-            models.extend(inst.list_models())
-        return models
+        """Converte ``CatalogModel`` na fronteira exigida por clientes legados."""
+        return [
+            _legacy_descriptor(model)
+            for model in self._gateway_for_legacy_calls.catalog.list_models()
+        ]
 
     async def test_all_connections(self) -> dict[str, ConnectionStatus]:
-        providers = ["openai", "anthropic", "gemini", "openrouter", "deepseek", "groq", "ollama"]
-        results: dict[str, ConnectionStatus] = {}
-        for p in providers:
-            inst = self.get_provider(p)
-            results[p] = await inst.test_connection()
-        return results
+        if self._gateway_is_injected:
+            return await self._gateway_for_legacy_calls.test_all_connections(
+                credential_resolver=self._legacy_credential_values
+            )
+
+        gateway = build_provider_gateway(self._home)
+        try:
+            return await gateway.test_all_connections(
+                credential_resolver=self._legacy_credential_values
+            )
+        finally:
+            await gateway.aclose()
+
+    async def aclose(self) -> None:
+        """Fecha o gateway criado pelo manager, preservando gateways injetados."""
+        if not self._gateway_is_injected and self._gateway is not None:
+            await self._gateway.aclose()
+            self._gateway = None
+
+    async def __aenter__(self) -> ProviderManager:
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        await self.aclose()
+
+    @property
+    def _gateway_for_legacy_calls(self) -> ProviderGateway:
+        if self._gateway is None:
+            self._gateway = build_provider_gateway(self._home)
+        return self._gateway
+
+    def _legacy_credential_values(self, provider: str) -> dict[str, str]:
+        api_key = self.get_api_key(provider)
+        if api_key:
+            return {"api_key": api_key}
+        if provider == "gemini" and (oauth_token := get_google_adc_token()):
+            return {"oauth_token": oauth_token}
+        return {}
+
+
+def _legacy_descriptor(model: CatalogModel) -> ModelDescriptor:
+    capabilities = model.capabilities
+    return ModelDescriptor(
+        id=model.ref.model,
+        name=model.display_name,
+        provider=model.ref.provider,
+        context_length=capabilities.context_length or 128_000,
+        max_output_tokens=capabilities.max_output_tokens or 8_192,
+        supports_tools=capabilities.tools is True,
+        supports_vision=capabilities.vision is True,
+        supports_streaming=capabilities.streaming is True,
+        cost_input_per_million=_legacy_price(model.price.prompt),
+        cost_output_per_million=_legacy_price(model.price.completion),
+    )
+
+
+def _legacy_price(value: Decimal | None) -> float:
+    return float(value) if value is not None else 0.0

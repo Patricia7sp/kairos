@@ -15,3 +15,6 @@ node_modules/
 
 # worktrees locais de desenvolvimento
 .worktrees/
+
+# artefatos locais do companion visual de brainstorming
+.superpowers/
