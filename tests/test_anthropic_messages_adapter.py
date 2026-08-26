@@ -311,6 +311,36 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
         self.assertTrue(context.exception.retryable)
 
+    async def test_tool_fechada_sem_message_stop_nao_vaza_antes_do_erro(self):
+        """`content_block_stop` não confirma a tool enquanto o término da mensagem não chegou."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu_closed_but_truncated",
+                            "name": "tempo",
+                            "input": {},
+                        },
+                    },
+                    {"type": "content_block_stop", "index": 0},
+                ),
+            )
+
+        events = []
+        async with client_for(httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ProviderError) as context:
+                async for event in AnthropicMessagesAdapter(client, "secret").stream(simple_request()):
+                    events.append(event)
+
+        self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
+        self.assertEqual(events, [])
+
     async def test_auth_error_e_repr_nao_expoem_segredo(self):
         """Corpo de erro do provider pode carregar a chave que a interface não pode registrar."""
         secret = "sk-anthropic-error-sentinel"  # noqa: S105 - sentinela sintética de vazamento

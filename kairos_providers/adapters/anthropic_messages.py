@@ -114,6 +114,7 @@ class AnthropicMessagesAdapter:
         input_tokens = 0
         cache_read_tokens = 0
         finish_reason = "stop"
+        usage_events: list[TokenUsage] = []
         finished = False
         try:
             async with self._http.stream(
@@ -134,18 +135,16 @@ class AnthropicMessagesAdapter:
                         if text:
                             yield ProviderEvent(kind="text_delta", text=text)
                         _append_tool_arguments(event, pending_calls)
-                    elif event_type == "content_block_stop":
-                        call = _take_tool_call(event, pending_calls)
-                        if call is not None:
-                            yield ProviderEvent(kind="tool_call", tool_call=call)
                     elif event_type == "message_delta":
                         finish_reason = _finish_reason(event, finish_reason)
                         usage = _usage_from(event, input_tokens, cache_read_tokens)
                         if usage is not None:
-                            yield ProviderEvent(kind="usage", usage=usage)
+                            usage_events.append(usage)
                     elif event_type == "message_stop":
                         for call in _take_pending_calls(pending_calls):
                             yield ProviderEvent(kind="tool_call", tool_call=call)
+                        for usage in usage_events:
+                            yield ProviderEvent(kind="usage", usage=usage)
                         yield ProviderEvent(kind="finish", finish_reason=finish_reason)
                         finished = True
                         break
@@ -358,13 +357,6 @@ def _text_delta(event: Mapping[str, Any]) -> str:
         return ""
     text = delta.get("text")
     return text if isinstance(text, str) else ""
-
-
-def _take_tool_call(
-    event: Mapping[str, Any], calls: dict[int, _PendingToolCall]
-) -> CanonicalToolCall | None:
-    index = _event_index(event)
-    return calls.pop(index).as_canonical() if index is not None and index in calls else None
 
 
 def _take_pending_calls(calls: dict[int, _PendingToolCall]) -> tuple[CanonicalToolCall, ...]:
