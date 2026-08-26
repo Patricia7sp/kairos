@@ -289,20 +289,26 @@ def _remember_tool_calls(delta: Mapping[str, Any], pending: dict[int, dict[str, 
         if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
         current = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
-        call_id = item.get("id")
-        if isinstance(call_id, str) and call_id:
+        if call_id := _explicit_string(item, "id"):
             current["id"] = call_id
-        function = item.get("function")
-        if function is None:
+        if "function" not in item:
             continue
+        function = item["function"]
         if not isinstance(function, dict):
             raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
-        name = function.get("name")
-        if isinstance(name, str) and name:
+        if name := _explicit_string(function, "name"):
             current["name"] = name
-        arguments = function.get("arguments")
-        if isinstance(arguments, str):
+        if arguments := _explicit_string(function, "arguments"):
             current["arguments"] += arguments
+
+
+def _explicit_string(record: Mapping[str, Any], field_name: str) -> str | None:
+    if field_name not in record:
+        return None
+    value = record[field_name]
+    if not isinstance(value, str):
+        raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
+    return value
 
 
 def _take_pending_calls(pending: dict[int, dict[str, str]]) -> tuple[CanonicalToolCall, ...]:

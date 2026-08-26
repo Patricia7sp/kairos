@@ -375,6 +375,117 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(sentinel, repr(context.exception))
                 self.assertEqual(observed, [])
 
+    async def test_tool_delta_rejeita_imediatamente_campos_explicitos_com_tipo_invalido(self):
+        """Ignorar tipos inválidos em fragmentos permitiria que um delta posterior os mascarasse."""
+        invalid_deltas = (
+            {"index": 0, "id": 1, "function": {"name": "weather", "arguments": "{}"}},
+            {"index": 0, "id": "call_1", "function": {"name": 1, "arguments": "{}"}},
+            {"index": 0, "id": "call_1", "function": {"name": "weather", "arguments": {}}},
+        )
+        for delta in invalid_deltas:
+            with self.subTest(delta=delta):
+                def handler(_request: httpx.Request, delta: dict[str, object] = delta) -> httpx.Response:
+                    return httpx.Response(
+                        200,
+                        content=sse(
+                            {"choices": [{"delta": {"tool_calls": [delta]}, "finish_reason": None}]},
+                            {"choices": [{"delta": {"content": "não chegar"}, "finish_reason": "stop"}]},
+                            "[DONE]",
+                        ),
+                    )
+
+                observed = []
+                async with client_for(httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(ProviderError) as context:
+                        async for event in OpenAICompatibleAdapter(
+                            DEEPSEEK_PROFILE, client, "secret"
+                        ).stream(simple_request()):
+                            observed.append(event)
+
+                self.assertIs(context.exception.kind, ProviderErrorKind.INCOMPATIBLE)
+                self.assertFalse(context.exception.retryable)
+                self.assertEqual(observed, [])
+
+    async def test_fragmento_anterior_nao_mascara_arguments_objeto_no_delta_terminal(self):
+        """Concatenar somente strings não pode aceitar objeto inválido após argumentos já válidos."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "function": {"name": "weather", "arguments": "{}"},
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "delta": {"tool_calls": [{"index": 0, "function": {"arguments": {}}}]},
+                                "finish_reason": "tool_calls",
+                            }
+                        ]
+                    },
+                    "[DONE]",
+                ),
+            )
+
+        observed = []
+        async with client_for(httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ProviderError) as context:
+                async for event in OpenAICompatibleAdapter(
+                    DEEPSEEK_PROFILE, client, "secret"
+                ).stream(simple_request()):
+                    observed.append(event)
+
+        self.assertIs(context.exception.kind, ProviderErrorKind.INCOMPATIBLE)
+        self.assertEqual(observed, [])
+
+    async def test_fragmento_incremental_sem_campos_opcionais_permanece_valido(self):
+        """A ausência de id/nome/arguments em delta posterior é normal e não deve falhar."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "function": {"name": "weather", "arguments": "{}"},
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    },
+                    {"choices": [{"delta": {"tool_calls": [{"index": 0}]}, "finish_reason": "tool_calls"}]},
+                    "[DONE]",
+                ),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(OpenAICompatibleAdapter(DEEPSEEK_PROFILE, client, "secret").stream(simple_request()))
+
+        self.assertEqual([event.kind for event in events], ["tool_call", "finish"])
+        self.assertEqual(events[0].tool_call, CanonicalToolCall("call_1", "weather", "{}"))
+
     async def test_done_interrompe_eventos_tardios_e_redige_erro_upstream(self):
         """Consumir dados após o terminal ou corpo de erro poderia corromper histórico e vazar segredo."""
         secret = "compatible-error-sentinel"  # noqa: S105
