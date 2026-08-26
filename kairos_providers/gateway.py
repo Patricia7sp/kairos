@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from kairos_providers.adapter_contract import ProviderAdapter, ProviderError
+from kairos_providers.base import ConnectionStatus
 from kairos_providers.catalog import CatalogSnapshot, ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.contracts import CatalogModel, CatalogOrigin, ProviderModelRef
 from kairos_providers.provider_registry import ProviderAdapterRegistry
-from kairos_security.credentials import CredentialRef, CredentialService
+from kairos_security.credentials import CredentialRef, CredentialService, VaultError
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,31 @@ class ProviderGateway:
 
     def create_adapter(self, ref: ProviderModelRef) -> ProviderAdapter:
         return self._create_adapter(ref.provider, model=ref.model)
+
+    async def test_connection(self, provider: str) -> ConnectionStatus:
+        """Testa somente o provider pedido, sem escolher um substituto."""
+        descriptor = self.registry.describe(provider)
+        try:
+            has_credentials = bool(self._credentials.list(provider))
+        except VaultError:
+            has_credentials = False
+        if descriptor.auth_methods and not has_credentials:
+            return ConnectionStatus(
+                False,
+                provider,
+                "credencial inválida ou ausente",
+                0,
+                auth_method=descriptor.auth_methods[0],
+                state="unavailable",
+            )
+        return await self._adapter_for_discovery(provider).test_connection()
+
+    async def test_all_connections(self) -> dict[str, ConnectionStatus]:
+        """Expõe o estado de cada provider registrado para a ponte legada."""
+        return {
+            descriptor.id: await self.test_connection(descriptor.id)
+            for descriptor in self.registry.list_descriptors()
+        }
 
     def _adapter_for_discovery(self, provider: str) -> ProviderAdapter:
         return self._create_adapter(provider)
