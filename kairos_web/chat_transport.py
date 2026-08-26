@@ -14,7 +14,7 @@ PROTOCOL_VERSION = 1
 def interaction_envelope_from_json(message: Mapping[str, Any]) -> InteractionEnvelope:
     """Normaliza uma mensagem WebSocket v1 sem selecionar provider ou modelo."""
     protocol = message.get("protocol", PROTOCOL_VERSION)
-    if isinstance(protocol, bool) or protocol != PROTOCOL_VERSION:
+    if type(protocol) is not int or protocol != PROTOCOL_VERSION:
         raise ValueError(f"protocolo WebSocket não suportado: {protocol!r}")
 
     parameters = message.get("parameters", {})

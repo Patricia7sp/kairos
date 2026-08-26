@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from kairos_integration import InteractionEnvelope
+from kairos_integration import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
 from kairos_providers import (
     CanonicalMessage,
@@ -21,7 +22,12 @@ from kairos_providers import (
     TokenUsage,
 )
 from kairos_state import connect, initialize_schema
-from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories import (
+    LeaseRepository,
+    MessageRepository,
+    SessionRepository,
+    UsageRepository,
+)
 
 
 def envelope(content: str = "oi") -> InteractionEnvelope:
@@ -78,6 +84,47 @@ class FakeGateway:
         return self._adapter
 
 
+class SequenceGateway:
+    def __init__(self, adapters) -> None:
+        self._adapters = iter(adapters)
+
+    def create_adapter(self, _ref):
+        return next(self._adapters)
+
+
+class BlockingAdapter(FakeAdapter):
+    def __init__(self, events: list[ProviderEvent]) -> None:
+        super().__init__(events)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+
+        async def events() -> AsyncIterator[ProviderEvent]:
+            self.started.set()
+            await self.release.wait()
+            for event in self._events:
+                yield event
+
+        return events()
+
+
+class RaisingAdapter(FakeAdapter):
+    def __init__(self, error: Exception) -> None:
+        super().__init__([])
+        self.error = error
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+
+        async def events() -> AsyncIterator[ProviderEvent]:
+            raise self.error
+            yield  # pragma: no cover - mantém a assinatura de async generator
+
+        return events()
+
+
 def service_with_fake_adapter(
     db, events: list[ProviderEvent | ProviderError]
 ) -> tuple[InteractionService, CountingResolver, FakeAdapter, UsageRepository]:
@@ -93,6 +140,19 @@ def service_with_fake_adapter(
         usage=usage,
     )
     return service, resolver, adapter, usage
+
+
+def service_with_adapters(db, adapters) -> InteractionService:
+    return InteractionService(
+        gateway=SequenceGateway(adapters),
+        resolver=CountingResolver(),
+        context_loader=FakeContextLoader(),
+        sessions=SessionRepository(db),
+        messages=MessageRepository(db),
+        usage=UsageRepository(db),
+        turn_leases=LeaseRepository.turn_leases(db),
+        turn_lease_poll_interval=0,
+    )
 
 
 class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -118,7 +178,9 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in service.stream(envelope())]
 
-        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "usage", "turn_end"])
+        self.assertEqual(
+            [event.kind for event in events], ["turn_start", "delta", "usage", "turn_end"]
+        )
         self.assertEqual(resolver.calls, 1)
         self.assertEqual(
             [row["role"] for row in MessageRepository(self.db).for_api("s1")],
@@ -155,7 +217,10 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
             "FROM messages WHERE session_id = ? AND role = 'assistant'",
             ("s1",),
         ).fetchone()
-        self.assertEqual((row["content"], row["finish_reason"], row["display_kind"]), ("parcial", "error", "error"))
+        self.assertEqual(
+            (row["content"], row["finish_reason"], row["display_kind"]),
+            ("parcial", "error", "error"),
+        )
         self.assertIn('"error_kind": "network"', row["display_metadata"])
         self.assertEqual(usage.pending_count(), 1)
 
@@ -193,15 +258,116 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
                 CanonicalMessage(
                     role="assistant",
                     content=(ContentPart(kind="text", value=""),),
-                    tool_calls=(
-                        CanonicalToolCall(id="call-1", name="soma", arguments='{"a": 1}'),
-                    ),
+                    tool_calls=(CanonicalToolCall(id="call-1", name="soma", arguments='{"a": 1}'),),
                 ),
                 CanonicalMessage(
                     role="tool",
                     content=(ContentPart(kind="text", value="2"),),
                     tool_call_id="call-1",
                 ),
-                CanonicalMessage(role="user", content=(ContentPart(kind="text", value="continue"),)),
+                CanonicalMessage(
+                    role="user", content=(ContentPart(kind="text", value="continue"),)
+                ),
             ),
         )
+
+    async def test_turnos_da_mesma_sessao_sao_fifo_e_segundo_ve_assistente_anterior(
+        self,
+    ) -> None:
+        first = BlockingAdapter(
+            [
+                ProviderEvent(kind="text_delta", text="primeira resposta"),
+                ProviderEvent(kind="finish", finish_reason="stop"),
+            ]
+        )
+        second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service = service_with_adapters(self.db, [first, second])
+
+        first_task = asyncio.create_task(_collect(service.stream(envelope("primeira pergunta"))))
+        await first.started.wait()
+        second_task = asyncio.create_task(_collect(service.stream(envelope("segunda pergunta"))))
+        await asyncio.sleep(0)
+
+        self.assertFalse(second_task.done())
+        self.assertEqual(
+            [(row["role"], row["payload"]) for row in MessageRepository(self.db).for_api("s1")],
+            [("user", "primeira pergunta")],
+        )
+        self.assertIsNotNone(LeaseRepository.turn_leases(self.db).holder("s1"))
+
+        first.release.set()
+        await asyncio.gather(first_task, second_task)
+
+        self.assertEqual(
+            [(message.role, message.content[0].value) for message in second.requests[0].messages],
+            [
+                ("user", "primeira pergunta"),
+                ("assistant", "primeira resposta"),
+                ("user", "segunda pergunta"),
+            ],
+        )
+        self.assertIsNone(LeaseRepository.turn_leases(self.db).holder("s1"))
+
+    async def test_turnos_de_sessoes_diferentes_continuam_concorrentes(self) -> None:
+        first = BlockingAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service = service_with_adapters(self.db, [first, second])
+
+        first_task = asyncio.create_task(_collect(service.stream(envelope_for("s1", "um"))))
+        await first.started.wait()
+        second_events = await asyncio.wait_for(
+            _collect(service.stream(envelope_for("s2", "dois"))), timeout=0.5
+        )
+
+        self.assertEqual([event.kind for event in second_events], ["turn_start", "turn_end"])
+        self.assertFalse(first_task.done())
+        first.release.set()
+        await first_task
+
+    async def test_lease_e_liberado_apos_provider_error_e_excecao_inesperada(self) -> None:
+        service = service_with_adapters(
+            self.db,
+            [
+                FakeAdapter([ProviderError(ProviderErrorKind.AUTH, retryable=False)]),
+                RaisingAdapter(RuntimeError("boom")),
+                FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")]),
+            ],
+        )
+
+        first = await _collect(service.stream(envelope("erro provider")))
+        self.assertEqual(first[-1].kind, "turn_error")
+        self.assertIsNone(LeaseRepository.turn_leases(self.db).holder("s1"))
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            await _collect(service.stream(envelope("erro inesperado")))
+        self.assertIsNone(LeaseRepository.turn_leases(self.db).holder("s1"))
+
+        final = await _collect(service.stream(envelope("depois")))
+        self.assertEqual(final[-1].kind, "turn_end")
+
+    async def test_cancelamento_libera_lease_para_turno_seguinte(self) -> None:
+        first = BlockingAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service = service_with_adapters(self.db, [first, second])
+
+        task = asyncio.create_task(_collect(service.stream(envelope("cancelar"))))
+        await first.started.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertIsNone(LeaseRepository.turn_leases(self.db).holder("s1"))
+        events = await asyncio.wait_for(_collect(service.stream(envelope("seguinte"))), timeout=0.5)
+        self.assertEqual(events[-1].kind, "turn_end")
+
+
+def envelope_for(conversation_id: str, content: str) -> InteractionEnvelope:
+    return InteractionEnvelope(
+        conversation_id=conversation_id,
+        source="web",
+        content=content,
+        parameters={"temperature": 0.2},
+    )
+
+
+async def _collect(stream: AsyncIterator[InteractionEvent]) -> list[InteractionEvent]:
+    return [event async for event in stream]

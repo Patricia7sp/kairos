@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -14,12 +16,19 @@ from kairos_integration import (
 )
 from kairos_providers import (
     CanonicalToolCall,
+    CatalogOrigin,
+    ModelCatalog,
+    ProviderEvent,
     ProviderModelRef,
     SelectionReason,
     TokenUsage,
+    curated_models,
 )
 from kairos_web import server
-from kairos_web.chat_transport import interaction_event_to_json
+from kairos_web.chat_transport import (
+    interaction_envelope_from_json,
+    interaction_event_to_json,
+)
 
 
 class FakeInteractionService:
@@ -35,6 +44,47 @@ class FakeInteractionService:
 
     async def aclose(self) -> None:
         self.close_calls += 1
+
+
+class FailingInteractionService(FakeInteractionService):
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        raise RuntimeError("segredo-interno")
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class CleanupInteractionService(FakeInteractionService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_closed = threading.Event()
+
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        try:
+            yield InteractionEvent.turn_end("first")
+            await asyncio.sleep(0.05)
+            yield InteractionEvent.turn_end("after-client-close")
+        finally:
+            self.stream_closed.set()
+
+
+class PersistingAdapter:
+    async def stream(self, _request):
+        yield ProviderEvent(kind="text_delta", text="resposta")
+        yield ProviderEvent(kind="finish", finish_reason="stop")
+
+
+class PersistingGateway:
+    def __init__(self) -> None:
+        self.catalog = ModelCatalog()
+        self.catalog.merge(curated_models(), origin=CatalogOrigin.CURATED)
+        self.closed = False
+
+    def create_adapter(self, _ref):
+        return PersistingAdapter()
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 @pytest.fixture
@@ -219,9 +269,72 @@ def test_websocket_reusa_servico_injetado_e_aceita_mensagem_legada_sem_protocol(
     assert fake_service.close_calls == 0
 
 
+@pytest.mark.parametrize("frame", [[], "texto", 7, None])
+def test_websocket_ignora_json_que_nao_e_objeto_sem_encerrar_conexao(
+    auth_client: TestClient,
+    fake_service: FakeInteractionService,
+    frame: object,
+) -> None:
+    with auth_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json(frame)
+        ws.send_json({"type": "ping"})
+        assert ws.receive_json() == {"type": "pong"}
+
+    assert fake_service.envelopes == []
+
+
+def test_websocket_fecha_1011_sem_expor_excecao_inesperada() -> None:
+    from starlette.websockets import WebSocketDisconnect
+
+    state = server.app.state
+    state.interaction_service = FailingInteractionService()
+    try:
+        with (
+            TestClient(
+                server.app,
+                headers={server.TOKEN_HEADER: server.SESSION_TOKEN},
+            ) as client,
+            client.websocket_connect("/ws/chat") as ws,
+        ):
+            ws.send_json({"type": "message", "protocol": 1, "content": "oi"})
+            with pytest.raises(WebSocketDisconnect) as caught:
+                ws.receive_json()
+    finally:
+        del state.interaction_service
+
+    assert caught.value.code == 1011
+    assert "segredo-interno" not in str(caught.value)
+
+
+def test_websocket_fecha_stream_quando_cliente_desconecta() -> None:
+    state = server.app.state
+    fake = CleanupInteractionService()
+    state.interaction_service = fake
+    try:
+        with (
+            TestClient(
+                server.app,
+                headers={server.TOKEN_HEADER: server.SESSION_TOKEN},
+            ) as client,
+            client.websocket_connect("/ws/chat") as ws,
+        ):
+            ws.send_json({"type": "message", "protocol": 1, "content": "oi"})
+            assert ws.receive_json()["finish_reason"] == "first"
+    finally:
+        del state.interaction_service
+
+    assert fake.stream_closed.wait(timeout=1)
+
+
 def test_tradutor_recusa_evento_canonico_sem_payload_obrigatorio() -> None:
     with pytest.raises(ValueError, match="tool_call"):
         interaction_event_to_json(InteractionEvent(kind="tool_call"), conversation_id="s1")
+
+
+@pytest.mark.parametrize("protocol", [True, 1.0])
+def test_tradutor_exige_protocol_inteiro_real(protocol: object) -> None:
+    with pytest.raises(ValueError, match="protocolo"):
+        interaction_envelope_from_json({"type": "message", "protocol": protocol, "content": "oi"})
 
 
 def test_lifecycle_constroi_uma_vez_com_home_fornecido_e_fecha_servico_owned(
@@ -246,3 +359,49 @@ def test_lifecycle_constroi_uma_vez_com_home_fornecido_e_fecha_servico_owned(
     assert built_homes == [tmp_path]
     assert fake.close_calls == 1
     assert not hasattr(state, "interaction_service")
+
+
+def test_websocket_persiste_no_mesmo_home_que_rest_le(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kairos_integration import composition
+
+    app_home = tmp_path / "app-home"
+    environment_home = tmp_path / "environment-home"
+    app_home.mkdir()
+    environment_home.mkdir()
+    (app_home / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = PersistingGateway()
+    state = server.app.state
+    monkeypatch.setenv("KAIROS_HOME", str(environment_home))
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    monkeypatch.setattr(state, "kairos_home", app_home, raising=False)
+    if hasattr(state, "interaction_service"):
+        del state.interaction_service
+
+    with TestClient(
+        server.app,
+        headers={server.TOKEN_HEADER: server.SESSION_TOKEN},
+    ) as client:
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({"type": "message", "protocol": 1, "session_id": "s1", "content": "oi"})
+            assert [ws.receive_json()["type"] for _ in range(3)] == [
+                "turn_start",
+                "delta",
+                "turn_end",
+            ]
+
+        assert client.get("/api/sessions/s1").status_code == 200
+        response = client.get("/api/sessions/s1/messages")
+        assert response.status_code == 200
+        assert [(item["role"], item["content"]) for item in response.json()["messages"]] == [
+            ("user", "oi"),
+            ("assistant", "resposta"),
+        ]
+
+    assert (app_home / "state.db").exists()
+    assert not (environment_home / "state.db").exists()
+    assert gateway.closed

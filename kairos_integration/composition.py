@@ -18,7 +18,12 @@ from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.composition import build_provider_gateway
 from kairos_state import connect
 from kairos_state.migrations import migrate
-from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories import (
+    LeaseRepository,
+    MessageRepository,
+    SessionRepository,
+    UsageRepository,
+)
 
 __all__ = ["ComposedInteractionService", "build_interaction_service"]
 
@@ -122,6 +127,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             sessions=sessions,
             messages=MessageRepository(connection),
             usage=UsageRepository(connection),
+            turn_leases=LeaseRepository.turn_leases(connection),
         )
     except BaseException as build_error:
         cleanup_errors: list[BaseException] = []
