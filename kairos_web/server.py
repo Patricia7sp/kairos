@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from hmac import compare_digest
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
+from kairos_integration import build_interaction_service
 from kairos_providers.manager import ProviderManager
 from kairos_security.credentials import (
     CredentialNotFoundError,
@@ -27,12 +30,41 @@ from kairos_security.credentials import (
     build_credential_service,
 )
 from kairos_security.credentials.io import credential_file_lock
-from kairos_state.repositories.messages import MessageRepository
 from kairos_state.repositories.sessions import SessionRepository
+from kairos_web.chat_transport import (
+    interaction_envelope_from_json,
+    interaction_event_to_json,
+)
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Kairos Web API", version="0.1.0")
+
+def _application_home(application: FastAPI) -> Path:
+    supplied = getattr(application.state, "kairos_home", None)
+    if supplied is not None:
+        return Path(supplied)
+    return Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
+    service = getattr(application.state, "interaction_service", None)
+    owns_service = service is None
+    if owns_service:
+        service = build_interaction_service(_application_home(application))
+        application.state.interaction_service = service
+    try:
+        yield
+    finally:
+        if owns_service:
+            try:
+                await service.aclose()
+            finally:
+                if getattr(application.state, "interaction_service", None) is service:
+                    del application.state.interaction_service
+
+
+app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)
 
 # CORS para desenvolvimento local e SPA
 app.add_middleware(
@@ -614,7 +646,7 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     await _chat_session(websocket)
 
 
-async def _chat_session(websocket: WebSocket) -> None:  # noqa: PLR0915
+async def _chat_session(websocket: WebSocket) -> None:
     await websocket.accept()
     logger.info("WebSocket chat client connected")
 
@@ -632,101 +664,20 @@ async def _chat_session(websocket: WebSocket) -> None:  # noqa: PLR0915
                 continue
 
             if event_type == "message":
-                user_text = data.get("content", "").strip()
-                session_id = data.get("session_id") or "web-default"
-                requested_model = data.get("model")
-                requested_provider = data.get("provider")
-
-                # Resolve provedor e modelo
-                config = load_config()
-                provider_name = requested_provider or config.get("provider", "anthropic")
-                model_name = requested_model or config.get("model")
-
-                store = _get_auth_store()
-                manager = ProviderManager(auth_store=store.profile)
-                provider = manager.get_provider(provider_name, model=model_name)
-
-                # Persiste mensagem do usuário no state.db
-                conn = _get_db()
                 try:
-                    session_repo = SessionRepository(conn)
-                    msg_repo = MessageRepository(conn)
-                    session_repo.ensure(session_id, source="web")
-                    msg_repo.append(session_id=session_id, role="user", content=user_text)
-
-                    # Monta contexto de mensagens ativas
-                    active_msgs = msg_repo.for_api(session_id)
-                    formatted_msgs = [
-                        {"role": m["role"], "content": m["payload"]} for m in active_msgs
-                    ]
-                finally:
-                    conn.close()
-
-                # Notifica início do turno
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "type": "turn_start",
-                            "session_id": session_id,
-                            "model": model_name or provider_name,
-                            "provider": provider_name,
-                        }
-                    )
-                )
-
-                # Executa streaming
-                full_reply = ""
-                try:
-                    async for chunk in provider.stream_chat(formatted_msgs, model=model_name):
-                        if chunk.delta_text:
-                            full_reply += chunk.delta_text
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "delta",
-                                        "text": chunk.delta_text,
-                                    }
-                                )
-                            )
-                        if chunk.delta_tool_calls:
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "tool_call",
-                                        "tool_calls": chunk.delta_tool_calls,
-                                    }
-                                )
-                            )
-                except Exception as stream_err:  # noqa: BLE001
-                    err_msg = f"\n[Erro durante streaming com {provider_name}: {stream_err}]"
-                    full_reply += err_msg
+                    envelope = interaction_envelope_from_json(data)
+                except (TypeError, ValueError):
+                    continue
+                service = websocket.app.state.interaction_service
+                async for event in service.stream(envelope):
                     await websocket.send_text(
                         json.dumps(
-                            {
-                                "type": "delta",
-                                "text": err_msg,
-                            }
+                            interaction_event_to_json(
+                                event,
+                                conversation_id=envelope.conversation_id,
+                            )
                         )
                     )
-
-                # Salva resposta no SQLite
-                conn = _get_db()
-                try:
-                    msg_repo = MessageRepository(conn)
-                    session_repo = SessionRepository(conn)
-                    msg_repo.append(session_id=session_id, role="assistant", content=full_reply)
-                    session_repo.increment_turn(session_id)
-                finally:
-                    conn.close()
-
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "type": "turn_end",
-                            "session_id": session_id,
-                        }
-                    )
-                )
 
     except WebSocketDisconnect:
         logger.info("WebSocket chat client disconnected")
