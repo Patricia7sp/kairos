@@ -10,6 +10,16 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final
 
+from kairos_providers.adapter_contract import (
+    AdapterRequest,
+    CanonicalMessage,
+    CanonicalToolCall,
+    ContentPart,
+    ProviderAdapter,
+    ProviderError,
+    ProviderErrorKind,
+    ProviderEvent,
+)
 from kairos_providers.base import (
     BaseLLMProvider,
     ConnectionStatus,
@@ -28,6 +38,7 @@ from kairos_providers.contracts import (
     CatalogOrigin,
     ModelCapabilities,
     ModelKind,
+    ModelPrice,
     ModelStability,
     ProviderDescriptor,
     ProviderModelRef,
@@ -52,22 +63,31 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "OMIT_TEMPERATURE",
+    "AdapterRequest",
     "BaseLLMProvider",
+    "CanonicalMessage",
+    "CanonicalToolCall",
     "CatalogModel",
     "CatalogOrigin",
     "CatalogSnapshot",
     "ConnectionStatus",
+    "ContentPart",
     "DiscoveryLayer",
     "ModelCapabilities",
     "ModelCatalog",
     "ModelDescriptor",
     "ModelKind",
+    "ModelPrice",
     "ModelSelectionContext",
     "ModelSelectionResolver",
     "ModelSelectionUnavailableError",
     "ModelStability",
+    "ProviderAdapter",
     "ProviderAdapterRegistry",
     "ProviderDescriptor",
+    "ProviderError",
+    "ProviderErrorKind",
+    "ProviderEvent",
     "ProviderManager",
     "ProviderModelRef",
     "ProviderProfile",
