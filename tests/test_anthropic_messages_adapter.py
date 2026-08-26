@@ -209,6 +209,7 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.url.path, "/v1/models")
             self.assertEqual(request.headers["x-api-key"], "secret")
             self.assertEqual(request.headers["anthropic-version"], "2023-06-01")
+            self.assertEqual(request.headers["accept"], "application/json")
             return httpx.Response(
                 200,
                 json={
@@ -227,7 +228,88 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([model.ref.model for model in models], ["claude-sonnet-5", "claude-next"])
         self.assertEqual(models[0].display_name, "Claude Sonnet 5")
         self.assertTrue(models[0].capabilities.tools)
+        self.assertFalse(models[1].capabilities.tools)
         self.assertTrue(models[1].capabilities.streaming)
+
+    async def test_agrupar_tool_results_adjacentes_em_uma_mensagem_user(self):
+        """Duas mensagens user seguidas após tools violam a alternância exigida por Messages."""
+        request = AdapterRequest(
+            model=ProviderModelRef("anthropic", "claude-sonnet-5"),
+            messages=(
+                CanonicalMessage(
+                    role="assistant",
+                    content=(),
+                    tool_calls=(
+                        CanonicalToolCall(id="toolu_1", name="temperatura", arguments="{}"),
+                        CanonicalToolCall(id="toolu_2", name="umidade", arguments="{}"),
+                    ),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    tool_call_id="toolu_1",
+                    content=(ContentPart(kind="text", value="22°C"),),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    tool_call_id="toolu_2",
+                    content=(ContentPart(kind="text", value="60%"),),
+                ),
+            ),
+        )
+
+        def handler(http_request: httpx.Request) -> httpx.Response:
+            self.assertEqual(
+                json.loads(http_request.content)["messages"],
+                [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "tool_use", "id": "toolu_1", "name": "temperatura", "input": {}},
+                            {"type": "tool_use", "id": "toolu_2", "name": "umidade", "input": {}},
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "toolu_1", "content": "22°C"},
+                            {"type": "tool_result", "tool_use_id": "toolu_2", "content": "60%"},
+                        ],
+                    },
+                ],
+            )
+            return httpx.Response(200, content=sse({"type": "message_stop"}))
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(AnthropicMessagesAdapter(client, "secret").stream(request))
+
+        self.assertEqual([event.kind for event in events], ["finish"])
+
+    async def test_eof_sem_message_stop_falha_sem_emitir_tool_ou_finish(self):
+        """Tratar stream truncado como término confirmaria uma tool call possivelmente incompleta."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu_truncated",
+                            "name": "tempo",
+                            "input": {},
+                        },
+                    }
+                ),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ProviderError) as context:
+                await collect(AnthropicMessagesAdapter(client, "secret").stream(simple_request()))
+
+        self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
+        self.assertTrue(context.exception.retryable)
 
     async def test_auth_error_e_repr_nao_expoem_segredo(self):
         """Corpo de erro do provider pode carregar a chave que a interface não pode registrar."""

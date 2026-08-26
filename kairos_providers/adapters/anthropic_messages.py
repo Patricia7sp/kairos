@@ -89,7 +89,7 @@ class AnthropicMessagesAdapter:
                 CatalogModel(
                     ref=ProviderModelRef(self.descriptor.id, model_id),
                     display_name=display_name if isinstance(display_name, str) else model_id,
-                    capabilities=ModelCapabilities(chat=True, tools=True, streaming=True),
+                    capabilities=ModelCapabilities(chat=True, tools=False, streaming=True),
                     origins=frozenset({CatalogOrigin.DYNAMIC}),
                 )
             )
@@ -117,7 +117,10 @@ class AnthropicMessagesAdapter:
         finished = False
         try:
             async with self._http.stream(
-                "POST", f"{_ANTHROPIC_API_BASE}/messages", headers=self._headers(), json=payload
+                "POST",
+                f"{_ANTHROPIC_API_BASE}/messages",
+                headers=self._headers(streaming=True),
+                json=payload,
             ) as response:
                 self._raise_for_status(response)
                 async for event in _sse_events(response):
@@ -154,14 +157,12 @@ class AnthropicMessagesAdapter:
             raise ProviderError(ProviderErrorKind.NETWORK, retryable=True) from exc
 
         if not finished:
-            for call in _take_pending_calls(pending_calls):
-                yield ProviderEvent(kind="tool_call", tool_call=call)
-            yield ProviderEvent(kind="finish", finish_reason=finish_reason)
+            raise ProviderError(ProviderErrorKind.NETWORK, retryable=True)
 
     async def _request(self, method: str, path: str) -> httpx.Response:
         try:
             response = await self._http.request(
-                method, f"{_ANTHROPIC_API_BASE}{path}", headers=self._headers()
+                method, f"{_ANTHROPIC_API_BASE}{path}", headers=self._headers(streaming=False)
             )
         except httpx.TimeoutException as exc:
             raise ProviderError(ProviderErrorKind.NETWORK, retryable=True) from exc
@@ -170,12 +171,12 @@ class AnthropicMessagesAdapter:
         self._raise_for_status(response)
         return response
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, streaming: bool) -> dict[str, str]:
         return {
             "x-api-key": self._api_key,
             "anthropic-version": _ANTHROPIC_VERSION,
             "content-type": "application/json",
-            "accept": "text/event-stream",
+            "accept": "text/event-stream" if streaming else "application/json",
         }
 
     @staticmethod
@@ -248,18 +249,15 @@ def _messages_for(request: AdapterRequest) -> tuple[str, list[dict[str, Any]]]:
         if message.role == "tool":
             if message.tool_call_id is None:
                 raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": message.tool_call_id,
-                            "content": "".join(text_parts),
-                        }
-                    ],
-                }
-            )
+            tool_result = {
+                "type": "tool_result",
+                "tool_use_id": message.tool_call_id,
+                "content": "".join(text_parts),
+            }
+            if _is_tool_result_message(messages[-1] if messages else None):
+                messages[-1]["content"].append(tool_result)
+            else:
+                messages.append({"role": "user", "content": [tool_result]})
             continue
 
         if message.role not in {"user", "assistant"}:
@@ -272,6 +270,15 @@ def _messages_for(request: AdapterRequest) -> tuple[str, list[dict[str, Any]]]:
         if content:
             messages.append({"role": message.role, "content": content})
     return "\n".join(system_parts), messages
+
+
+def _is_tool_result_message(message: dict[str, Any] | None) -> bool:
+    if message is None or message.get("role") != "user":
+        return False
+    content = message.get("content")
+    return isinstance(content, list) and all(
+        isinstance(part, dict) and part.get("type") == "tool_result" for part in content
+    )
 
 
 def _text_parts(parts: tuple[Any, ...]) -> list[str]:
