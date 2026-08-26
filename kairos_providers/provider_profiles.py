@@ -57,6 +57,7 @@ class OpenAICompatibleProfile:
     trusted_remote: bool = False
 
     def __post_init__(self) -> None:
+        _validate_trusted_remote(self.trusted_remote)
         if not self.id.strip():
             raise ValueError("provider id é obrigatório")
         base_url = _normalize_url(self.base_url, "base_url")
@@ -99,6 +100,7 @@ def custom_profile(
     confiar em um host remoto. ``models_url`` deve permanecer na mesma origem
     do endpoint de chat para não introduzir um segundo alvo de rede.
     """
+    _validate_trusted_remote(trusted_remote)
     normalized_base = _normalize_url(base_url, "base_url")
     normalized_models = _normalize_url(models_url or f"{normalized_base}/models", "models_url")
     if not trusted_remote and not _is_loopback_host(httpx.URL(normalized_base).host or ""):
@@ -134,6 +136,11 @@ def _normalize_url(value: str, field_name: str) -> str:
     ):
         raise ValueError(f"{field_name} é inválida")
     return str(url).rstrip("/")
+
+
+def _validate_trusted_remote(value: object) -> None:
+    if type(value) is not bool:
+        raise ValueError("trusted_remote deve ser bool")
 
 
 def _normalize_allowed_headers(headers: frozenset[str]) -> frozenset[str]:

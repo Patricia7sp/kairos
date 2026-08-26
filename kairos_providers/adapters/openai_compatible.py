@@ -306,13 +306,24 @@ def _remember_tool_calls(delta: Mapping[str, Any], pending: dict[int, dict[str, 
 
 
 def _take_pending_calls(pending: dict[int, dict[str, str]]) -> tuple[CanonicalToolCall, ...]:
-    calls = tuple(
-        CanonicalToolCall(call["id"], call["name"], call["arguments"])
-        for _, call in sorted(pending.items())
-        if call["id"] and call["name"]
-    )
+    calls = tuple(_validated_tool_call(call) for _, call in sorted(pending.items()))
     pending.clear()
     return calls
+
+
+def _validated_tool_call(call: Mapping[str, str]) -> CanonicalToolCall:
+    call_id = call["id"]
+    name = call["name"]
+    arguments = call["arguments"]
+    if not call_id or not name:
+        raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
+    try:
+        parsed_arguments = json.loads(arguments)
+    except json.JSONDecodeError as exc:
+        raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False) from exc
+    if not isinstance(parsed_arguments, dict):
+        raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
+    return CanonicalToolCall(call_id, name, arguments)
 
 
 def _usage_from(document: Mapping[str, Any]) -> TokenUsage | None:

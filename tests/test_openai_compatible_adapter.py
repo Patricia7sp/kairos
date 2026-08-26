@@ -134,6 +134,12 @@ class OpenAICompatibleProfileTests(unittest.TestCase):
                 models_url="https://provider.example/v1/models",
             )
 
+    def test_trusted_remote_rejeita_valores_que_nao_sao_bool_antes_do_host_check(self):
+        """Truthy/falsy não booleanos não podem decidir a fronteira administrativa de SSRF."""
+        for value in ("false", "true", 0, 1):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "trusted_remote deve ser bool"):
+                custom_profile(base_url="https://provider.example/v1", trusted_remote=value)  # type: ignore[arg-type]
+
     def test_deepseek_e_groq_sao_perfis_declarativos(self):
         """Trocar a marca não pode exigir um branch no gateway de interação."""
         self.assertEqual(DEEPSEEK_PROFILE.id, "deepseek")
@@ -331,6 +337,43 @@ class OpenAICompatibleAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(context.exception.kind, ProviderErrorKind.NETWORK)
         self.assertEqual(observed, [])
+
+    async def test_terminal_tool_calls_rejeita_delta_incompleto_ou_argumentos_invalidos(self):
+        """Descartar tool call truncada no terminal perderia efeito pendente e confirmaria turno inválido."""
+        sentinel = "tool-arguments-sentinel"
+        invalid_deltas = (
+            {"index": 0, "function": {"name": "weather", "arguments": "{}"}},
+            {"index": 0, "id": "call_without_name", "function": {"arguments": "{}"}},
+            {
+                "index": 0,
+                "id": "call_invalid_arguments",
+                "function": {"name": "weather", "arguments": f'{{"token":"{sentinel}"'},
+            },
+        )
+        for delta in invalid_deltas:
+            with self.subTest(delta=delta):
+                def handler(_request: httpx.Request, delta: dict[str, object] = delta) -> httpx.Response:
+                    return httpx.Response(
+                        200,
+                        content=sse(
+                            {"choices": [{"delta": {"tool_calls": [delta]}, "finish_reason": "tool_calls"}]},
+                            "[DONE]",
+                        ),
+                    )
+
+                observed = []
+                async with client_for(httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(ProviderError) as context:
+                        async for event in OpenAICompatibleAdapter(
+                            DEEPSEEK_PROFILE, client, "secret"
+                        ).stream(simple_request()):
+                            observed.append(event)
+
+                self.assertIs(context.exception.kind, ProviderErrorKind.INCOMPATIBLE)
+                self.assertFalse(context.exception.retryable)
+                self.assertNotIn(sentinel, str(context.exception))
+                self.assertNotIn(sentinel, repr(context.exception))
+                self.assertEqual(observed, [])
 
     async def test_done_interrompe_eventos_tardios_e_redige_erro_upstream(self):
         """Consumir dados após o terminal ou corpo de erro poderia corromper histórico e vazar segredo."""
