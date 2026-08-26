@@ -11,6 +11,7 @@ from kairos_integration.interaction_contract import (
     InteractionEvent,
     InteractionSelectionSnapshot,
 )
+from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_providers import (
     AdapterRequest,
@@ -46,10 +47,20 @@ class TurnAccumulator:
             self.reasoning += event.reasoning
         elif event.kind == "tool_call" and event.tool_call is not None:
             self.tool_calls.append(event.tool_call)
-        elif event.kind == "usage":
-            self.usage = event.usage
+        elif event.kind == "usage" and event.usage is not None:
+            self.usage = self._merge_usage(event.usage)
         elif event.kind == "finish":
             self.finish_reason = event.finish_reason
+
+    def _merge_usage(self, usage: TokenUsage) -> TokenUsage:
+        if self.usage is None:
+            return usage
+        return TokenUsage(
+            input_tokens=self.usage.input_tokens + usage.input_tokens,
+            output_tokens=self.usage.output_tokens + usage.output_tokens,
+            cache_read_tokens=self.usage.cache_read_tokens + usage.cache_read_tokens,
+            reasoning_tokens=self.usage.reasoning_tokens + usage.reasoning_tokens,
+        )
 
 
 class InteractionService:
@@ -66,6 +77,7 @@ class InteractionService:
         usage: UsageRepository,
         billing_base_url: str = "",
         billing_mode: str = "unknown",
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -75,6 +87,7 @@ class InteractionService:
         self._usage = usage
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
+        self._retry_policy = retry_policy or RetryPolicy()
 
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa exatamente uma seleção e transmite seus eventos normalizados."""
@@ -85,27 +98,36 @@ class InteractionService:
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
 
         accumulator = TurnAccumulator()
-        adapter = self._gateway.create_adapter(snapshot.ref)
-        request = AdapterRequest(
-            model=snapshot.ref,
-            messages=self._history(envelope.conversation_id),
-            parameters=snapshot.parameters,
-        )
-        try:
-            async for provider_event in adapter.stream(request):
-                accumulator.accept(provider_event)
-                event = InteractionEvent.from_provider(provider_event)
-                if event is not None:
-                    yield event
-        except ProviderError as exc:
-            self._persist_error(envelope.conversation_id, accumulator, selection, exc)
-            self._record_usage(envelope.conversation_id, selection, accumulator.usage)
-            yield InteractionEvent.turn_error(exc)
-            return
+        attempts = 0
+        while True:
+            attempts += 1
+            adapter = self._gateway.create_adapter(snapshot.ref)
+            request = AdapterRequest(
+                model=snapshot.ref,
+                messages=self._history(envelope.conversation_id),
+                parameters=snapshot.parameters,
+            )
+            try:
+                async for provider_event in adapter.stream(request):
+                    accumulator.accept(provider_event)
+                    event = InteractionEvent.from_provider(provider_event)
+                    if event is not None:
+                        yield event
+            except ProviderError as exc:
+                if self._retry_policy.can_retry(exc, accumulator) and self._retry_policy.has_attempts_remaining(
+                    attempts
+                ):
+                    await self._retry_policy.backoff(attempts)
+                    continue
+                self._persist_error(envelope.conversation_id, accumulator, selection, exc)
+                self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
+                yield InteractionEvent.turn_error(exc)
+                return
 
-        self._persist_assistant(envelope.conversation_id, accumulator, selection)
-        self._record_usage(envelope.conversation_id, selection, accumulator.usage)
-        yield InteractionEvent.turn_end(accumulator.finish_reason)
+            self._persist_assistant(envelope.conversation_id, accumulator, selection)
+            self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
+            yield InteractionEvent.turn_end(accumulator.finish_reason)
+            return
 
     def _resolve_snapshot(self, envelope: InteractionEnvelope) -> InteractionSelectionSnapshot:
         resolved = self._resolver.resolve(self._context_loader.load(envelope))
@@ -192,6 +214,7 @@ class InteractionService:
         conversation_id: str,
         selection: ResolvedModelSelection,
         usage: TokenUsage | None,
+        attempts: int,
     ) -> None:
         self._usage.record_event(
             conversation_id,
@@ -200,7 +223,7 @@ class InteractionService:
             billing_base_url=self._billing_base_url,
             billing_mode=self._billing_mode,
             usage=usage,
-            api_call_count=1,
+            api_call_count=attempts,
         )
 
     @staticmethod
