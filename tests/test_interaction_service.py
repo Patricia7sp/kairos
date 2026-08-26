@@ -9,6 +9,7 @@ from kairos_integration import InteractionEnvelope
 from kairos_integration.interaction_service import InteractionService
 from kairos_providers import (
     CanonicalMessage,
+    CanonicalToolCall,
     ContentPart,
     ModelSelectionContext,
     ProviderError,
@@ -23,11 +24,11 @@ from kairos_state import connect, initialize_schema
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 
-def envelope() -> InteractionEnvelope:
+def envelope(content: str = "oi") -> InteractionEnvelope:
     return InteractionEnvelope(
         conversation_id="s1",
         source="web",
-        content="oi",
+        content=content,
         parameters={"temperature": 0.2},
     )
 
@@ -157,3 +158,50 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row["content"], row["finish_reason"], row["display_kind"]), ("parcial", "error", "error"))
         self.assertIn('"error_kind": "network"', row["display_metadata"])
         self.assertEqual(usage.pending_count(), 1)
+
+    async def test_proximo_turno_reidrata_tool_calls_e_resultado_vinculado(self) -> None:
+        """Descartar IDs de tools faria o próximo provider rejeitar o histórico do turno."""
+        first_service, _resolver, _adapter, _usage = service_with_fake_adapter(
+            self.db,
+            events=[
+                ProviderEvent(
+                    kind="tool_call",
+                    tool_call=CanonicalToolCall(id="call-1", name="soma", arguments='{"a": 1}'),
+                ),
+                ProviderEvent(kind="finish", finish_reason="tool_calls"),
+            ],
+        )
+        _ = [event async for event in first_service.stream(envelope())]
+        MessageRepository(self.db).append(
+            "s1",
+            "tool",
+            content="2",
+            api_content="2",
+            tool_call_id="call-1",
+        )
+        second_service, _resolver, adapter, _usage = service_with_fake_adapter(
+            self.db,
+            events=[ProviderEvent(kind="finish", finish_reason="stop")],
+        )
+
+        _ = [event async for event in second_service.stream(envelope("continue"))]
+
+        self.assertEqual(
+            adapter.requests[0].messages,
+            (
+                CanonicalMessage(role="user", content=(ContentPart(kind="text", value="oi"),)),
+                CanonicalMessage(
+                    role="assistant",
+                    content=(ContentPart(kind="text", value=""),),
+                    tool_calls=(
+                        CanonicalToolCall(id="call-1", name="soma", arguments='{"a": 1}'),
+                    ),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    content=(ContentPart(kind="text", value="2"),),
+                    tool_call_id="call-1",
+                ),
+                CanonicalMessage(role="user", content=(ContentPart(kind="text", value="continue"),)),
+            ),
+        )

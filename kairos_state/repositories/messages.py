@@ -87,9 +87,9 @@ class MessageRepository:
         )
 
     def for_api(self, session_id: str) -> list[sqlite3.Row]:
-        """O que vai ao modelo: só as ativas, em ordem."""
+        """O que vai ao modelo: só as ativas, em ordem e com metadados canônicos."""
         return self._conn.execute(
-            "SELECT id, role, COALESCE(api_content, content) AS payload "
+            "SELECT id, role, COALESCE(api_content, content) AS payload, tool_call_id, tool_calls "
             "FROM messages WHERE session_id = ? AND active = 1 "
             "ORDER BY timestamp, id",
             (session_id,),

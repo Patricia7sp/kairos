@@ -137,6 +137,8 @@ class InteractionService:
             CanonicalMessage(
                 role=row["role"],
                 content=(ContentPart(kind="text", value=row["payload"]),),
+                tool_call_id=row["tool_call_id"],
+                tool_calls=self._rehydrate_tool_calls(row["tool_calls"]),
             )
             for row in self._messages.for_api(conversation_id)
         )
@@ -206,3 +208,25 @@ class InteractionService:
         if not tool_calls:
             return None
         return json.dumps([asdict(tool_call) for tool_call in tool_calls], sort_keys=True)
+
+    @staticmethod
+    def _rehydrate_tool_calls(raw: str | None) -> tuple[CanonicalToolCall, ...]:
+        if not raw:
+            return ()
+        try:
+            records = json.loads(raw)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(records, list):
+            return ()
+        calls = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            call_id = record.get("id")
+            name = record.get("name")
+            arguments = record.get("arguments", "")
+            if not isinstance(call_id, str) or not isinstance(name, str) or not isinstance(arguments, str):
+                continue
+            calls.append(CanonicalToolCall(id=call_id, name=name, arguments=arguments))
+        return tuple(calls)
