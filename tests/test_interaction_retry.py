@@ -53,17 +53,25 @@ class FakeAdapter:
     def __init__(self, events: list[ProviderEvent | ProviderError]) -> None:
         self._events = events
         self.requests = []
+        self.iterator_closes = 0
+        self.adapter_closes = 0
 
     def stream(self, request) -> AsyncIterator[ProviderEvent]:
         self.requests.append(request)
 
         async def events() -> AsyncIterator[ProviderEvent]:
-            for event in self._events:
-                if isinstance(event, ProviderError):
-                    raise event
-                yield event
+            try:
+                for event in self._events:
+                    if isinstance(event, ProviderError):
+                        raise event
+                    yield event
+            finally:
+                self.iterator_closes += 1
 
         return events()
+
+    async def aclose(self) -> None:
+        self.adapter_closes += 1
 
 
 class AttemptGateway:
@@ -134,13 +142,17 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in service.stream(envelope())]
 
-        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "usage", "turn_end"])
+        self.assertEqual(
+            [event.kind for event in events], ["turn_start", "delta", "usage", "turn_end"]
+        )
         self.assertEqual(resolver.calls, 1)
         self.assertEqual(gateway.refs, [ProviderModelRef("fake", "chat-1")] * 2)
         self.assertEqual(first.requests[0], second.requests[0])
         self.assertEqual(sleeps, [0.25])
         self.assertEqual(
-            self.db.execute("SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'", ("s1",)).fetchone()[0],
+            self.db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'", ("s1",)
+            ).fetchone()[0],
             1,
         )
         usage.flush(now=1.0)
@@ -150,8 +162,29 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         ).fetchone()
         self.assertEqual(tuple(row), (2, 3, 2))
 
-    async def test_retry_reuses_request_frozen_before_backoff_mutates_session_and_history(self) -> None:
+    async def test_retry_closes_each_attempt_iterator_once_without_closing_adapters(self) -> None:
+        """Closing an adapter instead of its iterator would tear down a shared resource."""
+
+        async def sleep(_delay: float) -> None:
+            return None
+
+        first = FakeAdapter([ProviderError(ProviderErrorKind.NETWORK, retryable=True)])
+        second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service, _resolver, _gateway, _usage = self.service(
+            [first, second], retry_policy=RetryPolicy(sleep=sleep, clock=lambda: 0.0)
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual(events[-1].kind, "turn_end")
+        self.assertEqual([first.iterator_closes, second.iterator_closes], [1, 1])
+        self.assertEqual([first.adapter_closes, second.adapter_closes], [0, 0])
+
+    async def test_retry_reuses_request_frozen_before_backoff_mutates_session_and_history(
+        self,
+    ) -> None:
         """Rebuilding retry history would let a concurrent turn change this turn's prompt."""
+
         async def sleep(_delay: float) -> None:
             SessionRepository(self.db).set_selection(
                 "s1",
@@ -159,7 +192,9 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
                 {"temperature": 0.9},
                 reason=SelectionReason.GLOBAL_DEFAULT,
             )
-            MessageRepository(self.db).append("s1", "user", content="intruso", api_content="intruso")
+            MessageRepository(self.db).append(
+                "s1", "user", content="intruso", api_content="intruso"
+            )
 
         first = FakeAdapter([ProviderError(ProviderErrorKind.NETWORK, retryable=True)])
         second = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
@@ -170,10 +205,13 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         _ = [event async for event in service.stream(envelope())]
 
         self.assertIs(first.requests[0], second.requests[0])
-        self.assertEqual([message.content[0].value for message in second.requests[0].messages], ["oi"])
+        self.assertEqual(
+            [message.content[0].value for message in second.requests[0].messages], ["oi"]
+        )
 
     async def test_retry_preserves_usage_from_each_pre_output_attempt(self) -> None:
         """Replacing attempt usage would undercount a provider call that reported usage before failing."""
+
         async def sleep(_delay: float) -> None:
             return None
 
@@ -188,8 +226,12 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 FakeAdapter(
                     [
-                        ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=1)),
-                        ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=6, output_tokens=1)),
+                        ProviderEvent(
+                            kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=1)
+                        ),
+                        ProviderEvent(
+                            kind="usage", usage=TokenUsage(input_tokens=6, output_tokens=1)
+                        ),
                         ProviderEvent(kind="finish", finish_reason="stop"),
                     ]
                 ),
@@ -211,7 +253,9 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_retryable_error_after_text_is_not_retried(self) -> None:
         """Replaying an accepted text delta duplicates user-visible assistant output."""
-        await self._assert_observable_output_blocks_retry(ProviderEvent(kind="text_delta", text="parcial"))
+        await self._assert_observable_output_blocks_retry(
+            ProviderEvent(kind="text_delta", text="parcial")
+        )
 
     async def test_retryable_error_after_reasoning_is_not_retried(self) -> None:
         """Replaying accepted reasoning would expose a divergent hidden trace."""
@@ -219,7 +263,9 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
             ProviderEvent(kind="reasoning_delta", reasoning="penso")
         )
 
-    async def test_retryable_error_after_tool_call_is_not_retried_and_persists_partial_turn(self) -> None:
+    async def test_retryable_error_after_tool_call_is_not_retried_and_persists_partial_turn(
+        self,
+    ) -> None:
         """Replaying a tool call can invoke an external effect twice."""
         tool_call = CanonicalToolCall(id="call-1", name="weather", arguments='{"city":"Lisboa"}')
         await self._assert_observable_output_blocks_retry(
@@ -257,6 +303,7 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_retryable_error_before_output_is_terminal(self) -> None:
         """Ignoring the provider retryability flag retries errors that cannot recover."""
+
         async def sleep(_delay: float) -> None:
             raise AssertionError("non-retryable error must not sleep")
 
@@ -275,6 +322,7 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_second_retryable_error_before_output_is_terminal(self) -> None:
         """Allowing a third adapter attempt turns a bounded retry into an unbounded loop."""
+
         async def sleep(_delay: float) -> None:
             return None
 
@@ -292,7 +340,9 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event.kind for event in events], ["turn_start", "turn_error"])
         self.assertEqual(len(gateway.refs), 2)
         self.assertEqual(
-            self.db.execute("SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'", ("s1",)).fetchone()[0],
+            self.db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'", ("s1",)
+            ).fetchone()[0],
             1,
         )
         usage.flush(now=1.0)
@@ -316,7 +366,9 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertFalse(
-            policy.can_retry(ProviderError(ProviderErrorKind.AUTH, retryable=False), TurnAccumulator())
+            policy.can_retry(
+                ProviderError(ProviderErrorKind.AUTH, retryable=False), TurnAccumulator()
+            )
         )
 
     def test_retry_policy_rejects_more_than_two_total_attempts(self) -> None:

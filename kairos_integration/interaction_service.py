@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field
@@ -31,6 +32,8 @@ from kairos_providers.gateway import ProviderGateway
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 __all__ = ["InteractionService"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -201,14 +204,27 @@ class InteractionService:
             adapter = self._gateway.create_adapter(snapshot.ref)
             attempt_usage: TokenUsage | None = None
             try:
-                async for provider_event in adapter.stream(request):
-                    if provider_event.kind == "usage":
-                        attempt_usage = provider_event.usage
-                        continue
-                    accumulator.accept(provider_event)
-                    event = InteractionEvent.from_provider(provider_event)
-                    if event is not None:
-                        yield event
+                try:
+                    async with aclosing(adapter.stream(request)) as provider_stream:
+                        async for provider_event in provider_stream:
+                            if provider_event.kind == "usage":
+                                attempt_usage = provider_event.usage
+                                continue
+                            accumulator.accept(provider_event)
+                            event = InteractionEvent.from_provider(provider_event)
+                            if event is not None:
+                                yield event
+                except BaseException as exc:
+                    primary = exc.__context__
+                    if isinstance(
+                        primary, (asyncio.CancelledError, GeneratorExit)
+                    ) and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        logger.error(
+                            "falha ao fechar iterador do provider; preservando cancelamento",
+                            exc_info=(type(exc), exc, exc.__traceback__),
+                        )
+                        raise primary from exc
+                    raise
             except ProviderError as exc:
                 accumulator.add_attempt_usage(attempt_usage)
                 if self._retry_policy.can_retry(

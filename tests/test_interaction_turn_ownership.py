@@ -126,6 +126,10 @@ class ProducerAbort(BaseException):
     pass
 
 
+class CleanupAbort(BaseException):
+    pass
+
+
 class BaseExceptionAdapter(ImmediateAdapter):
     def __init__(self) -> None:
         super().__init__("")
@@ -136,6 +140,36 @@ class BaseExceptionAdapter(ImmediateAdapter):
         self.raised.set()
         raise ProducerAbort("producer-abort")
         yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class CleanupGateAdapter(ImmediateAdapter):
+    def __init__(self, cleanup_error: BaseException) -> None:
+        super().__init__("")
+        self.cleanup_error = cleanup_error
+        self.calls = 0
+        self.cleanup_started = asyncio.Event()
+        self.cleanup_release = asyncio.Event()
+        self.cleanup_completed = asyncio.Event()
+        self.cleanup_count = 0
+        self.successor_started = asyncio.Event()
+
+    async def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        self.calls += 1
+        if self.calls == 1:
+            try:
+                yield ProviderEvent(kind="text_delta", text="primeira")
+                await asyncio.Event().wait()
+            finally:
+                self.cleanup_started.set()
+                await self.cleanup_release.wait()
+                self.cleanup_count += 1
+                self.cleanup_completed.set()
+                raise self.cleanup_error
+
+        self.successor_started.set()
+        yield ProviderEvent(kind="text_delta", text="sucessora")
+        yield ProviderEvent(kind="finish", finish_reason="stop")
 
 
 class FirstStreamBlocksAdapter(ImmediateAdapter):
@@ -841,6 +875,117 @@ async def test_fast_provider_is_demand_paced_and_loss_precedes_unrequested_delta
     finally:
         backend.lose.set()
         await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_lease_loss_awaits_provider_cleanup_before_releasing_owner(tmp_path: Path):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    timer = ControlledTime(100)
+    backend = GatedLossBackend(timer.now)
+    adapter = CleanupGateAdapter(CleanupAbort("cleanup-abort"))
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+        ttl=6,
+        refresh_interval=2,
+    )
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    stream = interaction.stream(envelope(content="primeiro"))
+    successor = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        while not timer._waiters:
+            await asyncio.sleep(0)
+        timer.advance_to(102)
+        await backend.refresh_called.wait()
+        backend.lose.set()
+        await adapter.cleanup_started.wait()
+
+        successor = asyncio.create_task(collect(interaction.stream(envelope(content="segundo"))))
+        await asyncio.sleep(0)
+
+        assert not backend.release_called.is_set()
+        assert not adapter.successor_started.is_set()
+        adapter.cleanup_release.set()
+        with pytest.raises(TurnLeaseLostError, match="s1"):
+            await anext(stream)
+        assert (await successor)[-1].kind == "turn_end"
+        await asyncio.sleep(0)
+
+        assert adapter.cleanup_completed.is_set()
+        assert adapter.cleanup_count == 1
+        assert not unhandled
+    finally:
+        adapter.cleanup_release.set()
+        backend.lose.set()
+        if successor is not None:
+            successor.cancel()
+            with suppress(asyncio.CancelledError):
+                await successor
+        await stream.aclose()
+        loop.set_exception_handler(previous_handler)
+        connection.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cleanup_error",
+    [RuntimeError("cleanup-error"), CleanupAbort("cleanup-abort")],
+    ids=["exception", "base-exception"],
+)
+async def test_public_iterator_close_awaits_provider_cleanup_and_preserves_close(
+    tmp_path: Path,
+    cleanup_error: BaseException,
+):
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    adapter = CleanupGateAdapter(cleanup_error)
+    interaction = service(connection, adapter)
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    stream = interaction.stream(envelope(content="primeiro"))
+    close_task = None
+    successor = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        close_task = asyncio.create_task(stream.aclose())
+        await adapter.cleanup_started.wait()
+        successor = asyncio.create_task(collect(interaction.stream(envelope(content="segundo"))))
+        await asyncio.sleep(0)
+
+        assert not close_task.done()
+        assert not adapter.successor_started.is_set()
+        adapter.cleanup_release.set()
+        await close_task
+        assert (await successor)[-1].kind == "turn_end"
+        await asyncio.sleep(0)
+
+        assert adapter.cleanup_completed.is_set()
+        assert adapter.cleanup_count == 1
+        assert not unhandled
+    finally:
+        adapter.cleanup_release.set()
+        if close_task is not None:
+            with suppress(asyncio.CancelledError, CleanupAbort):
+                await close_task
+        if successor is not None:
+            successor.cancel()
+            with suppress(asyncio.CancelledError):
+                await successor
+        await stream.aclose()
+        loop.set_exception_handler(previous_handler)
         connection.close()
 
 
