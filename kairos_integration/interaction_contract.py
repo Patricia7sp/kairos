@@ -27,6 +27,7 @@ __all__ = [
     "InteractionEventKind",
     "InteractionResult",
     "InteractionSelectionSnapshot",
+    "InteractionToolResult",
 ]
 
 
@@ -43,12 +44,24 @@ class InteractionEventKind(StrEnum):
     TURN_END = "turn_end"
 
 
+def _freeze(value: Any) -> Any:
+    """Recursively freeze JSON-like values used in turn parameters."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
 def _immutable_parameters(parameters: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Take a shallow immutable copy of caller-owned parameters."""
+    """Take a recursively immutable copy of caller-owned parameters."""
 
     if not isinstance(parameters, Mapping):
         raise TypeError("parameters deve ser um mapping")
-    return MappingProxyType(dict(parameters))
+    return _freeze(parameters)
 
 
 @dataclass(frozen=True)
@@ -82,7 +95,7 @@ class InteractionSelectionSnapshot:
     """The effective provider selection captured for one turn."""
 
     ref: ProviderModelRef
-    reason: SelectionReason = SelectionReason.CONVERSATION_OVERRIDE
+    reason: SelectionReason
     parameters: Mapping[str, Any] = field(default_factory=dict)
     credential_id: str | None = None
 
@@ -104,6 +117,23 @@ class InteractionResult:
 
 
 @dataclass(frozen=True)
+class InteractionToolResult:
+    """Safe, transport-neutral representation of a tool result."""
+
+    tool_call_id: str
+    content: str
+    is_error: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tool_call_id, str) or not self.tool_call_id.strip():
+            raise ValueError("tool_call_id é obrigatório")
+        if not isinstance(self.content, str):
+            raise TypeError("content do resultado deve ser uma string")
+        if not isinstance(self.is_error, bool):
+            raise TypeError("is_error deve ser booleano")
+
+
+@dataclass(frozen=True)
 class InteractionEvent:
     """A version-neutral event suitable for WebSocket and CLI translators."""
 
@@ -113,7 +143,7 @@ class InteractionEvent:
     text: str = ""
     reasoning: str = ""
     tool_call: CanonicalToolCall | None = None
-    tool_result: Any = None
+    tool_result: InteractionToolResult | None = None
     usage: TokenUsage | None = None
     finish_reason: str | None = None
     error: str | None = None
@@ -155,16 +185,25 @@ class InteractionEvent:
             return cls(kind=InteractionEventKind.REASONING_DELTA, reasoning=event.reasoning)
         if kind == "tool_call":
             return cls(kind=InteractionEventKind.TOOL_CALL, tool_call=event.tool_call)
-        if kind == "tool_result":
-            return cls(
-                kind=InteractionEventKind.TOOL_RESULT,
-                tool_result=getattr(event, "tool_result", None),
-            )
         if kind == "usage":
             return cls(kind=InteractionEventKind.USAGE, usage=event.usage)
         if kind == "finish":
             return None
         return None
+
+    @classmethod
+    def from_tool_result(
+        cls,
+        result: InteractionToolResult,
+        conversation_id: str | None = None,
+    ) -> InteractionEvent:
+        if not isinstance(result, InteractionToolResult):
+            raise TypeError("result deve ser InteractionToolResult")
+        return cls(
+            kind=InteractionEventKind.TOOL_RESULT,
+            conversation_id=conversation_id,
+            tool_result=result,
+        )
 
     @classmethod
     def turn_error(cls, error: Exception) -> InteractionEvent:

@@ -6,6 +6,7 @@ from kairos_integration.interaction_contract import (
     InteractionEventKind,
     InteractionResult,
     InteractionSelectionSnapshot,
+    InteractionToolResult,
 )
 from kairos_integration.surfaces import (
     PROCESS_TOPOLOGIES,
@@ -31,6 +32,7 @@ __all__ = [
     "InteractionEventKind",
     "InteractionResult",
     "InteractionSelectionSnapshot",
+    "InteractionToolResult",
     "LawViolation",
     "ProcessMap",
     "ProcessTopology",
