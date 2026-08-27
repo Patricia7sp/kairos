@@ -94,7 +94,12 @@ class TokenDelta:
         )
 
     def is_empty(self) -> bool:
-        return all(getattr(self, n) == 0 for n in _COUNTERS)
+        return (
+            all(getattr(self, n) == 0 for n in _COUNTERS)
+            and self.estimated_cost_usd is None
+            and self.actual_cost_usd is None
+            and self.cost_status is None
+        )
 
 
 class UsageRepository:
@@ -218,11 +223,13 @@ class UsageRepository:
                         ),
                     )
                     session_row = self._conn.execute(
-                        "SELECT estimated_cost_usd, actual_cost_usd, cost_status, cost_source "
+                        "SELECT billing_provider, billing_base_url, billing_mode, "
+                        "estimated_cost_usd, actual_cost_usd, cost_status, cost_source "
                         "FROM sessions WHERE id = ?",
                         (route.session_id,),
                     ).fetchone()
                     session_cost = _merge_row_cost(session_row, delta)
+                    session_route = _session_route_identity(session_row, route)
                     assignments = ", ".join(f"{name} = {name} + ?" for name in _COUNTERS)
                     self._conn.execute(
                         f"UPDATE sessions SET {assignments}, billing_provider = ?, "  # noqa: S608 - colunas constantes
@@ -230,9 +237,7 @@ class UsageRepository:
                         "actual_cost_usd = ?, cost_status = ?, cost_source = ? WHERE id = ?",
                         (
                             *[getattr(delta, name) for name in _COUNTERS],
-                            route.billing_provider,
-                            route.billing_base_url,
-                            route.billing_mode,
+                            *session_route,
                             *session_cost,
                             route.session_id,
                         ),
@@ -298,23 +303,40 @@ def _merge_cost_fields(
     incoming_status: str | None,
     incoming_source: str | None,
 ) -> tuple[float | None, float | None, str, str | None]:
-    statuses = {current_status or "unknown", incoming_status or "unknown"}
+    estimated = _sum_optional(current_estimated, incoming_estimated)
+    actual = _sum_optional(current_actual, incoming_actual)
+    statuses = (current_status, incoming_status)
     if "unknown" in statuses:
         status = "unknown"
-        estimated = None
+    elif any(status == "estimated" and estimated is not None for status in statuses):
+        status = "estimated"
+    elif any(status == "actual" and actual is not None for status in statuses):
+        status = "actual"
     else:
-        status = "estimated" if "estimated" in statuses else "actual"
-        estimated = (
-            current_estimated + incoming_estimated
-            if current_estimated is not None and incoming_estimated is not None
-            else None
-        )
-        if estimated is None:
-            status = "unknown"
-    actual = (
-        current_actual + incoming_actual
-        if current_actual is not None and incoming_actual is not None
-        else None
-    )
+        status = "unknown"
     source = current_source if current_source == incoming_source else None
     return estimated, actual, status, source
+
+
+def _sum_optional(current: float | None, incoming: float | None) -> float | None:
+    if current is None:
+        return incoming
+    if incoming is None:
+        return current
+    return current + incoming
+
+
+def _session_route_identity(
+    row: sqlite3.Row | None, incoming: BillingRoute
+) -> tuple[str, str, str]:
+    if row is None:
+        return (
+            incoming.billing_provider,
+            incoming.billing_base_url,
+            incoming.billing_mode,
+        )
+    current = (row["billing_provider"], row["billing_base_url"], row["billing_mode"])
+    new = (incoming.billing_provider, incoming.billing_base_url, incoming.billing_mode)
+    if current[0] == "mixed" or (current[0] is not None and current != new):
+        return ("mixed", "", "mixed")
+    return new
