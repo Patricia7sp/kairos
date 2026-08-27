@@ -26,8 +26,10 @@ __all__ = [
     "InteractionEnvelope",
     "InteractionEvent",
     "InteractionEventKind",
+    "InteractionPersistenceError",
     "InteractionResult",
     "InteractionSelectionSnapshot",
+    "InteractionServiceError",
     "InteractionToolResult",
 ]
 
@@ -43,6 +45,27 @@ class InteractionEventKind(StrEnum):
     USAGE = "usage"
     TURN_ERROR = "turn_error"
     TURN_END = "turn_end"
+
+
+class InteractionServiceError(Exception):
+    """Safe service failure that transports can serialize without internals."""
+
+    def __init__(self, error_kind: str, message: str, *, retryable: bool) -> None:
+        self.error_kind = error_kind
+        self.message = message
+        self.retryable = retryable
+        super().__init__(message)
+
+
+class InteractionPersistenceError(InteractionServiceError):
+    """The final accounting batch could not be made durable."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "persistence",
+            "não foi possível persistir a contabilidade do turno",
+            retryable=True,
+        )
 
 
 def _freeze(value: Any) -> Any:
@@ -224,6 +247,13 @@ class InteractionEvent:
                 kind=InteractionEventKind.TURN_ERROR,
                 error=error.message,
                 error_kind=error.kind.value,
+                retryable=error.retryable,
+            )
+        if isinstance(error, InteractionServiceError):
+            return cls(
+                kind=InteractionEventKind.TURN_ERROR,
+                error=error.message,
+                error_kind=error.error_kind,
                 retryable=error.retryable,
             )
         return cls(kind=InteractionEventKind.TURN_ERROR, error="falha ao executar interação")

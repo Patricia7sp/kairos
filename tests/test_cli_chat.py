@@ -233,7 +233,14 @@ def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
 
 def test_cli_human_turn_error_goes_to_stderr(monkeypatch, tmp_path, capsys):
     fake = FakeInteractionService(
-        (InteractionEvent(kind="turn_error", error="falha segura", error_kind="network"),)
+        (
+            InteractionEvent(
+                kind="turn_error",
+                error="não foi possível persistir a contabilidade do turno",
+                error_kind="persistence",
+                retryable=True,
+            ),
+        )
     )
     install_service(monkeypatch, tmp_path, fake)
 
@@ -242,7 +249,7 @@ def test_cli_human_turn_error_goes_to_stderr(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     assert code == ExitCode.ERROR
     assert captured.out == ""
-    assert captured.err == "falha segura\n"
+    assert captured.err == "não foi possível persistir a contabilidade do turno\n"
     assert fake.close_calls == 1
 
 
@@ -251,8 +258,8 @@ def test_cli_json_turn_error_stays_in_event_stream(monkeypatch, tmp_path, capsys
         (
             InteractionEvent(
                 kind="turn_error",
-                error="falha segura",
-                error_kind="network",
+                error="não foi possível persistir a contabilidade do turno",
+                error_kind="persistence",
                 retryable=True,
             ),
         )
@@ -267,8 +274,8 @@ def test_cli_json_turn_error_stays_in_event_stream(monkeypatch, tmp_path, capsys
         "type": "turn_error",
         "protocol": 1,
         "session_id": "s1",
-        "error": "falha segura",
-        "error_kind": "network",
+        "error": "não foi possível persistir a contabilidade do turno",
+        "error_kind": "persistence",
         "retryable": True,
     }
     assert captured.err == ""

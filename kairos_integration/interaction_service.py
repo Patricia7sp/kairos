@@ -14,6 +14,7 @@ from kairos_integration.interaction_contract import (
     InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
+    InteractionPersistenceError,
     InteractionSelectionSnapshot,
 )
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
@@ -230,16 +231,7 @@ class InteractionService:
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa um turno depois de adquirir ownership exclusivo da conversa."""
-        snapshot = self._resolve_snapshot(envelope)
-        prepared = self._prepare(snapshot.ref)
-        snapshot = replace(snapshot, credential_id=prepared.credential_id)
-        selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
-        await self._persist_user(envelope, selection)
-        request = AdapterRequest(
-            model=snapshot.ref,
-            messages=self._history(envelope.conversation_id),
-            parameters=snapshot.parameters,
-        )
+        snapshot, prepared, selection, request = await self._prepare_turn(envelope)
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
 
         accumulator = TurnAccumulator()
@@ -286,7 +278,9 @@ class InteractionService:
                     attempts=attempts,
                     cost=cost,
                 )
-                await self._flush_usage()
+                if persistence_error := await self._flush_terminal_usage():
+                    yield persistence_error
+                    return
                 if accumulator.usage is not None:
                     yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
                 yield InteractionEvent.turn_error(exc)
@@ -308,11 +302,37 @@ class InteractionService:
                 attempts=attempts,
                 cost=cost,
             )
-            await self._flush_usage()
+            if persistence_error := await self._flush_terminal_usage():
+                yield persistence_error
+                return
             if accumulator.usage is not None:
                 yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
             yield InteractionEvent.turn_end(accumulator.finish_reason)
             return
+
+    async def _prepare_turn(
+        self, envelope: InteractionEnvelope
+    ) -> tuple[
+        InteractionSelectionSnapshot,
+        PreparedProviderAdapter | _LegacyPreparedAdapter,
+        ResolvedModelSelection,
+        AdapterRequest,
+    ]:
+        snapshot = self._resolve_snapshot(envelope)
+        prepared = self._prepare(snapshot.ref)
+        snapshot = replace(snapshot, credential_id=prepared.credential_id)
+        selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
+        await self._persist_user(envelope, selection)
+        return (
+            snapshot,
+            prepared,
+            selection,
+            AdapterRequest(
+                model=snapshot.ref,
+                messages=self._history(envelope.conversation_id),
+                parameters=snapshot.parameters,
+            ),
+        )
 
     def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
         prepare = getattr(self._gateway, "prepare", None)
@@ -434,13 +454,18 @@ class InteractionService:
         )
 
     async def _flush_usage(self) -> None:
+        if self._persistence is not None:
+            await self._persistence.flush_usage()
+        else:
+            self._usage.flush()
+
+    async def _flush_terminal_usage(self) -> InteractionEvent | None:
         try:
-            if self._persistence is not None:
-                await self._persistence.flush_usage()
-            else:
-                self._usage.flush()
-        except Exception:  # noqa: BLE001 - fila foi restaurada e o transcript é prioritário
-            logger.warning("falha ao drenar uso no fim do turno; lote mantido para retry")
+            await self._flush_usage()
+        except Exception:
+            logger.exception("falha ao persistir contabilidade do turno")
+            return InteractionEvent.turn_error(InteractionPersistenceError())
+        return None
 
     @staticmethod
     def _tool_calls(tool_calls: list[CanonicalToolCall]) -> str | None:

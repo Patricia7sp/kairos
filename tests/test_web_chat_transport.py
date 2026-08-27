@@ -329,6 +329,29 @@ def test_websocket_reusa_servico_injetado_e_aceita_mensagem_legada_sem_protocol(
     assert fake_service.close_calls == 0
 
 
+def test_websocket_emite_erro_de_persistencia_seguro(auth_client: TestClient, fake_service) -> None:
+    """O transporte deve manter o erro de durabilidade canônico, sem detalhes internos."""
+    fake_service.events = (
+        InteractionEvent(
+            kind="turn_error",
+            error="não foi possível persistir a contabilidade do turno",
+            error_kind="persistence",
+            retryable=True,
+        ),
+    )
+
+    with auth_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"type": "message", "protocol": 1, "session_id": "s1", "content": "oi"})
+        assert ws.receive_json() == {
+            "type": "turn_error",
+            "protocol": 1,
+            "session_id": "s1",
+            "error": "não foi possível persistir a contabilidade do turno",
+            "error_kind": "persistence",
+            "retryable": True,
+        }
+
+
 @pytest.mark.parametrize("frame", [[], "texto", 7, None])
 def test_websocket_ignora_json_que_nao_e_objeto_sem_encerrar_conexao(
     auth_client: TestClient,

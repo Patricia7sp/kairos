@@ -199,6 +199,19 @@ def service_with_fake_adapter(
     return service, resolver, adapter, usage
 
 
+def service_with_failing_usage_flush(
+    db, events: list[ProviderEvent | ProviderError]
+) -> tuple[InteractionService, UsageRepository]:
+    """Create a real service whose terminal accounting flush fails safely."""
+    service, _resolver, _adapter, usage = service_with_fake_adapter(db, events)
+
+    def failing_flush() -> int:
+        raise RuntimeError("database credential detail")
+
+    usage.flush = failing_flush
+    return service, usage
+
+
 def service_with_adapters(db, adapters) -> InteractionService:
     db_path = Path(db.execute("PRAGMA database_list").fetchone()["file"])
     return InteractionService(
@@ -380,6 +393,45 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn('"error_kind": "network"', row["display_metadata"])
         self.assertEqual(usage.pending_count(), 0)
+
+    async def test_flush_failure_replaces_normal_terminal_with_persistence_error(self) -> None:
+        """Engolir o flush deixaria o cliente aceitar um turno sem uso durável."""
+        service, usage = service_with_failing_usage_flush(
+            self.db,
+            [
+                ProviderEvent(kind="text_delta", text="ok"),
+                ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=2, output_tokens=1)),
+                ProviderEvent(kind="finish", finish_reason="stop"),
+            ],
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "turn_error"])
+        self.assertEqual(
+            events[-1].error,
+            "não foi possível persistir a contabilidade do turno",
+        )
+        self.assertEqual(events[-1].error_kind, "persistence")
+        self.assertTrue(events[-1].retryable)
+        self.assertEqual(usage.pending_count(), 1)
+
+    async def test_flush_failure_takes_terminal_precedence_over_provider_error(self) -> None:
+        """Expor o erro do provider esconderia que a contabilidade não foi durável."""
+        service, usage = service_with_failing_usage_flush(
+            self.db,
+            [
+                ProviderEvent(kind="text_delta", text="partial"),
+                ProviderError(ProviderErrorKind.NETWORK, retryable=True),
+            ],
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "turn_error"])
+        self.assertEqual(events[-1].error_kind, "persistence")
+        self.assertNotIn("database", events[-1].error.lower())
+        self.assertEqual(usage.pending_count(), 1)
 
     async def test_turn_boundary_persiste_rotas_e_custos_conhecidos_antes_do_close(self) -> None:
         """Uso concluído deve ficar consultável sem esperar o lifecycle shutdown."""

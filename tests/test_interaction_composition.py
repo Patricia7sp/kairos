@@ -185,8 +185,8 @@ def test_falha_de_construcao_pos_gateway_fecha_gateway_e_banco(tmp_path, monkeyp
         connections[0].execute("SELECT 1")
 
 
-def test_turn_boundary_recupera_lote_apos_falha_transitoria(tmp_path, monkeypatch):
-    """Falha no dreno mantém a fila, e o turno seguinte torna todo uso visível."""
+def test_later_turn_drains_batch_restored_by_failed_terminal_flush(tmp_path, monkeypatch):
+    """A falha terminal preserva o lote para o turno seguinte drená-lo junto ao novo uso."""
     (tmp_path / "config.yaml").write_text(
         "provider: openai\nmodel: gpt-4o\n",
         encoding="utf-8",
@@ -207,18 +207,24 @@ def test_turn_boundary_recupera_lote_apos_falha_transitoria(tmp_path, monkeypatc
     service._usage.flush = flaky_flush
 
     async def stream_retry_and_close():
-        async for _event in service.stream(
-            InteractionEnvelope(conversation_id="s1", source="test", content="olá")
-        ):
-            pass
+        first = [
+            event
+            async for event in service.stream(
+                InteractionEnvelope(conversation_id="s1", source="test", content="olá")
+            )
+        ]
+        assert first[-1].error_kind == "persistence"
         assert service._usage.pending_count() == 1
         with sqlite3.connect(tmp_path / "state.db") as connection:
             assert connection.execute("SELECT count(*) FROM session_model_usage").fetchone()[0] == 0
 
-        async for _event in service.stream(
-            InteractionEnvelope(conversation_id="s2", source="test", content="de novo")
-        ):
-            pass
+        second = [
+            event
+            async for event in service.stream(
+                InteractionEnvelope(conversation_id="s2", source="test", content="de novo")
+            )
+        ]
+        assert second[-1].kind == "turn_end"
         assert service._usage.pending_count() == 0
         await service.aclose()
 
