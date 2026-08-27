@@ -182,6 +182,59 @@ class UsageEventTests(Base):
         self.assertEqual(row["cost_status"], "estimated")
         self.assertIsNone(row["cost_source"])
 
+    def test_coalesced_unknown_cost_clears_partial_estimate(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(
+                estimated_cost_usd=0.04,
+                cost_status="estimated",
+                cost_source="catalog",
+            ),
+        )
+        self.usage.queue(route, TokenDelta(input_tokens=1, cost_status="unknown"))
+        self.usage.flush(now=1)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual(tuple(row), (None, None, "unknown"))
+
+    def test_persisted_unknown_cost_clears_partial_estimate(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(
+                estimated_cost_usd=0.04,
+                cost_status="estimated",
+                cost_source="catalog",
+            ),
+        )
+        self.usage.flush(now=1)
+        self.usage.queue(route, TokenDelta(input_tokens=1, cost_status="unknown"))
+        self.usage.flush(now=2)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual(tuple(row), (None, None, "unknown"))
+
     def test_record_event_enfileira_sem_gravar_no_banco(self) -> None:
         self.sessions.create("s1", source="web")
 

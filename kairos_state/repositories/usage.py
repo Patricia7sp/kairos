@@ -308,6 +308,7 @@ def _merge_cost_fields(
     statuses = (current_status, incoming_status)
     if "unknown" in statuses:
         status = "unknown"
+        estimated = None
     elif any(status == "estimated" and estimated is not None for status in statuses):
         status = "estimated"
     elif any(status == "actual" and actual is not None for status in statuses):
