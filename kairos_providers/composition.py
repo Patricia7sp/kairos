@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.adapters import (
     AnthropicAdapter,
     AnthropicMessagesAdapter,
@@ -34,7 +35,7 @@ from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.contracts import CatalogOrigin, ProviderDescriptor
 from kairos_providers.curated_catalog import curated_models
-from kairos_providers.gateway import ProviderGateway
+from kairos_providers.gateway import ProviderBillingMetadata, ProviderGateway
 from kairos_providers.provider_profiles import (
     DEEPSEEK_PROFILE,
     GROQ_PROFILE,
@@ -118,17 +119,19 @@ class _ProviderHttpClients:
 
     def __init__(self, client_factory: Callable[[], httpx.AsyncClient] | None = None) -> None:
         self._clients: dict[str, httpx.AsyncClient] = {}
-        self._closed = False
+        self._closing = False
+        self._close = AsyncCleanupCoordinator(task_name="kairos-provider-clients-close")
         self._client_factory = client_factory or self._new_http_client
 
     def for_provider(self, provider: str) -> httpx.AsyncClient:
-        if self._closed:
-            raise RuntimeError("gateway de providers já foi encerrado")
-        client = self._clients.get(provider)
-        if client is None:
-            client = self._client_factory()
-            self._clients[provider] = client
-        return client
+        with self._close.lock:
+            if self._closing or self._close.succeeded:
+                raise RuntimeError("gateway de providers já foi encerrado")
+            client = self._clients.get(provider)
+            if client is None:
+                client = self._client_factory()
+                self._clients[provider] = client
+            return client
 
     @staticmethod
     def _new_http_client() -> httpx.AsyncClient:
@@ -138,11 +141,22 @@ class _ProviderHttpClients:
         )
 
     async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        for client in self._clients.values():
-            await client.aclose()
+        await self._close.run(self._close_attempt, on_reserve=self._begin_closing)
+
+    def _begin_closing(self) -> None:
+        self._closing = True
+
+    async def _close_attempt(self) -> None:
+        errors: list[BaseException] = []
+        for provider, client in tuple(self._clients.items()):
+            try:
+                await client.aclose()
+            except BaseException as exc:  # noqa: BLE001 - tenta os demais sob cancelamento
+                errors.append(exc)
+            else:
+                del self._clients[provider]
+        if errors:
+            raise BaseExceptionGroup("falha ao fechar clientes de providers", errors)
 
 
 class _ComposedProviderGateway(ProviderGateway):
@@ -183,7 +197,29 @@ def build_provider_gateway(
         _LazyCredentialService(home),
         snapshots,
         clients=clients,
+        billing_routes=_billing_routes(configuration),
     )
+
+
+def _billing_routes(
+    config: ProviderCompositionConfig,
+) -> dict[str, ProviderBillingMetadata]:
+    return {
+        "openai": ProviderBillingMetadata("openai", "https://api.openai.com/v1", "credential"),
+        "anthropic": ProviderBillingMetadata(
+            "anthropic", "https://api.anthropic.com/v1", "credential"
+        ),
+        "gemini": ProviderBillingMetadata(
+            "gemini", "https://generativelanguage.googleapis.com/v1beta", "credential"
+        ),
+        "ollama": ProviderBillingMetadata("ollama", config.ollama_base_url, "local"),
+        "deepseek": ProviderBillingMetadata("deepseek", DEEPSEEK_PROFILE.base_url, "credential"),
+        "groq": ProviderBillingMetadata("groq", GROQ_PROFILE.base_url, "credential"),
+        "custom": ProviderBillingMetadata("custom", config.custom.base_url, "credential"),
+        "openrouter": ProviderBillingMetadata(
+            "openrouter", "https://openrouter.ai/api/v1", "credential"
+        ),
+    }
 
 
 def _register_adapters(

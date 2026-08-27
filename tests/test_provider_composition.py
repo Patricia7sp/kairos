@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +14,11 @@ from unittest.mock import patch
 from kairos_providers.base import ConnectionStatus
 from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
-from kairos_providers.composition import build_provider_gateway, get_google_adc_token
+from kairos_providers.composition import (
+    ProviderCompositionConfig,
+    build_provider_gateway,
+    get_google_adc_token,
+)
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
@@ -24,6 +29,7 @@ from kairos_providers.contracts import (
 )
 from kairos_providers.gateway import ProviderGateway
 from kairos_providers.manager import ProviderManager
+from kairos_providers.provider_profiles import custom_profile
 from kairos_providers.provider_registry import ProviderAdapterRegistry
 
 
@@ -65,6 +71,63 @@ class TrackingClient:
         self.closed = True
 
 
+class FailingOnceClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        if self.close_attempts == 1:
+            raise RuntimeError("falha transitória no close")
+        await super().aclose()
+
+
+class CancellingOnceClient(FailingOnceClient):
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        if self.close_attempts == 1:
+            raise asyncio.CancelledError
+        self.closed = True
+
+
+class BarrierFailingOnceClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def aclose(self) -> None:
+        self.close_attempts += 1
+        attempt = self.close_attempts
+        self.started.set()
+        await self.release.wait()
+        if attempt == 1:
+            raise RuntimeError("falha compartilhada")
+        self.closed = True
+
+
+class ThreadBarrierClient(TrackingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_attempts = 0
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+
+    async def aclose(self) -> None:
+        with self._lock:
+            self.close_attempts += 1
+            attempt = self.close_attempts
+        self.started.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.001)
+        if attempt == 1:
+            raise RuntimeError("falha cross-loop compartilhada")
+        self.closed = True
+
+
 def test_google_adc_timeout_degrada_para_ausente():
     """Um gcloud instalado mas sem resposta não pode derrubar o status HTTP."""
     with (
@@ -93,6 +156,58 @@ def test_composition_registra_todos_os_providers(tmp_path):
         "openai",
         "openrouter",
     ]
+
+
+def test_preparo_congela_rotas_de_billing_openrouter_e_custom(tmp_path, monkeypatch):
+    """Usar uma base vazia coalesceria endpoints custom e esconderia o rateio real."""
+    custom = custom_profile(
+        base_url="https://models.example.test/v1",
+        trusted_remote=True,
+    )
+    passphrase_file = tmp_path / "vault-passphrase"
+    passphrase_file.write_text("senha-mestra-de-teste\n", encoding="utf-8")
+    passphrase_file.chmod(0o600)
+    monkeypatch.setenv("KAIROS_DISABLE_KEYRING", "1")
+    monkeypatch.setenv("KAIROS_VAULT_PASSPHRASE_FILE", str(passphrase_file))
+    gateway = build_provider_gateway(
+        tmp_path,
+        config=ProviderCompositionConfig(custom=custom),
+    )
+    models = (
+        CatalogModel(
+            ref=ProviderModelRef("openrouter", "acme/chat"),
+            display_name="Router",
+            capabilities=ModelCapabilities(chat=True),
+            price=ModelPrice(
+                prompt=Decimal("0.000001"),
+                completion=Decimal("0.000002"),
+                request=Decimal("0"),
+            ),
+        ),
+        CatalogModel(
+            ref=ProviderModelRef("custom", "private-chat"),
+            display_name="Custom",
+            capabilities=ModelCapabilities(chat=True),
+            price=ModelPrice(
+                prompt=Decimal("0.000003"),
+                completion=Decimal("0.000004"),
+                request=Decimal("0.01"),
+            ),
+        ),
+    )
+    gateway.catalog.merge(models, origin=CatalogOrigin.DYNAMIC)
+
+    openrouter = gateway.prepare(models[0].ref)
+    prepared_custom = gateway.prepare(models[1].ref)
+
+    assert openrouter.billing.provider == "openrouter"
+    assert openrouter.billing.base_url == "https://openrouter.ai/api/v1"
+    assert openrouter.billing.mode == "api_key"
+    assert openrouter.price == models[0].price
+    assert prepared_custom.billing.provider == "custom"
+    assert prepared_custom.billing.base_url == "https://models.example.test/v1"
+    assert prepared_custom.billing.mode == "api_key"
+    assert prepared_custom.price == models[1].price
 
 
 def test_manager_converte_catalogo_moderno_somente_na_borda_legada(tmp_path):
@@ -417,3 +532,188 @@ class ProviderManagerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(clients), 1)
         self.assertTrue(clients[0].closed)
+
+    async def test_gateway_tenta_todos_os_closes_e_permite_repetir_falhas(self):
+        """Um cliente falhar não pode impedir os demais nem bloquear uma nova tentativa."""
+        failing = FailingOnceClient()
+        healthy = TrackingClient()
+        clients = iter((failing, healthy))
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: next(clients),
+            )
+            gateway.registry.create("ollama")
+            gateway.registry.create("openai", api_key="")
+
+            with self.assertRaises(BaseExceptionGroup):
+                await gateway.aclose()
+
+            self.assertEqual(failing.close_attempts, 1)
+            self.assertTrue(healthy.closed)
+            with self.assertRaisesRegex(RuntimeError, "encerrado"):
+                gateway.registry.create("ollama")
+
+            await gateway.aclose()
+
+        self.assertEqual(failing.close_attempts, 2)
+        self.assertTrue(failing.closed)
+
+    async def test_gateway_tenta_demais_clientes_apos_cancelamento(self):
+        """Cancelamento de um close também deve preservar os demais e permitir retry."""
+        cancelling = CancellingOnceClient()
+        healthy = TrackingClient()
+        clients = iter((cancelling, healthy))
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: next(clients),
+            )
+            gateway.registry.create("ollama")
+            gateway.registry.create("openai", api_key="")
+
+            with self.assertRaises(BaseExceptionGroup):
+                await gateway.aclose()
+
+            self.assertTrue(healthy.closed)
+            await gateway.aclose()
+
+        self.assertEqual(cancelling.close_attempts, 2)
+        self.assertTrue(cancelling.closed)
+
+    async def test_aclose_concorrente_compartilha_tentativa_e_retry(self):
+        """Dois closes sobrepostos não podem fechar nem remover o mesmo cliente duas vezes."""
+        client = BarrierFailingOnceClient()
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+            start = asyncio.Event()
+
+            async def close_after_barrier():
+                await start.wait()
+                await gateway.aclose()
+
+            callers = [asyncio.create_task(close_after_barrier()) for _ in range(2)]
+            start.set()
+            await client.started.wait()
+            await asyncio.sleep(0)
+            attempts_during_overlap = client.close_attempts
+            client.release.set()
+            results = await asyncio.gather(*callers, return_exceptions=True)
+
+            self.assertEqual(attempts_during_overlap, 1)
+            self.assertTrue(all(isinstance(result, BaseExceptionGroup) for result in results))
+            self.assertEqual(client.close_attempts, 1)
+            await gateway.aclose()
+
+        self.assertEqual(client.close_attempts, 2)
+        self.assertTrue(client.closed)
+
+    def test_aclose_em_loops_de_threads_compartilha_tentativa(self):
+        """Waiters de loops distintos não podem aguardar Task estrangeira nem duplicar close."""
+        client = ThreadBarrierClient()
+        results: dict[str, object] = {}
+        second_joined = threading.Event()
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+
+            def run_close(name: str, joined: threading.Event | None = None) -> None:
+                async def close() -> None:
+                    task = asyncio.create_task(gateway.aclose())
+                    await asyncio.sleep(0)
+                    if joined is not None:
+                        joined.set()
+                    await task
+
+                try:
+                    results[name] = asyncio.run(close())
+                except BaseException as exc:  # noqa: BLE001 - registra outcome cross-loop
+                    results[name] = exc
+
+            first = threading.Thread(target=run_close, args=("first",), daemon=True)
+            first.start()
+            self.assertTrue(client.started.wait(timeout=2))
+            second = threading.Thread(
+                target=run_close,
+                args=("second", second_joined),
+                daemon=True,
+            )
+            second.start()
+            self.assertTrue(second_joined.wait(timeout=2))
+            client.release.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertTrue(
+            all(isinstance(results[name], BaseExceptionGroup) for name in ("first", "second"))
+        )
+        self.assertEqual(client.close_attempts, 1)
+        asyncio.run(gateway.aclose())
+        self.assertEqual(client.close_attempts, 2)
+        self.assertTrue(client.closed)
+
+    def test_falha_ao_agendar_cleanup_publica_resultado_e_permite_retry(self):
+        """Falha de launch deve chegar ao caller e permitir nova tentativa global."""
+        from kairos_providers import _async_cleanup
+
+        client = TrackingClient()
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+            with (
+                patch.object(
+                    _async_cleanup,
+                    "_launch_cleanup_task",
+                    side_effect=RuntimeError("falha ao agendar provider close"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "falha ao agendar"),
+            ):
+                asyncio.run(gateway.aclose())
+            with self.assertRaisesRegex(RuntimeError, "encerrado"):
+                gateway.registry.create("openai", api_key="")
+            asyncio.run(asyncio.wait_for(gateway.aclose(), timeout=1))
+
+        self.assertTrue(client.closed)
+
+    def test_cleanup_nao_usa_task_factory_eager_do_caller(self):
+        """Task factory ambiente não participa do launch do cleanup reservado."""
+        client = TrackingClient()
+
+        async def close_with_hostile_factory(gateway) -> None:
+            loop = asyncio.get_running_loop()
+
+            def hostile_factory(_loop, coroutine, **_kwargs):
+                coroutine.close()
+                raise AssertionError("task factory do caller executou cleanup")
+
+            loop.set_task_factory(hostile_factory)
+            try:
+                await gateway.aclose()
+            finally:
+                loop.set_task_factory(None)
+
+        with TemporaryDirectory() as tmpdir:
+            gateway = build_provider_gateway(
+                Path(tmpdir),
+                client_factory=lambda: client,
+            )
+            gateway.registry.create("ollama")
+            asyncio.run(close_with_hostile_factory(gateway))
+
+        self.assertTrue(client.closed)

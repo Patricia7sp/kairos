@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -587,64 +588,28 @@ def cmd_web(args) -> int:
 def cmd_run(args) -> int:
     import asyncio
 
-    from kairos_cli.config import load_config
-    from kairos_providers.manager import ProviderManager
-    from kairos_tools.registry import registry
+    from kairos_cli.chat import ChatUsageError, run_chat
 
     prompt_words = getattr(args, "prompt", []) or []
     prompt = " ".join(prompt_words).strip()
-
-    config = load_config()
-    provider_name = config.get("provider", "anthropic")
-    model_name = config.get("model")
-
-    # Obtem credenciais
-    auth_path = _home() / "auth.json"
-    auth_pool = {}
-    if auth_path.exists():
-        try:
-            auth_pool = json.loads(auth_path.read_text(encoding="utf-8")).get("credential_pool", {})
-        except Exception:  # noqa: BLE001, S110
-            pass
-
-    manager = ProviderManager(auth_store=auth_pool)
-    provider = manager.get_provider(provider_name, model=model_name)
-
-    async def _execute_turn(user_msg: str) -> None:
-        messages = [{"role": "user", "content": user_msg}]
-        tools = registry.get_definitions()
-        print(f"\n[Kairos - {provider.name}] > ", end="", flush=True)
-        try:
-            async for chunk in provider.stream_chat(messages, tools=tools, model=model_name):
-                if chunk.delta_text:
-                    print(chunk.delta_text, end="", flush=True)
-                if chunk.delta_tool_calls:
-                    print(f"\n[Ferramenta: {chunk.delta_tool_calls}]", flush=True)
-            print()
-        except Exception as exc:  # noqa: BLE001
-            print(f"\nErro no provedor {provider_name}: {exc}")
-
-    if prompt:
-        asyncio.run(_execute_turn(prompt))
-        return ExitCode.OK
-
-    # Modo interativo REPL
-    print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
+    session_id = getattr(args, "session", None)
+    if args.command == "run" and session_id is None:
+        session_id = "cli-default"
     try:
-        while True:
-            try:
-                line = input("\nvocê > ").strip()
-            except EOFError:
-                break
-            if not line:
-                continue
-            if line.lower() in ("exit", "quit", "sair"):
-                break
-            asyncio.run(_execute_turn(line))
-        return ExitCode.OK
-    except KeyboardInterrupt:
-        print("\nSaindo do Kairos.")
-        return ExitCode.OK
+        return asyncio.run(
+            run_chat(
+                home=_home(),
+                session_id=session_id,
+                prompt=prompt,
+                provider=getattr(args, "provider", None),
+                model=getattr(args, "model", None),
+                as_json=getattr(args, "json", False),
+                quiet=getattr(args, "quiet", False),
+            )
+        )
+    except ChatUsageError as exc:
+        print(f"kairos: {exc}", file=sys.stderr)
+        return ExitCode.USAGE
 
 
 def cmd_security(args) -> int:

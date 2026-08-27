@@ -5,9 +5,12 @@ RF-05, RF-11. Reconstruído de `_reversa_sdd/hermes-state/` §2 e §4.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
+from typing import Any
 
+from kairos_providers.contracts import ResolvedModelSelection
 from kairos_state.contention import Budget
 from kairos_state.writes import write_with_retry
 
@@ -54,10 +57,39 @@ class MessageRepository:
         # Perder o transcript é pior que atrasar: aguenta a paciência longa.
         return write_with_retry(op, budget=Budget.TRANSCRIPT, detail="append_message")
 
+    def append_turn_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        selection: ResolvedModelSelection,
+        *,
+        api_content: str | None = None,
+        timestamp: float | None = None,
+        **columns: Any,
+    ) -> int:
+        metadata = json.dumps(
+            {
+                "model": selection.ref.model,
+                "provider": selection.ref.provider,
+                "reason": selection.reason.value,
+            },
+            sort_keys=True,
+        )
+        return self.append(
+            session_id,
+            role,
+            content=content,
+            api_content=api_content,
+            timestamp=timestamp,
+            display_metadata=metadata,
+            **columns,
+        )
+
     def for_api(self, session_id: str) -> list[sqlite3.Row]:
-        """O que vai ao modelo: só as ativas, em ordem."""
+        """O que vai ao modelo: só as ativas, em ordem e com metadados canônicos."""
         return self._conn.execute(
-            "SELECT id, role, COALESCE(api_content, content) AS payload "
+            "SELECT id, role, COALESCE(api_content, content) AS payload, tool_call_id, tool_calls "
             "FROM messages WHERE session_id = ? AND active = 1 "
             "ORDER BY timestamp, id",
             (session_id,),

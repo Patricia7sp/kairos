@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from kairos_providers.catalog import ModelCatalog, UnknownModelError
 from kairos_providers.contracts import (
@@ -23,6 +25,11 @@ class ModelSelectionContext:
     activity: ProviderModelRef | None = None
     profile: ProviderModelRef | None = None
     global_default: ProviderModelRef | None = None
+    message_parameters: Mapping[str, Any] | None = None
+    conversation_parameters: Mapping[str, Any] | None = None
+    activity_parameters: Mapping[str, Any] | None = None
+    profile_parameters: Mapping[str, Any] | None = None
+    global_parameters: Mapping[str, Any] | None = None
 
 
 class ModelSelectionResolver:

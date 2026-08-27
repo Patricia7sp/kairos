@@ -144,6 +144,8 @@ class ParserTests(unittest.TestCase):
                     argv.append(c.subcommands[0].name)
                 if c.name == "approvals":
                     argv = ["approvals", "test", "ls"]
+                if c.name == "chat":
+                    argv = ["chat", "--session", "surface-test"]
                 if c.name in ("config",) and argv[1] in ("set",):
                     argv += ["k", "v"]
                 args = self.parser.parse_args(argv)
