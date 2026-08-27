@@ -4,15 +4,21 @@ import asyncio
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
+from decimal import Decimal
 from pathlib import Path
 
 from kairos_integration import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
+from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import (
     CanonicalMessage,
     CanonicalToolCall,
+    CatalogModel,
+    CatalogOrigin,
     ContentPart,
+    ModelCapabilities,
+    ModelPrice,
     ModelSelectionContext,
     ProviderError,
     ProviderErrorKind,
@@ -22,6 +28,9 @@ from kairos_providers import (
     SelectionReason,
     TokenUsage,
 )
+from kairos_providers.catalog import ModelCatalog
+from kairos_providers.gateway import ProviderBillingMetadata
+from kairos_providers.selection import ModelSelectionResolver
 from kairos_state import connect, initialize_schema
 from kairos_state.repositories import (
     LeaseRepository,
@@ -91,6 +100,53 @@ class SequenceGateway:
 
     def create_adapter(self, _ref):
         return next(self._adapters)
+
+
+class CostPreparedGateway:
+    def __init__(self, adapter: FakeAdapter) -> None:
+        self._adapter = adapter
+
+    def prepare(self, ref: ProviderModelRef):
+        adapter = self._adapter
+
+        class Prepared:
+            credential_id = None
+            billing = ProviderBillingMetadata("custom", "https://models.example.test/v1", "api_key")
+            price = ModelPrice(
+                prompt=Decimal("0.001"),
+                completion=Decimal("0.002"),
+                request=Decimal("0.01"),
+            )
+            cost_source = "catalog"
+            pricing_version = "snapshot-1"
+
+            def create_adapter(self):
+                return adapter
+
+        return Prepared()
+
+
+class OpenRouterCostPreparedGateway(CostPreparedGateway):
+    def prepare(self, ref: ProviderModelRef):
+        adapter = self._adapter
+
+        class Prepared:
+            credential_id = None
+            billing = ProviderBillingMetadata(
+                "openrouter", "https://openrouter.ai/api/v1", "api_key"
+            )
+            price = ModelPrice(
+                prompt=Decimal("0.000001"),
+                completion=Decimal("0.000002"),
+                request=Decimal("0"),
+            )
+            cost_source = "catalog"
+            pricing_version = "snapshot-2"
+
+            def create_adapter(self):
+                return adapter
+
+        return Prepared()
 
 
 class BlockingAdapter(FakeAdapter):
@@ -199,7 +255,106 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
             ("s1",),
         ).fetchone()
         self.assertEqual((assistant["content"], assistant["finish_reason"]), ("olá", "stop"))
-        self.assertEqual(usage.pending_count(), 1)
+        self.assertEqual(usage.pending_count(), 0)
+
+    async def test_snapshot_mescla_parametros_sem_tornar_override_de_mensagem_sticky(
+        self,
+    ) -> None:
+        """Um override efêmero não pode substituir a seleção explícita da conversa."""
+        conversation_ref = ProviderModelRef("fake", "conversation")
+        message_ref = ProviderModelRef("fake", "message")
+        catalog = ModelCatalog()
+        catalog.merge(
+            [
+                CatalogModel(
+                    ref=conversation_ref,
+                    display_name="Conversation",
+                    capabilities=ModelCapabilities(chat=True),
+                ),
+                CatalogModel(
+                    ref=message_ref,
+                    display_name="Message",
+                    capabilities=ModelCapabilities(chat=True),
+                ),
+            ],
+            origin=CatalogOrigin.CURATED,
+        )
+        self.db.execute("UPDATE sessions SET model = NULL WHERE id = 's1'")
+        sessions = SessionRepository(self.db)
+        sessions.ensure("s1", source="web")
+        sessions.set_selection(
+            "s1",
+            conversation_ref,
+            {"seed": 7, "routing": {"conversation": True, "shared": "conversation"}},
+        )
+        loader = SelectionContextLoader(
+            sessions,
+            profile_configs={
+                "work": {
+                    "provider": "fake",
+                    "model": "conversation",
+                    "parameters": {
+                        "max_tokens": 128,
+                        "routing": {"profile": True, "shared": "profile"},
+                    },
+                }
+            },
+            global_config={
+                "provider": "fake",
+                "model": "conversation",
+                "parameters": {
+                    "temperature": 0.1,
+                    "routing": {"global": True, "shared": "global"},
+                },
+            },
+        )
+        adapter = FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+        service = InteractionService(
+            gateway=FakeGateway(adapter),
+            resolver=ModelSelectionResolver(catalog),
+            context_loader=loader,
+            sessions=sessions,
+            messages=MessageRepository(self.db),
+            usage=UsageRepository(self.db),
+        )
+        turn = InteractionEnvelope(
+            conversation_id="s1",
+            source="web",
+            content="temporário",
+            profile="work",
+            override=message_ref,
+            parameters={"temperature": 0.9, "routing": {"message": True}},
+        )
+
+        events = [event async for event in service.stream(turn)]
+
+        self.assertEqual(events[0].snapshot.ref, message_ref)
+        self.assertEqual(
+            dict(events[0].snapshot.parameters),
+            {
+                "max_tokens": 128,
+                "seed": 7,
+                "temperature": 0.9,
+                "routing": {
+                    "global": True,
+                    "profile": True,
+                    "conversation": True,
+                    "message": True,
+                    "shared": "conversation",
+                },
+            },
+        )
+        persisted = sessions.selection("s1")
+        assert persisted is not None
+        self.assertEqual(persisted.ref, conversation_ref)
+        self.assertEqual(
+            persisted.parameters,
+            {"seed": 7, "routing": {"conversation": True, "shared": "conversation"}},
+        )
+        metadata = self.db.execute(
+            "SELECT display_metadata FROM messages WHERE session_id = 's1' AND role = 'user'"
+        ).fetchone()[0]
+        self.assertIn('"model": "message"', metadata)
 
     async def test_erro_persiste_resposta_parcial_e_nao_fecha_turno(self) -> None:
         """Propagar erro apagaria a resposta parcial e deixaria o cliente sem evento final."""
@@ -224,7 +379,69 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
             ("parcial", "error", "error"),
         )
         self.assertIn('"error_kind": "network"', row["display_metadata"])
-        self.assertEqual(usage.pending_count(), 1)
+        self.assertEqual(usage.pending_count(), 0)
+
+    async def test_turn_boundary_persiste_rotas_e_custos_conhecidos_antes_do_close(self) -> None:
+        """Uso concluído deve ficar consultável sem esperar o lifecycle shutdown."""
+        adapter = FakeAdapter(
+            [
+                ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=2)),
+                ProviderEvent(kind="finish", finish_reason="stop"),
+            ]
+        )
+        usage = UsageRepository(self.db)
+        service = InteractionService(
+            gateway=CostPreparedGateway(adapter),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=usage,
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        usage_event = next(event for event in events if event.kind == "usage")
+        self.assertEqual(usage_event.cost.status, "estimated")
+        self.assertAlmostEqual(usage_event.cost.estimated_usd, 0.017)
+        self.assertIsNone(usage_event.cost.actual_usd)
+        self.assertEqual(usage.pending_count(), 0)
+        row = self.db.execute(
+            "SELECT billing_provider, billing_base_url, billing_mode, estimated_cost_usd, "
+            "actual_cost_usd, cost_status, cost_source FROM session_model_usage"
+        ).fetchone()
+        self.assertEqual(tuple(row[:3]), ("custom", "https://models.example.test/v1", "api_key"))
+        self.assertAlmostEqual(row["estimated_cost_usd"], 0.017)
+        self.assertIsNone(row["actual_cost_usd"])
+        self.assertEqual((row["cost_status"], row["cost_source"]), ("estimated", "catalog"))
+
+        router_service = InteractionService(
+            gateway=OpenRouterCostPreparedGateway(
+                FakeAdapter(
+                    [
+                        ProviderEvent(
+                            kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=2)
+                        ),
+                        ProviderEvent(kind="finish", finish_reason="stop"),
+                    ]
+                )
+            ),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=usage,
+        )
+        router_events = [event async for event in router_service.stream(envelope("router"))]
+        router_usage = next(event for event in router_events if event.kind == "usage")
+        self.assertAlmostEqual(router_usage.cost.estimated_usd, 0.000007)
+        rows = self.db.execute(
+            "SELECT billing_provider, billing_base_url, estimated_cost_usd "
+            "FROM session_model_usage ORDER BY billing_provider"
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][0:2], ("openrouter", "https://openrouter.ai/api/v1"))
+        self.assertAlmostEqual(rows[1][2], 0.000007)
 
     async def test_proximo_turno_reidrata_tool_calls_e_resultado_vinculado(self) -> None:
         """Descartar IDs de tools faria o próximo provider rejeitar o histórico do turno."""

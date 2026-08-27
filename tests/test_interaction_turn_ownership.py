@@ -899,7 +899,7 @@ async def test_refresh_blocked_past_deadline_stops_owner_before_successor_provid
             ("assistant", "sucessora"),
         ]
         assert first_usage.pending_count() == 0
-        assert second_usage.pending_count() == 1
+        assert second_usage.pending_count() == 0
         assert refresh_finished.is_set()
         assert (
             second_connection.execute(

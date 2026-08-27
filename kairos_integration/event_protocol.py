@@ -71,6 +71,12 @@ def _event_fields(event: InteractionEvent) -> dict[str, Any]:
             "reasoning_tokens": event.usage.reasoning_tokens,
             "total_tokens": event.usage.total,
         }
+        payload["cost"] = {
+            "estimated_usd": event.cost.estimated_usd,
+            "actual_usd": event.cost.actual_usd,
+            "status": event.cost.status,
+            "source": event.cost.source,
+        }
     elif event.kind is InteractionEventKind.TURN_ERROR:
         payload.update(
             error=event.error,

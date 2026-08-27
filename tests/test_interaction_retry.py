@@ -6,11 +6,16 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from kairos_integration import InteractionEnvelope
+from kairos_integration.event_protocol import interaction_event_to_json
 from kairos_integration.interaction_service import InteractionService, TurnAccumulator
 from kairos_integration.retry import RetryPolicy
 from kairos_providers import (
     CanonicalToolCall,
+    CatalogModel,
+    CatalogOrigin,
+    ModelCapabilities,
     ModelSelectionContext,
+    ProviderDescriptor,
     ProviderError,
     ProviderErrorKind,
     ProviderEvent,
@@ -18,6 +23,15 @@ from kairos_providers import (
     ResolvedModelSelection,
     SelectionReason,
     TokenUsage,
+)
+from kairos_providers.catalog import ModelCatalog
+from kairos_providers.catalog_store import CatalogSnapshotStore
+from kairos_providers.gateway import ProviderGateway
+from kairos_providers.provider_registry import ProviderAdapterRegistry
+from kairos_security.credentials import (
+    CredentialMetadata,
+    CredentialRef,
+    CredentialSecret,
 )
 from kairos_state import connect, initialize_schema
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
@@ -134,6 +148,27 @@ class AttemptGateway:
         return self._adapters[len(self.refs) - 1]
 
 
+class RotatingCredentials:
+    def __init__(self) -> None:
+        self.current = "primary"
+        self.secrets = {
+            "primary": CredentialSecret({"api_key": "sentinel-primary-secret"}),
+            "rotated": CredentialSecret({"api_key": "sentinel-rotated-secret"}),
+        }
+
+    def list(self, provider: str):
+        return [
+            CredentialMetadata(
+                CredentialRef(provider, self.current),
+                "api_key",
+                "test",
+            )
+        ]
+
+    def get(self, ref: CredentialRef) -> CredentialSecret:
+        return self.secrets[ref.credential_id]
+
+
 class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -211,6 +246,62 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
             ("s1",),
         ).fetchone()
         self.assertEqual(tuple(row), (2, 3, 2))
+
+    async def test_retry_reuses_prepared_credential_after_vault_rotation(self) -> None:
+        """Reler o cofre no retry pode trocar a identidade no meio do mesmo turno."""
+        credentials = RotatingCredentials()
+        created_keys: list[str] = []
+        adapters = iter(
+            [
+                FakeAdapter([ProviderError(ProviderErrorKind.NETWORK, retryable=True)]),
+                FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")]),
+            ]
+        )
+        registry = ProviderAdapterRegistry()
+
+        def factory(*, api_key: str, **_kwargs):
+            created_keys.append(api_key)
+            return next(adapters)
+
+        registry.register(ProviderDescriptor("fake", "Fake", ("api_key",)), factory)
+        catalog = ModelCatalog()
+        catalog.merge(
+            [
+                CatalogModel(
+                    ref=ProviderModelRef("fake", "chat-1"),
+                    display_name="Fake",
+                    capabilities=ModelCapabilities(chat=True),
+                )
+            ],
+            origin=CatalogOrigin.CURATED,
+        )
+        gateway = ProviderGateway(
+            registry,
+            catalog,
+            credentials,
+            CatalogSnapshotStore(Path(self._tmp.name) / "catalog.json"),
+        )
+
+        async def rotate(_delay: float) -> None:
+            credentials.current = "rotated"
+
+        service = InteractionService(
+            gateway=gateway,
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=UsageRepository(self.db),
+            retry_policy=RetryPolicy(sleep=rotate, clock=lambda: 0.0),
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual(created_keys, ["sentinel-primary-secret"] * 2)
+        self.assertEqual(events[0].snapshot.credential_id, "primary")
+        protocol = interaction_event_to_json(events[0])
+        self.assertNotIn("credential", repr(protocol))
+        self.assertNotIn("sentinel-primary-secret", repr(events[0]))
 
     async def test_retry_closes_each_attempt_iterator_once_without_closing_adapters(self) -> None:
         """Closing an adapter instead of its iterator would tear down a shared resource."""
@@ -353,7 +444,7 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in service.stream(envelope())]
 
         self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_end"])
-        self.assertEqual(events[1].usage, TokenUsage(input_tokens=6, output_tokens=1))
+        self.assertEqual(events[1].usage, TokenUsage(input_tokens=10, output_tokens=1))
         self.assertEqual(len(gateway.refs), 2)
         usage.flush(now=1.0)
         row = self.db.execute(

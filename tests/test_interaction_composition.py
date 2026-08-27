@@ -185,8 +185,8 @@ def test_falha_de_construcao_pos_gateway_fecha_gateway_e_banco(tmp_path, monkeyp
         connections[0].execute("SELECT 1")
 
 
-def test_aclose_tenta_gateway_e_repete_flush_que_falhou(tmp_path, monkeypatch):
-    """Marcar closed antes do flush impede recuperar uso após falha transitória."""
+def test_turn_boundary_recupera_lote_apos_falha_transitoria(tmp_path, monkeypatch):
+    """Falha no dreno mantém a fila, e o turno seguinte torna todo uso visível."""
     (tmp_path / "config.yaml").write_text(
         "provider: openai\nmodel: gpt-4o\n",
         encoding="utf-8",
@@ -206,27 +206,32 @@ def test_aclose_tenta_gateway_e_repete_flush_que_falhou(tmp_path, monkeypatch):
 
     service._usage.flush = flaky_flush
 
-    async def stream_and_retry_close():
+    async def stream_retry_and_close():
         async for _event in service.stream(
             InteractionEnvelope(conversation_id="s1", source="test", content="olá")
         ):
             pass
-        with pytest.raises(BaseExceptionGroup, match="InteractionService"):
-            await service.aclose()
-        assert gateway.close_attempts == 1
         assert service._usage.pending_count() == 1
-        service._connection.execute("SELECT 1")
+        with sqlite3.connect(tmp_path / "state.db") as connection:
+            assert connection.execute("SELECT count(*) FROM session_model_usage").fetchone()[0] == 0
+
+        async for _event in service.stream(
+            InteractionEnvelope(conversation_id="s2", source="test", content="de novo")
+        ):
+            pass
+        assert service._usage.pending_count() == 0
         await service.aclose()
 
-    asyncio.run(stream_and_retry_close())
+    asyncio.run(stream_retry_and_close())
 
-    assert flush_attempts == 2
-    assert gateway.close_attempts == 2
+    assert flush_attempts == 3
+    assert gateway.close_attempts == 1
     with sqlite3.connect(tmp_path / "state.db") as connection:
-        row = connection.execute(
-            "SELECT api_call_count, input_tokens, output_tokens FROM session_model_usage"
-        ).fetchone()
-    assert row == (1, 7, 3)
+        rows = connection.execute(
+            "SELECT session_id, api_call_count, input_tokens, output_tokens "
+            "FROM session_model_usage ORDER BY session_id"
+        ).fetchall()
+    assert rows == [("s1", 1, 7, 3), ("s2", 1, 7, 3)]
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         service._connection.execute("SELECT 1")
 

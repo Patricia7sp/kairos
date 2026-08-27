@@ -61,6 +61,13 @@ class SelectionContextLoader:
             activity=_activity_ref(profile_config, envelope.activity),
             profile=parse_ref(_config_ref(profile_config)),
             global_default=parse_ref(_config_ref(self._global_config)),
+            message_parameters=envelope.parameters or None,
+            conversation_parameters=(
+                persisted.parameters if persisted is not None and persisted.parameters else None
+            ),
+            activity_parameters=_activity_parameters(profile_config, envelope.activity),
+            profile_parameters=_config_parameters(profile_config),
+            global_parameters=_config_parameters(self._global_config),
         )
 
 
@@ -81,13 +88,28 @@ def _activity_ref(config: Mapping[str, Any], activity: str | None) -> ProviderMo
     if not isinstance(activity_models, Mapping):
         return None
     model = activity_models.get(activity)
-    if (
-        isinstance(model, str)
-        and "/" not in model
-        and isinstance(config.get("provider"), str)
-    ):
+    if isinstance(model, str) and "/" not in model and isinstance(config.get("provider"), str):
         model = {
             "provider": config["provider"],
             "model": model,
         }
     return parse_ref(model)
+
+
+def _config_parameters(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    parameters = config.get("parameters")
+    if not isinstance(parameters, Mapping):
+        return None
+    return dict(parameters)
+
+
+def _activity_parameters(config: Mapping[str, Any], activity: str | None) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    activity_models = config.get("auxiliary_models")
+    if not isinstance(activity_models, Mapping):
+        return None
+    activity_config = activity_models.get(activity)
+    if not isinstance(activity_config, Mapping):
+        return None
+    return _config_parameters(activity_config)

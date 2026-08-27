@@ -22,6 +22,7 @@ from kairos_providers.base import TokenUsage
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
 
 __all__ = [
+    "InteractionCost",
     "InteractionEnvelope",
     "InteractionEvent",
     "InteractionEventKind",
@@ -104,6 +105,16 @@ class InteractionSelectionSnapshot:
 
 
 @dataclass(frozen=True)
+class InteractionCost:
+    """Cost accounting known at the end of a turn, never secret material."""
+
+    estimated_usd: float | None = None
+    actual_usd: float | None = None
+    status: str = "unknown"
+    source: str | None = None
+
+
+@dataclass(frozen=True)
 class InteractionResult:
     """Immutable accumulated result of a completed or partial turn."""
 
@@ -145,6 +156,7 @@ class InteractionEvent:
     tool_call: CanonicalToolCall | None = None
     tool_result: InteractionToolResult | None = None
     usage: TokenUsage | None = None
+    cost: InteractionCost = field(default_factory=InteractionCost)
     finish_reason: str | None = None
     error: str | None = None
     error_kind: str | None = None

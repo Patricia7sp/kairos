@@ -5,15 +5,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from decimal import Decimal
 
 from kairos_integration.interaction_contract import (
+    InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
     InteractionSelectionSnapshot,
 )
+from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import AsyncTurnLeaseBackend, SessionTurnOwnership
@@ -22,14 +25,20 @@ from kairos_providers import (
     CanonicalMessage,
     CanonicalToolCall,
     ContentPart,
+    ModelPrice,
     ModelSelectionResolver,
     ProviderError,
     ProviderEvent,
+    ProviderModelRef,
     ResolvedModelSelection,
     TokenUsage,
 )
 from kairos_providers._async_cleanup import run_persistent_cleanup
-from kairos_providers.gateway import ProviderGateway
+from kairos_providers.gateway import (
+    PreparedProviderAdapter,
+    ProviderBillingMetadata,
+    ProviderGateway,
+)
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 __all__ = ["InteractionService"]
@@ -121,6 +130,7 @@ class InteractionService:
         sessions: SessionRepository,
         messages: MessageRepository,
         usage: UsageRepository,
+        persistence: SQLiteAsyncInteractionPersistence | None = None,
         billing_base_url: str = "",
         billing_mode: str = "unknown",
         retry_policy: RetryPolicy | None = None,
@@ -138,6 +148,7 @@ class InteractionService:
         self._sessions = sessions
         self._messages = messages
         self._usage = usage
+        self._persistence = persistence
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
@@ -203,7 +214,7 @@ class InteractionService:
     ) -> _StreamTerminal:
         try:
             async with self._turn_ownership.acquire(envelope.conversation_id, envelope.source):
-                self._sessions.ensure(envelope.conversation_id, source=envelope.source)
+                await self._ensure_session(envelope)
                 async with aclosing(self._stream_owned(envelope)) as owned_stream:
                     while True:
                         await demand.get()
@@ -220,8 +231,10 @@ class InteractionService:
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa um turno depois de adquirir ownership exclusivo da conversa."""
         snapshot = self._resolve_snapshot(envelope)
+        prepared = self._prepare(snapshot.ref)
+        snapshot = replace(snapshot, credential_id=prepared.credential_id)
         selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
-        self._persist_user(envelope, selection)
+        await self._persist_user(envelope, selection)
         request = AdapterRequest(
             model=snapshot.ref,
             messages=self._history(envelope.conversation_id),
@@ -233,7 +246,7 @@ class InteractionService:
         attempts = 0
         while True:
             attempts += 1
-            adapter = self._gateway.create_adapter(snapshot.ref)
+            adapter = prepared.create_adapter()
             attempt_usage: TokenUsage | None = None
             try:
                 provider_stream = adapter.stream(request)
@@ -258,45 +271,74 @@ class InteractionService:
                 ) and self._retry_policy.has_attempts_remaining(attempts):
                     await self._retry_policy.backoff(attempts)
                     continue
-                if attempt_usage is not None:
-                    yield InteractionEvent(kind="usage", usage=attempt_usage)
-                self._persist_error(envelope.conversation_id, accumulator, selection, exc)
-                self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
+                cost = _cost_for(prepared, accumulator.usage, attempts)
+                await self._persist_error(envelope.conversation_id, accumulator, selection, exc)
+                self._record_usage(
+                    envelope.conversation_id,
+                    selection,
+                    prepared=prepared,
+                    usage=accumulator.usage,
+                    attempts=attempts,
+                    cost=cost,
+                )
+                await self._flush_usage()
+                if accumulator.usage is not None:
+                    yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
                 yield InteractionEvent.turn_error(exc)
                 return
 
             accumulator.add_attempt_usage(attempt_usage)
-            if attempt_usage is not None:
-                yield InteractionEvent(kind="usage", usage=attempt_usage)
-            self._persist_assistant(envelope.conversation_id, accumulator, selection)
-            self._record_usage(envelope.conversation_id, selection, accumulator.usage, attempts)
+            cost = _cost_for(prepared, accumulator.usage, attempts)
+            await self._persist_assistant(envelope.conversation_id, accumulator, selection)
+            self._record_usage(
+                envelope.conversation_id,
+                selection,
+                prepared=prepared,
+                usage=accumulator.usage,
+                attempts=attempts,
+                cost=cost,
+            )
+            await self._flush_usage()
+            if accumulator.usage is not None:
+                yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
             yield InteractionEvent.turn_end(accumulator.finish_reason)
             return
 
+    def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
+        prepare = getattr(self._gateway, "prepare", None)
+        if callable(prepare):
+            return prepare(ref)
+        return _LegacyPreparedAdapter(
+            self._gateway,
+            ref,
+            billing_base_url=self._billing_base_url,
+            billing_mode=self._billing_mode,
+        )
+
     def _resolve_snapshot(self, envelope: InteractionEnvelope) -> InteractionSelectionSnapshot:
-        resolved = self._resolver.resolve(self._context_loader.load(envelope))
+        context = self._context_loader.load(envelope)
+        resolved = self._resolver.resolve(context)
         return InteractionSelectionSnapshot(
             ref=resolved.ref,
             reason=resolved.reason,
-            parameters=envelope.parameters,
+            parameters=_merged_parameters(context, message_parameters=envelope.parameters),
         )
 
-    def _persist_user(
+    async def _ensure_session(self, envelope: InteractionEnvelope) -> None:
+        if self._persistence is not None:
+            await self._persistence.ensure(envelope.conversation_id, source=envelope.source)
+            return
+        self._sessions.ensure(envelope.conversation_id, source=envelope.source)
+
+    async def _persist_user(
         self, envelope: InteractionEnvelope, selection: ResolvedModelSelection
     ) -> None:
-        self._sessions.set_selection(
-            envelope.conversation_id,
-            selection.ref,
-            dict(envelope.parameters),
-            reason=selection.reason,
-        )
-        self._messages.append_turn_message(
-            envelope.conversation_id,
-            "user",
-            envelope.content,
-            selection,
-            api_content=envelope.content,
-        )
+        args = (envelope.conversation_id, "user", envelope.content, selection)
+        kwargs = {"api_content": envelope.content}
+        if self._persistence is not None:
+            await self._persistence.append_turn_message(*args, **kwargs)
+        else:
+            self._messages.append_turn_message(*args, **kwargs)
 
     def _history(self, conversation_id: str) -> tuple[CanonicalMessage, ...]:
         return tuple(
@@ -309,24 +351,25 @@ class InteractionService:
             for row in self._messages.for_api(conversation_id)
         )
 
-    def _persist_assistant(
+    async def _persist_assistant(
         self,
         conversation_id: str,
         accumulator: TurnAccumulator,
         selection: ResolvedModelSelection,
     ) -> None:
-        self._messages.append_turn_message(
-            conversation_id,
-            "assistant",
-            accumulator.text,
-            selection,
-            api_content=accumulator.text,
-            finish_reason=accumulator.finish_reason,
-            reasoning=accumulator.reasoning or None,
-            tool_calls=self._tool_calls(accumulator.tool_calls),
-        )
+        args = (conversation_id, "assistant", accumulator.text, selection)
+        kwargs = {
+            "api_content": accumulator.text,
+            "finish_reason": accumulator.finish_reason,
+            "reasoning": accumulator.reasoning or None,
+            "tool_calls": self._tool_calls(accumulator.tool_calls),
+        }
+        if self._persistence is not None:
+            await self._persistence.append_turn_message(*args, **kwargs)
+        else:
+            self._messages.append_turn_message(*args, **kwargs)
 
-    def _persist_error(
+    async def _persist_error(
         self,
         conversation_id: str,
         accumulator: TurnAccumulator,
@@ -341,34 +384,53 @@ class InteractionService:
             "reason": selection.reason.value,
             "retryable": error.retryable,
         }
-        self._messages.append(
-            conversation_id,
-            "assistant",
-            content=accumulator.text,
-            api_content=accumulator.text,
-            finish_reason="error",
-            reasoning=accumulator.reasoning or None,
-            tool_calls=self._tool_calls(accumulator.tool_calls),
-            display_kind="error",
-            display_metadata=json.dumps(metadata, sort_keys=True),
-        )
+        args = (conversation_id, "assistant")
+        kwargs = {
+            "content": accumulator.text,
+            "api_content": accumulator.text,
+            "finish_reason": "error",
+            "reasoning": accumulator.reasoning or None,
+            "tool_calls": self._tool_calls(accumulator.tool_calls),
+            "display_kind": "error",
+            "display_metadata": json.dumps(metadata, sort_keys=True),
+        }
+        if self._persistence is not None:
+            await self._persistence.append_message(*args, **kwargs)
+        else:
+            self._messages.append(*args, **kwargs)
 
     def _record_usage(
         self,
         conversation_id: str,
         selection: ResolvedModelSelection,
+        *,
+        prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
         usage: TokenUsage | None,
         attempts: int,
+        cost: InteractionCost,
     ) -> None:
         self._usage.record_event(
             conversation_id,
             selection,
-            billing_provider=selection.ref.provider,
-            billing_base_url=self._billing_base_url,
-            billing_mode=self._billing_mode,
+            billing_provider=prepared.billing.provider,
+            billing_base_url=prepared.billing.base_url,
+            billing_mode=prepared.billing.mode,
             usage=usage,
             api_call_count=attempts,
+            estimated_cost_usd=cost.estimated_usd,
+            actual_cost_usd=cost.actual_usd,
+            cost_status=cost.status,
+            cost_source=cost.source,
         )
+
+    async def _flush_usage(self) -> None:
+        try:
+            if self._persistence is not None:
+                await self._persistence.flush_usage()
+            else:
+                self._usage.flush()
+        except Exception:  # noqa: BLE001 - fila foi restaurada e o transcript é prioritário
+            logger.warning("falha ao drenar uso no fim do turno; lote mantido para retry")
 
     @staticmethod
     def _tool_calls(tool_calls: list[CanonicalToolCall]) -> str | None:
@@ -401,3 +463,89 @@ class InteractionService:
                 continue
             calls.append(CanonicalToolCall(id=call_id, name=name, arguments=arguments))
         return tuple(calls)
+
+
+def _merged_parameters(
+    context: object,
+    *,
+    message_parameters: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Merge lower-precedence defaults first, preserving nested routing policy."""
+    merged: dict[str, object] = {}
+    for field_name in (
+        "global_parameters",
+        "profile_parameters",
+        "activity_parameters",
+        "conversation_parameters",
+        "message_parameters",
+    ):
+        layer = getattr(context, field_name, None)
+        if isinstance(layer, Mapping):
+            _merge_mapping(merged, layer)
+    if isinstance(message_parameters, Mapping):
+        _merge_mapping(merged, message_parameters)
+    return merged
+
+
+def _merge_mapping(target: dict[str, object], layer: Mapping[str, object]) -> None:
+    for key, value in layer.items():
+        current = target.get(key)
+        if isinstance(current, dict) and isinstance(value, Mapping):
+            _merge_mapping(current, value)
+        elif isinstance(value, Mapping):
+            nested: dict[str, object] = {}
+            _merge_mapping(nested, value)
+            target[key] = nested
+        else:
+            target[key] = value
+
+
+class _LegacyPreparedAdapter:
+    """Compatibility for injected gateways that predate the prepared boundary."""
+
+    credential_id = None
+    price = ModelPrice()
+    cost_source = None
+    pricing_version = None
+
+    def __init__(
+        self,
+        gateway: object,
+        ref: ProviderModelRef,
+        *,
+        billing_base_url: str = "",
+        billing_mode: str = "unknown",
+    ) -> None:
+        self._gateway = gateway
+        self._ref = ref
+        self.billing = ProviderBillingMetadata(ref.provider, billing_base_url, billing_mode)
+
+    def create_adapter(self) -> object:
+        return self._gateway.create_adapter(self._ref)
+
+
+def _cost_for(
+    prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
+    usage: TokenUsage | None,
+    attempts: int,
+) -> InteractionCost:
+    if usage is None:
+        return InteractionCost()
+    price = prepared.price
+    components = (
+        (usage.input_tokens + usage.cache_read_tokens, price.prompt),
+        (usage.output_tokens + usage.reasoning_tokens, price.completion),
+        (attempts, price.request),
+    )
+    if any(count and unit_price is None for count, unit_price in components):
+        return InteractionCost(source=prepared.cost_source)
+    estimated = sum(
+        Decimal(count) * unit_price
+        for count, unit_price in components
+        if count and unit_price is not None
+    )
+    return InteractionCost(
+        estimated_usd=float(estimated),
+        status="estimated",
+        source=prepared.cost_source,
+    )

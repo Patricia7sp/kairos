@@ -6,6 +6,7 @@ from kairos_integration.event_protocol import (
     interaction_event_to_json,
 )
 from kairos_integration.interaction_contract import (
+    InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
     InteractionEventKind,
@@ -34,6 +35,7 @@ __all__ = [
     "SURFACE_PROFILES",
     "ComposedInteractionService",
     "CoreIsALibrary",
+    "InteractionCost",
     "InteractionEnvelope",
     "InteractionEvent",
     "InteractionEventKind",

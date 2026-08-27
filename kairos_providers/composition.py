@@ -35,7 +35,7 @@ from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.contracts import CatalogOrigin, ProviderDescriptor
 from kairos_providers.curated_catalog import curated_models
-from kairos_providers.gateway import ProviderGateway
+from kairos_providers.gateway import ProviderBillingMetadata, ProviderGateway
 from kairos_providers.provider_profiles import (
     DEEPSEEK_PROFILE,
     GROQ_PROFILE,
@@ -197,7 +197,29 @@ def build_provider_gateway(
         _LazyCredentialService(home),
         snapshots,
         clients=clients,
+        billing_routes=_billing_routes(configuration),
     )
+
+
+def _billing_routes(
+    config: ProviderCompositionConfig,
+) -> dict[str, ProviderBillingMetadata]:
+    return {
+        "openai": ProviderBillingMetadata("openai", "https://api.openai.com/v1", "credential"),
+        "anthropic": ProviderBillingMetadata(
+            "anthropic", "https://api.anthropic.com/v1", "credential"
+        ),
+        "gemini": ProviderBillingMetadata(
+            "gemini", "https://generativelanguage.googleapis.com/v1beta", "credential"
+        ),
+        "ollama": ProviderBillingMetadata("ollama", config.ollama_base_url, "local"),
+        "deepseek": ProviderBillingMetadata("deepseek", DEEPSEEK_PROFILE.base_url, "credential"),
+        "groq": ProviderBillingMetadata("groq", GROQ_PROFILE.base_url, "credential"),
+        "custom": ProviderBillingMetadata("custom", config.custom.base_url, "credential"),
+        "openrouter": ProviderBillingMetadata(
+            "openrouter", "https://openrouter.ai/api/v1", "credential"
+        ),
+    }
 
 
 def _register_adapters(

@@ -14,7 +14,11 @@ from unittest.mock import patch
 from kairos_providers.base import ConnectionStatus
 from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
-from kairos_providers.composition import build_provider_gateway, get_google_adc_token
+from kairos_providers.composition import (
+    ProviderCompositionConfig,
+    build_provider_gateway,
+    get_google_adc_token,
+)
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
@@ -25,6 +29,7 @@ from kairos_providers.contracts import (
 )
 from kairos_providers.gateway import ProviderGateway
 from kairos_providers.manager import ProviderManager
+from kairos_providers.provider_profiles import custom_profile
 from kairos_providers.provider_registry import ProviderAdapterRegistry
 
 
@@ -151,6 +156,58 @@ def test_composition_registra_todos_os_providers(tmp_path):
         "openai",
         "openrouter",
     ]
+
+
+def test_preparo_congela_rotas_de_billing_openrouter_e_custom(tmp_path, monkeypatch):
+    """Usar uma base vazia coalesceria endpoints custom e esconderia o rateio real."""
+    custom = custom_profile(
+        base_url="https://models.example.test/v1",
+        trusted_remote=True,
+    )
+    passphrase_file = tmp_path / "vault-passphrase"
+    passphrase_file.write_text("senha-mestra-de-teste\n", encoding="utf-8")
+    passphrase_file.chmod(0o600)
+    monkeypatch.setenv("KAIROS_DISABLE_KEYRING", "1")
+    monkeypatch.setenv("KAIROS_VAULT_PASSPHRASE_FILE", str(passphrase_file))
+    gateway = build_provider_gateway(
+        tmp_path,
+        config=ProviderCompositionConfig(custom=custom),
+    )
+    models = (
+        CatalogModel(
+            ref=ProviderModelRef("openrouter", "acme/chat"),
+            display_name="Router",
+            capabilities=ModelCapabilities(chat=True),
+            price=ModelPrice(
+                prompt=Decimal("0.000001"),
+                completion=Decimal("0.000002"),
+                request=Decimal("0"),
+            ),
+        ),
+        CatalogModel(
+            ref=ProviderModelRef("custom", "private-chat"),
+            display_name="Custom",
+            capabilities=ModelCapabilities(chat=True),
+            price=ModelPrice(
+                prompt=Decimal("0.000003"),
+                completion=Decimal("0.000004"),
+                request=Decimal("0.01"),
+            ),
+        ),
+    )
+    gateway.catalog.merge(models, origin=CatalogOrigin.DYNAMIC)
+
+    openrouter = gateway.prepare(models[0].ref)
+    prepared_custom = gateway.prepare(models[1].ref)
+
+    assert openrouter.billing.provider == "openrouter"
+    assert openrouter.billing.base_url == "https://openrouter.ai/api/v1"
+    assert openrouter.billing.mode == "api_key"
+    assert openrouter.price == models[0].price
+    assert prepared_custom.billing.provider == "custom"
+    assert prepared_custom.billing.base_url == "https://models.example.test/v1"
+    assert prepared_custom.billing.mode == "api_key"
+    assert prepared_custom.price == models[1].price
 
 
 def test_manager_converte_catalogo_moderno_somente_na_borda_legada(tmp_path):

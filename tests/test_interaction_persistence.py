@@ -146,3 +146,44 @@ class UsageEventTests(Base):
             ),
             ("openrouter/free", "openrouter", 1, 3, 5, 2),
         )
+
+    def test_flush_persiste_custo_estimado_e_sumario_da_sessao(self) -> None:
+        """Ignorar colunas existentes deixa dashboard e rateio sem custo consultável."""
+        self.sessions.create("s1", source="web")
+        self.usage.record_event(
+            "s1",
+            self.selection(provider="custom", model="priced"),
+            billing_provider="custom",
+            billing_base_url="https://models.example.test/v1",
+            billing_mode="api_key",
+            usage=TokenUsage(input_tokens=3, output_tokens=2),
+            api_call_count=1,
+            estimated_cost_usd=0.017,
+            actual_cost_usd=None,
+            cost_status="estimated",
+            cost_source="catalog",
+        )
+
+        self.usage.flush(now=1.0)
+
+        route = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status, cost_source "
+            "FROM session_model_usage WHERE session_id = 's1'"
+        ).fetchone()
+        session = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status, cost_source, "
+            "billing_provider, billing_base_url, billing_mode FROM sessions WHERE id = 's1'"
+        ).fetchone()
+        self.assertEqual(tuple(route), (0.017, None, "estimated", "catalog"))
+        self.assertEqual(
+            tuple(session),
+            (
+                0.017,
+                None,
+                "estimated",
+                "catalog",
+                "custom",
+                "https://models.example.test/v1",
+                "api_key",
+            ),
+        )

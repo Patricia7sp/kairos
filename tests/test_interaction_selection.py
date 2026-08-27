@@ -139,3 +139,62 @@ class SelectionContextLoaderTests(unittest.TestCase):
         ).load(envelope(activity="vision"))
 
         self.assertEqual(context.activity, ProviderModelRef("openai", "gpt-4.1"))
+
+    def test_contexto_retem_parametros_de_todas_as_camadas(self) -> None:
+        """Perder uma camada faz o snapshot ignorar política persistida ou defaults."""
+        self.sessions.create("s1", source="web")
+        self.sessions.set_selection(
+            "s1",
+            ref("conversation"),
+            {"seed": 7, "routing": {"conversation": True, "shared": "conversation"}},
+        )
+        context = self.loader(
+            profile_configs={
+                "work": {
+                    "provider": "p",
+                    "model": "profile",
+                    "parameters": {
+                        "max_tokens": 128,
+                        "routing": {"profile": True, "shared": "profile"},
+                    },
+                    "auxiliary_models": {
+                        "vision": {
+                            "provider": "p",
+                            "model": "activity",
+                            "parameters": {"top_p": 0.8},
+                        }
+                    },
+                }
+            },
+            global_config={
+                "provider": "p",
+                "model": "global",
+                "parameters": {
+                    "temperature": 0.1,
+                    "routing": {"global": True, "shared": "global"},
+                },
+            },
+        ).load(
+            envelope(
+                activity="vision",
+                override=ref("message"),
+                parameters={"temperature": 0.9, "routing": {"message": True}},
+            )
+        )
+
+        self.assertEqual(
+            context.message_parameters, {"temperature": 0.9, "routing": {"message": True}}
+        )
+        self.assertEqual(
+            context.conversation_parameters,
+            {"seed": 7, "routing": {"conversation": True, "shared": "conversation"}},
+        )
+        self.assertEqual(context.activity_parameters, {"top_p": 0.8})
+        self.assertEqual(
+            context.profile_parameters,
+            {"max_tokens": 128, "routing": {"profile": True, "shared": "profile"}},
+        )
+        self.assertEqual(
+            context.global_parameters,
+            {"temperature": 0.1, "routing": {"global": True, "shared": "global"}},
+        )

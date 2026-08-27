@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from kairos_integration.interaction_service import InteractionService
+from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import ModelSelectionResolver
@@ -19,7 +20,7 @@ from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.composition import build_provider_gateway
 from kairos_state import connect
 from kairos_state.migrations import migrate
-from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories import MessageRepository, SessionRepository
 
 __all__ = ["ComposedInteractionService", "build_interaction_service"]
 
@@ -75,7 +76,10 @@ class ComposedInteractionService(InteractionService):
         errors: list[BaseException] = []
         usage_flushed = False
         try:
-            self._usage.flush()
+            if self._persistence is not None:
+                await self._persistence.aclose()
+            else:
+                self._usage.flush()
             usage_flushed = True
         except Exception as exc:  # noqa: BLE001 - agrega falha de persistência no shutdown
             errors.append(exc)
@@ -102,9 +106,11 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
     """Monta o grafo compartilhado de interação sem consultar estado global."""
     connection = connect(home / "state.db")
     gateway = None
+    persistence = None
     try:
         migrate(connection)
         gateway = build_provider_gateway(home)
+        persistence = SQLiteAsyncInteractionPersistence(home / "state.db")
         sessions = SessionRepository(connection)
         config = _load_config(home)
         profile_configs = config.get("profiles", {})
@@ -122,7 +128,8 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             ),
             sessions=sessions,
             messages=MessageRepository(connection),
-            usage=UsageRepository(connection),
+            usage=persistence.usage,
+            persistence=persistence,
             turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
         )
     except BaseException as build_error:
@@ -131,6 +138,11 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             try:
                 _run_async_cleanup(gateway.aclose)
             except BaseException as exc:  # noqa: BLE001 - agrega cancelamento do cleanup async
+                cleanup_errors.append(exc)
+        if persistence is not None:
+            try:
+                _run_async_cleanup(persistence.aclose)
+            except BaseException as exc:  # noqa: BLE001 - agrega cleanup do worker SQLite
                 cleanup_errors.append(exc)
         try:
             connection.close()

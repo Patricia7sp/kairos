@@ -278,6 +278,12 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
                 "reasoning_tokens": 1,
                 "total_tokens": 8,
             },
+            "cost": {
+                "estimated_usd": None,
+                "actual_usd": None,
+                "status": "unknown",
+                "source": None,
+            },
         },
         {
             "type": "turn_error",

@@ -209,6 +209,12 @@ def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
             "type": "usage",
             "protocol": 1,
             "session_id": "s1",
+            "cost": {
+                "actual_usd": None,
+                "estimated_usd": None,
+                "source": None,
+                "status": "unknown",
+            },
             "usage": {
                 "input_tokens": 2,
                 "output_tokens": 3,
