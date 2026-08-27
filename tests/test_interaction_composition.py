@@ -476,6 +476,73 @@ def test_service_aclose_em_loops_de_threads_compartilha_tentativa():
     assert connection.close_attempts == 1
 
 
+def test_active_turn_release_wakes_foreign_loop_drain_thread_safely():
+    """Loop-affine drain notification can fail the turn and strand cross-thread close."""
+    service, gateway, usage, connection = thread_safe_service()
+    gateway.release.set()
+    turn_active, release_turn, close_reserved = (threading.Event() for _ in range(3))
+    close_loop: list[asyncio.AbstractEventLoop] = []
+    results: dict[str, object] = {}
+
+    def run_turn() -> None:
+        async def hold_admitted_turn() -> None:
+            assert service._admission is not None
+            async with service._admission.admit():
+                turn_active.set()
+                while not release_turn.is_set():
+                    await asyncio.sleep(0.001)
+
+        try:
+            results["turn"] = asyncio.run(hold_admitted_turn(), debug=True)
+        except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
+            results["turn"] = exc
+
+    def run_foreign_close() -> None:
+        async def close_after_reservation() -> None:
+            close_loop.append(asyncio.get_running_loop())
+            close_task = asyncio.create_task(service.aclose())
+            await asyncio.sleep(0)
+            close_reserved.set()
+            await close_task
+
+        try:
+            results["close"] = asyncio.run(close_after_reservation(), debug=True)
+        except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
+            results["close"] = exc
+
+    turn, close = (
+        threading.Thread(target=run_turn, daemon=True),
+        threading.Thread(target=run_foreign_close, daemon=True),
+    )
+    turn.start()
+    assert turn_active.wait(timeout=2), results
+    close.start()
+    assert close_reserved.wait(timeout=2)
+    assert close.is_alive(), "close estrangeiro deve aguardar o turno admitido"
+
+    release_turn.set()
+    for thread in (turn, close):
+        thread.join(timeout=2)
+    close_stranded = close.is_alive()
+    if close_stranded:
+
+        def cancel_foreign_tasks() -> None:
+            for task in asyncio.all_tasks(close_loop[0]):
+                task.cancel()
+
+        close_loop[0].call_soon_threadsafe(cancel_foreign_tasks)
+        close.join(timeout=2)
+    if results.get("close") is not None:
+        asyncio.run(service.aclose())
+
+    assert not turn.is_alive()
+    assert not close_stranded
+    assert results == {"turn": None, "close": None}
+    assert gateway.close_attempts == 1
+    assert usage.flush_attempts == 1
+    assert connection.close_attempts == 1
+
+
 def test_cancelar_waiter_em_outro_loop_nao_cancela_cleanup_global():
     """Cancelamento loop-local não pode cancelar o attempt usado por outro loop."""
     service, gateway, usage, connection = thread_safe_service()
