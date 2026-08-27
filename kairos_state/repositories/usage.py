@@ -148,7 +148,11 @@ class UsageRepository:
             input_tokens=usage.input_tokens if usage is not None else 0,
             output_tokens=usage.output_tokens if usage is not None else 0,
             cache_read_tokens=usage.cache_read_tokens if usage is not None else 0,
-            cache_write_tokens=cache_write_tokens,
+            cache_write_tokens=(
+                usage.cache_write_tokens
+                if usage is not None and usage.cache_write_tokens
+                else cache_write_tokens
+            ),
             reasoning_tokens=usage.reasoning_tokens if usage is not None else 0,
             estimated_cost_usd=estimated_cost_usd,
             actual_cost_usd=actual_cost_usd,

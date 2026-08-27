@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kairos_integration import (
+    InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
     InteractionSelectionSnapshot,
@@ -180,6 +181,7 @@ def protocol_events() -> tuple[InteractionEvent, ...]:
                 output_tokens=3,
                 cache_read_tokens=2,
                 reasoning_tokens=1,
+                cache_write_tokens=1,
             ),
         ),
         InteractionEvent(
@@ -290,6 +292,7 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
                 "output_tokens": 3,
                 "cache_read_tokens": 2,
                 "reasoning_tokens": 1,
+                "cache_write_tokens": 1,
                 "total_tokens": 7,
             },
             "cost": {
@@ -325,6 +328,31 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
             parameters={"temperature": 0.2},
         )
     ]
+
+
+def test_web_protocol_serializa_custo_sem_inventar_uso_de_tokens() -> None:
+    event = InteractionEvent(
+        kind="usage",
+        usage=None,
+        cost=InteractionCost(
+            estimated_usd=0.01,
+            status="estimated",
+            source="catalog:test",
+        ),
+    )
+
+    assert interaction_event_to_json(event, conversation_id="s1") == {
+        "type": "usage",
+        "protocol": 1,
+        "session_id": "s1",
+        "usage": None,
+        "cost": {
+            "estimated_usd": 0.01,
+            "actual_usd": None,
+            "status": "estimated",
+            "source": "catalog:test",
+        },
+    }
 
 
 def test_websocket_reusa_servico_injetado_e_aceita_mensagem_legada_sem_protocol(

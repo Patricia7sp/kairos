@@ -12,6 +12,7 @@ from kairos_cli import chat
 from kairos_cli.handlers import ExitCode, cmd_run
 from kairos_cli.main import main
 from kairos_integration import (
+    InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
     InteractionSelectionSnapshot,
@@ -221,6 +222,7 @@ def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
                 "output_tokens": 3,
                 "cache_read_tokens": 0,
                 "reasoning_tokens": 0,
+                "cache_write_tokens": 0,
                 "total_tokens": 5,
             },
         },
@@ -229,6 +231,49 @@ def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
     assert all(payload["protocol"] == 1 for payload in payloads)
     assert "credential" not in captured.out
     assert "vault-primary-secret" not in captured.out
+    assert captured.err == ""
+
+
+def test_cli_json_serializa_custo_sem_uso_de_tokens(monkeypatch, tmp_path, capsys):
+    fake = FakeInteractionService(
+        (
+            InteractionEvent(
+                kind="usage",
+                usage=None,
+                cost=InteractionCost(
+                    estimated_usd=0.01,
+                    status="estimated",
+                    source="catalog:test",
+                ),
+            ),
+            turn_end(),
+        )
+    )
+    install_service(monkeypatch, tmp_path, fake)
+
+    code = main(["chat", "--session", "s1", "--json", "oi"])
+
+    captured = capsys.readouterr()
+    payloads = [json.loads(line) for line in captured.out.splitlines()]
+    assert code == ExitCode.OK
+    assert payloads[0] == {
+        "type": "usage",
+        "protocol": 1,
+        "session_id": "s1",
+        "usage": None,
+        "cost": {
+            "actual_usd": None,
+            "estimated_usd": 0.01,
+            "source": "catalog:test",
+            "status": "estimated",
+        },
+    }
+    assert payloads[1] == {
+        "type": "turn_end",
+        "protocol": 1,
+        "session_id": "s1",
+        "finish_reason": "stop",
+    }
     assert captured.err == ""
 
 

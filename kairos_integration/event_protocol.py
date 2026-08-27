@@ -62,15 +62,18 @@ def _event_fields(event: InteractionEvent) -> dict[str, Any]:
             "is_error": event.tool_result.is_error,
         }
     elif event.kind is InteractionEventKind.USAGE:
-        if event.usage is None:
-            raise ValueError("usage exige payload")
-        payload["usage"] = {
-            "input_tokens": event.usage.input_tokens,
-            "output_tokens": event.usage.output_tokens,
-            "cache_read_tokens": event.usage.cache_read_tokens,
-            "reasoning_tokens": event.usage.reasoning_tokens,
-            "total_tokens": event.usage.total,
-        }
+        payload["usage"] = (
+            {
+                "input_tokens": event.usage.input_tokens,
+                "output_tokens": event.usage.output_tokens,
+                "cache_read_tokens": event.usage.cache_read_tokens,
+                "reasoning_tokens": event.usage.reasoning_tokens,
+                "cache_write_tokens": event.usage.cache_write_tokens,
+                "total_tokens": event.usage.total,
+            }
+            if event.usage is not None
+            else None
+        )
         payload["cost"] = {
             "estimated_usd": event.cost.estimated_usd,
             "actual_usd": event.cost.actual_usd,

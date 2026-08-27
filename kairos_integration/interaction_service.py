@@ -111,6 +111,7 @@ class TurnAccumulator:
             output_tokens=self.usage.output_tokens + usage.output_tokens,
             cache_read_tokens=self.usage.cache_read_tokens + usage.cache_read_tokens,
             reasoning_tokens=self.usage.reasoning_tokens + usage.reasoning_tokens,
+            cache_write_tokens=self.usage.cache_write_tokens + usage.cache_write_tokens,
         )
 
 
@@ -300,7 +301,7 @@ class InteractionService:
                 if persistence_error := await self._flush_terminal_usage():
                     yield persistence_error
                     return
-                if accumulator.usage is not None:
+                if accumulator.usage is not None or _cost_is_present(cost):
                     yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
                 yield InteractionEvent.turn_error(exc)
                 return
@@ -324,7 +325,7 @@ class InteractionService:
             if persistence_error := await self._flush_terminal_usage():
                 yield persistence_error
                 return
-            if accumulator.usage is not None:
+            if accumulator.usage is not None or _cost_is_present(cost):
                 yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
             yield InteractionEvent.turn_end(accumulator.finish_reason)
             return
@@ -539,6 +540,10 @@ def _merged_parameters(
     if isinstance(message_parameters, Mapping):
         _merge_mapping(merged, message_parameters)
     return merged
+
+
+def _cost_is_present(cost: InteractionCost) -> bool:
+    return cost.estimated_usd is not None or cost.actual_usd is not None
 
 
 def _merge_mapping(target: dict[str, object], layer: Mapping[str, object]) -> None:

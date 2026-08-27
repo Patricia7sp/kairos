@@ -11,6 +11,7 @@ from kairos_integration import (
     build_interaction_service,
     composition,
 )
+from kairos_integration.admission import AdmissionState
 from kairos_integration.interaction_contract import (
     InteractionEnvelope,
     InteractionServiceUnavailableError,
@@ -20,6 +21,8 @@ from kairos_providers import (
     ModelCatalog,
     ProviderEvent,
     ProviderModelRef,
+    ResolvedModelSelection,
+    SelectionReason,
     TokenUsage,
     curated_models,
 )
@@ -806,3 +809,65 @@ async def test_failed_close_retry_keeps_admission_draining():
     await service.aclose()
 
     assert gateway.close_attempts == 2
+
+
+@pytest.mark.anyio
+async def test_final_usage_flush_failure_keeps_persistence_open_and_retries(tmp_path, monkeypatch):
+    """Fechar o worker após um flush falho tornaria o lote irrecuperável no retry."""
+    gateway = StreamingGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    assert service._persistence is not None
+    await service._persistence.ensure("pending", source="test")
+    service._usage.record_event(
+        "pending",
+        ResolvedModelSelection(
+            ProviderModelRef("openai", "gpt-4o"),
+            SelectionReason.GLOBAL_DEFAULT,
+        ),
+        billing_provider="openai",
+        billing_base_url="https://api.openai.com/v1",
+        billing_mode="api_key",
+        usage=TokenUsage(input_tokens=2, output_tokens=1),
+        api_call_count=1,
+    )
+    real_flush = service._usage.flush
+    flush_attempts = 0
+
+    def fail_final_flush_once():
+        nonlocal flush_attempts
+        flush_attempts += 1
+        if flush_attempts == 1:
+            raise RuntimeError("database credential detail")
+        return real_flush()
+
+    service._usage.flush = fail_final_flush_once
+
+    with pytest.raises(BaseExceptionGroup, match="falha ao fechar InteractionService"):
+        await service.aclose()
+
+    assert flush_attempts == 1
+    assert service._usage.pending_count() == 1
+    assert service._persistence._connection is not None
+    assert service._connection.execute("SELECT 1").fetchone()[0] == 1
+    assert service._admission is not None
+    assert service._admission._state is AdmissionState.DRAINING
+    with pytest.raises(InteractionServiceUnavailableError):
+        await anext(
+            service.stream(
+                InteractionEnvelope(conversation_id="later", source="test", content="oi")
+            )
+        )
+
+    await service.aclose()
+
+    assert flush_attempts == 2
+    assert service._usage.pending_count() == 0
+    assert service._persistence._connection is None
+    assert service._admission._state is AdmissionState.CLOSED
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        row = connection.execute(
+            "SELECT api_call_count, input_tokens, output_tokens "
+            "FROM session_model_usage WHERE session_id = 'pending'"
+        ).fetchone()
+    assert row == (1, 2, 1)

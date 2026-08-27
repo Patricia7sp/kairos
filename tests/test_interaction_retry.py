@@ -422,7 +422,14 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
                 FakeAdapter(
                     [
                         ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=2)),
-                        ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=4)),
+                        ProviderEvent(
+                            kind="usage",
+                            usage=TokenUsage(
+                                input_tokens=4,
+                                cache_read_tokens=1,
+                                cache_write_tokens=2,
+                            ),
+                        ),
                         ProviderError(ProviderErrorKind.NETWORK, retryable=True),
                     ]
                 ),
@@ -432,7 +439,13 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
                             kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=1)
                         ),
                         ProviderEvent(
-                            kind="usage", usage=TokenUsage(input_tokens=6, output_tokens=1)
+                            kind="usage",
+                            usage=TokenUsage(
+                                input_tokens=6,
+                                output_tokens=1,
+                                cache_read_tokens=2,
+                                cache_write_tokens=3,
+                            ),
                         ),
                         ProviderEvent(kind="finish", finish_reason="stop"),
                     ]
@@ -444,14 +457,23 @@ class InteractionRetryTests(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in service.stream(envelope())]
 
         self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_end"])
-        self.assertEqual(events[1].usage, TokenUsage(input_tokens=10, output_tokens=1))
+        self.assertEqual(
+            events[1].usage,
+            TokenUsage(
+                input_tokens=10,
+                output_tokens=1,
+                cache_read_tokens=3,
+                cache_write_tokens=5,
+            ),
+        )
         self.assertEqual(len(gateway.refs), 2)
         usage.flush(now=1.0)
         row = self.db.execute(
-            "SELECT api_call_count, input_tokens, output_tokens FROM session_model_usage WHERE session_id = ?",
+            "SELECT api_call_count, input_tokens, output_tokens, cache_read_tokens, "
+            "cache_write_tokens FROM session_model_usage WHERE session_id = ?",
             ("s1",),
         ).fetchone()
-        self.assertEqual(tuple(row), (2, 10, 1))
+        self.assertEqual(tuple(row), (2, 10, 1, 3, 5))
 
     async def test_retryable_error_after_text_is_not_retried(self) -> None:
         """Replaying an accepted text delta duplicates user-visible assistant output."""

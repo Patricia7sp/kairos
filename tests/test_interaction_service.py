@@ -503,6 +503,52 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[1][0:2], ("openrouter", "https://openrouter.ai/api/v1"))
         self.assertAlmostEqual(rows[1][2], 0.000007)
 
+    async def test_request_only_cost_emite_usage_sem_tokens_no_terminal_de_sucesso(self) -> None:
+        """O custo conhecido por requisição não pode ficar apenas no banco."""
+        usage = UsageRepository(self.db)
+        service = InteractionService(
+            gateway=CostPreparedGateway(
+                FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+            ),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=usage,
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_end"])
+        self.assertIsNone(events[1].usage)
+        self.assertEqual(events[1].cost.status, "estimated")
+        self.assertEqual(events[1].cost.estimated_usd, 0.01)
+        row = self.db.execute(
+            "SELECT api_call_count, input_tokens, output_tokens, estimated_cost_usd "
+            "FROM session_model_usage WHERE session_id = 's1'"
+        ).fetchone()
+        self.assertEqual(tuple(row), (1, 0, 0, 0.01))
+
+    async def test_request_only_cost_emite_usage_sem_tokens_antes_do_erro_do_provider(self) -> None:
+        """O terminal de erro também deve expor o custo durável da tentativa."""
+        service = InteractionService(
+            gateway=CostPreparedGateway(
+                FakeAdapter([ProviderError(ProviderErrorKind.AUTH, retryable=False)])
+            ),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=UsageRepository(self.db),
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_error"])
+        self.assertIsNone(events[1].usage)
+        self.assertEqual(events[1].cost.estimated_usd, 0.01)
+        self.assertEqual(events[-1].error_kind, "auth")
+
     async def test_proximo_turno_reidrata_tool_calls_e_resultado_vinculado(self) -> None:
         """Descartar IDs de tools faria o próximo provider rejeitar o histórico do turno."""
         first_service, _resolver, _adapter, _usage = service_with_fake_adapter(
