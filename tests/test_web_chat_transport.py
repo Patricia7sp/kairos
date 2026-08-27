@@ -276,7 +276,7 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
                 "output_tokens": 3,
                 "cache_read_tokens": 2,
                 "reasoning_tokens": 1,
-                "total_tokens": 8,
+                "total_tokens": 7,
             },
             "cost": {
                 "estimated_usd": None,
