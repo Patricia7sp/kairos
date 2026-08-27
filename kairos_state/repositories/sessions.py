@@ -168,7 +168,12 @@ class SessionRepository:
         config = _load_json_object(row["model_config"])
         provider = config.get("provider")
         model = row["model"]
-        if not isinstance(provider, str) or not provider.strip() or not isinstance(model, str) or not model.strip():
+        if (
+            not isinstance(provider, str)
+            or not provider.strip()
+            or not isinstance(model, str)
+            or not model.strip()
+        ):
             return None
 
         try:

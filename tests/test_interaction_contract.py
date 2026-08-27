@@ -53,9 +53,9 @@ def test_envelope_exige_conversa_e_conteudo():
 
 
 def test_provider_finish_nao_vira_evento_duplicado():
-    assert InteractionEvent.from_provider(
-        ProviderEvent(kind="finish", finish_reason="stop")
-    ) is None
+    assert (
+        InteractionEvent.from_provider(ProviderEvent(kind="finish", finish_reason="stop")) is None
+    )
 
 
 def test_provider_evento_e_traduzido_para_delta_e_uso():
