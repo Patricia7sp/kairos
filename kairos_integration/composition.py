@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.selection_context import SelectionContextLoader
@@ -62,7 +63,8 @@ class ComposedInteractionService(InteractionService):
     """Serviço cujos recursos foram criados pelo composition root."""
 
     def __init__(self, *, home: Path, connection: sqlite3.Connection, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+        admission = InteractionAdmissionGate()
+        super().__init__(admission=admission, **kwargs)
         self.home = home
         self.gateway = self._gateway
         self._connection = connection
@@ -70,9 +72,15 @@ class ComposedInteractionService(InteractionService):
 
     async def aclose(self) -> None:
         """Fecha, uma única vez, somente os recursos criados por esta composição."""
-        await self._close.run(self._close_attempt)
+        assert self._admission is not None
+        await self._close.run(
+            self._close_attempt,
+            on_reserve=self._admission._start_draining,
+        )
 
     async def _close_attempt(self) -> None:
+        assert self._admission is not None
+        await self._admission.drain()
         errors: list[BaseException] = []
         usage_flushed = False
         try:
@@ -94,6 +102,7 @@ class ComposedInteractionService(InteractionService):
                 errors.append(exc)
         if errors:
             raise BaseExceptionGroup("falha ao fechar InteractionService", errors)
+        await self._admission.mark_closed()
 
     async def __aenter__(self) -> ComposedInteractionService:
         return self

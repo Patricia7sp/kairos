@@ -113,6 +113,7 @@ class AnthropicMessagesAdapter:
         pending_calls: dict[int, _PendingToolCall] = {}
         input_tokens = 0
         cache_read_tokens = 0
+        cache_write_tokens = 0
         finish_reason = "stop"
         usage_events: list[TokenUsage] = []
         finished = False
@@ -127,7 +128,7 @@ class AnthropicMessagesAdapter:
                 async for event in _sse_events(response):
                     event_type = event.get("type")
                     if event_type == "message_start":
-                        input_tokens, cache_read_tokens = _input_usage(event)
+                        input_tokens, cache_read_tokens, cache_write_tokens = _input_usage(event)
                     elif event_type == "content_block_start":
                         _remember_tool_call(event, pending_calls)
                     elif event_type == "content_block_delta":
@@ -137,7 +138,12 @@ class AnthropicMessagesAdapter:
                         _append_tool_arguments(event, pending_calls)
                     elif event_type == "message_delta":
                         finish_reason = _finish_reason(event, finish_reason)
-                        usage = _usage_from(event, input_tokens, cache_read_tokens)
+                        usage = _usage_from(
+                            event,
+                            input_tokens,
+                            cache_read_tokens,
+                            cache_write_tokens,
+                        )
                         if usage is not None:
                             usage_events.append(usage)
                     elif event_type == "message_stop":
@@ -372,18 +378,26 @@ def _event_index(event: Mapping[str, Any]) -> int | None:
     return index if isinstance(index, int) and not isinstance(index, bool) else None
 
 
-def _input_usage(event: Mapping[str, Any]) -> tuple[int, int]:
+def _input_usage(event: Mapping[str, Any]) -> tuple[int, int, int]:
     message = event.get("message")
     usage = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(usage, dict):
-        return 0, 0
-    return _int_or_zero(usage.get("input_tokens")), _int_or_zero(
-        usage.get("cache_read_input_tokens")
+        return 0, 0, 0
+    uncached_tokens = _int_or_zero(usage.get("input_tokens"))
+    cache_read_tokens = _int_or_zero(usage.get("cache_read_input_tokens"))
+    cache_write_tokens = _int_or_zero(usage.get("cache_creation_input_tokens"))
+    return (
+        uncached_tokens + cache_read_tokens + cache_write_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
     )
 
 
 def _usage_from(
-    event: Mapping[str, Any], input_tokens: int, cache_read_tokens: int
+    event: Mapping[str, Any],
+    input_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
 ) -> TokenUsage | None:
     usage = event.get("usage")
     if not isinstance(usage, dict):
@@ -392,6 +406,7 @@ def _usage_from(
         input_tokens=input_tokens,
         output_tokens=_int_or_zero(usage.get("output_tokens")),
         cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
     )
 
 

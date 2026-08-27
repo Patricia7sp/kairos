@@ -7,7 +7,13 @@ from pathlib import Path
 
 from kairos_providers import ProviderModelRef, ResolvedModelSelection, SelectionReason, TokenUsage
 from kairos_state import connect, initialize_schema
-from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories import (
+    BillingRoute,
+    MessageRepository,
+    SessionRepository,
+    TokenDelta,
+    UsageRepository,
+)
 
 
 class Base(unittest.TestCase):
@@ -111,6 +117,124 @@ class TurnMessageTests(Base):
 
 
 class UsageEventTests(Base):
+    def test_actual_only_costs_sum_without_requiring_estimates(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(actual_cost_usd=0.02, cost_status="actual", cost_source="upstream"),
+        )
+        self.usage.flush(now=1)
+        self.usage.queue(
+            route,
+            TokenDelta(actual_cost_usd=0.03, cost_status="actual", cost_source="upstream"),
+        )
+        self.usage.flush(now=2)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertIsNone(row["estimated_cost_usd"])
+        self.assertEqual(row["actual_cost_usd"], 0.05)
+        self.assertEqual(row["cost_status"], "actual")
+
+    def test_estimated_and_actual_costs_keep_independent_sums(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(
+                estimated_cost_usd=0.04,
+                cost_status="estimated",
+                cost_source="catalog",
+            ),
+        )
+        self.usage.flush(now=1)
+        self.usage.queue(
+            route,
+            TokenDelta(
+                actual_cost_usd=0.05,
+                cost_status="actual",
+                cost_source="upstream",
+            ),
+        )
+        self.usage.flush(now=2)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status, cost_source "
+            "FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual((row["estimated_cost_usd"], row["actual_cost_usd"]), (0.04, 0.05))
+        self.assertEqual(row["cost_status"], "estimated")
+        self.assertIsNone(row["cost_source"])
+
+    def test_coalesced_unknown_cost_clears_partial_estimate(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(
+                estimated_cost_usd=0.04,
+                cost_status="estimated",
+                cost_source="catalog",
+            ),
+        )
+        self.usage.queue(route, TokenDelta(input_tokens=1, cost_status="unknown"))
+        self.usage.flush(now=1)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual(tuple(row), (None, None, "unknown"))
+
+    def test_persisted_unknown_cost_clears_partial_estimate(self) -> None:
+        self.sessions.create("s1", source="web")
+        route = BillingRoute(
+            "s1",
+            "openrouter/free",
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "api_key",
+        )
+        self.usage.queue(
+            route,
+            TokenDelta(
+                estimated_cost_usd=0.04,
+                cost_status="estimated",
+                cost_source="catalog",
+            ),
+        )
+        self.usage.flush(now=1)
+        self.usage.queue(route, TokenDelta(input_tokens=1, cost_status="unknown"))
+        self.usage.flush(now=2)
+
+        row = self.db.execute(
+            "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual(tuple(row), (None, None, "unknown"))
+
     def test_record_event_enfileira_sem_gravar_no_banco(self) -> None:
         self.sessions.create("s1", source="web")
 
@@ -146,6 +270,27 @@ class UsageEventTests(Base):
             ),
             ("openrouter/free", "openrouter", 1, 3, 5, 2),
         )
+
+    def test_record_event_nao_duplica_cache_write_canonico_e_legado(self) -> None:
+        """O argumento legado pode repetir o detalhe já presente em TokenUsage."""
+        self.sessions.create("s1", source="web")
+
+        self.usage.record_event(
+            "s1",
+            self.selection(),
+            billing_provider="openrouter",
+            billing_base_url="https://openrouter.ai/api/v1",
+            billing_mode="api_key",
+            usage=TokenUsage(input_tokens=8, cache_write_tokens=5),
+            cache_write_tokens=5,
+        )
+        self.usage.flush(now=1.0)
+
+        row = self.db.execute(
+            "SELECT input_tokens, cache_write_tokens FROM session_model_usage"
+        ).fetchone()
+        assert row is not None
+        self.assertEqual(tuple(row), (8, 5))
 
     def test_flush_persiste_custo_estimado_e_sumario_da_sessao(self) -> None:
         """Ignorar colunas existentes deixa dashboard e rateio sem custo consultável."""

@@ -466,6 +466,28 @@ class UsageTests(Base):
             [("anthropic", 200), ("openai", 100)],
         )
 
+    def test_session_summary_becomes_sticky_mixed_after_distinct_routes(self):
+        openai = BillingRoute("s1", "gpt", "openai", "https://api.openai.com", "key")
+        openrouter = BillingRoute("s1", "gpt", "openrouter", "https://openrouter.ai/api/v1", "key")
+        self.usage.queue(openai, TokenDelta(input_tokens=2))
+        self.usage.flush(now=1)
+        self.usage.queue(openrouter, TokenDelta(input_tokens=3))
+        self.usage.flush(now=2)
+
+        row = self.db.execute(
+            "SELECT billing_provider, billing_base_url, billing_mode, input_tokens "
+            "FROM sessions WHERE id='s1'"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("mixed", "", "mixed", 5))
+
+        self.usage.queue(openai, TokenDelta(input_tokens=7))
+        self.usage.flush(now=3)
+        row = self.db.execute(
+            "SELECT billing_provider, billing_base_url, billing_mode, input_tokens "
+            "FROM sessions WHERE id='s1'"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("mixed", "", "mixed", 12))
+
     def test_flushes_sucessivos_acumulam(self):
         self.usage.queue(self.rota, TokenDelta(input_tokens=10))
         self.usage.flush()

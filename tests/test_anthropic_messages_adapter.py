@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
 import httpx
 
+from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_providers import (
     AdapterRequest,
     CanonicalMessage,
     CanonicalToolCall,
     ContentPart,
+    ModelPrice,
     ProviderError,
     ProviderErrorKind,
     ProviderModelRef,
+    ResolvedModelSelection,
+    SelectionReason,
 )
 from kairos_providers.adapters.anthropic_messages import AnthropicMessagesAdapter
+from kairos_state import connect, initialize_schema
+from kairos_state.repositories import SessionRepository, UsageRepository
 
 
 def sse(*events: dict[str, object]) -> bytes:
@@ -149,7 +158,13 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
                 content=sse(
                     {
                         "type": "message_start",
-                        "message": {"usage": {"input_tokens": 12, "cache_read_input_tokens": 3}},
+                        "message": {
+                            "usage": {
+                                "input_tokens": 12,
+                                "cache_read_input_tokens": 3,
+                                "cache_creation_input_tokens": 5,
+                            }
+                        },
                     },
                     {
                         "type": "content_block_delta",
@@ -198,10 +213,89 @@ class AnthropicMessagesAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1].tool_call.id, "toolu_01")  # type: ignore[union-attr]
         self.assertEqual(events[1].tool_call.name, "hora_local")  # type: ignore[union-attr]
         self.assertEqual(events[1].tool_call.arguments, '{"cidade":"Lisboa"}')  # type: ignore[union-attr]
-        self.assertEqual(events[2].usage.input_tokens, 12)  # type: ignore[union-attr]
+        self.assertEqual(events[2].usage.input_tokens, 20)  # type: ignore[union-attr]
         self.assertEqual(events[2].usage.output_tokens, 4)  # type: ignore[union-attr]
         self.assertEqual(events[2].usage.cache_read_tokens, 3)  # type: ignore[union-attr]
+        self.assertEqual(events[2].usage.cache_write_tokens, 5)  # type: ignore[union-attr]
         self.assertEqual(events[3].finish_reason, "tool_use")
+
+    async def test_usage_do_adapter_preserva_subconjuntos_na_contabilidade_persistida(self):
+        """Somar detalhes outra vez ou descartá-los quebra custo e auditoria persistida."""
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=sse(
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "usage": {
+                                "input_tokens": 7,
+                                "cache_read_input_tokens": 3,
+                                "cache_creation_input_tokens": 5,
+                            }
+                        },
+                    },
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn"},
+                        "usage": {"output_tokens": 4},
+                    },
+                    {"type": "message_stop"},
+                ),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(
+                AnthropicMessagesAdapter(client, "secret").stream(simple_request())
+            )
+
+        usage = next(event.usage for event in events if event.kind == "usage")
+        assert usage is not None
+        cost = estimate_interaction_cost(
+            ModelPrice(
+                prompt=Decimal("0.01"),
+                completion=Decimal("0.02"),
+                request=Decimal("0"),
+            ),
+            usage,
+            attempts=1,
+            source="catalog:test",
+        )
+        self.assertEqual(cost.estimated_usd, 0.23)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = connect(Path(tmpdir) / "state.db")
+            try:
+                initialize_schema(db)
+                SessionRepository(db).create("s1", source="test")
+                repository = UsageRepository(db)
+                repository.record_event(
+                    "s1",
+                    ResolvedModelSelection(
+                        ProviderModelRef("anthropic", "claude-haiku-4-5-20251001"),
+                        SelectionReason.GLOBAL_DEFAULT,
+                    ),
+                    billing_provider="anthropic",
+                    billing_base_url="https://api.anthropic.com/v1",
+                    billing_mode="api_key",
+                    usage=usage,
+                    api_call_count=1,
+                    estimated_cost_usd=cost.estimated_usd,
+                    cost_status=cost.status,
+                    cost_source=cost.source,
+                )
+                repository.flush(now=1.0)
+                row = db.execute(
+                    "SELECT input_tokens, output_tokens, cache_read_tokens, "
+                    "cache_write_tokens, estimated_cost_usd FROM session_model_usage"
+                ).fetchone()
+            finally:
+                db.close()
+
+        assert row is not None
+        self.assertEqual(tuple(row), (15, 4, 3, 5, 0.23))
 
     async def test_discover_models_mantem_apenas_modelos_claude_textuais(self):
         """Promover registros não-Claude como chat produziria uma seleção inválida."""

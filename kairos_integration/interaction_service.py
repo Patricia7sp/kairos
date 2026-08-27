@@ -8,12 +8,14 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
-from decimal import Decimal
 
+from kairos_integration.admission import InteractionAdmissionGate
+from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_integration.interaction_contract import (
     InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
+    InteractionPersistenceError,
     InteractionSelectionSnapshot,
 )
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
@@ -109,6 +111,7 @@ class TurnAccumulator:
             output_tokens=self.usage.output_tokens + usage.output_tokens,
             cache_read_tokens=self.usage.cache_read_tokens + usage.cache_read_tokens,
             reasoning_tokens=self.usage.reasoning_tokens + usage.reasoning_tokens,
+            cache_write_tokens=self.usage.cache_write_tokens + usage.cache_write_tokens,
         )
 
 
@@ -141,6 +144,7 @@ class InteractionService:
         turn_lease_release_max_attempts: int = 5,
         turn_lease_clock: Callable[[], float] | None = None,
         turn_lease_sleep: Callable[[float], Awaitable[None]] | None = None,
+        admission: InteractionAdmissionGate | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -152,6 +156,7 @@ class InteractionService:
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
+        self._admission = admission
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -168,6 +173,22 @@ class InteractionService:
 
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa exatamente uma seleção e transmite seus eventos normalizados."""
+        if self._admission is None:
+            async with aclosing(self._stream_with_owned_producer(envelope)) as stream:
+                async for event in stream:
+                    yield event
+            return
+        async with (
+            self._admission.admit(),
+            aclosing(self._stream_with_owned_producer(envelope)) as stream,
+        ):
+            async for event in stream:
+                yield event
+
+    async def _stream_with_owned_producer(
+        self, envelope: InteractionEnvelope
+    ) -> AsyncIterator[InteractionEvent]:
+        """Own the demand-paced producer until terminal delivery or explicit close."""
         demand: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         events: asyncio.Queue[InteractionEvent] = asyncio.Queue(maxsize=1)
         producer = asyncio.create_task(
@@ -230,16 +251,7 @@ class InteractionService:
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa um turno depois de adquirir ownership exclusivo da conversa."""
-        snapshot = self._resolve_snapshot(envelope)
-        prepared = self._prepare(snapshot.ref)
-        snapshot = replace(snapshot, credential_id=prepared.credential_id)
-        selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
-        await self._persist_user(envelope, selection)
-        request = AdapterRequest(
-            model=snapshot.ref,
-            messages=self._history(envelope.conversation_id),
-            parameters=snapshot.parameters,
-        )
+        snapshot, prepared, selection, request = await self._prepare_turn(envelope)
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
 
         accumulator = TurnAccumulator()
@@ -271,7 +283,12 @@ class InteractionService:
                 ) and self._retry_policy.has_attempts_remaining(attempts):
                     await self._retry_policy.backoff(attempts)
                     continue
-                cost = _cost_for(prepared, accumulator.usage, attempts)
+                cost = estimate_interaction_cost(
+                    prepared.price,
+                    accumulator.usage,
+                    attempts,
+                    prepared.cost_source,
+                )
                 await self._persist_error(envelope.conversation_id, accumulator, selection, exc)
                 self._record_usage(
                     envelope.conversation_id,
@@ -281,14 +298,21 @@ class InteractionService:
                     attempts=attempts,
                     cost=cost,
                 )
-                await self._flush_usage()
-                if accumulator.usage is not None:
+                if persistence_error := await self._flush_terminal_usage():
+                    yield persistence_error
+                    return
+                if accumulator.usage is not None or _cost_is_present(cost):
                     yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
                 yield InteractionEvent.turn_error(exc)
                 return
 
             accumulator.add_attempt_usage(attempt_usage)
-            cost = _cost_for(prepared, accumulator.usage, attempts)
+            cost = estimate_interaction_cost(
+                prepared.price,
+                accumulator.usage,
+                attempts,
+                prepared.cost_source,
+            )
             await self._persist_assistant(envelope.conversation_id, accumulator, selection)
             self._record_usage(
                 envelope.conversation_id,
@@ -298,11 +322,37 @@ class InteractionService:
                 attempts=attempts,
                 cost=cost,
             )
-            await self._flush_usage()
-            if accumulator.usage is not None:
+            if persistence_error := await self._flush_terminal_usage():
+                yield persistence_error
+                return
+            if accumulator.usage is not None or _cost_is_present(cost):
                 yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
             yield InteractionEvent.turn_end(accumulator.finish_reason)
             return
+
+    async def _prepare_turn(
+        self, envelope: InteractionEnvelope
+    ) -> tuple[
+        InteractionSelectionSnapshot,
+        PreparedProviderAdapter | _LegacyPreparedAdapter,
+        ResolvedModelSelection,
+        AdapterRequest,
+    ]:
+        snapshot = self._resolve_snapshot(envelope)
+        prepared = self._prepare(snapshot.ref)
+        snapshot = replace(snapshot, credential_id=prepared.credential_id)
+        selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
+        await self._persist_user(envelope, selection)
+        return (
+            snapshot,
+            prepared,
+            selection,
+            AdapterRequest(
+                model=snapshot.ref,
+                messages=self._history(envelope.conversation_id),
+                parameters=snapshot.parameters,
+            ),
+        )
 
     def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
         prepare = getattr(self._gateway, "prepare", None)
@@ -424,13 +474,18 @@ class InteractionService:
         )
 
     async def _flush_usage(self) -> None:
+        if self._persistence is not None:
+            await self._persistence.flush_usage()
+        else:
+            self._usage.flush()
+
+    async def _flush_terminal_usage(self) -> InteractionEvent | None:
         try:
-            if self._persistence is not None:
-                await self._persistence.flush_usage()
-            else:
-                self._usage.flush()
-        except Exception:  # noqa: BLE001 - fila foi restaurada e o transcript é prioritário
-            logger.warning("falha ao drenar uso no fim do turno; lote mantido para retry")
+            await self._flush_usage()
+        except Exception:
+            logger.exception("falha ao persistir contabilidade do turno")
+            return InteractionEvent.turn_error(InteractionPersistenceError())
+        return None
 
     @staticmethod
     def _tool_calls(tool_calls: list[CanonicalToolCall]) -> str | None:
@@ -487,6 +542,10 @@ def _merged_parameters(
     return merged
 
 
+def _cost_is_present(cost: InteractionCost) -> bool:
+    return cost.estimated_usd is not None or cost.actual_usd is not None
+
+
 def _merge_mapping(target: dict[str, object], layer: Mapping[str, object]) -> None:
     for key, value in layer.items():
         current = target.get(key)
@@ -522,30 +581,3 @@ class _LegacyPreparedAdapter:
 
     def create_adapter(self) -> object:
         return self._gateway.create_adapter(self._ref)
-
-
-def _cost_for(
-    prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
-    usage: TokenUsage | None,
-    attempts: int,
-) -> InteractionCost:
-    if usage is None:
-        return InteractionCost()
-    price = prepared.price
-    components = (
-        (usage.input_tokens + usage.cache_read_tokens, price.prompt),
-        (usage.output_tokens + usage.reasoning_tokens, price.completion),
-        (attempts, price.request),
-    )
-    if any(count and unit_price is None for count, unit_price in components):
-        return InteractionCost(source=prepared.cost_source)
-    estimated = sum(
-        Decimal(count) * unit_price
-        for count, unit_price in components
-        if count and unit_price is not None
-    )
-    return InteractionCost(
-        estimated_usd=float(estimated),
-        status="estimated",
-        source=prepared.cost_source,
-    )

@@ -11,12 +11,18 @@ from kairos_integration import (
     build_interaction_service,
     composition,
 )
-from kairos_integration.interaction_contract import InteractionEnvelope
+from kairos_integration.admission import AdmissionState
+from kairos_integration.interaction_contract import (
+    InteractionEnvelope,
+    InteractionServiceUnavailableError,
+)
 from kairos_providers import (
     CatalogOrigin,
     ModelCatalog,
     ProviderEvent,
     ProviderModelRef,
+    ResolvedModelSelection,
+    SelectionReason,
     TokenUsage,
     curated_models,
 )
@@ -45,6 +51,33 @@ class StreamingGateway:
     async def aclose(self):
         self.close_attempts += 1
         self.closed = True
+
+
+class BackpressuredAdapter:
+    def __init__(self) -> None:
+        self.cleanup_complete = False
+
+    async def stream(self, _request):
+        try:
+            yield ProviderEvent(kind="text_delta", text="parcial")
+            await asyncio.Event().wait()
+        finally:
+            self.cleanup_complete = True
+
+
+class BackpressuredGateway(StreamingGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.adapter = BackpressuredAdapter()
+        self.cleanup_complete = False
+
+    def create_adapter(self, _ref):
+        return self.adapter
+
+    async def aclose(self):
+        assert self.adapter.cleanup_complete
+        await super().aclose()
+        self.cleanup_complete = True
 
 
 def test_composition_usa_gateway_e_state_compartilhados(tmp_path):
@@ -122,7 +155,7 @@ def test_composition_fecha_somente_os_recursos_que_criou(tmp_path, monkeypatch):
         source="test",
         content="olá",
     )
-    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+    with pytest.raises(InteractionServiceUnavailableError):
         asyncio.run(anext(service.stream(envelope)))
 
 
@@ -185,8 +218,8 @@ def test_falha_de_construcao_pos_gateway_fecha_gateway_e_banco(tmp_path, monkeyp
         connections[0].execute("SELECT 1")
 
 
-def test_turn_boundary_recupera_lote_apos_falha_transitoria(tmp_path, monkeypatch):
-    """Falha no dreno mantém a fila, e o turno seguinte torna todo uso visível."""
+def test_later_turn_drains_batch_restored_by_failed_terminal_flush(tmp_path, monkeypatch):
+    """A falha terminal preserva o lote para o turno seguinte drená-lo junto ao novo uso."""
     (tmp_path / "config.yaml").write_text(
         "provider: openai\nmodel: gpt-4o\n",
         encoding="utf-8",
@@ -207,18 +240,24 @@ def test_turn_boundary_recupera_lote_apos_falha_transitoria(tmp_path, monkeypatc
     service._usage.flush = flaky_flush
 
     async def stream_retry_and_close():
-        async for _event in service.stream(
-            InteractionEnvelope(conversation_id="s1", source="test", content="olá")
-        ):
-            pass
+        first = [
+            event
+            async for event in service.stream(
+                InteractionEnvelope(conversation_id="s1", source="test", content="olá")
+            )
+        ]
+        assert first[-1].error_kind == "persistence"
         assert service._usage.pending_count() == 1
         with sqlite3.connect(tmp_path / "state.db") as connection:
             assert connection.execute("SELECT count(*) FROM session_model_usage").fetchone()[0] == 0
 
-        async for _event in service.stream(
-            InteractionEnvelope(conversation_id="s2", source="test", content="de novo")
-        ):
-            pass
+        second = [
+            event
+            async for event in service.stream(
+                InteractionEnvelope(conversation_id="s2", source="test", content="de novo")
+            )
+        ]
+        assert second[-1].kind == "turn_end"
         assert service._usage.pending_count() == 0
         await service.aclose()
 
@@ -440,6 +479,73 @@ def test_service_aclose_em_loops_de_threads_compartilha_tentativa():
     assert connection.close_attempts == 1
 
 
+def test_active_turn_release_wakes_foreign_loop_drain_thread_safely():
+    """Loop-affine drain notification can fail the turn and strand cross-thread close."""
+    service, gateway, usage, connection = thread_safe_service()
+    gateway.release.set()
+    turn_active, release_turn, close_reserved = (threading.Event() for _ in range(3))
+    close_loop: list[asyncio.AbstractEventLoop] = []
+    results: dict[str, object] = {}
+
+    def run_turn() -> None:
+        async def hold_admitted_turn() -> None:
+            assert service._admission is not None
+            async with service._admission.admit():
+                turn_active.set()
+                while not release_turn.is_set():
+                    await asyncio.sleep(0.001)
+
+        try:
+            results["turn"] = asyncio.run(hold_admitted_turn(), debug=True)
+        except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
+            results["turn"] = exc
+
+    def run_foreign_close() -> None:
+        async def close_after_reservation() -> None:
+            close_loop.append(asyncio.get_running_loop())
+            close_task = asyncio.create_task(service.aclose())
+            await asyncio.sleep(0)
+            close_reserved.set()
+            await close_task
+
+        try:
+            results["close"] = asyncio.run(close_after_reservation(), debug=True)
+        except BaseException as exc:  # noqa: BLE001 - outcome cross-loop sob teste
+            results["close"] = exc
+
+    turn, close = (
+        threading.Thread(target=run_turn, daemon=True),
+        threading.Thread(target=run_foreign_close, daemon=True),
+    )
+    turn.start()
+    assert turn_active.wait(timeout=2), results
+    close.start()
+    assert close_reserved.wait(timeout=2)
+    assert close.is_alive(), "close estrangeiro deve aguardar o turno admitido"
+
+    release_turn.set()
+    for thread in (turn, close):
+        thread.join(timeout=2)
+    close_stranded = close.is_alive()
+    if close_stranded:
+
+        def cancel_foreign_tasks() -> None:
+            for task in asyncio.all_tasks(close_loop[0]):
+                task.cancel()
+
+        close_loop[0].call_soon_threadsafe(cancel_foreign_tasks)
+        close.join(timeout=2)
+    if results.get("close") is not None:
+        asyncio.run(service.aclose())
+
+    assert not turn.is_alive()
+    assert not close_stranded
+    assert results == {"turn": None, "close": None}
+    assert gateway.close_attempts == 1
+    assert usage.flush_attempts == 1
+    assert connection.close_attempts == 1
+
+
 def test_cancelar_waiter_em_outro_loop_nao_cancela_cleanup_global():
     """Cancelamento loop-local não pode cancelar o attempt usado por outro loop."""
     service, gateway, usage, connection = thread_safe_service()
@@ -574,3 +680,194 @@ def test_cleanup_nao_usa_task_factory_eager_do_caller():
     assert usage.flush_attempts == 1
     assert gateway.close_attempts == 1
     assert connection.close_attempts == 1
+
+
+@pytest.mark.anyio
+async def test_composed_close_waits_for_backpressured_turn_before_resources(tmp_path, monkeypatch):
+    """Dropping admission before public aclose would close owned resources under the turn."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = BackpressuredGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    stream = service.stream(
+        InteractionEnvelope(conversation_id="active", source="test", content="olá")
+    )
+    close_task = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        close_task = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+
+        assert not close_task.done()
+        with pytest.raises(InteractionServiceUnavailableError):
+            await anext(
+                service.stream(
+                    InteractionEnvelope(
+                        conversation_id="later",
+                        source="test",
+                        content="depois",
+                    )
+                )
+            )
+
+        await stream.aclose()
+        await close_task
+
+        assert gateway.cleanup_complete
+        assert service._persistence is not None
+        assert service._persistence._connection is None
+    finally:
+        await stream.aclose()
+        if close_task is not None:
+            await asyncio.gather(close_task, return_exceptions=True)
+        await asyncio.gather(service.aclose(), return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_cancelled_close_waiter_does_not_cancel_shared_drain(tmp_path, monkeypatch):
+    """Forwarding waiter cancellation into the reserved close task strands later waiters."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = BackpressuredGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    stream = service.stream(
+        InteractionEnvelope(conversation_id="active", source="test", content="olá")
+    )
+    first = None
+    second = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        first = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        second = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+        assert not second.done()
+        assert service._persistence is not None
+        assert service._persistence._connection is not None
+        await stream.aclose()
+        await second
+
+        assert gateway.close_attempts == 1
+        assert gateway.cleanup_complete
+    finally:
+        await stream.aclose()
+        for task in (first, second):
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(service.aclose(), return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_failed_close_retry_keeps_admission_draining():
+    """A failed resource close must not reopen turns before a later successful retry."""
+
+    class RetryGateway:
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        async def aclose(self) -> None:
+            self.close_attempts += 1
+            if self.close_attempts == 1:
+                raise RuntimeError("database-internal")
+
+    gateway = RetryGateway()
+    usage = ThreadSafeUsage()
+    connection = ThreadSafeConnection()
+    service = ComposedInteractionService(
+        home=Path("/retry-test"),
+        connection=connection,
+        gateway=gateway,
+        resolver=object(),
+        context_loader=object(),
+        sessions=object(),
+        messages=object(),
+        usage=usage,
+    )
+
+    with pytest.raises(BaseExceptionGroup, match="falha ao fechar InteractionService"):
+        await service.aclose()
+    with pytest.raises(InteractionServiceUnavailableError):
+        await anext(
+            service.stream(
+                InteractionEnvelope(conversation_id="later", source="test", content="oi")
+            )
+        )
+
+    await service.aclose()
+
+    assert gateway.close_attempts == 2
+
+
+@pytest.mark.anyio
+async def test_final_usage_flush_failure_keeps_persistence_open_and_retries(tmp_path, monkeypatch):
+    """Fechar o worker após um flush falho tornaria o lote irrecuperável no retry."""
+    gateway = StreamingGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    assert service._persistence is not None
+    await service._persistence.ensure("pending", source="test")
+    service._usage.record_event(
+        "pending",
+        ResolvedModelSelection(
+            ProviderModelRef("openai", "gpt-4o"),
+            SelectionReason.GLOBAL_DEFAULT,
+        ),
+        billing_provider="openai",
+        billing_base_url="https://api.openai.com/v1",
+        billing_mode="api_key",
+        usage=TokenUsage(input_tokens=2, output_tokens=1),
+        api_call_count=1,
+    )
+    real_flush = service._usage.flush
+    flush_attempts = 0
+
+    def fail_final_flush_once():
+        nonlocal flush_attempts
+        flush_attempts += 1
+        if flush_attempts == 1:
+            raise RuntimeError("database credential detail")
+        return real_flush()
+
+    service._usage.flush = fail_final_flush_once
+
+    with pytest.raises(BaseExceptionGroup, match="falha ao fechar InteractionService"):
+        await service.aclose()
+
+    assert flush_attempts == 1
+    assert service._usage.pending_count() == 1
+    assert service._persistence._connection is not None
+    assert service._connection.execute("SELECT 1").fetchone()[0] == 1
+    assert service._admission is not None
+    assert service._admission._state is AdmissionState.DRAINING
+    with pytest.raises(InteractionServiceUnavailableError):
+        await anext(
+            service.stream(
+                InteractionEnvelope(conversation_id="later", source="test", content="oi")
+            )
+        )
+
+    await service.aclose()
+
+    assert flush_attempts == 2
+    assert service._usage.pending_count() == 0
+    assert service._persistence._connection is None
+    assert service._admission._state is AdmissionState.CLOSED
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        row = connection.execute(
+            "SELECT api_call_count, input_tokens, output_tokens "
+            "FROM session_model_usage WHERE session_id = 'pending'"
+        ).fetchone()
+    assert row == (1, 2, 1)

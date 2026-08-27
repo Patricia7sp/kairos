@@ -10,11 +10,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kairos_integration import (
+    InteractionCost,
     InteractionEnvelope,
     InteractionEvent,
     InteractionSelectionSnapshot,
     InteractionToolResult,
 )
+from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_integration.turn_ownership import TurnLeaseLostError
 from kairos_providers import (
     CanonicalToolCall,
@@ -52,6 +54,13 @@ class FailingInteractionService(FakeInteractionService):
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         self.envelopes.append(envelope)
         raise RuntimeError("segredo-interno")
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class UnavailableInteractionService(FakeInteractionService):
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        raise InteractionServiceUnavailableError() from RuntimeError("database-internal")
         yield  # pragma: no cover - mantém a assinatura de async generator
 
 
@@ -101,6 +110,9 @@ class BlockingSendWebSocket:
         self.send_started = asyncio.Event()
         self.allow_send = asyncio.Event()
         self.closed_code: int | None = None
+        self.closed_reason = ""
+        self.close_code: int | None = None
+        self.close_reason = ""
         self.accepted = False
         self._received = False
 
@@ -118,8 +130,11 @@ class BlockingSendWebSocket:
         self.send_started.set()
         await self.allow_send.wait()
 
-    async def close(self, code: int) -> None:
+    async def close(self, code: int, reason: str = "") -> None:
         self.closed_code = code
+        self.closed_reason = reason
+        self.close_code = code
+        self.close_reason = reason
 
 
 class PersistingAdapter:
@@ -166,6 +181,7 @@ def protocol_events() -> tuple[InteractionEvent, ...]:
                 output_tokens=3,
                 cache_read_tokens=2,
                 reasoning_tokens=1,
+                cache_write_tokens=1,
             ),
         ),
         InteractionEvent(
@@ -276,7 +292,8 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
                 "output_tokens": 3,
                 "cache_read_tokens": 2,
                 "reasoning_tokens": 1,
-                "total_tokens": 8,
+                "cache_write_tokens": 1,
+                "total_tokens": 7,
             },
             "cost": {
                 "estimated_usd": None,
@@ -313,6 +330,31 @@ def test_websocket_emite_todo_protocolo_v1_e_preserva_campos_compativeis(
     ]
 
 
+def test_web_protocol_serializa_custo_sem_inventar_uso_de_tokens() -> None:
+    event = InteractionEvent(
+        kind="usage",
+        usage=None,
+        cost=InteractionCost(
+            estimated_usd=0.01,
+            status="estimated",
+            source="catalog:test",
+        ),
+    )
+
+    assert interaction_event_to_json(event, conversation_id="s1") == {
+        "type": "usage",
+        "protocol": 1,
+        "session_id": "s1",
+        "usage": None,
+        "cost": {
+            "estimated_usd": 0.01,
+            "actual_usd": None,
+            "status": "estimated",
+            "source": "catalog:test",
+        },
+    }
+
+
 def test_websocket_reusa_servico_injetado_e_aceita_mensagem_legada_sem_protocol(
     auth_client: TestClient,
     fake_service: FakeInteractionService,
@@ -327,6 +369,29 @@ def test_websocket_reusa_servico_injetado_e_aceita_mensagem_legada_sem_protocol(
 
     assert [envelope.content for envelope in fake_service.envelopes] == ["um", "dois"]
     assert fake_service.close_calls == 0
+
+
+def test_websocket_emite_erro_de_persistencia_seguro(auth_client: TestClient, fake_service) -> None:
+    """O transporte deve manter o erro de durabilidade canônico, sem detalhes internos."""
+    fake_service.events = (
+        InteractionEvent(
+            kind="turn_error",
+            error="não foi possível persistir a contabilidade do turno",
+            error_kind="persistence",
+            retryable=True,
+        ),
+    )
+
+    with auth_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json({"type": "message", "protocol": 1, "session_id": "s1", "content": "oi"})
+        assert ws.receive_json() == {
+            "type": "turn_error",
+            "protocol": 1,
+            "session_id": "s1",
+            "error": "não foi possível persistir a contabilidade do turno",
+            "error_kind": "persistence",
+            "retryable": True,
+        }
 
 
 @pytest.mark.parametrize("frame", [[], "texto", 7, None])
@@ -404,6 +469,17 @@ async def test_lease_loss_durante_send_bloqueado_fecha_1011_e_desfaz_stream() ->
     assert websocket.accepted
     assert websocket.closed_code == 1011
     assert service.stream_closed.is_set()
+
+
+@pytest.mark.anyio
+async def test_websocket_fecha_1012_sem_expor_indisponibilidade_interna() -> None:
+    """Mapping unavailable as 1011 or including its cause leaks an operational failure."""
+    websocket = BlockingSendWebSocket(UnavailableInteractionService())
+
+    await server._chat_session(websocket)
+
+    assert websocket.close_code == 1012
+    assert "database" not in websocket.close_reason.lower()
 
 
 def test_tradutor_recusa_evento_canonico_sem_payload_obrigatorio() -> None:

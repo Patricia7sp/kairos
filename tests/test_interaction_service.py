@@ -199,6 +199,19 @@ def service_with_fake_adapter(
     return service, resolver, adapter, usage
 
 
+def service_with_failing_usage_flush(
+    db, events: list[ProviderEvent | ProviderError]
+) -> tuple[InteractionService, UsageRepository]:
+    """Create a real service whose terminal accounting flush fails safely."""
+    service, _resolver, _adapter, usage = service_with_fake_adapter(db, events)
+
+    def failing_flush() -> int:
+        raise RuntimeError("database credential detail")
+
+    usage.flush = failing_flush
+    return service, usage
+
+
 def service_with_adapters(db, adapters) -> InteractionService:
     db_path = Path(db.execute("PRAGMA database_list").fetchone()["file"])
     return InteractionService(
@@ -381,11 +394,58 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"error_kind": "network"', row["display_metadata"])
         self.assertEqual(usage.pending_count(), 0)
 
+    async def test_flush_failure_replaces_normal_terminal_with_persistence_error(self) -> None:
+        """Engolir o flush deixaria o cliente aceitar um turno sem uso durável."""
+        service, usage = service_with_failing_usage_flush(
+            self.db,
+            [
+                ProviderEvent(kind="text_delta", text="ok"),
+                ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=2, output_tokens=1)),
+                ProviderEvent(kind="finish", finish_reason="stop"),
+            ],
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "turn_error"])
+        self.assertEqual(
+            events[-1].error,
+            "não foi possível persistir a contabilidade do turno",
+        )
+        self.assertEqual(events[-1].error_kind, "persistence")
+        self.assertTrue(events[-1].retryable)
+        self.assertEqual(usage.pending_count(), 1)
+
+    async def test_flush_failure_takes_terminal_precedence_over_provider_error(self) -> None:
+        """Expor o erro do provider esconderia que a contabilidade não foi durável."""
+        service, usage = service_with_failing_usage_flush(
+            self.db,
+            [
+                ProviderEvent(kind="text_delta", text="partial"),
+                ProviderError(ProviderErrorKind.NETWORK, retryable=True),
+            ],
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "delta", "turn_error"])
+        self.assertEqual(events[-1].error_kind, "persistence")
+        self.assertNotIn("database", events[-1].error.lower())
+        self.assertEqual(usage.pending_count(), 1)
+
     async def test_turn_boundary_persiste_rotas_e_custos_conhecidos_antes_do_close(self) -> None:
         """Uso concluído deve ficar consultável sem esperar o lifecycle shutdown."""
         adapter = FakeAdapter(
             [
-                ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=2)),
+                ProviderEvent(
+                    kind="usage",
+                    usage=TokenUsage(
+                        input_tokens=3,
+                        output_tokens=2,
+                        cache_read_tokens=7,
+                        reasoning_tokens=11,
+                    ),
+                ),
                 ProviderEvent(kind="finish", finish_reason="stop"),
             ]
         )
@@ -442,6 +502,52 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1][0:2], ("openrouter", "https://openrouter.ai/api/v1"))
         self.assertAlmostEqual(rows[1][2], 0.000007)
+
+    async def test_request_only_cost_emite_usage_sem_tokens_no_terminal_de_sucesso(self) -> None:
+        """O custo conhecido por requisição não pode ficar apenas no banco."""
+        usage = UsageRepository(self.db)
+        service = InteractionService(
+            gateway=CostPreparedGateway(
+                FakeAdapter([ProviderEvent(kind="finish", finish_reason="stop")])
+            ),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=usage,
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_end"])
+        self.assertIsNone(events[1].usage)
+        self.assertEqual(events[1].cost.status, "estimated")
+        self.assertEqual(events[1].cost.estimated_usd, 0.01)
+        row = self.db.execute(
+            "SELECT api_call_count, input_tokens, output_tokens, estimated_cost_usd "
+            "FROM session_model_usage WHERE session_id = 's1'"
+        ).fetchone()
+        self.assertEqual(tuple(row), (1, 0, 0, 0.01))
+
+    async def test_request_only_cost_emite_usage_sem_tokens_antes_do_erro_do_provider(self) -> None:
+        """O terminal de erro também deve expor o custo durável da tentativa."""
+        service = InteractionService(
+            gateway=CostPreparedGateway(
+                FakeAdapter([ProviderError(ProviderErrorKind.AUTH, retryable=False)])
+            ),
+            resolver=CountingResolver(),
+            context_loader=FakeContextLoader(),
+            sessions=SessionRepository(self.db),
+            messages=MessageRepository(self.db),
+            usage=UsageRepository(self.db),
+        )
+
+        events = [event async for event in service.stream(envelope())]
+
+        self.assertEqual([event.kind for event in events], ["turn_start", "usage", "turn_error"])
+        self.assertIsNone(events[1].usage)
+        self.assertEqual(events[1].cost.estimated_usd, 0.01)
+        self.assertEqual(events[-1].error_kind, "auth")
 
     async def test_proximo_turno_reidrata_tool_calls_e_resultado_vinculado(self) -> None:
         """Descartar IDs de tools faria o próximo provider rejeitar o histórico do turno."""
