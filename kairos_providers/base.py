@@ -29,7 +29,7 @@ class TokenUsage:
 
     @property
     def total(self) -> int:
-        return self.input_tokens + self.output_tokens + self.reasoning_tokens
+        return self.input_tokens + self.output_tokens
 
 
 @dataclass

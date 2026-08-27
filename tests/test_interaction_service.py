@@ -385,7 +385,15 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
         """Uso concluído deve ficar consultável sem esperar o lifecycle shutdown."""
         adapter = FakeAdapter(
             [
-                ProviderEvent(kind="usage", usage=TokenUsage(input_tokens=3, output_tokens=2)),
+                ProviderEvent(
+                    kind="usage",
+                    usage=TokenUsage(
+                        input_tokens=3,
+                        output_tokens=2,
+                        cache_read_tokens=7,
+                        reasoning_tokens=11,
+                    ),
+                ),
                 ProviderEvent(kind="finish", finish_reason="stop"),
             ]
         )

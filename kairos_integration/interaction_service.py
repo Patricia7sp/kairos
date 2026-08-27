@@ -8,8 +8,8 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
-from decimal import Decimal
 
+from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_integration.interaction_contract import (
     InteractionCost,
     InteractionEnvelope,
@@ -271,7 +271,12 @@ class InteractionService:
                 ) and self._retry_policy.has_attempts_remaining(attempts):
                     await self._retry_policy.backoff(attempts)
                     continue
-                cost = _cost_for(prepared, accumulator.usage, attempts)
+                cost = estimate_interaction_cost(
+                    prepared.price,
+                    accumulator.usage,
+                    attempts,
+                    prepared.cost_source,
+                )
                 await self._persist_error(envelope.conversation_id, accumulator, selection, exc)
                 self._record_usage(
                     envelope.conversation_id,
@@ -288,7 +293,12 @@ class InteractionService:
                 return
 
             accumulator.add_attempt_usage(attempt_usage)
-            cost = _cost_for(prepared, accumulator.usage, attempts)
+            cost = estimate_interaction_cost(
+                prepared.price,
+                accumulator.usage,
+                attempts,
+                prepared.cost_source,
+            )
             await self._persist_assistant(envelope.conversation_id, accumulator, selection)
             self._record_usage(
                 envelope.conversation_id,
@@ -522,30 +532,3 @@ class _LegacyPreparedAdapter:
 
     def create_adapter(self) -> object:
         return self._gateway.create_adapter(self._ref)
-
-
-def _cost_for(
-    prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
-    usage: TokenUsage | None,
-    attempts: int,
-) -> InteractionCost:
-    if usage is None:
-        return InteractionCost()
-    price = prepared.price
-    components = (
-        (usage.input_tokens + usage.cache_read_tokens, price.prompt),
-        (usage.output_tokens + usage.reasoning_tokens, price.completion),
-        (attempts, price.request),
-    )
-    if any(count and unit_price is None for count, unit_price in components):
-        return InteractionCost(source=prepared.cost_source)
-    estimated = sum(
-        Decimal(count) * unit_price
-        for count, unit_price in components
-        if count and unit_price is not None
-    )
-    return InteractionCost(
-        estimated_usd=float(estimated),
-        status="estimated",
-        source=prepared.cost_source,
-    )
