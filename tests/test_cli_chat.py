@@ -17,6 +17,7 @@ from kairos_integration import (
     InteractionSelectionSnapshot,
     InteractionToolResult,
 )
+from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers import (
     CanonicalToolCall,
     ProviderModelRef,
@@ -291,6 +292,20 @@ def test_cli_closes_owned_service_when_stream_raises(monkeypatch, tmp_path, caps
     assert code == ExitCode.ERROR
     assert captured.out == ""
     assert "provider indisponível" in captured.err
+    assert fake.close_calls == 1
+
+
+def test_cli_prints_normalized_unavailable_error(monkeypatch, tmp_path, capsys):
+    """Falling through the global handler would expose the exception type/prefix."""
+    fake = FakeInteractionService(stream_error=InteractionServiceUnavailableError())
+    install_service(monkeypatch, tmp_path, fake)
+
+    cli_result = main(["chat", "--session", "s1", "oi"])
+
+    captured = capsys.readouterr()
+    assert cli_result == 1
+    assert captured.out == ""
+    assert captured.err == "serviço de interação indisponível\n"
     assert fake.close_calls == 1
 
 

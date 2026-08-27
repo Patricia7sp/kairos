@@ -30,6 +30,7 @@ __all__ = [
     "InteractionResult",
     "InteractionSelectionSnapshot",
     "InteractionServiceError",
+    "InteractionServiceUnavailableError",
     "InteractionToolResult",
 ]
 
@@ -64,6 +65,17 @@ class InteractionPersistenceError(InteractionServiceError):
         super().__init__(
             "persistence",
             "não foi possível persistir a contabilidade do turno",
+            retryable=True,
+        )
+
+
+class InteractionServiceUnavailableError(InteractionServiceError):
+    """The composed service stopped accepting new interaction turns."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unavailable",
+            "serviço de interação indisponível",
             retryable=True,
         )
 

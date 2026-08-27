@@ -15,6 +15,7 @@ from kairos_integration import (
     InteractionSelectionSnapshot,
     InteractionToolResult,
 )
+from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_integration.turn_ownership import TurnLeaseLostError
 from kairos_providers import (
     CanonicalToolCall,
@@ -52,6 +53,13 @@ class FailingInteractionService(FakeInteractionService):
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         self.envelopes.append(envelope)
         raise RuntimeError("segredo-interno")
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class UnavailableInteractionService(FakeInteractionService):
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        raise InteractionServiceUnavailableError() from RuntimeError("database-internal")
         yield  # pragma: no cover - mantém a assinatura de async generator
 
 
@@ -101,6 +109,9 @@ class BlockingSendWebSocket:
         self.send_started = asyncio.Event()
         self.allow_send = asyncio.Event()
         self.closed_code: int | None = None
+        self.closed_reason = ""
+        self.close_code: int | None = None
+        self.close_reason = ""
         self.accepted = False
         self._received = False
 
@@ -118,8 +129,11 @@ class BlockingSendWebSocket:
         self.send_started.set()
         await self.allow_send.wait()
 
-    async def close(self, code: int) -> None:
+    async def close(self, code: int, reason: str = "") -> None:
         self.closed_code = code
+        self.closed_reason = reason
+        self.close_code = code
+        self.close_reason = reason
 
 
 class PersistingAdapter:
@@ -427,6 +441,17 @@ async def test_lease_loss_durante_send_bloqueado_fecha_1011_e_desfaz_stream() ->
     assert websocket.accepted
     assert websocket.closed_code == 1011
     assert service.stream_closed.is_set()
+
+
+@pytest.mark.anyio
+async def test_websocket_fecha_1012_sem_expor_indisponibilidade_interna() -> None:
+    """Mapping unavailable as 1011 or including its cause leaks an operational failure."""
+    websocket = BlockingSendWebSocket(UnavailableInteractionService())
+
+    await server._chat_session(websocket)
+
+    assert websocket.close_code == 1012
+    assert "database" not in websocket.close_reason.lower()
 
 
 def test_tradutor_recusa_evento_canonico_sem_payload_obrigatorio() -> None:

@@ -11,7 +11,10 @@ from kairos_integration import (
     build_interaction_service,
     composition,
 )
-from kairos_integration.interaction_contract import InteractionEnvelope
+from kairos_integration.interaction_contract import (
+    InteractionEnvelope,
+    InteractionServiceUnavailableError,
+)
 from kairos_providers import (
     CatalogOrigin,
     ModelCatalog,
@@ -45,6 +48,33 @@ class StreamingGateway:
     async def aclose(self):
         self.close_attempts += 1
         self.closed = True
+
+
+class BackpressuredAdapter:
+    def __init__(self) -> None:
+        self.cleanup_complete = False
+
+    async def stream(self, _request):
+        try:
+            yield ProviderEvent(kind="text_delta", text="parcial")
+            await asyncio.Event().wait()
+        finally:
+            self.cleanup_complete = True
+
+
+class BackpressuredGateway(StreamingGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.adapter = BackpressuredAdapter()
+        self.cleanup_complete = False
+
+    def create_adapter(self, _ref):
+        return self.adapter
+
+    async def aclose(self):
+        assert self.adapter.cleanup_complete
+        await super().aclose()
+        self.cleanup_complete = True
 
 
 def test_composition_usa_gateway_e_state_compartilhados(tmp_path):
@@ -122,7 +152,7 @@ def test_composition_fecha_somente_os_recursos_que_criou(tmp_path, monkeypatch):
         source="test",
         content="olá",
     )
-    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+    with pytest.raises(InteractionServiceUnavailableError):
         asyncio.run(anext(service.stream(envelope)))
 
 
@@ -580,3 +610,132 @@ def test_cleanup_nao_usa_task_factory_eager_do_caller():
     assert usage.flush_attempts == 1
     assert gateway.close_attempts == 1
     assert connection.close_attempts == 1
+
+
+@pytest.mark.anyio
+async def test_composed_close_waits_for_backpressured_turn_before_resources(tmp_path, monkeypatch):
+    """Dropping admission before public aclose would close owned resources under the turn."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = BackpressuredGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    stream = service.stream(
+        InteractionEnvelope(conversation_id="active", source="test", content="olá")
+    )
+    close_task = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        close_task = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+
+        assert not close_task.done()
+        with pytest.raises(InteractionServiceUnavailableError):
+            await anext(
+                service.stream(
+                    InteractionEnvelope(
+                        conversation_id="later",
+                        source="test",
+                        content="depois",
+                    )
+                )
+            )
+
+        await stream.aclose()
+        await close_task
+
+        assert gateway.cleanup_complete
+        assert service._persistence is not None
+        assert service._persistence._connection is None
+    finally:
+        await stream.aclose()
+        if close_task is not None:
+            await asyncio.gather(close_task, return_exceptions=True)
+        await asyncio.gather(service.aclose(), return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_cancelled_close_waiter_does_not_cancel_shared_drain(tmp_path, monkeypatch):
+    """Forwarding waiter cancellation into the reserved close task strands later waiters."""
+    (tmp_path / "config.yaml").write_text(
+        "provider: openai\nmodel: gpt-4o\n",
+        encoding="utf-8",
+    )
+    gateway = BackpressuredGateway()
+    monkeypatch.setattr(composition, "build_provider_gateway", lambda _home: gateway)
+    service = build_interaction_service(tmp_path)
+    stream = service.stream(
+        InteractionEnvelope(conversation_id="active", source="test", content="olá")
+    )
+    first = None
+    second = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        first = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        second = asyncio.create_task(service.aclose())
+        await asyncio.sleep(0)
+        assert not second.done()
+        assert service._persistence is not None
+        assert service._persistence._connection is not None
+        await stream.aclose()
+        await second
+
+        assert gateway.close_attempts == 1
+        assert gateway.cleanup_complete
+    finally:
+        await stream.aclose()
+        for task in (first, second):
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(service.aclose(), return_exceptions=True)
+
+
+@pytest.mark.anyio
+async def test_failed_close_retry_keeps_admission_draining():
+    """A failed resource close must not reopen turns before a later successful retry."""
+
+    class RetryGateway:
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        async def aclose(self) -> None:
+            self.close_attempts += 1
+            if self.close_attempts == 1:
+                raise RuntimeError("database-internal")
+
+    gateway = RetryGateway()
+    usage = ThreadSafeUsage()
+    connection = ThreadSafeConnection()
+    service = ComposedInteractionService(
+        home=Path("/retry-test"),
+        connection=connection,
+        gateway=gateway,
+        resolver=object(),
+        context_loader=object(),
+        sessions=object(),
+        messages=object(),
+        usage=usage,
+    )
+
+    with pytest.raises(BaseExceptionGroup, match="falha ao fechar InteractionService"):
+        await service.aclose()
+    with pytest.raises(InteractionServiceUnavailableError):
+        await anext(
+            service.stream(
+                InteractionEnvelope(conversation_id="later", source="test", content="oi")
+            )
+        )
+
+    await service.aclose()
+
+    assert gateway.close_attempts == 2

@@ -14,6 +14,7 @@ from kairos_integration import (
     build_interaction_service,
     interaction_event_to_json,
 )
+from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers import ProviderModelRef
 
 __all__ = ["ChatUsageError", "run_chat"]
@@ -75,6 +76,9 @@ async def run_chat(
             as_json=as_json,
             quiet=quiet,
         )
+    except InteractionServiceUnavailableError as exc:
+        print(exc.message, file=sys.stderr, flush=True)
+        return 1
     finally:
         await service.aclose()
 

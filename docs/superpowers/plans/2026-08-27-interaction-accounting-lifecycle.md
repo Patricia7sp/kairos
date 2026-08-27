@@ -160,9 +160,13 @@ git commit -m "fix(interaction): corrige semantica de tokens e custos"
 def test_actual_only_costs_sum_without_requiring_estimates(db):
     repo = UsageRepository(db)
     route = billing_route("s1", provider="openrouter")
-    repo.queue(route, TokenDelta(actual_cost_usd=0.02, cost_status="actual", cost_source="upstream"))
+    repo.queue(
+        route, TokenDelta(actual_cost_usd=0.02, cost_status="actual", cost_source="upstream")
+    )
     repo.flush(now=1)
-    repo.queue(route, TokenDelta(actual_cost_usd=0.03, cost_status="actual", cost_source="upstream"))
+    repo.queue(
+        route, TokenDelta(actual_cost_usd=0.03, cost_status="actual", cost_source="upstream")
+    )
     repo.flush(now=2)
     row = db.execute(
         "SELECT estimated_cost_usd, actual_cost_usd, cost_status FROM session_model_usage"
@@ -175,9 +179,13 @@ def test_actual_only_costs_sum_without_requiring_estimates(db):
 def test_estimated_and_actual_costs_keep_independent_sums(db):
     repo = UsageRepository(db)
     route = billing_route("s1", provider="openrouter")
-    repo.queue(route, TokenDelta(estimated_cost_usd=0.04, cost_status="estimated", cost_source="catalog"))
+    repo.queue(
+        route, TokenDelta(estimated_cost_usd=0.04, cost_status="estimated", cost_source="catalog")
+    )
     repo.flush(now=1)
-    repo.queue(route, TokenDelta(actual_cost_usd=0.05, cost_status="actual", cost_source="upstream"))
+    repo.queue(
+        route, TokenDelta(actual_cost_usd=0.05, cost_status="actual", cost_source="upstream")
+    )
     repo.flush(now=2)
     row = db.execute(
         "SELECT estimated_cost_usd, actual_cost_usd, cost_status, cost_source FROM session_model_usage"
@@ -192,15 +200,24 @@ def test_estimated_and_actual_costs_keep_independent_sums(db):
 ```python
 def test_session_summary_becomes_sticky_mixed_after_distinct_routes(db):
     repo = UsageRepository(db)
-    repo.queue(billing_route("s1", provider="openai", base_url="https://api.openai.com"), TokenDelta(input_tokens=2))
+    repo.queue(
+        billing_route("s1", provider="openai", base_url="https://api.openai.com"),
+        TokenDelta(input_tokens=2),
+    )
     repo.flush(now=1)
-    repo.queue(billing_route("s1", provider="openrouter", base_url="https://openrouter.ai/api/v1"), TokenDelta(input_tokens=3))
+    repo.queue(
+        billing_route("s1", provider="openrouter", base_url="https://openrouter.ai/api/v1"),
+        TokenDelta(input_tokens=3),
+    )
     repo.flush(now=2)
     row = db.execute(
         "SELECT billing_provider, billing_base_url, billing_mode, input_tokens FROM sessions WHERE id='s1'"
     ).fetchone()
     assert tuple(row) == ("mixed", "", "mixed", 5)
-    repo.queue(billing_route("s1", provider="openai", base_url="https://api.openai.com"), TokenDelta(input_tokens=7))
+    repo.queue(
+        billing_route("s1", provider="openai", base_url="https://api.openai.com"),
+        TokenDelta(input_tokens=7),
+    )
     repo.flush(now=3)
     row = db.execute(
         "SELECT billing_provider, billing_base_url, billing_mode, input_tokens FROM sessions WHERE id='s1'"
@@ -281,7 +298,9 @@ git commit -m "fix(state): corrige agregacao de custos e rotas"
 
 ```python
 async def test_flush_failure_replaces_normal_terminal_with_persistence_error():
-    service, persistence = service_with_failing_usage_flush(events=[text("ok"), usage(2, 1), finish("stop")])
+    service, persistence = service_with_failing_usage_flush(
+        events=[text("ok"), usage(2, 1), finish("stop")]
+    )
     events = [event async for event in service.stream(envelope())]
     assert [event.kind for event in events] == ["turn_start", "delta", "turn_error"]
     assert events[-1].error_kind == "persistence"

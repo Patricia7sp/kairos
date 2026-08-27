@@ -468,9 +468,7 @@ class UsageTests(Base):
 
     def test_session_summary_becomes_sticky_mixed_after_distinct_routes(self):
         openai = BillingRoute("s1", "gpt", "openai", "https://api.openai.com", "key")
-        openrouter = BillingRoute(
-            "s1", "gpt", "openrouter", "https://openrouter.ai/api/v1", "key"
-        )
+        openrouter = BillingRoute("s1", "gpt", "openrouter", "https://openrouter.ai/api/v1", "key")
         self.usage.queue(openai, TokenDelta(input_tokens=2))
         self.usage.flush(now=1)
         self.usage.queue(openrouter, TokenDelta(input_tokens=3))

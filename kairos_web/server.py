@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_integration import build_interaction_service
+from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers.manager import ProviderManager
 from kairos_security.credentials import (
     CredentialNotFoundError,
@@ -690,6 +691,11 @@ async def _chat_session(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("WebSocket chat client disconnected")
+    except InteractionServiceUnavailableError:
+        try:
+            await websocket.close(code=1012)
+        except Exception:  # noqa: BLE001, S110 - socket pode já estar fechado
+            pass
     except Exception as exc:
         logger.exception("WebSocket error: %s", exc)
         try:

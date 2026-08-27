@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
 
+from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_integration.interaction_contract import (
     InteractionCost,
@@ -142,6 +143,7 @@ class InteractionService:
         turn_lease_release_max_attempts: int = 5,
         turn_lease_clock: Callable[[], float] | None = None,
         turn_lease_sleep: Callable[[float], Awaitable[None]] | None = None,
+        admission: InteractionAdmissionGate | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -153,6 +155,7 @@ class InteractionService:
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
+        self._admission = admission
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -169,6 +172,22 @@ class InteractionService:
 
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Executa exatamente uma seleção e transmite seus eventos normalizados."""
+        if self._admission is None:
+            async with aclosing(self._stream_with_owned_producer(envelope)) as stream:
+                async for event in stream:
+                    yield event
+            return
+        async with (
+            self._admission.admit(),
+            aclosing(self._stream_with_owned_producer(envelope)) as stream,
+        ):
+            async for event in stream:
+                yield event
+
+    async def _stream_with_owned_producer(
+        self, envelope: InteractionEnvelope
+    ) -> AsyncIterator[InteractionEvent]:
+        """Own the demand-paced producer until terminal delivery or explicit close."""
         demand: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         events: asyncio.Queue[InteractionEvent] = asyncio.Queue(maxsize=1)
         producer = asyncio.create_task(
