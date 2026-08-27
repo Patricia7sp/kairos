@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import warnings
 
 import pytest
 
-from kairos_providers._async_cleanup import AsyncCleanupCoordinator
+from kairos_providers._async_cleanup import (
+    AsyncCleanupCoordinator,
+    run_persistent_cleanup,
+)
 
 
 def test_asyncio_run_shutdown_drena_cleanup_antes_do_primeiro_passo():
@@ -108,3 +113,87 @@ def test_cancelar_waiter_nao_cancela_cleanup_compartilhado():
     asyncio.run(run_waiters())
 
     assert attempts == 1
+
+
+def test_cleanup_persistente_drena_no_shutdown_antes_do_primeiro_passo():
+    """O Runner não pode cancelar um cleanup one-shot ainda não iniciado."""
+    events: list[str] = []
+
+    async def cleanup() -> None:
+        events.append("started")
+        await asyncio.sleep(0)
+        events.append("completed")
+
+    async def launch_and_return() -> None:
+        waiter = asyncio.create_task(
+            run_persistent_cleanup(cleanup, task_name="test-one-shot-shutdown")
+        )
+        await asyncio.sleep(0)
+        cleanup_task = next(
+            task for task in asyncio.all_tasks() if task.get_name() == "test-one-shot-shutdown"
+        )
+        assert events == []
+        assert not cleanup_task.done()
+        assert not waiter.done()
+
+    asyncio.run(launch_and_return())
+
+    assert events == ["started", "completed"]
+
+
+def test_cleanup_persistente_recusa_cancelamento_externo_antes_do_primeiro_passo():
+    """Cancelamento pré-start não pode impedir o cleanup já reservado."""
+    events: list[str] = []
+
+    async def cleanup() -> None:
+        events.append("started")
+        await asyncio.sleep(0)
+        events.append("completed")
+
+    async def launch_cancel_and_wait():
+        waiter = asyncio.create_task(
+            run_persistent_cleanup(cleanup, task_name="test-one-shot-pre-start")
+        )
+        await asyncio.sleep(0)
+        cleanup_task = next(
+            task for task in asyncio.all_tasks() if task.get_name() == "test-one-shot-pre-start"
+        )
+        assert events == []
+
+        assert not cleanup_task.cancel()
+        outcome = await waiter
+
+        assert outcome.error is None
+        assert outcome.cancellation is None
+
+    asyncio.run(launch_cancel_and_wait())
+
+    assert events == ["started", "completed"]
+
+
+def test_falha_do_launcher_e_outcome_sem_coroutine_orfa(monkeypatch):
+    """Falha síncrona ao lançar deve fechar a coroutine e publicar o erro."""
+    from kairos_providers import _async_cleanup
+
+    calls = 0
+
+    async def cleanup() -> None:
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(
+        _async_cleanup,
+        "_PersistentCleanupTask",
+        lambda _coroutine, *, loop, name, execution: (_ for _ in ()).throw(RuntimeError(name)),
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        outcome = asyncio.run(run_persistent_cleanup(cleanup, task_name="test-launch-failure"))
+        gc.collect()
+
+    assert isinstance(outcome.error, RuntimeError)
+    assert str(outcome.error) == "test-launch-failure"
+    assert outcome.cancellation is None
+    assert calls == 0
+    assert not [warning for warning in caught if "was never awaited" in str(warning.message)]

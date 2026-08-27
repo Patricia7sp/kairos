@@ -4,11 +4,12 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from kairos_cli import chat
-from kairos_cli.handlers import ExitCode
+from kairos_cli.handlers import ExitCode, cmd_run
 from kairos_cli.main import main
 from kairos_integration import (
     InteractionEnvelope,
@@ -134,8 +135,16 @@ def test_cli_rejects_partial_override_before_composition(
     assert fake.close_calls == 0
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["chat", "--session", "s1", "--json", "oi"],
+        ["--json", "chat", "--session", "s1", "oi"],
+    ],
+    ids=["chat-local", "root-before-command"],
+)
 def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, argv
 ):
     snapshot = InteractionSelectionSnapshot(
         ref=ProviderModelRef("openrouter", "acme/chat"),
@@ -160,7 +169,7 @@ def test_cli_json_is_versioned_canonical_ndjson_without_credential_metadata(
     fake = FakeInteractionService(events)
     install_service(monkeypatch, tmp_path, fake)
 
-    code = main(["chat", "--session", "s1", "--json", "oi"])
+    code = main(argv)
 
     captured = capsys.readouterr()
     payloads = [json.loads(line) for line in captured.out.splitlines()]
@@ -321,3 +330,48 @@ def test_run_alias_uses_same_interaction_service(monkeypatch, tmp_path, capsys):
     assert fake.envelopes[0].conversation_id == "cli-default"
     assert fake.close_calls == 1
     assert capsys.readouterr().out == "ok\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["chat", "oi"],
+        ["chat", "--session", "", "oi"],
+        ["chat", "--session", "   ", "oi"],
+    ],
+    ids=["missing", "empty", "blank"],
+)
+def test_cli_chat_requires_nonblank_session_before_composition(monkeypatch, tmp_path, argv):
+    fake = FakeInteractionService((turn_end(),))
+    homes = install_service(monkeypatch, tmp_path, fake)
+
+    with pytest.raises(SystemExit) as raised:
+        main(argv)
+
+    assert raised.value.code == ExitCode.USAGE
+    assert homes == []
+    assert fake.close_calls == 0
+
+
+@pytest.mark.parametrize("session_id", ["", "   "])
+def test_chat_handler_defends_nonblank_session_before_composition(
+    monkeypatch, tmp_path, capsys, session_id: str
+):
+    fake = FakeInteractionService((turn_end(),))
+    homes = install_service(monkeypatch, tmp_path, fake)
+    args = SimpleNamespace(
+        command="chat",
+        prompt=["oi"],
+        quiet=False,
+        session=session_id,
+        provider=None,
+        model=None,
+        json=False,
+    )
+
+    code = cmd_run(args)
+
+    assert code == ExitCode.USAGE
+    assert "--session" in capsys.readouterr().err
+    assert homes == []
+    assert fake.close_calls == 0

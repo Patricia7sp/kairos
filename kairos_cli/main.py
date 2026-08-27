@@ -48,7 +48,12 @@ def build_parser():
 
     for cmd in COMMANDS:
         p = sub.add_parser(cmd.name, help=cmd.help)
-        p.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+        p.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
 
         if cmd.subcommands:
             # `dest` nomeado por comando: é o que permite ao handler saber
@@ -57,7 +62,12 @@ def build_parser():
             s = p.add_subparsers(dest=dest, metavar="<subcomando>")
             for scmd in cmd.subcommands:
                 sp = s.add_parser(scmd.name, help=scmd.help)
-                sp.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+                sp.add_argument(
+                    "--json",
+                    action="store_true",
+                    default=argparse.SUPPRESS,
+                    help=argparse.SUPPRESS,
+                )
                 _extra_args(cmd.name, scmd.name, sp)
         else:
             _extra_args(cmd.name, None, p)
@@ -83,11 +93,22 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
-        parser.add_argument(
-            "--session",
-            default="cli-default",
-            help="ID da conversa persistida (padrão: cli-default)",
-        )
+        if command == "chat":
+            parser.add_argument(
+                "--session",
+                required=True,
+                type=_nonblank_session,
+                metavar="ID",
+                help="ID não vazio da conversa persistida",
+            )
+        else:
+            parser.add_argument(
+                "--session",
+                default="cli-default",
+                type=_nonblank_session,
+                metavar="ID",
+                help="ID da conversa persistida (padrão: cli-default)",
+            )
         parser.add_argument("--provider", help="provider do override deste turno")
         parser.add_argument("--model", help="modelo do override deste turno")
     elif command == "gateway" and subcommand in ("run", None):
@@ -133,6 +154,15 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
         parser.add_argument(
             "--no-browser", action="store_true", help="Não abre o navegador automaticamente"
         )
+
+
+def _nonblank_session(value: str) -> str:
+    session_id = value.strip()
+    if not session_id:
+        from argparse import ArgumentTypeError
+
+        raise ArgumentTypeError("--session exige um ID não vazio")
+    return session_id
 
 
 def main(argv: list[str] | None = None) -> int:

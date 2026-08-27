@@ -28,21 +28,13 @@ from kairos_providers import (
     ResolvedModelSelection,
     TokenUsage,
 )
+from kairos_providers._async_cleanup import run_persistent_cleanup
 from kairos_providers.gateway import ProviderGateway
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
 
 __all__ = ["InteractionService"]
 
 logger = logging.getLogger(__name__)
-
-
-async def _invoke_provider_close(close: Callable[[], Awaitable[object]]) -> BaseException | None:
-    """Run optional iterator cleanup without leaking a detached task exception."""
-    try:
-        await close()
-    except BaseException as exc:  # noqa: BLE001 - owner interprets cleanup outcome
-        return exc
-    return None
 
 
 async def _finish_provider_stream(
@@ -55,16 +47,12 @@ async def _finish_provider_stream(
     cleanup_cancel: asyncio.CancelledError | None = None
 
     if callable(close):
-        close_task = asyncio.create_task(
-            _invoke_provider_close(close),
-            name="kairos-provider-stream-close",
+        outcome = await run_persistent_cleanup(
+            close,
+            task_name="kairos-provider-stream-close",
         )
-        while not close_task.done():
-            try:
-                await asyncio.shield(close_task)
-            except asyncio.CancelledError as exc:
-                cleanup_cancel = cleanup_cancel or exc
-        cleanup_error = close_task.result()
+        cleanup_error = outcome.error
+        cleanup_cancel = outcome.cancellation
 
     unwind = primary if primary is not None else cleanup_cancel
     if cleanup_error is not None:

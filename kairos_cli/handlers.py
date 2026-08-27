@@ -592,11 +592,14 @@ def cmd_run(args) -> int:
 
     prompt_words = getattr(args, "prompt", []) or []
     prompt = " ".join(prompt_words).strip()
+    session_id = getattr(args, "session", None)
+    if args.command == "run" and session_id is None:
+        session_id = "cli-default"
     try:
         return asyncio.run(
             run_chat(
                 home=_home(),
-                session_id=getattr(args, "session", "cli-default") or "cli-default",
+                session_id=session_id,
                 prompt=prompt,
                 provider=getattr(args, "provider", None),
                 model=getattr(args, "model", None),

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import sqlite3
 import threading
+import warnings
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
@@ -250,6 +252,39 @@ class ExplicitCloseGateAdapter(ImmediateAdapter):
         return successor()
 
 
+class ShutdownCloseIterator:
+    def __init__(self, trace: list[str]) -> None:
+        self.trace = trace
+        self.emitted = False
+        self.close_calls = 0
+
+    def __aiter__(self) -> ShutdownCloseIterator:
+        return self
+
+    async def __anext__(self) -> ProviderEvent:
+        if not self.emitted:
+            self.emitted = True
+            return ProviderEvent(kind="text_delta", text="primeira")
+        await asyncio.Event().wait()
+        raise StopAsyncIteration  # pragma: no cover - bloqueia até cancelamento
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.trace.append("close-started")
+        await asyncio.sleep(0)
+        self.trace.append("close-completed")
+
+
+class ShutdownCloseAdapter(ImmediateAdapter):
+    def __init__(self, trace: list[str]) -> None:
+        super().__init__("")
+        self.iterator = ShutdownCloseIterator(trace)
+
+    def stream(self, request) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
+        return self.iterator
+
+
 class FirstStreamBlocksAdapter(ImmediateAdapter):
     def __init__(self) -> None:
         super().__init__("")
@@ -348,6 +383,16 @@ class RecordingBackend:
         self.releases.append((conversation_id, holder))
         self.release_called.set()
         return LeaseReleaseResult.RELEASED
+
+
+class TraceReleaseBackend(RecordingBackend):
+    def __init__(self, clock, trace: list[str]) -> None:
+        super().__init__(clock)
+        self.trace = trace
+
+    async def release(self, conversation_id, holder):
+        self.trace.append("lease-released")
+        return await super().release(conversation_id, holder)
 
 
 class PermanentReleaseContentionBackend(RecordingBackend):
@@ -1119,6 +1164,123 @@ async def test_second_close_cancellation_cannot_release_owner_before_iterator_cl
             with suppress(asyncio.CancelledError):
                 await successor
         await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_provider_cleanup_bypasses_hostile_task_factory_without_warning(tmp_path: Path):
+    """Factory do caller não pode impedir aclose nem substituir GeneratorExit."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    trace: list[str] = []
+    adapter = ShutdownCloseAdapter(trace)
+    stream = service(connection, adapter).stream(envelope())
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+    failure: BaseException | None = None
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+
+        def hostile_factory(_loop, _coroutine, **_kwargs):
+            raise RuntimeError("hostile-task-factory")
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loop.set_task_factory(hostile_factory)
+            try:
+                await stream.aclose()
+            except BaseException as exc:  # noqa: BLE001 - preserva o erro observado
+                failure = exc
+            finally:
+                loop.set_task_factory(previous_factory)
+            gc.collect()
+
+        assert failure is None
+        assert adapter.iterator.close_calls == 1
+        assert trace == ["close-started", "close-completed"]
+        assert not [warning for warning in caught if "was never awaited" in str(warning.message)]
+    finally:
+        loop.set_task_factory(previous_factory)
+        await stream.aclose()
+        connection.close()
+
+
+@pytest.mark.anyio
+async def test_pre_start_cleanup_cancellation_cannot_release_owner_before_close(tmp_path: Path):
+    """Cancelar a task bruta pré-start não pode pular aclose nem antecipar release."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    trace: list[str] = []
+    timer = ManualTime()
+    backend = TraceReleaseBackend(timer.now, trace)
+    adapter = ShutdownCloseAdapter(trace)
+    stream = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+    ).stream(envelope())
+    try:
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+
+        public_close = asyncio.create_task(stream.aclose())
+        await asyncio.sleep(0)
+        cleanup_task = next(
+            task
+            for task in asyncio.all_tasks()
+            if task.get_name() == "kairos-provider-stream-close"
+        )
+        assert adapter.iterator.close_calls == 0
+        assert not backend.releases
+
+        assert not cleanup_task.cancel()
+        await public_close
+
+        assert adapter.iterator.close_calls == 1
+        assert trace == ["close-started", "close-completed", "lease-released"]
+    finally:
+        await stream.aclose()
+        connection.close()
+
+
+def test_asyncio_run_shutdown_preserves_provider_close_before_lease_release(tmp_path: Path):
+    """Cancel pré-start do Runner não pode liberar ownership antes de aclose."""
+    connection = connect(tmp_path / "state.db")
+    initialize_schema(connection)
+    trace: list[str] = []
+    timer = ManualTime()
+    backend = TraceReleaseBackend(timer.now, trace)
+    adapter = ShutdownCloseAdapter(trace)
+    interaction = service(
+        connection,
+        adapter,
+        backend=backend,
+        clock=timer.now,
+        sleep=timer.sleep,
+    )
+
+    async def launch_close_and_return() -> None:
+        stream = interaction.stream(envelope())
+        assert (await anext(stream)).kind == "turn_start"
+        assert (await anext(stream)).kind == "delta"
+        public_close = asyncio.create_task(stream.aclose(), name="test-public-stream-close")
+        while not any(
+            task.get_name() == "kairos-provider-stream-close" for task in asyncio.all_tasks()
+        ):
+            await asyncio.sleep(0)
+        assert adapter.iterator.close_calls == 0
+        assert not backend.releases
+        assert not public_close.done()
+
+    try:
+        asyncio.run(launch_close_and_return())
+
+        assert adapter.iterator.close_calls == 1
+        assert trace == ["close-started", "close-completed", "lease-released"]
+    finally:
         connection.close()
 
 

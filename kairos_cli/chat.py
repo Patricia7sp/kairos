@@ -56,6 +56,7 @@ async def run_chat(
     quiet: bool = False,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
+    session_id = _required_session_id(session_id)
     override = _model_override(provider, model)
     service = build_interaction_service(home)
     try:
@@ -151,3 +152,9 @@ def _model_override(provider: str | None, model: str | None) -> ProviderModelRef
     if not provider or not provider.strip() or not model or not model.strip():
         raise ChatUsageError("--provider e --model devem ser informados juntos")
     return ProviderModelRef(provider.strip(), model.strip())
+
+
+def _required_session_id(session_id: str) -> str:
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ChatUsageError("--session exige um ID não vazio")
+    return session_id.strip()

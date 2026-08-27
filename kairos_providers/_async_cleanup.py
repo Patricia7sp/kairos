@@ -14,34 +14,106 @@ from concurrent.futures import Future as ConcurrentFuture
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["AsyncCleanupCoordinator"]
+__all__ = [
+    "AsyncCleanupCoordinator",
+    "PersistentCleanupOutcome",
+    "run_persistent_cleanup",
+]
+
+
+@dataclass(slots=True)
+class _CleanupExecutionState:
+    started: bool = False
 
 
 class _PersistentCleanupTask(asyncio.Task[BaseException | None]):
     """Task que mantém o loop afim vivo até o cleanup terminar.
 
     ``asyncio.run`` cancela todas as tasks pendentes antes de fechar o loop.
-    Essa fase acontece com o loop parado; recusar somente esse cancelamento
-    permite que o Runner volte a dirigir o loop e drene o cleanup. Durante a
-    execução normal do loop, timeout, TaskGroup e cancellation scopes mantêm a
+    Essa fase acontece com o loop parado; além dela, cancelamento antes do
+    primeiro passo também precisa ser recusado para o cleanup reservado chegar
+    a chamar o recurso. Depois que começou, timeout e TaskGroup mantêm a
     semântica nativa de ``asyncio.Task.cancel``.
     """
 
+    def __init__(
+        self,
+        coroutine: Coroutine[Any, Any, BaseException | None],
+        *,
+        loop: asyncio.AbstractEventLoop,
+        name: str,
+        execution: _CleanupExecutionState,
+    ) -> None:
+        self._execution = execution
+        super().__init__(coroutine, loop=loop, name=name)
+
     def cancel(self, msg: Any | None = None) -> bool:
-        if not self.get_loop().is_running():
+        if not self._execution.started or not self.get_loop().is_running():
             return False
         return super().cancel(msg)
 
 
 def _launch_cleanup_task(
-    coroutine: Coroutine[Any, Any, BaseException | None], *, name: str
+    cleanup: Callable[[], Awaitable[None]], *, name: str
 ) -> asyncio.Task[BaseException | None]:
     """Agenda sem consultar a task factory potencialmente eager do caller."""
-    return _PersistentCleanupTask(
-        coroutine,
-        loop=asyncio.get_running_loop(),
-        name=name,
-    )
+    execution = _CleanupExecutionState()
+    coroutine = _execute_cleanup(cleanup, execution)
+    try:
+        return _PersistentCleanupTask(
+            coroutine,
+            loop=asyncio.get_running_loop(),
+            name=name,
+            execution=execution,
+        )
+    except BaseException:
+        coroutine.close()
+        raise
+
+
+@dataclass(frozen=True, slots=True)
+class PersistentCleanupOutcome:
+    """Resultado de um cleanup one-shot e do cancelamento de quem o aguardou."""
+
+    error: BaseException | None = None
+    cancellation: asyncio.CancelledError | None = None
+
+
+async def _execute_cleanup(
+    cleanup: Callable[[], Awaitable[None]],
+    execution: _CleanupExecutionState,
+) -> BaseException | None:
+    execution.started = True
+    try:
+        await cleanup()
+    except BaseException as exc:  # noqa: BLE001 - publica sem exception órfã
+        return exc
+    return None
+
+
+async def run_persistent_cleanup(
+    cleanup: Callable[[], Awaitable[None]],
+    *,
+    task_name: str,
+) -> PersistentCleanupOutcome:
+    """Executa uma vez, até o fim, apesar de cancelamentos do waiter/Runner."""
+    try:
+        task = _launch_cleanup_task(cleanup, name=task_name)
+    except BaseException as exc:  # noqa: BLE001 - launch também é um outcome
+        return PersistentCleanupOutcome(error=exc)
+
+    cancellation: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
+
+    try:
+        error = task.result()
+    except BaseException as exc:  # noqa: BLE001 - cancel externo também é cleanup failure
+        error = exc
+    return PersistentCleanupOutcome(error=error, cancellation=cancellation)
 
 
 @dataclass(slots=True)
@@ -96,23 +168,13 @@ class AsyncCleanupCoordinator:
         attempt: _CleanupAttempt,
         cleanup: Callable[[], Awaitable[None]],
     ) -> None:
-        coroutine = self._execute(cleanup)
         try:
-            task = _launch_cleanup_task(coroutine, name=self._task_name)
+            task = _launch_cleanup_task(cleanup, name=self._task_name)
         except BaseException as exc:  # noqa: BLE001 - launch failure é outcome da tentativa
-            coroutine.close()
             self._publish(attempt, exc)
             return
         attempt.task = task
         task.add_done_callback(lambda completed: self._task_done(attempt, completed))
-
-    @staticmethod
-    async def _execute(cleanup: Callable[[], Awaitable[None]]) -> BaseException | None:
-        try:
-            await cleanup()
-        except BaseException as exc:  # noqa: BLE001 - callback publica sem exception órfã
-            return exc
-        return None
 
     def _task_done(
         self,
