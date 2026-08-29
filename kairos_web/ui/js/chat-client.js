@@ -13,10 +13,11 @@ const KNOWN_EVENTS = new Set([
 ]);
 
 export class ChatClient {
-  constructor({ onEvent = () => {}, onAuthLost = () => {}, onClose = () => {} } = {}) {
+  constructor({ onEvent = () => {}, onAuthLost = () => {}, onClose = () => {}, onOpen = () => {} } = {}) {
     this.onEvent = onEvent;
     this.onAuthLost = onAuthLost;
     this.onClose = onClose;
+    this.onOpen = onOpen;
     this.socket = null;
     this.turnStarted = false;
   }
@@ -27,6 +28,7 @@ export class ChatClient {
     const url = `${scheme}://${location.host}/ws/chat?token=${encodeURIComponent(token)}`;
     const socket = new WebSocketImpl(url);
     this.socket = socket;
+    socket.addEventListener("open", () => this.onOpen());
     socket.addEventListener("message", (event) => {
       let payload;
       try {

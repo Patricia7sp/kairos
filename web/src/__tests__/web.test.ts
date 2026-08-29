@@ -7,6 +7,8 @@ import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
 import { providerCardMarkup } from "../../../kairos_web/ui/js/views/provedores.js";
 // @ts-expect-error A SPA principal é JavaScript sem etapa de build.
 import { filterModels, modelSelectionMarkup } from "../../../kairos_web/ui/js/views/modelos.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { chatShellMarkup, initialTurnState, reduceTurn, turnMarkup } from "../../../kairos_web/ui/js/views/chat.js";
 import {
   PROFILE_QUERY_PARAM,
   REAUTH_ERROR_CODES,
@@ -297,5 +299,64 @@ describe("catálogo de modelos", () => {
     const preview = { ...free, id: "preview", stability: "preview" };
     expect(filterModels([free, preview], {})).toEqual([free]);
     expect(filterModels([free, preview], { includePreview: true })).toEqual([free, preview]);
+  });
+});
+
+describe("Chat principal", () => {
+  it("bloqueia o composer quando nenhum provider é utilizável", () => {
+    const markup = chatShellMarkup({ providers: [], sessions: [], models: [] });
+    expect(markup).toContain("Configurar um provedor");
+    expect(markup).toContain("textarea disabled");
+  });
+
+  it("mostra provider, modelo e gratuidade no painel de contexto", () => {
+    const markup = chatShellMarkup({
+      providers: [{ id: "openrouter", configured: true }],
+      sessions: [],
+      models: [{
+        id: "openrouter/free", provider: "openrouter", name: "OpenRouter Free",
+        is_free: true, capabilities: { tools: true },
+      }],
+      selection: { provider: "openrouter", model: "openrouter/free" },
+    });
+    expect(markup).toContain("openrouter");
+    expect(markup).toContain("OpenRouter Free");
+    expect(markup).toContain("Gratuito");
+  });
+
+  it("preserva texto parcial quando o turno termina com erro", () => {
+    let state = initialTurnState();
+    state = reduceTurn(state, { protocol: 1, type: "turn_start" });
+    state = reduceTurn(state, { protocol: 1, type: "delta", text: "parcial" });
+    state = reduceTurn(state, {
+      protocol: 1, type: "turn_error", error_kind: "rate_limit", error: "limite",
+    });
+    expect(state.text).toBe("parcial");
+    expect(state.error).toBe("limite");
+    expect(state.status).toBe("error");
+  });
+
+  it("resume tools sem guardar argumentos brutos", () => {
+    const state = reduceTurn(initialTurnState(), {
+      protocol: 1,
+      type: "tool_call",
+      tool_call: { id: "tool-1", name: "search", arguments: '{"secret":"x"}' },
+    });
+    expect(state.tools).toEqual([{ id: "tool-1", name: "search", status: "running" }]);
+    expect(JSON.stringify(state)).not.toContain("secret");
+  });
+
+  it("mantém o composer bloqueado enquanto o WebSocket ainda conecta", () => {
+    const markup = chatShellMarkup({
+      providers: [{ id: "ollama", configured: true }], sessions: [], models: [],
+    });
+    expect(markup).toContain("textarea disabled");
+  });
+
+  it("não deixa um turno terminal marcado para substituição", () => {
+    expect(turnMarkup({ ...initialTurnState(), status: "done", text: "primeira" }))
+      .not.toContain("data-active-turn");
+    expect(turnMarkup({ ...initialTurnState(), status: "streaming", text: "segunda" }))
+      .toContain("data-active-turn");
   });
 });
