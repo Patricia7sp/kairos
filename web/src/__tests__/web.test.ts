@@ -5,6 +5,8 @@ import { api as spaApi } from "../../../kairos_web/ui/js/api.js";
 import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
 // @ts-expect-error A SPA principal é JavaScript sem etapa de build.
 import { providerCardMarkup } from "../../../kairos_web/ui/js/views/provedores.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { filterModels, modelSelectionMarkup } from "../../../kairos_web/ui/js/views/modelos.js";
 import {
   PROFILE_QUERY_PARAM,
   REAUTH_ERROR_CODES,
@@ -258,5 +260,42 @@ describe("página de provedores", () => {
 
     expect(markup).toContain("Sem credencial necessária");
     expect(markup).not.toContain('type="password"');
+  });
+});
+
+describe("catálogo de modelos", () => {
+  const free = {
+    id: "openrouter/free",
+    provider: "openrouter",
+    name: "OpenRouter Free",
+    is_free: true,
+    stability: "stable",
+    pricing: { prompt: "0", completion: "0", request: "0" },
+    capabilities: { chat: true, tools: true, vision: false, context_length: 128000 },
+    origins: ["curated"],
+  };
+  const paid = {
+    ...free,
+    id: "anthropic/paid",
+    name: "Pago",
+    is_free: false,
+    pricing: { prompt: "0.000003", completion: "0.000015", request: null },
+  };
+
+  it("somente gratuitos remove modelos pagos do OpenRouter", () => {
+    expect(filterModels([free, paid], { provider: "openrouter", freeOnly: true }))
+      .toEqual([free]);
+  });
+
+  it("troca de modelo oferece próximo turno e nova conversa", () => {
+    const markup = modelSelectionMarkup(free);
+    expect(markup).toContain("Aplicar ao próximo turno");
+    expect(markup).toContain("Iniciar nova conversa");
+  });
+
+  it("preview fica oculto até o filtro explícito", () => {
+    const preview = { ...free, id: "preview", stability: "preview" };
+    expect(filterModels([free, preview], {})).toEqual([free]);
+    expect(filterModels([free, preview], { includePreview: true })).toEqual([free, preview]);
   });
 });

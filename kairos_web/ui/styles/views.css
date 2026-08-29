@@ -254,3 +254,24 @@
 .k-provider__status { min-height: 1.5em; color: var(--k-text-2); }
 .k-provider__status--ok { color: var(--k-ok); }
 .k-provider__status--error { color: var(--k-danger); }
+
+.k-model-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--k-space-3);
+  margin: var(--k-space-4) 0;
+}
+.k-model-filters label { display: grid; gap: var(--k-space-1); }
+.k-model-filters label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.k-model-dialog {
+  max-width: 34rem;
+  color: var(--k-text);
+  background: var(--k-surface);
+  border: 1px solid var(--k-border);
+  border-radius: var(--k-radius-lg);
+}
+.k-model-dialog::backdrop { background: rgb(15 23 42 / .55); }
+.k-model-dialog__close { float: right; }
+.k-model-dialog__actions { display: flex; flex-wrap: wrap; gap: var(--k-space-3); }
+.k-model-dialog__status { min-height: 1.5em; color: var(--k-text-2); }
