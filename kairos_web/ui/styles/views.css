@@ -233,3 +233,24 @@
 @media (max-width: 560px) {
   .k-ses__acoes { justify-content: flex-start; margin-top: var(--k-space-2); }
 }
+.k-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--k-space-4);
+}
+
+.k-provider { display: grid; gap: var(--k-space-4); align-content: start; }
+.k-provider__head, .k-provider__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-3);
+}
+.k-provider__head h2 { margin: 0; }
+.k-provider__head p, .k-provider__local { margin: var(--k-space-1) 0 0; color: var(--k-text-2); }
+.k-provider__credential { display: grid; gap: var(--k-space-2); }
+.k-provider__credential input { min-width: 0; flex: 1; }
+.k-provider__credential small { color: var(--k-text-2); }
+.k-provider__status { min-height: 1.5em; color: var(--k-text-2); }
+.k-provider__status--ok { color: var(--k-ok); }
+.k-provider__status--error { color: var(--k-danger); }

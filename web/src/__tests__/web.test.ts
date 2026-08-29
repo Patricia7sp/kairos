@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api as spaApi } from "../../../kairos_web/ui/js/api.js";
 // @ts-expect-error A SPA principal é JavaScript sem etapa de build.
 import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { providerCardMarkup } from "../../../kairos_web/ui/js/views/provedores.js";
 import {
   PROFILE_QUERY_PARAM,
   REAUTH_ERROR_CODES,
@@ -222,5 +224,39 @@ describe("cliente canônico da SPA", () => {
 
     expect(onEvent).toHaveBeenCalledOnce();
     expect(onEvent).toHaveBeenCalledWith({ protocol: 1, type: "delta", text: "olá" });
+  });
+});
+
+describe("página de provedores", () => {
+  it("nunca inclui segredo no cartão após salvar credencial", () => {
+    const secret = "sk-nao-renderizar";
+    const markup = providerCardMarkup({
+      id: "openai",
+      provider: "openai",
+      name: "OpenAI",
+      auth_methods: ["api_key"],
+      requires_credential: true,
+      configured: true,
+      credential_state: "configured",
+      savedSecret: secret,
+    });
+
+    expect(markup).not.toContain(secret);
+    expect(markup).not.toContain("masked_identifier");
+  });
+
+  it("mostra Ollama sem formulário de credencial", () => {
+    const markup = providerCardMarkup({
+      id: "ollama",
+      provider: "ollama",
+      name: "Ollama",
+      auth_methods: [],
+      requires_credential: false,
+      configured: true,
+      credential_state: "not_required",
+    });
+
+    expect(markup).toContain("Sem credencial necessária");
+    expect(markup).not.toContain('type="password"');
   });
 });

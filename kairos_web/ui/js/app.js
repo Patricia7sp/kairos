@@ -12,6 +12,7 @@ import { dashboardView } from "./views/dashboard.js";
 import { skillsView } from "./views/skills.js";
 import { sessoesView } from "./views/sessoes.js";
 import { modelosView } from "./views/modelos.js";
+import { provedoresView } from "./views/provedores.js";
 import { emBreveView } from "./views/em-breve.js";
 import { loginView } from "./views/login.js";
 import { api } from "./api.js";
@@ -21,7 +22,7 @@ const ROTAS = [
   { id: "skills",      titulo: "Skills",      icone: "skills",    grupo: "Agente", view: skillsView },
   { id: "sessoes",     titulo: "Sessões",     icone: "sessions",  grupo: "Agente", view: sessoesView },
   { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
-  { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: emBreveView },
+  { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: provedoresView },
   { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: emBreveView },
   { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: emBreveView },
 ];
