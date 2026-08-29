@@ -7,10 +7,12 @@ import json
 import logging
 import os
 import secrets
+import threading
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing, asynccontextmanager
 from hmac import compare_digest
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -117,7 +119,8 @@ def _token_configurado() -> str:
 
 SESSION_TOKEN = _token_configurado()
 
-# O bundle do SPA já manda este header; o WebSocket manda `?token=`.
+# Clientes não-browser podem mandar o token de sessão neste header. A SPA usa
+# um ticket efêmero e de uso único na query do WebSocket.
 TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o segredo
 
 # Cookie de sessão. Guarda o mesmo token, mas `httpOnly`: assim o JavaScript
@@ -125,6 +128,36 @@ TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o
 # Antes ele era injetado em toda resposta da raiz — quem alcançasse a porta
 # obtinha a credencial só de carregar a página, sem autenticar-se.
 SESSION_COOKIE = "kairos_session"
+
+WS_TICKET_TTL_SECONDS = 30
+_WS_TICKETS: dict[str, float] = {}
+_WS_TICKETS_LOCK = threading.Lock()
+
+
+def _issue_ws_ticket() -> str:
+    now = monotonic()
+    ticket = secrets.token_urlsafe(32)
+    with _WS_TICKETS_LOCK:
+        expired = [value for value, deadline in _WS_TICKETS.items() if deadline <= now]
+        for value in expired:
+            del _WS_TICKETS[value]
+        _WS_TICKETS[ticket] = now + WS_TICKET_TTL_SECONDS
+    return ticket
+
+
+def _consume_ws_ticket(ticket: str | None) -> bool:
+    if not ticket:
+        return False
+    now = monotonic()
+    with _WS_TICKETS_LOCK:
+        deadline = _WS_TICKETS.pop(ticket, None)
+    return deadline is not None and deadline > now
+
+
+def _revoke_ws_tickets() -> None:
+    with _WS_TICKETS_LOCK:
+        _WS_TICKETS.clear()
+
 
 # `/api/health` fica aberto: é o que `kairos doctor` e o healthcheck do
 # container sondam, e não devolve nada além de "estou de pé".
@@ -739,8 +772,9 @@ async def get_session_messages(session_id: str, request: Request):
 
 @app.websocket("/ws/chat")
 async def websocket_chat_endpoint(websocket: WebSocket):
-    supplied = websocket.query_params.get("token") or websocket.headers.get(TOKEN_HEADER)
-    if not _token_ok(supplied):
+    ticket_ok = _consume_ws_ticket(websocket.query_params.get("token"))
+    header_ok = _token_ok(websocket.headers.get(TOKEN_HEADER))
+    if not ticket_ok and not header_ok:
         # 4401 é o código que o SPA reconhece para recarregar e repegar o token.
         await websocket.close(code=4401)
         return
@@ -853,14 +887,16 @@ async def login(req: LoginRequest, response: Response):
 
 
 @app.post("/api/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    if _autenticado(request):
+        _revoke_ws_tickets()
     response.delete_cookie(SESSION_COOKIE, path="/")
     return {"authenticated": False}
 
 
 @app.post("/api/auth/ws-ticket")
 async def get_ws_ticket():
-    return {"ticket": SESSION_TOKEN, "expires_in": 86400}
+    return {"ticket": _issue_ws_ticket(), "expires_in": WS_TICKET_TTL_SECONDS}
 
 
 @app.get("/api/profiles")

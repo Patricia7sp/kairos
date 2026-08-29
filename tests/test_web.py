@@ -9,10 +9,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from kairos_state.repositories.messages import MessageRepository
+from kairos_web import server as web_server
 from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
 
@@ -187,9 +189,11 @@ class SessionTokenTests(unittest.TestCase):
         self.assertNotIn("token", corpo)
         self.assertNotIn(SESSION_TOKEN, str(corpo))
 
-    def test_ws_ticket_reports_the_live_token(self):
+    def test_ws_ticket_is_short_lived_and_distinct_from_session_token(self):
         res = self.auth.post("/api/auth/ws-ticket")
-        self.assertEqual(res.json()["ticket"], SESSION_TOKEN)
+        payload = res.json()
+        self.assertNotEqual(payload["ticket"], SESSION_TOKEN)
+        self.assertLessEqual(payload["expires_in"], 60)
 
     def test_websocket_refuses_connection_without_token(self):
         from starlette.websockets import WebSocketDisconnect as WSDisconnect
@@ -198,8 +202,63 @@ class SessionTokenTests(unittest.TestCase):
             pass
         self.assertEqual(ctx.exception.code, 4401)
 
-    def test_websocket_accepts_token_in_query(self):
-        with self.auth.websocket_connect(f"/ws/chat?token={SESSION_TOKEN}") as ws:
+    def test_websocket_accepts_ticket_once_and_rejects_reuse(self):
+        from starlette.websockets import WebSocketDisconnect as WSDisconnect
+
+        ticket = self.auth.post("/api/auth/ws-ticket").json()["ticket"]
+        with self.anon.websocket_connect(f"/ws/chat?token={ticket}") as ws:
+            ws.send_text(json.dumps({"type": "ping"}))
+            self.assertEqual(json.loads(ws.receive_text())["type"], "pong")
+
+        with (
+            self.assertRaises(WSDisconnect) as ctx,
+            self.anon.websocket_connect(f"/ws/chat?token={ticket}"),
+        ):
+            pass
+        self.assertEqual(ctx.exception.code, 4401)
+
+    def test_websocket_rejects_session_token_in_query(self):
+        from starlette.websockets import WebSocketDisconnect as WSDisconnect
+
+        with (
+            self.assertRaises(WSDisconnect) as ctx,
+            self.anon.websocket_connect(f"/ws/chat?token={SESSION_TOKEN}"),
+        ):
+            pass
+        self.assertEqual(ctx.exception.code, 4401)
+
+    def test_logout_revokes_pending_websocket_ticket(self):
+        from starlette.websockets import WebSocketDisconnect as WSDisconnect
+
+        ticket = self.auth.post("/api/auth/ws-ticket").json()["ticket"]
+        self.auth.post("/api/auth/logout")
+
+        with (
+            self.assertRaises(WSDisconnect) as ctx,
+            self.anon.websocket_connect(f"/ws/chat?token={ticket}"),
+        ):
+            pass
+        self.assertEqual(ctx.exception.code, 4401)
+
+    def test_expired_websocket_ticket_is_rejected(self):
+        from starlette.websockets import WebSocketDisconnect as WSDisconnect
+
+        with patch.object(web_server, "monotonic", return_value=100.0):
+            ticket = self.auth.post("/api/auth/ws-ticket").json()["ticket"]
+
+        with (
+            patch.object(web_server, "monotonic", return_value=131.0),
+            self.assertRaises(WSDisconnect) as ctx,
+            self.anon.websocket_connect(f"/ws/chat?token={ticket}"),
+        ):
+            pass
+        self.assertEqual(ctx.exception.code, 4401)
+
+    def test_anonymous_logout_does_not_revoke_pending_ticket(self):
+        ticket = self.auth.post("/api/auth/ws-ticket").json()["ticket"]
+        self.anon.post("/api/auth/logout")
+
+        with self.anon.websocket_connect(f"/ws/chat?token={ticket}") as ws:
             ws.send_text(json.dumps({"type": "ping"}))
             self.assertEqual(json.loads(ws.receive_text())["type"], "pong")
 
