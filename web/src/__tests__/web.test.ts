@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { api as spaApi } from "../../../kairos_web/ui/js/api.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
 import {
   PROFILE_QUERY_PARAM,
   REAUTH_ERROR_CODES,
@@ -166,5 +170,57 @@ describe("slots de plugin", () => {
 
   it("slot vazio devolve lista vazia", () => {
     expect(new SlotRegistry().entries("global.modal")).toEqual([]);
+  });
+});
+
+describe("cliente canônico da SPA", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("serializa filtros de provider e gratuidade do OpenRouter", async () => {
+    let requestedUrl = "";
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requestedUrl = url;
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    await spaApi.modelos({ provider: "openrouter", freeOnly: true });
+
+    expect(requestedUrl).toBe("/api/models?provider=openrouter&free_only=true");
+  });
+
+  it("envia seleção canônica com seu escopo", async () => {
+    let sentBody: unknown;
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ status: "updated" }), { status: 200 });
+    }));
+
+    await spaApi.selecionarModelo({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      scope: "global",
+    });
+
+    expect(sentBody).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      scope: "global",
+    });
+  });
+
+  it("ignora eventos WebSocket aditivos e entrega os conhecidos", () => {
+    const onEvent = vi.fn();
+    const client = new ChatClient({ onEvent });
+
+    expect(() => client.accept({ protocol: 1, type: "future_event" })).not.toThrow();
+    client.accept({ protocol: 1, type: "delta", text: "olá" });
+
+    expect(onEvent).toHaveBeenCalledOnce();
+    expect(onEvent).toHaveBeenCalledWith({ protocol: 1, type: "delta", text: "olá" });
   });
 });

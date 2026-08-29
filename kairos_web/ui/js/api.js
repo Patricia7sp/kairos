@@ -95,8 +95,28 @@ export const api = {
   sessao:    (id) => request(`/api/sessions/${encodeURIComponent(id)}`),
   mensagens: (id) => request(`/api/sessions/${encodeURIComponent(id)}/messages`),
   atualizarSessao: (id, campos) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: campos }),
-  modelos:   () => request("/api/models"),
+  modelos:   (filtros = {}) => {
+    const params = new URLSearchParams();
+    if (filtros.provider) params.set("provider", filtros.provider);
+    if (filtros.freeOnly) params.set("free_only", "true");
+    if (filtros.includePreview) params.set("include_preview", "true");
+    const sufixo = params.toString();
+    return request(`/api/models${sufixo ? "?" + sufixo : ""}`);
+  },
+  atualizarCatalogo: (provider) => request("/api/models/refresh", {
+    method: "POST", body: { provider },
+  }),
+  selecionarModelo: (selection) => request("/api/models/selection", {
+    method: "POST", body: selection,
+  }),
   provedores:() => request("/api/providers"),
+  salvarCredencial: (provider, secret, authMethod = "api_key") =>
+    request(`/api/providers/${encodeURIComponent(provider)}/credentials`, {
+      method: "POST", body: { secret, auth_method: authMethod },
+    }),
+  testarProvedor: (provider) =>
+    request(`/api/providers/${encodeURIComponent(provider)}/test`, { method: "POST" }),
+  wsTicket: () => request("/api/auth/ws-ticket", { method: "POST" }),
   toolsets:  () => request("/api/tools/toolsets"),
   uso:       () => request("/api/analytics/usage"),
 };
