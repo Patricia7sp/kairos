@@ -11,18 +11,21 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing, asynccontextmanager
 from hmac import compare_digest
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_integration import build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
+from kairos_providers.catalog import UnknownModelError
+from kairos_providers.composition import build_provider_gateway
+from kairos_providers.contracts import ProviderModelRef, SelectionReason
 from kairos_providers.manager import ProviderManager
 from kairos_security.credentials import (
     CredentialNotFoundError,
@@ -36,6 +39,7 @@ from kairos_web.chat_transport import (
     interaction_envelope_from_json,
     interaction_event_to_json,
 )
+from kairos_web.provider_api import list_models_payload, list_providers_payload, serialize_model
 
 logger = logging.getLogger(__name__)
 
@@ -223,35 +227,115 @@ async def update_config(req: ConfigUpdateRequest):
 
 
 @app.get("/api/models")
-async def list_models():
-    store = _get_auth_store()
-    manager = _provider_manager(store)
-    models = manager.list_all_models()
+async def list_models(
+    provider: str | None = None,
+    free_only: bool = False,
+    include_preview: bool = False,
+):
+    gateway = build_provider_gateway(_application_home(app))
     config = load_config()
     default_model = config.get("model", "claude-3-7-sonnet-20250219")
     default_provider = config.get("provider", "anthropic")
-
-    return {
-        "default_model": default_model,
-        "default_provider": default_provider,
-        "models": [
-            {
-                "id": m.id,
-                "name": m.name,
-                "provider": m.provider,
-                "context_length": m.context_length,
-                "supports_vision": m.supports_vision,
-                "supports_tools": m.supports_tools,
-            }
-            for m in models
-        ],
-    }
+    try:
+        return list_models_payload(
+            gateway,
+            provider=provider,
+            free_only=free_only,
+            include_preview=include_preview,
+            default_provider=default_provider,
+            default_model=default_model,
+        )
+    finally:
+        await gateway.aclose()
 
 
 class SetDefaultModelRequest(BaseModel):
     model: str
     provider: str | None = None
     task: str | None = None
+
+
+class ModelSelectionRequest(BaseModel):
+    provider: str
+    model: str
+    scope: Literal["conversation", "profile", "global"]
+    session_id: str | None = None
+    profile: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/models/selection")
+async def select_model(req: ModelSelectionRequest):
+    gateway = build_provider_gateway(_application_home(app))
+    ref = ProviderModelRef(req.provider.strip(), req.model.strip())
+    try:
+        try:
+            model = gateway.catalog.find(ref)
+        except UnknownModelError as exc:
+            raise HTTPException(
+                status_code=422, detail="modelo indisponível para o provider"
+            ) from exc
+        if not model.is_selectable():
+            raise HTTPException(status_code=422, detail="modelo indisponível para o provider")
+
+        if req.scope == "conversation":
+            if not req.session_id:
+                raise HTTPException(status_code=422, detail="session_id é obrigatório")
+            db = _get_db(app)
+            try:
+                sessions = SessionRepository(db)
+                if sessions.get(req.session_id) is None:
+                    raise HTTPException(status_code=404, detail="sessão não encontrada")
+                sessions.set_selection(
+                    req.session_id,
+                    ref,
+                    req.parameters,
+                    reason=SelectionReason.CONVERSATION_OVERRIDE,
+                )
+            finally:
+                db.close()
+        else:
+            config = load_config()
+            target = config
+            if req.scope == "profile":
+                if not req.profile:
+                    raise HTTPException(status_code=422, detail="profile é obrigatório")
+                target = config.setdefault("profiles", {}).setdefault(req.profile, {})
+            target.update(
+                {"provider": ref.provider, "model": ref.model, "parameters": req.parameters}
+            )
+            save_config(config)
+        return {
+            "status": "updated",
+            "selection": {
+                "provider": ref.provider,
+                "model": ref.model,
+                "scope": req.scope,
+            },
+        }
+    finally:
+        await gateway.aclose()
+
+
+class RefreshModelsRequest(BaseModel):
+    provider: str
+
+
+@app.post("/api/models/refresh")
+async def refresh_models(req: RefreshModelsRequest):
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            result = await gateway.refresh(req.provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        return {
+            "provider": req.provider,
+            "source": result.source.value,
+            "models": [serialize_model(model) for model in result.models],
+        }
+    finally:
+        await gateway.aclose()
 
 
 @app.post("/api/models/set-default")
@@ -270,35 +354,101 @@ async def set_default_model(req: SetDefaultModelRequest):
 
 @app.get("/api/providers")
 async def get_providers_status():
-    store = _get_auth_store()
-    manager = _provider_manager(store)
-    statuses = await manager.test_all_connections()
-
-    result = []
-    for prov_name, st in statuses.items():
-        key = manager.get_api_key(prov_name)
-        masked_key = (
-            f"{key[:7]}...{key[-4:]}"
-            if (key and len(key) > 12)
-            else ("Configurada" if key else None)
-        )
-        result.append(
-            {
-                "provider": prov_name,
-                "connected": st.ok,
-                "message": st.message,
-                "models_count": st.models_found,
-                "auth_method": st.auth_method,
-                "has_key": bool(key),
-                "masked_key": masked_key,
-            }
-        )
-    return {"providers": result}
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        return list_providers_payload(gateway)
+    finally:
+        await gateway.aclose()
 
 
 class SaveKeyRequest(BaseModel):
     provider: str
     api_key: str
+
+
+class SaveCredentialRequest(BaseModel):
+    secret: str
+    auth_method: str = "api_key"
+
+
+@app.post("/api/providers/{provider}/credentials")
+async def save_provider_credential(provider: str, req: SaveCredentialRequest):
+    secret = req.secret.strip()
+    if not secret:
+        raise HTTPException(status_code=422, detail="secret é obrigatório")
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            descriptor = gateway.registry.describe(provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        if req.auth_method not in descriptor.auth_methods:
+            raise HTTPException(status_code=422, detail="método de autenticação inválido")
+    finally:
+        await gateway.aclose()
+
+    kairos_home = _application_home(app)
+    kairos_home.mkdir(parents=True, exist_ok=True)
+    auth_path = kairos_home / "auth.json"
+    ref = CredentialRef(provider, "primary")
+    with credential_file_lock(auth_path):
+        store = _get_auth_store()
+        try:
+            try:
+                previous = store.vault.get(ref)
+            except CredentialNotFoundError:
+                previous = None
+            metadata = store.vault.put(
+                ref,
+                CredentialSecret({"api_key": secret}),
+                auth_method=req.auth_method,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="cofre de credenciais indisponível"
+            ) from exc
+        previous_profile = store.profile.get(provider)
+        store.profile[provider] = [
+            {"credential_id": ref.credential_id, "auth_method": metadata.auth_method}
+        ]
+        try:
+            store.write_atomically(auth_path)
+        except Exception:
+            if previous is None:
+                store.vault.delete(ref)
+            else:
+                store.vault.put(ref, previous, auth_method=metadata.auth_method)
+            if previous_profile is None:
+                store.profile.pop(provider, None)
+            else:
+                store.profile[provider] = previous_profile
+            raise
+    return {
+        "provider": provider,
+        "credential_id": ref.credential_id,
+        "auth_method": metadata.auth_method,
+        "state": "configured",
+    }
+
+
+@app.post("/api/providers/{provider}/test")
+async def test_provider_connection(provider: str):
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            status = await gateway.test_connection(provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        return {
+            "provider": provider,
+            "connected": status.ok,
+            "message": status.message,
+            "models_count": status.models_found,
+            "auth_method": status.auth_method,
+            "state": status.state,
+        }
+    finally:
+        await gateway.aclose()
 
 
 @app.post("/api/providers/save-key")

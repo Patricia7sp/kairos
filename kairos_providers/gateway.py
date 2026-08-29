@@ -181,6 +181,16 @@ class ProviderGateway:
         """Testa somente o provider pedido, sem escolher um substituto."""
         return await self._test_connection(provider)
 
+    def credential_state(self, provider: str) -> str:
+        """Resume disponibilidade sem expor identidade ou abrir conexão."""
+        descriptor = self.registry.describe(provider)
+        if not descriptor.auth_methods:
+            return "not_required"
+        try:
+            return "configured" if self._credentials.list(provider) else "not_configured"
+        except VaultError:
+            return "locked"
+
     async def _test_connection(
         self, provider: str, *, credential_values: Mapping[str, Any] | None = None
     ) -> ConnectionStatus:
