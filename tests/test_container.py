@@ -16,6 +16,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import tomllib
 import typing
 import unittest
 from pathlib import Path
@@ -376,6 +377,13 @@ class DockerfileTests(unittest.TestCase):
     def test_a_extensao_cjk_falhar_nao_derruba_o_build(self):
         self.assertIn("build.sh /opt/kairos/lib ||", self.src)
 
+    def test_distribuicao_descobre_subpacotes_e_inclui_spa(self):
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        setuptools = config["tool"]["setuptools"]
+
+        self.assertEqual(setuptools["packages"]["find"]["include"], ["kairos*"])
+        self.assertIn("ui/**/*", setuptools["package-data"]["kairos_web"])
+
     def test_docker_build_check_nao_reporta_warning(self):
         r = subprocess.run(
             ["docker", "build", "--check", str(REPO)],
@@ -552,32 +560,29 @@ class RealImageTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "ok")
 
     def test_todo_pacote_declarado_no_pyproject_esta_na_imagem(self):
-        """Deriva entre duas listas mantidas à mão.
+        """Todo pacote raiz descoberto pelo setuptools entra na imagem.
 
-        O `pyproject.toml` declara os pacotes; o Dockerfile os copia um a um.
-        Adicionar um pacote e esquecer o COPY quebra o build — e foi o que
-        aconteceu com `kairos_container`.
+        O `pyproject.toml` descobre `kairos*`; o Dockerfile ainda copia as
+        raízes uma a uma. Adicionar uma raiz e esquecer o COPY quebra o build.
         """
         import re as _re
 
-        declared = _re.search(
-            r"packages = \[([^\]]+)\]", (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(
+            config["tool"]["setuptools"]["packages"]["find"]["include"],
+            ["kairos*"],
         )
-        self.assertIsNotNone(declared)
-        names = _re.findall(r'"([^"]+)"', declared.group(1))
-        self.assertTrue(names)
+        package_roots = sorted(
+            path.name
+            for path in REPO.glob("kairos*")
+            if path.is_dir() and (path / "__init__.py").is_file()
+        )
+        self.assertTrue(package_roots)
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
         copied_roots = _re.findall(r"^COPY ([^ /]+)/", dockerfile, flags=_re.MULTILINE)
-        for pkg in names:
-            with self.subTest(package=pkg):
-                package_path = pkg.replace(".", "/")
-                self.assertTrue(
-                    any(
-                        package_path == root or package_path.startswith(f"{root}/")
-                        for root in copied_roots
-                    ),
-                    f"{pkg} está no pyproject mas nenhum pacote pai é copiado no Dockerfile",
-                )
+        for package_root in package_roots:
+            with self.subTest(package=package_root):
+                self.assertIn(package_root, copied_roots)
 
     # -- o bug do gateway em dobro ----------------------------------------
 

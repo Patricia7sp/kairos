@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { api as spaApi } from "../../../kairos_web/ui/js/api.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { providerCardMarkup } from "../../../kairos_web/ui/js/views/provedores.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { filterModels, modelSelectionMarkup } from "../../../kairos_web/ui/js/views/modelos.js";
+// @ts-expect-error A SPA principal é JavaScript sem etapa de build.
+import { chatShellMarkup, initialTurnState, reduceTurn, turnMarkup } from "../../../kairos_web/ui/js/views/chat.js";
 import {
   PROFILE_QUERY_PARAM,
   REAUTH_ERROR_CODES,
@@ -166,5 +176,187 @@ describe("slots de plugin", () => {
 
   it("slot vazio devolve lista vazia", () => {
     expect(new SlotRegistry().entries("global.modal")).toEqual([]);
+  });
+});
+
+describe("cliente canônico da SPA", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("serializa filtros de provider e gratuidade do OpenRouter", async () => {
+    let requestedUrl = "";
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requestedUrl = url;
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    await spaApi.modelos({ provider: "openrouter", freeOnly: true });
+
+    expect(requestedUrl).toBe("/api/models?provider=openrouter&free_only=true");
+  });
+
+  it("envia seleção canônica com seu escopo", async () => {
+    let sentBody: unknown;
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ status: "updated" }), { status: 200 });
+    }));
+
+    await spaApi.selecionarModelo({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      scope: "global",
+    });
+
+    expect(sentBody).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      scope: "global",
+    });
+  });
+
+  it("ignora eventos WebSocket aditivos e entrega os conhecidos", () => {
+    const onEvent = vi.fn();
+    const client = new ChatClient({ onEvent });
+
+    expect(() => client.accept({ protocol: 1, type: "future_event" })).not.toThrow();
+    client.accept({ protocol: 1, type: "delta", text: "olá" });
+
+    expect(onEvent).toHaveBeenCalledOnce();
+    expect(onEvent).toHaveBeenCalledWith({ protocol: 1, type: "delta", text: "olá" });
+  });
+});
+
+describe("página de provedores", () => {
+  it("nunca inclui segredo no cartão após salvar credencial", () => {
+    const secret = "sk-nao-renderizar";
+    const markup = providerCardMarkup({
+      id: "openai",
+      provider: "openai",
+      name: "OpenAI",
+      auth_methods: ["api_key"],
+      requires_credential: true,
+      configured: true,
+      credential_state: "configured",
+      savedSecret: secret,
+    });
+
+    expect(markup).not.toContain(secret);
+    expect(markup).not.toContain("masked_identifier");
+  });
+
+  it("mostra Ollama sem formulário de credencial", () => {
+    const markup = providerCardMarkup({
+      id: "ollama",
+      provider: "ollama",
+      name: "Ollama",
+      auth_methods: [],
+      requires_credential: false,
+      configured: true,
+      credential_state: "not_required",
+    });
+
+    expect(markup).toContain("Sem credencial necessária");
+    expect(markup).not.toContain('type="password"');
+  });
+});
+
+describe("catálogo de modelos", () => {
+  const free = {
+    id: "openrouter/free",
+    provider: "openrouter",
+    name: "OpenRouter Free",
+    is_free: true,
+    stability: "stable",
+    pricing: { prompt: "0", completion: "0", request: "0" },
+    capabilities: { chat: true, tools: true, vision: false, context_length: 128000 },
+    origins: ["curated"],
+  };
+  const paid = {
+    ...free,
+    id: "anthropic/paid",
+    name: "Pago",
+    is_free: false,
+    pricing: { prompt: "0.000003", completion: "0.000015", request: null },
+  };
+
+  it("somente gratuitos remove modelos pagos do OpenRouter", () => {
+    expect(filterModels([free, paid], { provider: "openrouter", freeOnly: true }))
+      .toEqual([free]);
+  });
+
+  it("troca de modelo oferece próximo turno e nova conversa", () => {
+    const markup = modelSelectionMarkup(free);
+    expect(markup).toContain("Aplicar ao próximo turno");
+    expect(markup).toContain("Iniciar nova conversa");
+  });
+
+  it("preview fica oculto até o filtro explícito", () => {
+    const preview = { ...free, id: "preview", stability: "preview" };
+    expect(filterModels([free, preview], {})).toEqual([free]);
+    expect(filterModels([free, preview], { includePreview: true })).toEqual([free, preview]);
+  });
+});
+
+describe("Chat principal", () => {
+  it("bloqueia o composer quando nenhum provider é utilizável", () => {
+    const markup = chatShellMarkup({ providers: [], sessions: [], models: [] });
+    expect(markup).toContain("Configurar um provedor");
+    expect(markup).toContain("textarea disabled");
+  });
+
+  it("mostra provider, modelo e gratuidade no painel de contexto", () => {
+    const markup = chatShellMarkup({
+      providers: [{ id: "openrouter", configured: true }],
+      sessions: [],
+      models: [{
+        id: "openrouter/free", provider: "openrouter", name: "OpenRouter Free",
+        is_free: true, capabilities: { tools: true },
+      }],
+      selection: { provider: "openrouter", model: "openrouter/free" },
+    });
+    expect(markup).toContain("openrouter");
+    expect(markup).toContain("OpenRouter Free");
+    expect(markup).toContain("Gratuito");
+  });
+
+  it("preserva texto parcial quando o turno termina com erro", () => {
+    let state = initialTurnState();
+    state = reduceTurn(state, { protocol: 1, type: "turn_start" });
+    state = reduceTurn(state, { protocol: 1, type: "delta", text: "parcial" });
+    state = reduceTurn(state, {
+      protocol: 1, type: "turn_error", error_kind: "rate_limit", error: "limite",
+    });
+    expect(state.text).toBe("parcial");
+    expect(state.error).toBe("limite");
+    expect(state.status).toBe("error");
+  });
+
+  it("resume tools sem guardar argumentos brutos", () => {
+    const state = reduceTurn(initialTurnState(), {
+      protocol: 1,
+      type: "tool_call",
+      tool_call: { id: "tool-1", name: "search", arguments: '{"secret":"x"}' },
+    });
+    expect(state.tools).toEqual([{ id: "tool-1", name: "search", status: "running" }]);
+    expect(JSON.stringify(state)).not.toContain("secret");
+  });
+
+  it("mantém o composer bloqueado enquanto o WebSocket ainda conecta", () => {
+    const markup = chatShellMarkup({
+      providers: [{ id: "ollama", configured: true }], sessions: [], models: [],
+    });
+    expect(markup).toContain("textarea disabled");
+  });
+
+  it("não deixa um turno terminal marcado para substituição", () => {
+    expect(turnMarkup({ ...initialTurnState(), status: "done", text: "primeira" }))
+      .not.toContain("data-active-turn");
+    expect(turnMarkup({ ...initialTurnState(), status: "streaming", text: "segunda" }))
+      .toContain("data-active-turn");
   });
 });

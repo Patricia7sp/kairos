@@ -48,6 +48,7 @@ _CURATED_MODELS = (
     _model("gemini", "gemini-2.0-flash", "Gemini 2.0 Flash"),
     _model("deepseek", "deepseek-v4-pro", "DeepSeek V4 Pro"),
     _model("deepseek", "deepseek-v4-flash", "DeepSeek V4 Flash"),
+    _model("openrouter", "openrouter/free", "OpenRouter Free"),
     _model(
         "gemini",
         "antigravity",

@@ -58,6 +58,13 @@ São **48 comandos** na superfície (44 grupos do legado + `run`, `chat`,
 `tick`, `version`). Os implementados usam as units reconstruídas; os demais
 saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
 
+## Chat, modelos e providers
+
+A SPA principal em `/` oferece Chat, catálogo de modelos e configuração de
+providers. WebSocket e CLI usam o mesmo serviço de interação e o mesmo
+protocolo versionado. Consulte [`docs/providers-e-chat.md`](docs/providers-e-chat.md)
+para configuração, OpenRouter, Ollama, operação e rollback.
+
 ## Auditoria de segurança
 
 ```bash
@@ -123,10 +130,9 @@ Dois campos da stack não são o padrão e precisam continuar assim:
 | `auto_pull` | `false` | a imagem é buildada, não puxada; o `compose pull` falha com *pull access denied* |
 | `run_build` | `true` | é o que dispara `docker compose build` |
 
-A stack recebe `KAIROS_WEB_TOKEN` pelo *environment* — sem ele o compose
-recusa subir, de propósito. A porta é publicada **só** no endereço Tailscale
-do host: o dashboard entrega o token de sessão dentro do HTML, então quem
-alcança a porta alcança o agente e o REPL de terminal.
+A stack monta o `web-token` e a passphrase administrada a partir de arquivos;
+o token não é injetado no HTML. A porta permanece publicada **só** no endereço
+Tailscale do host, e a SPA autentica por cookie `httpOnly`.
 
 ## CI
 

@@ -7,23 +7,27 @@ import json
 import logging
 import os
 import secrets
+import threading
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing, asynccontextmanager
 from hmac import compare_digest
 from pathlib import Path
-from typing import Any
+from time import monotonic
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
 from kairos_integration import build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
-from kairos_providers.manager import ProviderManager
+from kairos_providers.catalog import UnknownModelError
+from kairos_providers.composition import build_provider_gateway
+from kairos_providers.contracts import ProviderModelRef, SelectionReason
 from kairos_security.credentials import (
     CredentialNotFoundError,
     CredentialRef,
@@ -36,6 +40,7 @@ from kairos_web.chat_transport import (
     interaction_envelope_from_json,
     interaction_event_to_json,
 )
+from kairos_web.provider_api import list_models_payload, list_providers_payload, serialize_model
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +88,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DIST_DIR = Path(__file__).parent / "web_dist"
-
 # --- SESSÃO ---
 
 
@@ -116,7 +119,8 @@ def _token_configurado() -> str:
 
 SESSION_TOKEN = _token_configurado()
 
-# O bundle do SPA já manda este header; o WebSocket manda `?token=`.
+# Clientes não-browser podem mandar o token de sessão neste header. A SPA usa
+# um ticket efêmero e de uso único na query do WebSocket.
 TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o segredo
 
 # Cookie de sessão. Guarda o mesmo token, mas `httpOnly`: assim o JavaScript
@@ -124,6 +128,36 @@ TOKEN_HEADER = "X-Kairos-Session-Token"  # noqa: S105 — nome de header, não o
 # Antes ele era injetado em toda resposta da raiz — quem alcançasse a porta
 # obtinha a credencial só de carregar a página, sem autenticar-se.
 SESSION_COOKIE = "kairos_session"
+
+WS_TICKET_TTL_SECONDS = 30
+_WS_TICKETS: dict[str, float] = {}
+_WS_TICKETS_LOCK = threading.Lock()
+
+
+def _issue_ws_ticket() -> str:
+    now = monotonic()
+    ticket = secrets.token_urlsafe(32)
+    with _WS_TICKETS_LOCK:
+        expired = [value for value, deadline in _WS_TICKETS.items() if deadline <= now]
+        for value in expired:
+            del _WS_TICKETS[value]
+        _WS_TICKETS[ticket] = now + WS_TICKET_TTL_SECONDS
+    return ticket
+
+
+def _consume_ws_ticket(ticket: str | None) -> bool:
+    if not ticket:
+        return False
+    now = monotonic()
+    with _WS_TICKETS_LOCK:
+        deadline = _WS_TICKETS.pop(ticket, None)
+    return deadline is not None and deadline > now
+
+
+def _revoke_ws_tickets() -> None:
+    with _WS_TICKETS_LOCK:
+        _WS_TICKETS.clear()
+
 
 # `/api/health` fica aberto: é o que `kairos doctor` e o healthcheck do
 # container sondam, e não devolve nada além de "estou de pé".
@@ -176,15 +210,6 @@ def _get_auth_store() -> AuthStore:
     )
 
 
-def _provider_manager(store: AuthStore) -> ProviderManager:
-    return ProviderManager(
-        auth_store=store.profile,
-        secret_resolver=lambda provider, credential_id: store.vault.get(
-            CredentialRef(provider, credential_id)
-        ),
-    )
-
-
 # --- REST ENDPOINTS ---
 
 
@@ -194,7 +219,7 @@ async def health_check():
         "status": "ok",
         "app": "kairos",
         "version": "0.1.0",
-        "web_dist_present": DIST_DIR.exists(),
+        "ui_present": (Path(__file__).parent / "ui").exists(),
     }
 
 
@@ -223,35 +248,115 @@ async def update_config(req: ConfigUpdateRequest):
 
 
 @app.get("/api/models")
-async def list_models():
-    store = _get_auth_store()
-    manager = _provider_manager(store)
-    models = manager.list_all_models()
+async def list_models(
+    provider: str | None = None,
+    free_only: bool = False,
+    include_preview: bool = False,
+):
+    gateway = build_provider_gateway(_application_home(app))
     config = load_config()
     default_model = config.get("model", "claude-3-7-sonnet-20250219")
     default_provider = config.get("provider", "anthropic")
-
-    return {
-        "default_model": default_model,
-        "default_provider": default_provider,
-        "models": [
-            {
-                "id": m.id,
-                "name": m.name,
-                "provider": m.provider,
-                "context_length": m.context_length,
-                "supports_vision": m.supports_vision,
-                "supports_tools": m.supports_tools,
-            }
-            for m in models
-        ],
-    }
+    try:
+        return list_models_payload(
+            gateway,
+            provider=provider,
+            free_only=free_only,
+            include_preview=include_preview,
+            default_provider=default_provider,
+            default_model=default_model,
+        )
+    finally:
+        await gateway.aclose()
 
 
 class SetDefaultModelRequest(BaseModel):
     model: str
     provider: str | None = None
     task: str | None = None
+
+
+class ModelSelectionRequest(BaseModel):
+    provider: str
+    model: str
+    scope: Literal["conversation", "profile", "global"]
+    session_id: str | None = None
+    profile: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/models/selection")
+async def select_model(req: ModelSelectionRequest):
+    gateway = build_provider_gateway(_application_home(app))
+    ref = ProviderModelRef(req.provider.strip(), req.model.strip())
+    try:
+        try:
+            model = gateway.catalog.find(ref)
+        except UnknownModelError as exc:
+            raise HTTPException(
+                status_code=422, detail="modelo indisponível para o provider"
+            ) from exc
+        if not model.is_selectable():
+            raise HTTPException(status_code=422, detail="modelo indisponível para o provider")
+
+        if req.scope == "conversation":
+            if not req.session_id:
+                raise HTTPException(status_code=422, detail="session_id é obrigatório")
+            db = _get_db(app)
+            try:
+                sessions = SessionRepository(db)
+                if sessions.get(req.session_id) is None:
+                    raise HTTPException(status_code=404, detail="sessão não encontrada")
+                sessions.set_selection(
+                    req.session_id,
+                    ref,
+                    req.parameters,
+                    reason=SelectionReason.CONVERSATION_OVERRIDE,
+                )
+            finally:
+                db.close()
+        else:
+            config = load_config()
+            target = config
+            if req.scope == "profile":
+                if not req.profile:
+                    raise HTTPException(status_code=422, detail="profile é obrigatório")
+                target = config.setdefault("profiles", {}).setdefault(req.profile, {})
+            target.update(
+                {"provider": ref.provider, "model": ref.model, "parameters": req.parameters}
+            )
+            save_config(config)
+        return {
+            "status": "updated",
+            "selection": {
+                "provider": ref.provider,
+                "model": ref.model,
+                "scope": req.scope,
+            },
+        }
+    finally:
+        await gateway.aclose()
+
+
+class RefreshModelsRequest(BaseModel):
+    provider: str
+
+
+@app.post("/api/models/refresh")
+async def refresh_models(req: RefreshModelsRequest):
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            result = await gateway.refresh(req.provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        return {
+            "provider": req.provider,
+            "source": result.source.value,
+            "models": [serialize_model(model) for model in result.models],
+        }
+    finally:
+        await gateway.aclose()
 
 
 @app.post("/api/models/set-default")
@@ -270,30 +375,11 @@ async def set_default_model(req: SetDefaultModelRequest):
 
 @app.get("/api/providers")
 async def get_providers_status():
-    store = _get_auth_store()
-    manager = _provider_manager(store)
-    statuses = await manager.test_all_connections()
-
-    result = []
-    for prov_name, st in statuses.items():
-        key = manager.get_api_key(prov_name)
-        masked_key = (
-            f"{key[:7]}...{key[-4:]}"
-            if (key and len(key) > 12)
-            else ("Configurada" if key else None)
-        )
-        result.append(
-            {
-                "provider": prov_name,
-                "connected": st.ok,
-                "message": st.message,
-                "models_count": st.models_found,
-                "auth_method": st.auth_method,
-                "has_key": bool(key),
-                "masked_key": masked_key,
-            }
-        )
-    return {"providers": result}
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        return list_providers_payload(gateway)
+    finally:
+        await gateway.aclose()
 
 
 class SaveKeyRequest(BaseModel):
@@ -301,20 +387,31 @@ class SaveKeyRequest(BaseModel):
     api_key: str
 
 
-@app.post("/api/providers/save-key")
-async def save_provider_key(req: SaveKeyRequest):
-    kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+class SaveCredentialRequest(BaseModel):
+    secret: str
+    auth_method: str = "api_key"
+
+
+@app.post("/api/providers/{provider}/credentials")
+async def save_provider_credential(provider: str, req: SaveCredentialRequest):
+    secret = req.secret.strip()
+    if not secret:
+        raise HTTPException(status_code=422, detail="secret é obrigatório")
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            descriptor = gateway.registry.describe(provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        if req.auth_method not in descriptor.auth_methods:
+            raise HTTPException(status_code=422, detail="método de autenticação inválido")
+    finally:
+        await gateway.aclose()
+
+    kairos_home = _application_home(app)
     kairos_home.mkdir(parents=True, exist_ok=True)
     auth_path = kairos_home / "auth.json"
-
-    api_key = req.api_key.strip()
-    if not api_key:
-        raise HTTPException(status_code=422, detail="api_key é obrigatória")
-    ref = CredentialRef(req.provider, "primary")
-
-    # Valida usando somente memória; nenhum arquivo ou resposta recebe a chave.
-    validation_manager = ProviderManager(auth_store={req.provider: [{"api_key": api_key}]})
-    status = await validation_manager.get_provider(req.provider).test_connection()
+    ref = CredentialRef(provider, "primary")
     with credential_file_lock(auth_path):
         store = _get_auth_store()
         try:
@@ -322,18 +419,18 @@ async def save_provider_key(req: SaveKeyRequest):
                 previous = store.vault.get(ref)
             except CredentialNotFoundError:
                 previous = None
-            metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
+            metadata = store.vault.put(
+                ref,
+                CredentialSecret({"api_key": secret}),
+                auth_method=req.auth_method,
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=503, detail="cofre de credenciais indisponível"
             ) from exc
-        previous_profile = store.profile.get(req.provider)
-        store.profile[req.provider] = [
-            {
-                "credential_id": ref.credential_id,
-                "auth_method": metadata.auth_method,
-                "masked_identifier": metadata.masked_identifier,
-            }
+        previous_profile = store.profile.get(provider)
+        store.profile[provider] = [
+            {"credential_id": ref.credential_id, "auth_method": metadata.auth_method}
         ]
         try:
             store.write_atomically(auth_path)
@@ -341,22 +438,52 @@ async def save_provider_key(req: SaveKeyRequest):
             if previous is None:
                 store.vault.delete(ref)
             else:
-                store.vault.put(ref, previous)
+                store.vault.put(ref, previous, auth_method=metadata.auth_method)
             if previous_profile is None:
-                store.profile.pop(req.provider, None)
+                store.profile.pop(provider, None)
             else:
-                store.profile[req.provider] = previous_profile
+                store.profile[provider] = previous_profile
             raise
+    return {
+        "provider": provider,
+        "credential_id": ref.credential_id,
+        "auth_method": metadata.auth_method,
+        "state": "configured",
+    }
 
+
+@app.post("/api/providers/{provider}/test")
+async def test_provider_connection(provider: str):
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        try:
+            status = await gateway.test_connection(provider)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="provider desconhecido") from exc
+        return {
+            "provider": provider,
+            "connected": status.ok,
+            "message": status.message,
+            "models_count": status.models_found,
+            "auth_method": status.auth_method,
+            "state": status.state,
+        }
+    finally:
+        await gateway.aclose()
+
+
+@app.post("/api/providers/save-key")
+async def save_provider_key(req: SaveKeyRequest):
+    result = await save_provider_credential(
+        req.provider,
+        SaveCredentialRequest(secret=req.api_key, auth_method="api_key"),
+    )
     return {
         "status": "saved",
         "provider": req.provider,
-        "credential_status": "active" if status.ok else "saved_unverified",
-        "connection": {
-            "ok": status.ok,
-            "message": status.message,
-            "models_count": status.models_found,
-        },
+        "credential_status": "saved_unverified",
+        "credential_id": result["credential_id"],
+        "auth_method": result["auth_method"],
     }
 
 
@@ -645,8 +772,9 @@ async def get_session_messages(session_id: str, request: Request):
 
 @app.websocket("/ws/chat")
 async def websocket_chat_endpoint(websocket: WebSocket):
-    supplied = websocket.query_params.get("token") or websocket.headers.get(TOKEN_HEADER)
-    if not _token_ok(supplied):
+    ticket_ok = _consume_ws_ticket(websocket.query_params.get("token"))
+    header_ok = _token_ok(websocket.headers.get(TOKEN_HEADER))
+    if not ticket_ok and not header_ok:
         # 4401 é o código que o SPA reconhece para recarregar e repegar o token.
         await websocket.close(code=4401)
         return
@@ -759,14 +887,16 @@ async def login(req: LoginRequest, response: Response):
 
 
 @app.post("/api/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    if _autenticado(request):
+        _revoke_ws_tickets()
     response.delete_cookie(SESSION_COOKIE, path="/")
     return {"authenticated": False}
 
 
 @app.post("/api/auth/ws-ticket")
 async def get_ws_ticket():
-    return {"ticket": SESSION_TOKEN, "expires_in": 86400}
+    return {"ticket": _issue_ws_ticket(), "expires_in": WS_TICKET_TTL_SECONDS}
 
 
 @app.get("/api/profiles")
@@ -806,25 +936,23 @@ async def get_model_info():
 
 @app.get("/api/model/options")
 async def get_model_options():
-    store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
-    models = manager.list_all_models()
-    return {
-        "models": [
-            {
-                "id": m.id,
-                "name": m.name,
-                "provider": m.provider,
-                # A chave da resposta é o que a SPA lê; o atributo do descritor
-                # é `context_length`. Ler `m.context_window` levantava
-                # AttributeError e a rota inteira devolvia 500.
-                "context_window": m.context_length,
-                "supports_tools": m.supports_tools,
-                "supports_vision": m.supports_vision,
-            }
-            for m in models
-        ]
-    }
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        return {
+            "models": [
+                {
+                    "id": model.ref.model,
+                    "name": model.display_name,
+                    "provider": model.ref.provider,
+                    "context_window": model.capabilities.context_length or 128_000,
+                    "supports_tools": model.capabilities.tools is True,
+                    "supports_vision": model.capabilities.vision is True,
+                }
+                for model in gateway.catalog.list_models()
+            ]
+        }
+    finally:
+        await gateway.aclose()
 
 
 def _skill_roots() -> list[tuple[str, Path]]:
@@ -1038,9 +1166,6 @@ async def websocket_alias_endpoint(websocket: WebSocket):
 # --- INTERFACE DO KAIROS ---
 
 # A UI própria: HTML, CSS e módulos ES servidos como estão, sem passo de build.
-# O `web_dist` herdado continua montado sob /legacy enquanto chat e terminal
-# (que dependem dos websockets e ainda não têm equivalente aqui) não migram —
-# a ponte é explícita e tem prazo, não é o rosto do produto.
 UI_DIR = Path(__file__).parent / "ui"
 
 if UI_DIR.exists():
@@ -1055,24 +1180,12 @@ async def favicon():
     return JSONResponse({"error": "not_found"}, status_code=404)
 
 
-if DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
-    if (DIST_DIR / "fonts").exists():
-        app.mount("/fonts", StaticFiles(directory=str(DIST_DIR / "fonts")), name="fonts")
-    if (DIST_DIR / "fonts-terminal").exists():
-        app.mount(
-            "/fonts-terminal",
-            StaticFiles(directory=str(DIST_DIR / "fonts-terminal")),
-            name="fonts-terminal",
-        )
+if UI_DIR.exists():
 
-    def _resposta_spa(full_path: str, raiz: Path, *, injetar_token: bool = False):
+    def _resposta_spa(full_path: str, raiz: Path):
         """Serve um arquivo da raiz, ou o index.
 
-        `injetar_token` existe só para a interface herdada, que lê o token de
-        `window` e não sabe usar cookie. A interface do Kairos NÃO recebe o
-        token no HTML: ela autentica e passa a usar o cookie httpOnly, e é isso
-        que impede que carregar a página já entregue a credencial.
+        A interface não recebe token no HTML: autentica e usa cookie httpOnly.
         """
         pedido = raiz / full_path
         if full_path and pedido.is_file():
@@ -1081,21 +1194,7 @@ if DIST_DIR.exists():
         if not index.exists():
             return JSONResponse({"error": "index.html não encontrado"}, status_code=404)
         html = index.read_text(encoding="utf-8")
-        if injetar_token:
-            script = (
-                "<script>"
-                f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
-                "window.__KAIROS_AUTH_REQUIRED__=false;"
-                "</script>"
-            )
-            if "</head>" in html:
-                html = html.replace("</head>", f"{script}</head>")
         return HTMLResponse(content=html, status_code=200)
-
-    @app.get("/legacy/{full_path:path}", include_in_schema=False)
-    async def serve_legacy(full_path: str):
-        """Interface herdada, mantida só enquanto chat e terminal não migram."""
-        return _resposta_spa(full_path, DIST_DIR, injetar_token=True)
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
@@ -1105,7 +1204,6 @@ if DIST_DIR.exists():
         # status de erro e sem nada nos logs do servidor. Era isto que fazia o
         # menu Skills abrir em branco. 404 em JSON transforma falha silenciosa
         # em erro legível dos dois lados.
-        if full_path.startswith("api/"):
+        if full_path.startswith("api/") or full_path == "legacy" or full_path.startswith("legacy/"):
             return JSONResponse({"error": "not_found", "path": f"/{full_path}"}, status_code=404)
-        # A interface do Kairos é a da raiz; o dist herdado só responde em /legacy.
-        return _resposta_spa(full_path, UI_DIR if UI_DIR.exists() else DIST_DIR)
+        return _resposta_spa(full_path, UI_DIR)
