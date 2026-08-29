@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import threading
 import unittest
 from decimal import Decimal
@@ -13,24 +12,19 @@ from unittest.mock import patch
 
 from kairos_providers.base import ConnectionStatus
 from kairos_providers.catalog import ModelCatalog
-from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.composition import (
     ProviderCompositionConfig,
     build_provider_gateway,
-    get_google_adc_token,
 )
 from kairos_providers.contracts import (
     CatalogModel,
     CatalogOrigin,
     ModelCapabilities,
     ModelPrice,
-    ProviderDescriptor,
     ProviderModelRef,
 )
-from kairos_providers.gateway import ProviderGateway
 from kairos_providers.manager import ProviderManager
 from kairos_providers.provider_profiles import custom_profile
-from kairos_providers.provider_registry import ProviderAdapterRegistry
 
 
 class EmptyCredentials:
@@ -40,27 +34,6 @@ class EmptyCredentials:
 
     def get(self, ref):
         raise AssertionError(f"não deve consultar o cofre: {ref}")
-
-
-class RecordingConnectionAdapter:
-    async def test_connection(self) -> ConnectionStatus:
-        return ConnectionStatus(True, "openai", "ok", 1)
-
-
-def _gateway_for_legacy_credentials(tmp_path, received: list[dict[str, str]]) -> ProviderGateway:
-    registry = ProviderAdapterRegistry()
-
-    def factory(**kwargs):
-        received.append(kwargs)
-        return RecordingConnectionAdapter()
-
-    registry.register(ProviderDescriptor("openai", "OpenAI", ("api_key",)), factory)
-    return ProviderGateway(
-        registry,
-        ModelCatalog(),
-        EmptyCredentials(),
-        CatalogSnapshotStore(tmp_path / "model-catalog.json"),
-    )
 
 
 class TrackingClient:
@@ -126,18 +99,6 @@ class ThreadBarrierClient(TrackingClient):
         if attempt == 1:
             raise RuntimeError("falha cross-loop compartilhada")
         self.closed = True
-
-
-def test_google_adc_timeout_degrada_para_ausente():
-    """Um gcloud instalado mas sem resposta não pode derrubar o status HTTP."""
-    with (
-        patch("kairos_providers.composition.shutil.which", return_value="/usr/bin/gcloud"),
-        patch(
-            "kairos_providers.composition.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("gcloud", 3.0),
-        ),
-    ):
-        assert get_google_adc_token() is None
 
 
 def test_composition_registra_todos_os_providers(tmp_path):
@@ -242,88 +203,6 @@ def test_manager_converte_catalogo_moderno_somente_na_borda_legada(tmp_path):
     assert edge.supports_tools is True
     assert edge.cost_input_per_million == 1.25
     assert edge.cost_output_per_million == 2.5
-
-
-def test_manager_legado_nao_cria_cofre_ao_instanciar_adapter(tmp_path, monkeypatch):
-    """Criar adapter legado não deve concorrer pela inicialização do cofre."""
-    passphrase_file = tmp_path / "vault-passphrase"
-    passphrase_file.write_text("senha-mestra-de-teste\n", encoding="utf-8")
-    passphrase_file.chmod(0o600)
-    monkeypatch.setenv("KAIROS_HOME", str(tmp_path))
-    monkeypatch.setenv("KAIROS_DISABLE_KEYRING", "1")
-    monkeypatch.setenv("KAIROS_VAULT_PASSPHRASE_FILE", str(passphrase_file))
-
-    adapter = ProviderManager().get_provider("openai")
-
-    assert adapter.name == "openai"
-    assert not (Path(tmp_path) / "credentials.vault").exists()
-
-
-def test_manager_usa_secret_resolver_na_conexao_delegada(tmp_path):
-    """Ignorar o resolver faz o gateway marcar uma credencial válida como ausente."""
-    received: list[dict[str, str]] = []
-    manager = ProviderManager(
-        auth_store={"openai": [{"credential_id": "primary"}]},
-        secret_resolver=lambda provider, credential_id: {"api_key": "sk-resolvida"},
-        gateway=_gateway_for_legacy_credentials(tmp_path, received),
-    )
-
-    statuses = asyncio.run(manager.test_all_connections())
-
-    assert statuses["openai"].ok is True
-    assert received == [{"api_key": "sk-resolvida"}]
-
-
-def test_manager_conexao_delegada_prioriza_chave_do_ambiente(tmp_path, monkeypatch):
-    """Uma chave externa deve manter a precedência histórica sobre o cofre."""
-    received: list[dict[str, str]] = []
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambiente")
-    manager = ProviderManager(
-        auth_store={"openai": [{"credential_id": "primary"}]},
-        secret_resolver=lambda provider, credential_id: {"api_key": "sk-cofre"},
-        gateway=_gateway_for_legacy_credentials(tmp_path, received),
-    )
-
-    statuses = asyncio.run(manager.test_all_connections())
-
-    assert statuses["openai"].ok is True
-    assert received == [{"api_key": "sk-ambiente"}]
-
-
-def test_manager_conexao_gemini_preserva_adc_sem_api_key(tmp_path):
-    """Reduzir toda autenticação legada a api_key descarta o OAuth do ADC."""
-    received: list[dict[str, str]] = []
-    registry = ProviderAdapterRegistry()
-
-    def factory(**kwargs):
-        received.append(kwargs)
-        return RecordingConnectionAdapter()
-
-    registry.register(ProviderDescriptor("gemini", "Google Gemini", ("api_key", "oauth")), factory)
-    gateway = ProviderGateway(
-        registry,
-        ModelCatalog(),
-        EmptyCredentials(),
-        CatalogSnapshotStore(tmp_path / "model-catalog.json"),
-    )
-
-    with patch("kairos_providers.manager.get_google_adc_token", return_value="ya29.adc"):
-        statuses = asyncio.run(ProviderManager(gateway=gateway).test_all_connections())
-
-    assert statuses["gemini"].ok is True
-    assert received == [{"oauth_token": "ya29.adc"}]
-
-
-def test_manager_preserva_custom_provider_arbitrario_e_default_localhost():
-    """Rejeitar IDs customizados quebra integrações OpenAI-compatible existentes."""
-    manager = ProviderManager()
-
-    remote = manager.get_provider("servidor-interno", base_url="http://127.0.0.1:9090/v1")
-    default = manager.get_provider("servidor-sem-url")
-
-    assert remote.name == "servidor-interno"
-    assert remote.base_url == "http://127.0.0.1:9090/v1"
-    assert default.base_url == "http://localhost:8000/v1"
 
 
 def test_listagem_nao_cria_clientes_nem_inicializa_cofre(tmp_path, monkeypatch):

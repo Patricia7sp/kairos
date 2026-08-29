@@ -9,11 +9,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from kairos_providers.base import ConnectionStatus
 from kairos_state.repositories.messages import MessageRepository
 from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
@@ -120,10 +118,6 @@ class WebServerApiTests(unittest.TestCase):
         self.assertEqual(status.json()["state"], "unlocked")
 
     def test_saves_concorrentes_preservam_referencias_de_providers_distintos(self):
-        class AvailableProvider:
-            async def test_connection(self):
-                return ConnectionStatus(True, "test", "ok")
-
         responses = []
 
         def save(provider):
@@ -135,18 +129,14 @@ class WebServerApiTests(unittest.TestCase):
                 )
             )
 
-        with patch(
-            "kairos_web.server.ProviderManager.get_provider",
-            return_value=AvailableProvider(),
-        ):
-            threads = [
-                threading.Thread(target=save, args=("openai",)),
-                threading.Thread(target=save, args=("anthropic",)),
-            ]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+        threads = [
+            threading.Thread(target=save, args=("openai",)),
+            threading.Thread(target=save, args=("anthropic",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
         self.assertEqual([response.status_code for response in responses], [200, 200])
         pool = json.loads((Path(self._tmp.name) / "auth.json").read_text(encoding="utf-8"))[
@@ -247,22 +237,19 @@ class IdentidadeKairosTests(unittest.TestCase):
         html = (self.DIST / "index.html").read_text(encoding="utf-8")
         self.assertIn("<title>Kairos", html)
 
-    def test_o_contrato_do_token_casa_entre_servidor_e_bundles(self):
-        """Renomear de um lado só derruba o login — sem erro, só 401."""
+    def test_spa_principal_usa_header_compativel_sem_token_injetado(self):
         from kairos_web.server import TOKEN_HEADER as header
 
         self.assertEqual(header, "X-Kairos-Session-Token")
-        bundles = " ".join(
-            f.read_text(encoding="utf-8", errors="ignore") for f in self.DIST.rglob("*.js")
-        )
-        self.assertIn(header, bundles, "os bundles não esperam o header do servidor")
-        servidor = (Path(__file__).resolve().parent.parent / "kairos_web" / "server.py").read_text(
-            encoding="utf-8"
-        )
-        for nome in ("__KAIROS_SESSION_TOKEN__", "__KAIROS_AUTH_REQUIRED__"):
-            with self.subTest(nome=nome):
-                self.assertIn(nome, servidor)
-                self.assertIn(nome, bundles)
+        api_source = (
+            Path(__file__).resolve().parent.parent / "kairos_web" / "ui" / "js" / "api.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(header, api_source)
+        html = (
+            Path(__file__).resolve().parent.parent / "kairos_web" / "ui" / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("__KAIROS_SESSION_TOKEN__", html)
+        self.assertNotIn("__KAIROS_AUTH_REQUIRED__", html)
 
     def test_o_health_se_identifica_como_kairos(self):
         res = TestClient(app).get("/api/health")
@@ -477,9 +464,9 @@ class InterfaceKairosTests(unittest.TestCase):
             with self.subTest(caminho=caminho):
                 self.assertEqual(self.client.get(caminho).status_code, 200)
 
-    def test_o_dist_herdado_responde_so_em_legacy(self):
-        """A ponte existe enquanto chat e terminal não migram — e só ali."""
-        self.assertEqual(self.client.get("/legacy/").status_code, 200)
+    def test_o_dist_herdado_nao_e_mais_servido(self):
+        """A SPA principal já possui Chat; o dist herdado saiu do runtime."""
+        self.assertEqual(self.client.get("/legacy/").status_code, 404)
 
     def test_o_token_NAO_viaja_no_html_da_interface_propria(self):
         """Injetar o token no HTML entregava a credencial a quem só carregasse
@@ -488,9 +475,8 @@ class InterfaceKairosTests(unittest.TestCase):
         self.assertNotIn(SESSION_TOKEN, html)
         self.assertNotIn("__KAIROS_SESSION_TOKEN__", html)
 
-    def test_a_interface_herdada_ainda_recebe_o_token(self):
-        """Ela lê de `window` e não sabe usar cookie; a ponte depende disso."""
-        self.assertIn("__KAIROS_SESSION_TOKEN__", self.client.get("/legacy/").text)
+    def test_legacy_nao_expoe_token(self):
+        self.assertNotIn("__KAIROS_SESSION_TOKEN__", self.client.get("/legacy/").text)
 
     def test_nenhum_arquivo_da_interface_menciona_hermes(self):
         for f in sorted(self.UI.rglob("*")):

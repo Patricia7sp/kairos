@@ -1,75 +1,49 @@
-"""Ponte temporária entre os consumidores legados e o ProviderGateway."""
+"""Facade somente-leitura para consumidores antigos de catálogo.
+
+Novos consumidores usam ProviderGateway. Esta classe não resolve credenciais,
+não seleciona provider e não inicia chamadas externas.
+"""
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
-from kairos_providers.base import BaseLLMProvider, ConnectionStatus, ModelDescriptor
-from kairos_providers.composition import (
-    build_legacy_provider,
-    build_provider_gateway,
-    get_google_adc_token,
-    resolve_legacy_api_key,
-)
+from kairos_providers.base import ModelDescriptor
+from kairos_providers.composition import build_provider_gateway
 from kairos_providers.contracts import CatalogModel
 from kairos_providers.gateway import ProviderGateway
 
-__all__ = ["ProviderManager", "get_google_adc_token"]
+__all__ = ["ProviderManager"]
 
 
 class ProviderManager:
-    """Mantém a API legada, delegando catálogo e conexões ao gateway moderno."""
-
     def __init__(
         self,
-        auth_store: dict[str, Any] | None = None,
-        secret_resolver: Callable[[str, str], Mapping[str, str] | Any] | None = None,
-        *,
+        *_args: object,
         gateway: ProviderGateway | None = None,
         home: Path | None = None,
+        **_kwargs: object,
     ) -> None:
-        self.auth_store = auth_store or {}
-        self.secret_resolver = secret_resolver
         self._gateway = gateway
         self._gateway_is_injected = gateway is not None
         self._home = home or Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
 
-    def get_api_key(self, provider: str) -> str | None:
-        return resolve_legacy_api_key(provider, self.auth_store, self.secret_resolver)
-
-    def get_provider(self, provider_name: str, **kwargs: Any) -> BaseLLMProvider:
-        """Retorna o adapter antigo até Chat e CLI migrarem para o gateway."""
-        return build_legacy_provider(
-            provider_name, api_key=self.get_api_key(provider_name), **kwargs
-        )
-
     def list_all_models(self) -> list[ModelDescriptor]:
-        """Converte ``CatalogModel`` na fronteira exigida por clientes legados."""
-        return [
-            _legacy_descriptor(model)
-            for model in self._gateway_for_legacy_calls.catalog.list_models()
-        ]
+        return [_legacy_descriptor(model) for model in self._catalog_gateway.catalog.list_models()]
 
-    async def test_all_connections(self) -> dict[str, ConnectionStatus]:
+    async def test_all_connections(self):
+        """Compatibilidade temporária; runtime Web não consome mais esta sonda."""
         if self._gateway_is_injected:
-            return await self._gateway_for_legacy_calls.test_all_connections(
-                credential_resolver=self._legacy_credential_values
-            )
-
+            return await self._catalog_gateway.test_all_connections()
         gateway = build_provider_gateway(self._home)
         try:
-            return await gateway.test_all_connections(
-                credential_resolver=self._legacy_credential_values
-            )
+            return await gateway.test_all_connections()
         finally:
             await gateway.aclose()
 
     async def aclose(self) -> None:
-        """Fecha o gateway criado pelo manager, preservando gateways injetados."""
         if not self._gateway_is_injected and self._gateway is not None:
             await self._gateway.aclose()
             self._gateway = None
@@ -81,18 +55,10 @@ class ProviderManager:
         await self.aclose()
 
     @property
-    def _gateway_for_legacy_calls(self) -> ProviderGateway:
+    def _catalog_gateway(self) -> ProviderGateway:
         if self._gateway is None:
             self._gateway = build_provider_gateway(self._home)
         return self._gateway
-
-    def _legacy_credential_values(self, provider: str) -> dict[str, str]:
-        api_key = self.get_api_key(provider)
-        if api_key:
-            return {"api_key": api_key}
-        if provider == "gemini" and (oauth_token := get_google_adc_token()):
-            return {"oauth_token": oauth_token}
-        return {}
 
 
 def _legacy_descriptor(model: CatalogModel) -> ModelDescriptor:

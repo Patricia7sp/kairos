@@ -26,7 +26,6 @@ from kairos_integration.interaction_contract import InteractionServiceUnavailabl
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
-from kairos_providers.manager import ProviderManager
 from kairos_security.credentials import (
     CredentialNotFoundError,
     CredentialRef,
@@ -86,8 +85,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-DIST_DIR = Path(__file__).parent / "web_dist"
 
 # --- SESSÃO ---
 
@@ -180,15 +177,6 @@ def _get_auth_store() -> AuthStore:
     )
 
 
-def _provider_manager(store: AuthStore) -> ProviderManager:
-    return ProviderManager(
-        auth_store=store.profile,
-        secret_resolver=lambda provider, credential_id: store.vault.get(
-            CredentialRef(provider, credential_id)
-        ),
-    )
-
-
 # --- REST ENDPOINTS ---
 
 
@@ -198,7 +186,7 @@ async def health_check():
         "status": "ok",
         "app": "kairos",
         "version": "0.1.0",
-        "web_dist_present": DIST_DIR.exists(),
+        "ui_present": (Path(__file__).parent / "ui").exists(),
     }
 
 
@@ -453,60 +441,16 @@ async def test_provider_connection(provider: str):
 
 @app.post("/api/providers/save-key")
 async def save_provider_key(req: SaveKeyRequest):
-    kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
-    kairos_home.mkdir(parents=True, exist_ok=True)
-    auth_path = kairos_home / "auth.json"
-
-    api_key = req.api_key.strip()
-    if not api_key:
-        raise HTTPException(status_code=422, detail="api_key é obrigatória")
-    ref = CredentialRef(req.provider, "primary")
-
-    # Valida usando somente memória; nenhum arquivo ou resposta recebe a chave.
-    validation_manager = ProviderManager(auth_store={req.provider: [{"api_key": api_key}]})
-    status = await validation_manager.get_provider(req.provider).test_connection()
-    with credential_file_lock(auth_path):
-        store = _get_auth_store()
-        try:
-            try:
-                previous = store.vault.get(ref)
-            except CredentialNotFoundError:
-                previous = None
-            metadata = store.vault.put(ref, CredentialSecret({"api_key": api_key}))
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503, detail="cofre de credenciais indisponível"
-            ) from exc
-        previous_profile = store.profile.get(req.provider)
-        store.profile[req.provider] = [
-            {
-                "credential_id": ref.credential_id,
-                "auth_method": metadata.auth_method,
-                "masked_identifier": metadata.masked_identifier,
-            }
-        ]
-        try:
-            store.write_atomically(auth_path)
-        except Exception:
-            if previous is None:
-                store.vault.delete(ref)
-            else:
-                store.vault.put(ref, previous)
-            if previous_profile is None:
-                store.profile.pop(req.provider, None)
-            else:
-                store.profile[req.provider] = previous_profile
-            raise
-
+    result = await save_provider_credential(
+        req.provider,
+        SaveCredentialRequest(secret=req.api_key, auth_method="api_key"),
+    )
     return {
         "status": "saved",
         "provider": req.provider,
-        "credential_status": "active" if status.ok else "saved_unverified",
-        "connection": {
-            "ok": status.ok,
-            "message": status.message,
-            "models_count": status.models_found,
-        },
+        "credential_status": "saved_unverified",
+        "credential_id": result["credential_id"],
+        "auth_method": result["auth_method"],
     }
 
 
@@ -956,25 +900,23 @@ async def get_model_info():
 
 @app.get("/api/model/options")
 async def get_model_options():
-    store = _get_auth_store()
-    manager = ProviderManager(auth_store=store.profile)
-    models = manager.list_all_models()
-    return {
-        "models": [
-            {
-                "id": m.id,
-                "name": m.name,
-                "provider": m.provider,
-                # A chave da resposta é o que a SPA lê; o atributo do descritor
-                # é `context_length`. Ler `m.context_window` levantava
-                # AttributeError e a rota inteira devolvia 500.
-                "context_window": m.context_length,
-                "supports_tools": m.supports_tools,
-                "supports_vision": m.supports_vision,
-            }
-            for m in models
-        ]
-    }
+    gateway = build_provider_gateway(_application_home(app))
+    try:
+        return {
+            "models": [
+                {
+                    "id": model.ref.model,
+                    "name": model.display_name,
+                    "provider": model.ref.provider,
+                    "context_window": model.capabilities.context_length or 128_000,
+                    "supports_tools": model.capabilities.tools is True,
+                    "supports_vision": model.capabilities.vision is True,
+                }
+                for model in gateway.catalog.list_models()
+            ]
+        }
+    finally:
+        await gateway.aclose()
 
 
 def _skill_roots() -> list[tuple[str, Path]]:
@@ -1188,9 +1130,6 @@ async def websocket_alias_endpoint(websocket: WebSocket):
 # --- INTERFACE DO KAIROS ---
 
 # A UI própria: HTML, CSS e módulos ES servidos como estão, sem passo de build.
-# O `web_dist` herdado continua montado sob /legacy enquanto chat e terminal
-# (que dependem dos websockets e ainda não têm equivalente aqui) não migram —
-# a ponte é explícita e tem prazo, não é o rosto do produto.
 UI_DIR = Path(__file__).parent / "ui"
 
 if UI_DIR.exists():
@@ -1205,24 +1144,11 @@ async def favicon():
     return JSONResponse({"error": "not_found"}, status_code=404)
 
 
-if DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
-    if (DIST_DIR / "fonts").exists():
-        app.mount("/fonts", StaticFiles(directory=str(DIST_DIR / "fonts")), name="fonts")
-    if (DIST_DIR / "fonts-terminal").exists():
-        app.mount(
-            "/fonts-terminal",
-            StaticFiles(directory=str(DIST_DIR / "fonts-terminal")),
-            name="fonts-terminal",
-        )
-
-    def _resposta_spa(full_path: str, raiz: Path, *, injetar_token: bool = False):
+if UI_DIR.exists():
+    def _resposta_spa(full_path: str, raiz: Path):
         """Serve um arquivo da raiz, ou o index.
 
-        `injetar_token` existe só para a interface herdada, que lê o token de
-        `window` e não sabe usar cookie. A interface do Kairos NÃO recebe o
-        token no HTML: ela autentica e passa a usar o cookie httpOnly, e é isso
-        que impede que carregar a página já entregue a credencial.
+        A interface não recebe token no HTML: autentica e usa cookie httpOnly.
         """
         pedido = raiz / full_path
         if full_path and pedido.is_file():
@@ -1231,21 +1157,7 @@ if DIST_DIR.exists():
         if not index.exists():
             return JSONResponse({"error": "index.html não encontrado"}, status_code=404)
         html = index.read_text(encoding="utf-8")
-        if injetar_token:
-            script = (
-                "<script>"
-                f'window.__KAIROS_SESSION_TOKEN__="{SESSION_TOKEN}";'
-                "window.__KAIROS_AUTH_REQUIRED__=false;"
-                "</script>"
-            )
-            if "</head>" in html:
-                html = html.replace("</head>", f"{script}</head>")
         return HTMLResponse(content=html, status_code=200)
-
-    @app.get("/legacy/{full_path:path}", include_in_schema=False)
-    async def serve_legacy(full_path: str):
-        """Interface herdada, mantida só enquanto chat e terminal não migram."""
-        return _resposta_spa(full_path, DIST_DIR, injetar_token=True)
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
@@ -1255,7 +1167,6 @@ if DIST_DIR.exists():
         # status de erro e sem nada nos logs do servidor. Era isto que fazia o
         # menu Skills abrir em branco. 404 em JSON transforma falha silenciosa
         # em erro legível dos dois lados.
-        if full_path.startswith("api/"):
+        if full_path.startswith("api/") or full_path == "legacy" or full_path.startswith("legacy/"):
             return JSONResponse({"error": "not_found", "path": f"/{full_path}"}, status_code=404)
-        # A interface do Kairos é a da raiz; o dist herdado só responde em /legacy.
-        return _resposta_spa(full_path, UI_DIR if UI_DIR.exists() else DIST_DIR)
+        return _resposta_spa(full_path, UI_DIR)

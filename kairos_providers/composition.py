@@ -8,10 +8,7 @@ do cofre somente quando precisa instanciar um adapter.
 from __future__ import annotations
 
 import ipaddress
-import os
-import shutil
-import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,16 +17,12 @@ import httpx
 
 from kairos_providers._async_cleanup import AsyncCleanupCoordinator
 from kairos_providers.adapters import (
-    AnthropicAdapter,
     AnthropicMessagesAdapter,
     GeminiNativeAdapter,
-    GoogleGeminiAdapter,
-    OllamaAdapter,
     OllamaNativeAdapter,
     OpenAIResponsesAdapter,
     OpenRouterAdapter,
 )
-from kairos_providers.adapters import OpenAICompatibleAdapter as LegacyOpenAICompatibleAdapter
 from kairos_providers.adapters.openai_compatible import OpenAICompatibleAdapter
 from kairos_providers.catalog import ModelCatalog
 from kairos_providers.catalog_store import CatalogSnapshotStore
@@ -47,22 +40,11 @@ from kairos_security.credentials import build_credential_service
 
 __all__ = [
     "ProviderCompositionConfig",
-    "build_legacy_provider",
     "build_provider_gateway",
-    "get_google_adc_token",
-    "resolve_legacy_api_key",
 ]
 
 
 _OLLAMA_LOCAL_URL = "http://127.0.0.1:11434"
-_LEGACY_ENVIRONMENT_KEYS = {
-    "openai": ("OPENAI_API_KEY",),
-    "anthropic": ("ANTHROPIC_API_KEY",),
-    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "openrouter": ("OPENROUTER_API_KEY",),
-    "deepseek": ("DEEPSEEK_API_KEY",),
-    "groq": ("GROQ_API_KEY",),
-}
 
 
 @dataclass(frozen=True)
@@ -278,145 +260,6 @@ def _register_compatible_adapter(
             profile, clients.for_provider(profile.id), api_key
         ),
     )
-
-
-def resolve_legacy_api_key(
-    provider: str,
-    auth_store: Mapping[str, Any],
-    secret_resolver: Callable[[str, str], Mapping[str, str] | Any] | None,
-) -> str | None:
-    """Resolve o caminho legado sem copiar segredos para registry ou catálogo."""
-    for environment_key in _LEGACY_ENVIRONMENT_KEYS.get(provider, ()):
-        value = os.environ.get(environment_key)
-        if value and value.strip():
-            return value.strip()
-
-    credentials = auth_store.get(provider, [])
-    if not isinstance(credentials, list) or not credentials:
-        return None
-    first = credentials[0]
-    if not isinstance(first, Mapping):
-        return None
-    credential_id = first.get("credential_id")
-    if isinstance(credential_id, str) and credential_id and secret_resolver is not None:
-        resolved = secret_resolver(provider, credential_id)
-        values = resolved.reveal() if hasattr(resolved, "reveal") else resolved
-        if isinstance(values, Mapping):
-            return _secret_value(values)
-    return _secret_value(first)
-
-
-def _secret_value(values: Mapping[str, Any]) -> str | None:
-    for name in ("api_key", "token"):
-        value = values.get(name)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def get_google_adc_token() -> str | None:
-    """Obtém ADC para a ponte legada apenas quando Gemini é efetivamente usado."""
-    if not (gcloud := shutil.which("gcloud")):
-        return None
-    try:
-        result = subprocess.run(  # noqa: S603
-            [gcloud, "auth", "application-default", "print-access-token"],
-            capture_output=True,
-            text=True,
-            timeout=3.0,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
-
-
-def build_legacy_provider(
-    provider: str, *, api_key: str | None, **kwargs: Any
-) -> LegacyOpenAICompatibleAdapter | AnthropicAdapter | GoogleGeminiAdapter | OllamaAdapter:
-    """Compatibilidade temporária para superfícies que ainda usam BaseLLMProvider."""
-    factory = _LEGACY_FACTORIES.get(provider, _legacy_custom)
-    if factory is _legacy_custom:
-        kwargs.setdefault("name", provider)
-    return factory(api_key=api_key, **kwargs)
-
-
-def _legacy_openai(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
-    return LegacyOpenAICompatibleAdapter(
-        name="openai",
-        base_url="https://api.openai.com/v1",
-        api_key=api_key,
-        default_model=kwargs.get("model", "gpt-4o"),
-    )
-
-
-def _legacy_anthropic(*, api_key: str | None, **kwargs: Any) -> AnthropicAdapter:
-    return AnthropicAdapter(
-        name="anthropic",
-        api_key=api_key,
-        default_model=kwargs.get("model", "claude-3-7-sonnet-20250219"),
-    )
-
-
-def _legacy_gemini(*, api_key: str | None, **kwargs: Any) -> GoogleGeminiAdapter:
-    return GoogleGeminiAdapter(
-        name="gemini",
-        api_key=api_key,
-        oauth_token=get_google_adc_token(),
-        default_model=kwargs.get("model", "gemini-2.0-flash"),
-    )
-
-
-def _legacy_openrouter(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
-    return LegacyOpenAICompatibleAdapter(
-        name="openrouter",
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key,
-        default_model=kwargs.get("model", "anthropic/claude-3.7-sonnet"),
-    )
-
-
-def _legacy_deepseek(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
-    return LegacyOpenAICompatibleAdapter(
-        name="deepseek",
-        base_url=DEEPSEEK_PROFILE.base_url,
-        api_key=api_key,
-        default_model=kwargs.get("model", "deepseek-chat"),
-    )
-
-
-def _legacy_groq(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
-    return LegacyOpenAICompatibleAdapter(
-        name="groq",
-        base_url=GROQ_PROFILE.base_url,
-        api_key=api_key,
-        default_model=kwargs.get("model", "llama-3.3-70b-versatile"),
-    )
-
-
-def _legacy_ollama(*, api_key: str | None, **kwargs: Any) -> OllamaAdapter:
-    del api_key
-    return OllamaAdapter(name="ollama", default_model=kwargs.get("model", "llama3.3"))
-
-
-def _legacy_custom(*, api_key: str | None, **kwargs: Any) -> LegacyOpenAICompatibleAdapter:
-    return LegacyOpenAICompatibleAdapter(
-        name=kwargs.pop("name", "custom"),
-        base_url=kwargs.get("base_url", "http://localhost:8000/v1"),
-        api_key=api_key,
-        default_model=kwargs.get("model", "custom"),
-    )
-
-
-_LEGACY_FACTORIES: dict[str, Callable[..., Any]] = {
-    "openai": _legacy_openai,
-    "anthropic": _legacy_anthropic,
-    "gemini": _legacy_gemini,
-    "openrouter": _legacy_openrouter,
-    "deepseek": _legacy_deepseek,
-    "groq": _legacy_groq,
-    "ollama": _legacy_ollama,
-}
 
 
 def _is_loopback(host: str) -> bool:
