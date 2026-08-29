@@ -3,6 +3,26 @@
 Registro das divergências deliberadas em relação ao legado. Cada entrada
 nomeia a tarefa que a produziu e a evidência que a justifica.
 
+## Providers e Chat — runtime canônico
+
+### D-PC.1 — Web e CLI usam uma única execução
+
+`InteractionService` é a única fronteira de execução de turnos. A SPA e o
+terminal somente traduzem envelope e eventos v1; seleção, credencial,
+persistência, retry, usage e custo não são reimplementados nas superfícies.
+
+### D-PC.2 — O frontend herdado saiu do runtime
+
+A SPA principal já cobre Chat, Modelos e Provedores. `/legacy` responde 404 e
+os adapters antigos foram removidos; o facade `ProviderManager` permanece
+somente para converter catálogo a consumidores externos antigos.
+
+### D-PC.3 — O wheel descobre subpacotes
+
+Setuptools usa descoberta `kairos*` e inclui os arquivos da SPA como package
+data. Isso impede que adapters, repositórios ou a interface desapareçam do
+wheel enquanto a imagem Docker continua funcionando por copiar a árvore.
+
 ---
 
 ## Tarefa 01 — Schema do Banco de Dados

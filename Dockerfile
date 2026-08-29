@@ -53,10 +53,8 @@ RUN useradd -l -u ${KAIROS_UID} -m -d /opt/data kairos
 # --- aplicação ---------------------------------------------------------------
 WORKDIR /opt/kairos
 COPY pyproject.toml README.md ./
-# ATENÇÃO: esta lista tem de bater com [tool.setuptools].packages do
-# pyproject.toml. São duas listas mantidas à mão, e a deriva entre elas só
-# aparece num build real — `docker build --check` não a detecta. Há um teste
-# que compara as duas (tests/test_container.py).
+# A imagem copia os pacotes e instala em modo editável. O wheel usa descoberta
+# `kairos*`, incluindo subpacotes de adapters e credenciais.
 COPY kairos_state/ ./kairos_state/
 COPY kairos_domain/ ./kairos_domain/
 COPY kairos_i18n/ ./kairos_i18n/

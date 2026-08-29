@@ -16,6 +16,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import tomllib
 import typing
 import unittest
 from pathlib import Path
@@ -375,6 +376,13 @@ class DockerfileTests(unittest.TestCase):
 
     def test_a_extensao_cjk_falhar_nao_derruba_o_build(self):
         self.assertIn("build.sh /opt/kairos/lib ||", self.src)
+
+    def test_distribuicao_descobre_subpacotes_e_inclui_spa(self):
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        setuptools = config["tool"]["setuptools"]
+
+        self.assertEqual(setuptools["packages"]["find"]["include"], ["kairos*"])
+        self.assertIn("ui/**/*", setuptools["package-data"]["kairos_web"])
 
     def test_docker_build_check_nao_reporta_warning(self):
         r = subprocess.run(

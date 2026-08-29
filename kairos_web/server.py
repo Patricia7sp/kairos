@@ -1145,6 +1145,7 @@ async def favicon():
 
 
 if UI_DIR.exists():
+
     def _resposta_spa(full_path: str, raiz: Path):
         """Serve um arquivo da raiz, ou o index.
 
