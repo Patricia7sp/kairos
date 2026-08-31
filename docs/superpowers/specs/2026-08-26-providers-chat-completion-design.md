@@ -1,7 +1,7 @@
 # Conclusão de Providers, Modelos e Chat
 
 **Data:** 2026-08-26  
-**Estado:** desenho aprovado; implementação pendente  
+**Estado:** implementação concluída; validação operacional contínua
 **Escopo:** fases 3–6 de `2026-08-25-providers-modelos-chat-design.md`
 
 ## Objetivo
@@ -282,6 +282,19 @@ A entrega exige:
 - Python, frontend, lint, tipagem, shellcheck, hadolint, build e integração
   verdes;
 - container `healthy` e endpoints de saúde aprovados após redeploy.
+
+## Estado da implementação
+
+As fases 3–6 foram entregues pelos PRs #6–#9. `kairos_providers` contém o
+gateway, os adapters nativos e o catálogo dinâmico; `kairos_integration`
+centraliza seleção, persistência, retry, ownership e contabilidade no
+`InteractionService`. WebSocket e CLI usam o mesmo protocolo de eventos, e a
+SPA principal oferece Chat, Modelos e Provedores.
+
+A suíte automatizada cobre contratos, adapters, persistência, transportes,
+frontends e imagem. Saúde, credenciais e chamadas reais do ambiente implantado
+continuam sendo verificadas como rotina operacional, não como implementação
+pendente desta especificação.
 
 ## Migração e rollback
 
