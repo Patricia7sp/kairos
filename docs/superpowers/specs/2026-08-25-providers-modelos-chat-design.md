@@ -1,7 +1,7 @@
 # Providers, catálogo de modelos e Chat web
 
 **Data:** 2026-08-25  
-**Estado:** fase 1 implementada; fases 2–6 pendentes
+**Estado:** fases 1–6 implementadas
 **Escopo:** aplicação local, de usuário único
 
 ## Objetivo
@@ -16,7 +16,9 @@ configuração segura de providers e troca de modelo sem reiniciar o sistema.
 WhatsApp, Telegram, desktop completo e providers instaláveis ficam para fases
 posteriores, mas recebem fronteiras arquiteturais claras nesta entrega.
 
-## Estado atual
+## Estado inicial
+
+Este era o estado do projeto quando a especificação foi aprovada:
 
 - A SPA principal é `kairos_web/ui`. O React compilado em `web_dist` é legado e
   continua disponível em `/legacy`.
@@ -294,22 +296,25 @@ padrão.
 
 1. Contratos, registry, catálogo e resolvedor. ✅
 2. Keyring, cofre e migração segura de credenciais. ✅
-3. Adapters e modelos atuais dos providers.
-4. Persistência de seleção e `InteractionService` compartilhado.
-5. Página Provedores de IA e Chat operacional.
-6. Migração do terminal, robustez, documentação e suíte completa.
+3. Adapters e modelos atuais dos providers. ✅
+4. Persistência de seleção e `InteractionService` compartilhado. ✅
+5. Página Provedores de IA e Chat operacional. ✅
+6. Migração do terminal, robustez, documentação e suíte completa. ✅
 
 ### Estado da implementação
 
-A fase 1 está implementada nos módulos `contracts.py`, `provider_registry.py`,
-`catalog.py`, `curated_catalog.py` e `selection.py` de `kairos_providers`. Ela
-entrega tipos canônicos, registry interno de factories, catálogo híbrido com
-precedência de fontes, curadoria agentic inicial e resolução explícita da
-seleção. A fase 2 adiciona keyring com sonda de disponibilidade, fallback
-criptografado AES-GCM/Scrypt, migração confirmada do `auth.json`, referências
-sem plaintext na API Web e comandos de operação do cofre. Atualização dos
-adapters, persistência compartilhada, UI e Chat continuam pendentes nas fases
-seguintes.
+As seis fases estão implementadas. `kairos_providers` contém os contratos,
+registry, catálogo híbrido, resolução de seleção, perfis persistidos, gateway e
+adapters nativos para os protocolos suportados. `kairos_security.credentials`
+fornece keyring com sonda de disponibilidade, fallback criptografado
+AES-GCM/Scrypt, migração confirmada do `auth.json` e APIs sem plaintext.
+
+`kairos_integration` concentra o `InteractionService`, seleção por turno,
+persistência, retry, ownership e contabilidade. A SPA principal oferece as
+páginas Provedores, Modelos e Chat com streaming; o WebSocket e
+`kairos chat` compartilham o protocolo de eventos e o mesmo serviço. Os testes
+de contrato, adapters, persistência, transporte Web, CLI e frontend, junto da
+documentação operacional em `docs/providers-e-chat.md`, fecham a fase 6.
 
 ## Fora do escopo desta entrega
 
