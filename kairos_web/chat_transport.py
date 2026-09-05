@@ -35,6 +35,7 @@ def interaction_envelope_from_json(message: Mapping[str, Any]) -> InteractionEnv
         activity=_optional_text(message.get("activity"), "activity"),
         override=_model_override(message.get("provider"), message.get("model")),
         parameters=parameters,
+        idempotency_key=_optional_text(message.get("idempotency_key"), "idempotency_key"),
     )
 
 

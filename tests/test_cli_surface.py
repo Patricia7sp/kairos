@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 #: Comandos que nascem no Kairos e não têm correspondente no legado.
 #: `token` existe porque o painel precisava de um caminho para a credencial
 #: que não passasse por variável de ambiente nem por log.
-PROPRIOS_DO_KAIROS = frozenset({"token"})
+PROPRIOS_DO_KAIROS = frozenset({"runtime", "token"})
 
 
 class ArvoreTests(unittest.TestCase):

@@ -176,6 +176,7 @@ def test_runtime_event_has_one_public_json_converter() -> None:
         {"nested": ({"ok": True},)},
     )
     assert runtime_event_to_json(event) == {
+        "execution_kind": "agent_runtime",
         "protocol_version": 1,
         "event_id": "event-1",
         "session_id": "session-1",

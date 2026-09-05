@@ -40,6 +40,7 @@ def runtime_event_to_json(event: RuntimeEvent) -> dict[str, Any]:
     if not isinstance(event, RuntimeEvent):
         raise TypeError("event deve ser RuntimeEvent")
     return {
+        "execution_kind": "agent_runtime",
         "protocol_version": event.protocol_version,
         "event_id": event.event_id,
         "session_id": event.session_id,

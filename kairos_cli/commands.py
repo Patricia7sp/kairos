@@ -59,8 +59,8 @@ def _c(name, help, *subs, status=Status.NOT_IMPLEMENTED, unit=None) -> Command:
     return Command(name, help, tuple(subs), status, unit)
 
 
-def _sub(name, help) -> Command:
-    return Command(name, help)
+def _sub(name, help, *subs) -> Command:
+    return Command(name, help, tuple(subs))
 
 
 #: A árvore. Ordem alfabética, exceto os de topo, que vêm primeiro por serem
@@ -78,6 +78,25 @@ COMMANDS: tuple[Command, ...] = (
         "Conversa persistida com o agente",
         status=Status.IMPLEMENTED,
         unit="interaction-service",
+    ),
+    _c(
+        "runtime",
+        "Sessões persistentes do Agent Runtime",
+        _sub("serve", "Sobe o host compartilhado em primeiro plano"),
+        _sub("status", "Mostra o estado do host"),
+        _sub("login", "Autentica no runtime oficial"),
+        _sub("logout", "Encerra a autenticação do runtime"),
+        _sub(
+            "session",
+            "Gerencia sessões persistentes",
+            _sub("create", "Cria uma sessão de runtime"),
+            _sub("end", "Encerra uma sessão de runtime"),
+        ),
+        _sub("approve", "Responde explicitamente a uma aprovação"),
+        _sub("cancel", "Cancela um turno explicitamente"),
+        _sub("watch", "Acompanha o journal a partir de um cursor"),
+        status=Status.IMPLEMENTED,
+        unit="agent-runtime",
     ),
     _c("tick", "Executa um tick do scheduler e sai", unit="cron", status=Status.IMPLEMENTED),
     _c(
@@ -291,6 +310,10 @@ def find_command(name: str) -> Command | None:
 def leaf_count() -> int:
     """Comandos invocáveis: o grupo conta quando não tem subcomando."""
     total = 0
+
+    def leaves(command: Command) -> int:
+        return sum(leaves(child) for child in command.subcommands) if command.subcommands else 1
+
     for c in COMMANDS:
-        total += len(c.subcommands) if c.subcommands else 1
+        total += leaves(c)
     return total

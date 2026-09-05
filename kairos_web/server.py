@@ -16,6 +16,8 @@ from time import monotonic
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from kairos_cli.auth import AuthStore
 from kairos_cli.config import load_config, save_config
-from kairos_integration import build_interaction_service
+from kairos_integration import build_interaction_router as build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
@@ -41,6 +43,8 @@ from kairos_web.chat_transport import (
     interaction_event_to_json,
 )
 from kairos_web.provider_api import list_models_payload, list_providers_payload, serialize_model
+from kairos_web.runtime_api import router as runtime_api_router
+from kairos_web.runtime_transport import runtime_websocket_session
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +63,38 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
     if owns_service:
         service = build_interaction_service(_application_home(application))
         application.state.interaction_service = service
+    runtime_client = getattr(application.state, "runtime_client", None)
+    installed_runtime_client = False
+    if runtime_client is None and hasattr(service, "runtime_client"):
+        runtime_client = service.runtime_client
+        application.state.runtime_client = runtime_client
+        installed_runtime_client = True
     try:
         yield
     finally:
-        if owns_service:
-            try:
+        try:
+            if owns_service:
                 await service.aclose()
-            finally:
-                if getattr(application.state, "interaction_service", None) is service:
-                    del application.state.interaction_service
+        finally:
+            if owns_service and getattr(application.state, "interaction_service", None) is service:
+                del application.state.interaction_service
+            if (
+                installed_runtime_client
+                and getattr(application.state, "runtime_client", None) is runtime_client
+            ):
+                del application.state.runtime_client
 
 
 app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)
+app.include_router(runtime_api_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def _safe_runtime_validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/runtime/"):
+        return JSONResponse({"detail": "requisição de runtime inválida"}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
+
 
 # CORS para desenvolvimento local e SPA
 app.add_middleware(
@@ -524,7 +548,8 @@ def _linha_sessao(s) -> dict:
     def campo(nome, padrao=None):
         return s[nome] if nome in chaves else padrao
 
-    return {
+    execution_kind = campo("execution_kind", "model") or "model"
+    result = {
         "id": s["id"],
         "source": s["source"],
         "title": campo("display_name") or campo("title") or "",
@@ -541,7 +566,35 @@ def _linha_sessao(s) -> dict:
         "tool_call_count": campo("tool_call_count", 0) or 0,
         "input_tokens": campo("input_tokens", 0) or 0,
         "output_tokens": campo("output_tokens", 0) or 0,
+        "execution_kind": execution_kind,
     }
+    if execution_kind == "agent_runtime":
+        capabilities = campo("runtime_capabilities")
+        try:
+            capabilities = json.loads(capabilities) if capabilities else None
+        except (TypeError, json.JSONDecodeError):
+            capabilities = None
+        result.update(
+            {
+                "runtime_kind": campo("runtime_kind"),
+                "cwd": campo("requested_cwd") or campo("cwd"),
+                "canonical_cwd": campo("canonical_cwd"),
+                "sandbox": campo("sandbox_profile"),
+                "external_thread_id": campo("external_thread_id"),
+                "runtime_state": campo("runtime_state"),
+                "protocol_version": campo("runtime_protocol_version"),
+                "capabilities": capabilities,
+                "broad_consent": campo("broad_consent_at") is not None,
+            }
+        )
+    return result
+
+
+_SESSION_RUNTIME_COLUMNS = (
+    "r.runtime_kind,r.external_thread_id,r.requested_cwd,r.canonical_cwd,"
+    "r.sandbox_profile,r.broad_consent_at,r.state AS runtime_state,"
+    "r.protocol_version AS runtime_protocol_version,r.capabilities_json AS runtime_capabilities"
+)
 
 
 def _contagem_de_mensagens(conn, ids: list[str]) -> dict[str, int]:
@@ -640,7 +693,7 @@ async def list_sessions(
                 "EXISTS (SELECT 1 FROM session_tags stf WHERE stf.session_id = s.id AND stf.tag = ?)"
             )
             args.append(tag_filtro)
-        sql = "SELECT s.* FROM sessions s"
+        sql = f"SELECT s.*,{_SESSION_RUNTIME_COLUMNS} FROM sessions s LEFT JOIN runtime_sessions r ON r.session_id=s.id"  # noqa: S608 - fixed internal projection
         if where:
             sql += " WHERE " + " AND ".join(where)
         total = int(
@@ -679,7 +732,10 @@ async def list_sessions(
 async def get_session(session_id: str, request: Request):
     conn = _get_db(request.app)
     try:
-        s = SessionRepository(conn).get(session_id)
+        s = conn.execute(
+            f"SELECT s.*,{_SESSION_RUNTIME_COLUMNS} FROM sessions s LEFT JOIN runtime_sessions r ON r.session_id=s.id WHERE s.id=?",  # noqa: S608 - fixed internal projection
+            (session_id,),
+        ).fetchone()
         if s is None:
             return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
         linha = _linha_sessao(s)
@@ -733,7 +789,11 @@ async def update_session(session_id: str, payload: dict[str, Any], request: Requ
                     "INSERT INTO session_tags(session_id, tag) VALUES (?, ?)",
                     [(session_id, value) for value in tags],
                 )
-        linha = SessionRepository(conn).get(session_id)
+        linha = conn.execute(
+            f"SELECT s.*,{_SESSION_RUNTIME_COLUMNS} FROM sessions s "  # noqa: S608 - fixed internal projection
+            "LEFT JOIN runtime_sessions r ON r.session_id=s.id WHERE s.id=?",
+            (session_id,),
+        ).fetchone()
         linha_dict = _linha_sessao(linha)
         linha_dict["tags"] = _tags_para_sessoes(conn, [session_id]).get(session_id, [])
         return linha_dict
@@ -745,23 +805,52 @@ async def update_session(session_id: str, payload: dict[str, Any], request: Requ
 async def get_session_messages(session_id: str, request: Request):
     conn = _get_db(request.app)
     try:
-        if SessionRepository(conn).get(session_id) is None:
+        session = SessionRepository(conn).get(session_id)
+        if session is None:
             return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
-        rows = conn.execute(
-            "SELECT id, role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp, id",
-            (session_id,),
-        ).fetchall()
+        execution_kind = (
+            session["execution_kind"]
+            if "execution_kind" in session.keys()  # noqa: SIM118 - sqlite3.Row membership checks values
+            else "model"
+        ) or "model"
+        if execution_kind == "agent_runtime":
+            rows = conn.execute(
+                "SELECT m.id,m.role,m.content,m.timestamp,"
+                "COALESCE(u.id,a.id) AS runtime_turn_id,"
+                "COALESCE(u.state,a.state) AS runtime_turn_state "
+                "FROM messages m LEFT JOIN runtime_turns u ON u.user_message_id=m.id "
+                "LEFT JOIN runtime_turns a ON a.assistant_message_id=m.id "
+                "WHERE m.session_id=? ORDER BY m.timestamp,m.id",
+                (session_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, role, content, timestamp FROM messages "
+                "WHERE session_id = ? ORDER BY timestamp, id",
+                (session_id,),
+            ).fetchall()
+
+        def message_payload(row):
+            payload = {
+                "id": row["id"],
+                "role": row["role"],
+                "content": row["content"],
+                "created_at": row["timestamp"],
+            }
+            if execution_kind == "agent_runtime":
+                payload.update(
+                    {
+                        "execution_kind": "agent_runtime",
+                        "turn_id": row["runtime_turn_id"],
+                        "turn_state": row["runtime_turn_state"],
+                    }
+                )
+            return payload
+
         return {
             "session_id": session_id,
-            "messages": [
-                {
-                    "id": r["id"],
-                    "role": r["role"],
-                    "content": r["content"],
-                    "created_at": r["timestamp"],
-                }
-                for r in rows
-            ],
+            "execution_kind": execution_kind,
+            "messages": [message_payload(row) for row in rows],
         }
     finally:
         conn.close()
@@ -779,6 +868,23 @@ async def websocket_chat_endpoint(websocket: WebSocket):
         await websocket.close(code=4401)
         return
     await _chat_session(websocket)
+
+
+@app.websocket("/ws/runtime")
+async def websocket_runtime_endpoint(websocket: WebSocket):
+    ticket_ok = _consume_ws_ticket(websocket.query_params.get("token"))
+    header_ok = _token_ok(websocket.headers.get(TOKEN_HEADER))
+    if not ticket_ok and not header_ok:
+        await websocket.close(code=4401)
+        return
+    client = getattr(websocket.app.state, "runtime_client", None)
+    if client is None:
+        service = getattr(websocket.app.state, "interaction_service", None)
+        client = getattr(service, "runtime_client", None)
+    if client is None:
+        await websocket.close(code=1012)
+        return
+    await runtime_websocket_session(websocket, client)
 
 
 async def _chat_session(websocket: WebSocket) -> None:

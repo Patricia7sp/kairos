@@ -605,11 +605,20 @@ def cmd_run(args) -> int:
                 model=getattr(args, "model", None),
                 as_json=getattr(args, "json", False),
                 quiet=getattr(args, "quiet", False),
+                idempotency_key=getattr(args, "idempotency_key", None),
             )
         )
     except ChatUsageError as exc:
         print(f"kairos: {exc}", file=sys.stderr)
         return ExitCode.USAGE
+
+
+def cmd_runtime(args) -> int:
+    import asyncio
+
+    from kairos_cli.runtime import run_runtime
+
+    return asyncio.run(run_runtime(home=_home(), args=args))
 
 
 def cmd_security(args) -> int:
@@ -646,6 +655,7 @@ def cmd_security(args) -> int:
 HANDLERS = {
     "run": cmd_run,
     "chat": cmd_run,
+    "runtime": cmd_runtime,
     "version": cmd_version,
     "status": cmd_status,
     "doctor": cmd_doctor,
