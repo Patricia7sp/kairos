@@ -195,6 +195,72 @@ async def test_cancel_timeout_keeps_quarantine_and_session_cannot_end(tmp_path):
         await service.aclose()
 
 
+@pytest.mark.parametrize(
+    "interrupt_behavior", ["missing_response", "transport_error", "terminal_without_response"]
+)
+@async_test
+async def test_cancel_bounds_interrupt_delivery_and_uses_independent_terminal_evidence(
+    tmp_path, monkeypatch, interrupt_behavior
+):
+    service, store, runtime = await setup_service(tmp_path, cancel_timeout=0.03)
+    interrupts = []
+
+    async def interrupt(session, external_turn_id):
+        interrupts.append(external_turn_id)
+        if interrupt_behavior == "transport_error":
+            raise RuntimeErrorInfo("transport", "interrupt response lost", True)
+        if interrupt_behavior == "terminal_without_response":
+            await runtime.events.put({"kind": "turn", "payload": {"state": "interrupted"}})
+        await asyncio.Future()
+
+    monkeypatch.setattr(runtime, "cancel_turn", interrupt)
+    try:
+        turn = await service.submit("s1", "hello", "key")
+        async for event in service.subscribe("s1"):
+            if event.kind == "turn_start":
+                break
+        async with asyncio.timeout(0.3):
+            if interrupt_behavior == "terminal_without_response":
+                await service.cancel("s1", turn)
+                assert (await store.get_turn(turn))["state"] == "cancelled"
+                assert (await store.get_turn(turn))["inactive_confirmed_at"] is not None
+                assert (await service.get("s1"))["state"] == "ready"
+            else:
+                with pytest.raises(RuntimeErrorInfo, match="cancel_partial"):
+                    await service.cancel("s1", turn)
+                assert (await store.get_turn(turn))["state"] == "interrupted"
+                assert (await store.get_turn(turn))["inactive_confirmed_at"] is None
+                assert await service.submit("s1", "hello", "key") == turn
+        assert interrupts == ["external-1"]
+        if interrupt_behavior == "transport_error":
+            assert runtime.inspections >= 1
+        elif interrupt_behavior == "missing_response":
+            assert runtime.inspections == 0
+    finally:
+        await service.aclose()
+
+
+@async_test
+async def test_cancel_shares_one_deadline_between_delivery_and_terminal_wait(tmp_path, monkeypatch):
+    service, store, runtime = await setup_service(tmp_path, cancel_timeout=0.2)
+
+    async def delayed_interrupt(session, external_turn_id):
+        await asyncio.sleep(0.12)
+
+    monkeypatch.setattr(runtime, "cancel_turn", delayed_interrupt)
+    try:
+        turn = await service.submit("s1", "hello", "key")
+        async for event in service.subscribe("s1"):
+            if event.kind == "turn_start":
+                break
+        async with asyncio.timeout(0.28):
+            with pytest.raises(RuntimeErrorInfo, match="cancel_partial"):
+                await service.cancel("s1", turn)
+        assert (await store.get_turn(turn))["state"] == "interrupted"
+    finally:
+        await service.aclose()
+
+
 @async_test
 async def test_cancel_waits_for_terminal_evidence_and_sets_cancelled(tmp_path):
     service, store, runtime = await setup_service(tmp_path)

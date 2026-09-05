@@ -76,6 +76,22 @@ async def test_attach_registers_before_resume_and_keeps_exact_recovered_turn(tmp
 
 
 @async_test
+async def test_terminal_attachment_snapshot_finishes_observer_without_notification(tmp_path):
+    runtime = await adapter(tmp_path, "attach-terminal-only")
+    active = session(tmp_path, thread_id="thread-1")
+    try:
+        snapshot = await runtime.attach_turn(active, "recovered-local", "external-turn-1")
+        assert snapshot.state == "completed"
+        async with asyncio.timeout(0.3):
+            events = [event async for event in runtime.observe(active, "recovered-local")]
+        assert [event["kind"] for event in events] == ["snapshot"]
+        assert events[0]["payload"]["items"][0]["text"] == "completed while attaching"
+        assert events[0]["generation"] == runtime.generation
+    finally:
+        await runtime.aclose()
+
+
+@async_test
 async def test_snapshot_barrier_precedes_delta_in_same_response_batch(tmp_path):
     from kairos_runtime.contracts import RuntimeEvent
     from kairos_runtime.recovery import TranscriptProjection

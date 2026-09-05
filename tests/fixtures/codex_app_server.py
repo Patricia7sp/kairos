@@ -91,6 +91,8 @@ def effective_result(params: dict[str, Any], thread_id: str) -> dict[str, Any]:
 
 
 pending_slow: int | str | None = None
+pending_interrupt: int | str | None = None
+interrupt_count = 0
 reply_count = 0
 last_thread_id = "thread-1"
 last_cwd = tempfile.gettempdir()
@@ -410,14 +412,37 @@ for raw_line in sys.stdin:
                     "thread": thread(
                         params["threadId"],
                         last_cwd,
-                        turns=[{"id": turn_id, "items": [], "status": turn_status}],
+                        turns=[
+                            {
+                                "id": turn_id,
+                                "items": [
+                                    {
+                                        "id": "i1",
+                                        "type": "agentMessage",
+                                        "text": "completed while attaching",
+                                    }
+                                ]
+                                if MODE == "attach-terminal-only"
+                                else [],
+                                "status": turn_status,
+                            }
+                        ],
                     )
                 },
             }
         )
     elif method in {"turn/interrupt", "thread/unsubscribe"}:
+        if method == "turn/interrupt" and MODE == "late-interrupt":
+            pending_interrupt = request_id
+            interrupt_count += 1
+            send({"method": "test/interruptPending", "params": {"threadId": params["threadId"]}})
+            continue
         result = {} if method == "turn/interrupt" else {"status": "unsubscribed"}
         send({"id": request_id, "result": result})
+    elif method == "release-interrupt":
+        send({"id": pending_interrupt, "result": {}})
+        pending_interrupt = None
+        send({"id": request_id, "result": {"interruptCount": interrupt_count}})
     elif request_id is not None and method is None:
         # Client reply to a server request.
         reply_count += 1

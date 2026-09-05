@@ -171,6 +171,8 @@ class CodexAppServerAdapter:
                     if deferred_terminal is not None:
                         yield deferred_terminal
                         return
+                    if observation.state in {"completed", "failed", "interrupted", "cancelled"}:
+                        return
                     continue
                 message_turn_id = self._message_turn_id(message)
                 if "id" in message and message.get("method") not in APPROVAL_METHODS:

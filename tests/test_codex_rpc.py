@@ -137,3 +137,21 @@ async def test_late_response_for_cancelled_call_does_not_poison_other_calls() ->
         assert await rpc.call("check/replies", {}) == {"replyCount": 0}
     finally:
         await close_process(process, rpc)
+
+
+@async_test
+async def test_timed_out_interrupt_late_response_is_drained_without_resend() -> None:
+    process, rpc = await rpc_process("late-interrupt")
+    subscription = rpc.subscribe("thread-1")
+    try:
+        interrupt = asyncio.create_task(
+            rpc.call("turn/interrupt", {"threadId": "thread-1", "turnId": "external-1"})
+        )
+        assert (await subscription.get())["method"] == "test/interruptPending"
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(interrupt, 0.01)
+        assert await rpc.call("release-interrupt", {}) == {"interruptCount": 1}
+        assert await rpc.call("check/replies", {}) == {"replyCount": 0}
+    finally:
+        rpc.unsubscribe(subscription)
+        await close_process(process, rpc)

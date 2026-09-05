@@ -120,6 +120,60 @@ async def test_active_recovery_adopts_fenced_lease_and_streams_without_resend(tm
 
 
 @async_test
+async def test_active_inspection_then_terminal_attachment_snapshot_finalizes_without_notification(
+    tmp_path, monkeypatch
+):
+    service, store, _runtime = await setup_service(tmp_path)
+    turn = await service.submit("s1", "hello", "key")
+    async for event in service.subscribe("s1"):
+        if event.kind == "turn_start":
+            break
+    await service.aclose()
+    recovered = FakeRuntime()
+    recovered.generation = "process-2"
+    recovered.snapshot = RuntimeObservation("active", "external-1", (), ())
+    completed = RuntimeObservation(
+        "completed",
+        "external-1",
+        ({"id": "i1", "type": "agentMessage", "text": "completed while attaching"},),
+        (),
+    )
+
+    async def completed_attach(session, turn_id, external_turn_id):
+        assert external_turn_id == "external-1"
+        await recovered.events.put(
+            {"kind": "text", "payload": {"itemId": "i1", "delta": "completed"}}
+        )
+        await recovered.events.put(
+            {"kind": "snapshot", "payload": {"state": completed.state, "items": completed.items}}
+        )
+        return completed
+
+    monkeypatch.setattr(recovered, "attach_turn", completed_attach)
+    next_service = AgentRuntimeService(
+        store,
+        recovered,
+        allowed_directories=(str(tmp_path),),
+        inactivity_confirmed=lambda generation: generation == "process-1",
+    )
+    try:
+        await next_service.recover()
+        async with asyncio.timeout(0.3):
+            async for event in next_service.subscribe("s1"):
+                if event.kind == "turn_end" and event.payload["state"] == "completed":
+                    assert event.payload["content"] == "completed while attaching"
+                    break
+            await asyncio.gather(*tuple(next_service._tasks.values()))
+        assert (await store.get_turn(turn))["inactive_confirmed_at"] is not None
+        assert (await next_service.get("s1"))["state"] == "ready"
+        assert recovered.starts == []
+        events = await store.events_after("s1", None)
+        assert [event.kind for event in events[-3:]] == ["text", "reconciled", "turn_end"]
+    finally:
+        await next_service.aclose()
+
+
+@async_test
 async def test_takeover_rejects_changed_owner_and_old_owner_cannot_write(tmp_path):
     service, store, _runtime = await setup_service(tmp_path)
     turn = await service.submit("s1", "hello", "key")

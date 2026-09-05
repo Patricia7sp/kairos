@@ -58,6 +58,7 @@ class AgentRuntimeService:
         self._changed: dict[str, asyncio.Event] = {}
         self._closed = False
         self._owners: dict[str, int] = {}
+        self._cancel_deadlines: dict[str, float] = {}
 
     def _lock(self, session_id):
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -264,25 +265,9 @@ class AgentRuntimeService:
                 raise RuntimeErrorInfo("invalid_event", "correlação de evento inválida", False)
             kind, payload = raw["kind"], json_value(raw["payload"])
             if kind == "turn" and payload["state"] != "active":
-                state = payload["state"]
-                if (
-                    state == "interrupted"
-                    and (await self.store.get_turn(turn_id))["state"] == "cancelling"
-                ):
-                    state = "cancelled"
-                await self._owned(
-                    turn_id,
-                    lease_generation,
-                    "finish",
-                    turn_id,
-                    state,
-                    projection.content,
-                    projection.usage,
+                await self._finish_observed(
+                    session, turn_id, lease_generation, payload["state"], projection
                 )
-                await self.leases.release(
-                    turn_id, self._holder, lease_generation, confirmed_inactive=True
-                )
-                self._wake(session.session_id)
                 return
             if kind == "approval":
                 await self._owned(
@@ -309,8 +294,33 @@ class AgentRuntimeService:
                     turn_id, lease_generation, "append", turn_id, event_id, kind, payload
                 )
                 projection.apply(event)
+                if raw["kind"] == "snapshot" and observation.state in {
+                    "completed",
+                    "failed",
+                    "interrupted",
+                    "cancelled",
+                }:
+                    await self._finish_observed(
+                        session, turn_id, lease_generation, observation.state, projection
+                    )
+                    return
             self._wake(session.session_id)
         raise RuntimeErrorInfo("transport", "observação de runtime encerrada", True)
+
+    async def _finish_observed(self, session, turn_id, lease_generation, state, projection):
+        if state == "interrupted" and (await self.store.get_turn(turn_id))["state"] == "cancelling":
+            state = "cancelled"
+        await self._owned(
+            turn_id,
+            lease_generation,
+            "finish",
+            turn_id,
+            state,
+            projection.content,
+            projection.usage,
+        )
+        await self.leases.release(turn_id, self._holder, lease_generation, confirmed_inactive=True)
+        self._wake(session.session_id)
 
     async def _lost(self, turn_id):
         turn = await self.store.get_turn(turn_id)
@@ -353,10 +363,18 @@ class AgentRuntimeService:
 
     async def _inspect_loss(self, turn):
         """Inspect a failed observation once; uncertain sends are never dispatched again."""
+        deadline = self._cancel_deadlines.get(turn["id"])
+        timeout = self._cancel_timeout
+        if deadline is not None:
+            timeout = min(timeout, deadline - asyncio.get_running_loop().time())
+            if timeout <= 0:
+                return
         try:
             session = await self._authorize(turn["session_id"])
+            if deadline is not None:
+                timeout = max(0, deadline - asyncio.get_running_loop().time())
             snapshot = await asyncio.wait_for(
-                self.runtime.inspect_turn(session, turn["external_turn_id"]), self._cancel_timeout
+                self.runtime.inspect_turn(session, turn["external_turn_id"]), timeout
             )
             if snapshot.state == "missing":
                 raise RuntimeErrorInfo("thread_missing", "thread de runtime ausente", False)
@@ -506,20 +524,53 @@ class AgentRuntimeService:
                     "cancel_partial", "cancelamento ainda não confirmado", False
                 ) from exc
             self._wake(session_id)
-            await self.runtime.cancel_turn(
-                await self.store.get_session(session_id), turn["external_turn_id"]
-            )
-        task = self._tasks.get(turn_id)
-        if task:
-            try:
-                await asyncio.wait_for(asyncio.shield(task), self._cancel_timeout)
-            except TimeoutError:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+            await self._wait_cancellation(turn, send_interrupt=turn["state"] != "cancelling")
         turn = await self.store.get_turn(turn_id)
         if turn["state"] not in {"completed", "failed", "cancelled"}:
-            await self._lost(turn_id)
             raise RuntimeErrorInfo("cancel_partial", "cancelamento ainda não confirmado", False)
+
+    async def _wait_cancellation(self, turn, *, send_interrupt):
+        """One deadline covers RPC delivery, terminal evidence and bounded reconciliation."""
+        turn_id = turn["id"]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._cancel_timeout
+        self._cancel_deadlines[turn_id] = deadline
+        runner = self._tasks.get(turn_id)
+        interrupt = None
+        try:
+            if send_interrupt:
+                session = await self.store.get_session(turn["session_id"])
+                interrupt = asyncio.create_task(
+                    self.runtime.cancel_turn(session, turn["external_turn_id"])
+                )
+            waiters = {task for task in (interrupt, runner) if task is not None}
+            if waiters:
+                done, _pending = await asyncio.wait(
+                    waiters,
+                    timeout=max(0, deadline - loop.time()),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if (
+                    interrupt in done
+                    and not interrupt.cancelled()
+                    and interrupt.exception() is not None
+                    and (runner is None or not runner.done())
+                ):
+                    await self._inspect_loss(turn)
+                if runner is not None and not runner.done():
+                    await asyncio.wait({runner}, timeout=max(0, deadline - loop.time()))
+            if runner is None:
+                await self._lost(turn_id)
+        finally:
+            # Cancelling the pending call marks its RPC id abandoned; a late response
+            # is drained by CodexRpc without a retry or poisoning later calls.
+            for task in (interrupt, runner):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (interrupt, runner) if task is not None), return_exceptions=True
+            )
+            self._cancel_deadlines.pop(turn_id, None)
 
     async def end(self, session_id: str) -> None:
         while True:
