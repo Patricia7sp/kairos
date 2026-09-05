@@ -67,6 +67,7 @@ from typing import Any, Literal, Protocol
 Sandbox = Literal["read_only", "workspace_write", "broad_access"]
 Decision = Literal["accept", "decline"]
 
+
 @dataclass(frozen=True)
 class RuntimeSession:
     session_id: str
@@ -75,10 +76,12 @@ class RuntimeSession:
     sandbox: Sandbox
     external_thread_id: str | None = None
 
+
 @dataclass(frozen=True)
 class RuntimeCapabilities:
     protocol_version: int
     features: frozenset[str]
+
 
 @dataclass(frozen=True)
 class RuntimeEvent:
@@ -91,6 +94,7 @@ class RuntimeEvent:
     kind: str
     payload: Mapping[str, Any]
 
+
 @dataclass(frozen=True)
 class RuntimeObservation:
     state: str  # active, completed, failed, cancelled, missing, unknown
@@ -98,16 +102,23 @@ class RuntimeObservation:
     items: tuple[Mapping[str, Any], ...]
     pending_requests: tuple[Mapping[str, Any], ...]
 
+
 class AgentRuntimeProtocol(Protocol):
     async def capabilities(self) -> RuntimeCapabilities: ...
     async def create_thread(self, session: RuntimeSession) -> str: ...
     async def resume_thread(self, session: RuntimeSession) -> RuntimeObservation: ...
     async def start_turn(self, session: RuntimeSession, turn_id: str, content: str) -> str: ...
-    def observe(self, session: RuntimeSession, turn_id: str) -> AsyncIterator[Mapping[str, Any]]: ...
+    def observe(
+        self, session: RuntimeSession, turn_id: str
+    ) -> AsyncIterator[Mapping[str, Any]]: ...
     async def cancel_turn(self, session: RuntimeSession, external_turn_id: str) -> None: ...
     async def respond_approval(self, request_id: str, decision: Decision) -> None: ...
-    async def inspect_turn(self, session: RuntimeSession, external_turn_id: str | None) -> RuntimeObservation: ...
-    async def reconcile(self, session: RuntimeSession, cursor: str | None) -> RuntimeObservation: ...
+    async def inspect_turn(
+        self, session: RuntimeSession, external_turn_id: str | None
+    ) -> RuntimeObservation: ...
+    async def reconcile(
+        self, session: RuntimeSession, cursor: str | None
+    ) -> RuntimeObservation: ...
     async def end_thread(self, session: RuntimeSession) -> None: ...
     async def aclose(self) -> None: ...
 ```
