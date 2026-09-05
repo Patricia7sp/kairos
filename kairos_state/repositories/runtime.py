@@ -22,6 +22,7 @@ from kairos_runtime.policy import (
     revalidate_directory_identity,
     validate_sandbox,
 )
+from kairos_runtime.redaction import sanitize_payload
 from kairos_state.writes import is_busy_error
 
 __all__ = ["RuntimeRepository"]
@@ -357,7 +358,7 @@ class RuntimeRepository:
         """Append inside the caller's transaction; never publish before its commit."""
         if any(not isinstance(value, str) or not value for value in (turn_id, event_id, kind)):
             raise _error("invalid_event", "evento inválido")
-        payload_snapshot = _snapshot_json(payload)
+        payload_snapshot = _snapshot_json(sanitize_payload(kind, dict(payload)))
         if not isinstance(payload_snapshot, Mapping):
             raise _error("invalid_event", "payload de evento inválido")
         payload_json = _json_dump(payload_snapshot)
@@ -588,6 +589,7 @@ class RuntimeRepository:
         external_item_id: str | None,
         request: dict,
     ) -> str:
+        request = sanitize_payload("approval", request)
         with self._transaction():
             existing = self._conn.execute(
                 "SELECT * FROM runtime_approvals WHERE process_generation=? AND external_request_id=?",

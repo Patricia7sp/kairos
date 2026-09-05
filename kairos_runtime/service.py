@@ -25,6 +25,7 @@ from .policy import (
     validate_sandbox,
 )
 from .recovery import TranscriptProjection, json_value, reconciliation
+from .redaction import sanitize_payload
 from .store import RuntimeStore
 
 
@@ -314,7 +315,8 @@ class AgentRuntimeService:
                 or raw.get("external_turn_id") != turn["external_turn_id"]
             ):
                 raise RuntimeErrorInfo("invalid_event", "correlação de evento inválida", False)
-            kind, payload = raw["kind"], json_value(raw["payload"])
+            kind = raw["kind"]
+            payload = sanitize_payload(kind, json_value(raw["payload"]))
             if kind == "turn" and payload["state"] != "active":
                 await self._finish_observed(
                     session, turn_id, lease_generation, payload["state"], projection
@@ -650,6 +652,11 @@ class AgentRuntimeService:
                     return
             for turn in turns:
                 await self.cancel(session_id, turn["id"])
+
+    async def ensure_account_idle(self) -> None:
+        """Refuse account mutation while any durable work may still execute."""
+        if await self.store.nonterminal_turns():
+            raise RuntimeErrorInfo("session_busy", "runtime possui trabalho pendente", True)
 
     async def recover(self) -> None:  # noqa: PLR0912 - explicit recovery branches preserve uncertainty boundaries
         for turn in await self.store.terminal_without_event():

@@ -30,6 +30,28 @@ RESTART_BACKOFF_SECONDS = (1, 2, 4, 8, 16, 30)
 MAX_RESTART_ATTEMPTS = 5
 STDERR_DIAGNOSTIC_LIMIT = 64 * 1024
 
+_AUTH_ENVIRONMENT_KEYS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AZURE_OPENAI_API_KEY",
+        "CODEX_API_KEY",
+        "GEMINI_API_KEY",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GOOGLE_API_KEY",
+        "GROQ_API_KEY",
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "KAIROS_WEB_TOKEN",
+        "MISTRAL_API_KEY",
+        "OPENAI_API_KEY",
+        "XAI_API_KEY",
+    }
+)
+
 
 SubprocessFactory = Callable[..., Awaitable[asyncio.subprocess.Process]]
 
@@ -149,8 +171,7 @@ class CodexSupervisor:
     async def _launch(self) -> CodexRpc:
         await self._preflight_version()
         generation = self._generation_factory()
-        environment = os.environ.copy()
-        environment["CODEX_HOME"] = self._codex_home
+        environment = _runtime_environment(self._codex_home)
         try:
             process_or_awaitable = self._subprocess_exec(
                 *self._command,
@@ -199,8 +220,7 @@ class CodexSupervisor:
     async def _preflight_version(self) -> None:
         if self._version_validated:
             return
-        environment = os.environ.copy()
-        environment["CODEX_HOME"] = self._codex_home
+        environment = _runtime_environment(self._codex_home)
         try:
             process_or_awaitable = self._subprocess_exec(
                 *self._version_command,
@@ -346,3 +366,14 @@ class CodexSupervisor:
             observed += counted
             if counted:
                 self._logger.warning("codex_stderr category=%s bytes=%d", "diagnostic", counted)
+
+
+def _runtime_environment(codex_home: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _AUTH_ENVIRONMENT_KEYS
+        and not key.endswith(("_API_KEY", "_AUTH_TOKEN", "_ACCESS_TOKEN", "_SESSION_TOKEN"))
+    }
+    environment["CODEX_HOME"] = codex_home
+    return environment

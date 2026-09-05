@@ -1,5 +1,6 @@
 """Tipos e políticas públicas do Agent Runtime Kairos."""
 
+from .auth import RuntimeAuth
 from .client import RuntimeClient
 from .codex_adapter import CodexAppServerAdapter
 from .codex_rpc import CodexRpc
@@ -28,6 +29,7 @@ from .policy import (
     revalidate_directory_identity,
     validate_sandbox,
 )
+from .redaction import public_error, sanitize_payload
 from .service import AgentRuntimeService
 from .store import RuntimeStore
 from .supervisor import CodexSupervisor
@@ -46,6 +48,7 @@ __all__ = [
     "CodexSupervisor",
     "Decision",
     "DirectoryIdentity",
+    "RuntimeAuth",
     "RuntimeCapabilities",
     "RuntimeClient",
     "RuntimeErrorInfo",
@@ -59,8 +62,10 @@ __all__ = [
     "capture_directory_identity",
     "json_value",
     "negotiate",
+    "public_error",
     "revalidate_directory_identity",
     "runtime_event_to_json",
+    "sanitize_payload",
     "serve_runtime",
     "validate_sandbox",
 ]

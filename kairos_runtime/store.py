@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from kairos_runtime.contracts import RuntimeCapabilities, RuntimeEvent, RuntimeSession
+from kairos_runtime.redaction import sanitize_payload
 
 __all__ = ["RuntimeStore"]
 
@@ -85,7 +86,8 @@ class RuntimeStore:
     async def append(
         self, turn_id: str, event_id: str, kind: str, payload: Mapping[str, Any]
     ) -> RuntimeEvent:
-        return await self._call(lambda repo: repo.append(turn_id, event_id, kind, payload))
+        safe = sanitize_payload(kind, dict(payload))
+        return await self._call(lambda repo: repo.append(turn_id, event_id, kind, safe))
 
     async def events_after(self, session_id: str, cursor: str | None) -> tuple[RuntimeEvent, ...]:
         return await self._call(lambda repo: repo.events_after(session_id, cursor))

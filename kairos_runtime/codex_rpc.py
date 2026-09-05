@@ -9,7 +9,7 @@ from typing import Any
 
 from .errors import RuntimeErrorInfo
 
-__all__ = ["CodexRpc", "CodexSubscription"]
+__all__ = ["CodexAccountSubscription", "CodexRpc", "CodexSubscription"]
 
 
 MAX_FRAME_BYTES = 1024 * 1024
@@ -26,6 +26,21 @@ class CodexSubscription:
     rpc: CodexRpc
     generation: str
     thread_id: str
+    queue: asyncio.Queue[dict[str, Any] | RuntimeErrorInfo] = field(default_factory=asyncio.Queue)
+
+    async def get(self) -> dict[str, Any]:
+        message = await self.queue.get()
+        if isinstance(message, RuntimeErrorInfo):
+            raise message
+        return message
+
+
+@dataclass(eq=False)
+class CodexAccountSubscription:
+    """Generation-bound stream of account notifications only."""
+
+    rpc: CodexRpc
+    generation: str
     queue: asyncio.Queue[dict[str, Any] | RuntimeErrorInfo] = field(default_factory=asyncio.Queue)
 
     async def get(self) -> dict[str, Any]:
@@ -55,6 +70,7 @@ class CodexRpc:
         self._snapshot_barriers: dict[int, CodexSubscription] = {}
         self._abandoned: set[int] = set()
         self._subscriptions: set[CodexSubscription] = set()
+        self._account_subscriptions: set[CodexAccountSubscription] = set()
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._next_id = 1
         self._reader_task: asyncio.Task[None] | None = None
@@ -73,8 +89,16 @@ class CodexRpc:
             subscription.queue.put_nowait(self._closed_error)
         return subscription
 
-    def unsubscribe(self, subscription: CodexSubscription) -> None:
+    def subscribe_account(self) -> CodexAccountSubscription:
+        subscription = CodexAccountSubscription(self, self.generation)
+        self._account_subscriptions.add(subscription)
+        if self._closed_error is not None:
+            subscription.queue.put_nowait(self._closed_error)
+        return subscription
+
+    def unsubscribe(self, subscription: CodexSubscription | CodexAccountSubscription) -> None:
         self._subscriptions.discard(subscription)
+        self._account_subscriptions.discard(subscription)
 
     async def call(
         self,
@@ -194,6 +218,11 @@ class CodexRpc:
             raise _transport()
         if "id" in message:
             self._validate_request_id(message["id"])
+        if method in {"account/login/completed", "account/updated"} and "id" not in message:
+            copied = dict(message)
+            for subscription in tuple(self._account_subscriptions):
+                subscription.queue.put_nowait(copied)
+            return
         thread_id = params.get("threadId")
         if not isinstance(thread_id, str):
             if "id" in message:
@@ -267,6 +296,8 @@ class CodexRpc:
             if not future.done():
                 future.set_exception(error)
         for subscription in tuple(self._subscriptions):
+            subscription.queue.put_nowait(error)
+        for subscription in tuple(self._account_subscriptions):
             subscription.queue.put_nowait(error)
 
     @staticmethod

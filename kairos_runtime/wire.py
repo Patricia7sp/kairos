@@ -10,6 +10,7 @@ from typing import Any
 
 from .contracts import RuntimeEvent
 from .errors import RuntimeErrorInfo
+from .redaction import sanitize_payload
 
 __all__ = ["MAX_MESSAGE_BYTES", "json_value", "runtime_event_to_json"]
 
@@ -46,7 +47,7 @@ def runtime_event_to_json(event: RuntimeEvent) -> dict[str, Any]:
         "sequence": event.sequence,
         "cursor": event.cursor,
         "kind": event.kind,
-        "payload": json_value(event.payload),
+        "payload": sanitize_payload(event.kind, json_value(event.payload)),
     }
 
 

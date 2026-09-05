@@ -14,8 +14,10 @@ from typing import Any
 
 import yaml
 
+from .auth import RuntimeAuth
 from .codex_adapter import CodexAppServerAdapter
 from .errors import RuntimeErrorInfo
+from .redaction import public_error
 from .service import AgentRuntimeService
 from .store import RuntimeStore
 from .supervisor import CodexSupervisor
@@ -40,6 +42,8 @@ _METHODS = frozenset(
     }
 )
 
+_SAFE_DETAILED_ERRORS = frozenset({("invalid_event", "mensagem de runtime excede o limite", False)})
+
 # An uncertain cleanup must keep both the original flock and the supervisor
 # object reachable. Process supervision can then fail closed instead of
 # silently allowing a second host beside a possibly-live child.
@@ -56,11 +60,18 @@ class _Config:
 
 class _Host:
     def __init__(
-        self, *, config: _Config | None, service=None, supervisor=None, startup_error=None
+        self,
+        *,
+        config: _Config | None,
+        service=None,
+        supervisor=None,
+        auth=None,
+        startup_error=None,
     ) -> None:
         self.config = config
         self.service = service
         self.supervisor = supervisor
+        self.auth = auth
         self.startup_error = startup_error
         self.accepting = True
         self.running = True
@@ -122,7 +133,7 @@ class _Host:
                 return {"enabled": True, "state": "unavailable"}
             return {"enabled": True, "state": "ready"}
         if method.startswith("account."):
-            raise RuntimeErrorInfo("unavailable", "operações de conta indisponíveis", False)
+            return await self._dispatch_account(method, params)
         # Fail immediately while recovery owns the mutation fence, then verify
         # readiness again after acquiring it to close the child-exit race.
         self._available_service()
@@ -150,6 +161,25 @@ class _Host:
                 return None
             if method == "approval.decide":
                 await service.decide(**_exact(params, {"session_id", "approval_id", "decision"}))
+                return None
+        raise RuntimeErrorInfo("invalid_event", "requisição de runtime inválida", False)
+
+    async def _dispatch_account(self, method: str, params: dict[str, Any]) -> Any:
+        self._available_service()
+        async with self.mutations:
+            service = self._available_service()
+            auth = self._available_auth()
+            if method == "account.status":
+                return await auth.status(**_exact(params, set()))
+            if method == "account.login":
+                return await auth.login(**_exact(params, {"mode"}, {"api_key"}))
+            if method == "account.cancel":
+                await auth.cancel(**_exact(params, {"login_id"}))
+                return None
+            if method == "account.logout":
+                _exact(params, set())
+                await service.ensure_account_idle()
+                await auth.logout()
                 return None
         raise RuntimeErrorInfo("invalid_event", "requisição de runtime inválida", False)
 
@@ -190,6 +220,11 @@ class _Host:
             raise RuntimeErrorInfo("unavailable", "host de runtime indisponível", True)
         return self.service
 
+    def _available_auth(self):
+        if self.auth is None:
+            raise RuntimeErrorInfo("unavailable", "operações de conta indisponíveis", False)
+        return self.auth
+
     def _runtime_ready(self) -> bool:
         if not self.accepting or self.service is None:
             return False
@@ -224,6 +259,7 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
         raise
     supervisor = None
     service = None
+    auth = None
     server = None
     monitor = None
     config = None
@@ -245,6 +281,7 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                     raise
                 await supervisor.start()
                 runtime = CodexAppServerAdapter(supervisor)
+                auth = RuntimeAuth(supervisor.rpc)
                 service = AgentRuntimeService(
                     RuntimeStore(canonical_home / "state.db"),
                     runtime,
@@ -257,6 +294,9 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                 await service.recover()
         except Exception as exc:  # noqa: BLE001 - status evita restart loop
             startup_error = _public_error(exc)
+            if auth is not None:
+                await auth.aclose()
+                auth = None
             if service is not None:
                 await service.aclose()
                 service = None
@@ -267,6 +307,7 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
             config=config,
             service=service,
             supervisor=supervisor,
+            auth=auth,
             startup_error=startup_error,
         )
         if service is not None and supervisor is not None:
@@ -291,6 +332,8 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
             await asyncio.gather(monitor, return_exceptions=True)
         close_error = None
         try:
+            if auth is not None:
+                await auth.aclose()
             if service is not None:
                 await service.aclose()
             elif supervisor is not None:
@@ -327,6 +370,8 @@ async def _monitor_runtime(host: _Host, supervisor, service) -> None:
             async with host.mutations:
                 await service.pause_runtime(generation)
                 await supervisor.restart()
+                if host.auth is not None:
+                    await host.auth.replace_rpc(supervisor.rpc)
                 await service.recover()
                 service.resume_runtime()
         except asyncio.CancelledError:
@@ -442,6 +487,16 @@ def _exact(
 
 
 def _public_error(exc: BaseException) -> RuntimeErrorInfo:
-    if isinstance(exc, RuntimeErrorInfo):
+    if (
+        isinstance(exc, RuntimeErrorInfo)
+        and (
+            exc.code,
+            exc.message,
+            exc.retryable,
+        )
+        in _SAFE_DETAILED_ERRORS
+    ):
         return exc
-    return RuntimeErrorInfo("runtime_internal", "falha interna do runtime", False)
+    code = exc.code if isinstance(exc, RuntimeErrorInfo) else "runtime_internal"
+    safe = public_error(code)
+    return RuntimeErrorInfo(safe["code"], safe["message"], safe["retryable"])
