@@ -144,6 +144,12 @@ def test_observation_from_json_freezes_item_collections() -> None:
         observation.pending_requests[0]["request_id"] = "changed"  # type: ignore[index]
 
 
+def test_interrupted_is_a_valid_inconclusive_observation_state() -> None:
+    observation = RuntimeObservation("interrupted", "turn-1", (), ())
+
+    assert observation.state == "interrupted"
+
+
 @pytest.mark.parametrize(
     "payload",
     [

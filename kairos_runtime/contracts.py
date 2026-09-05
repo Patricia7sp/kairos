@@ -26,7 +26,7 @@ Decision = Literal["accept", "decline"]
 
 _SANDBOXES = frozenset({"read_only", "workspace_write", "broad_access"})
 _OBSERVATION_STATES = frozenset(
-    {"active", "completed", "failed", "cancelled", "missing", "unknown"}
+    {"active", "completed", "failed", "interrupted", "cancelled", "missing", "unknown"}
 )
 
 
