@@ -8,13 +8,20 @@ import math
 import sqlite3
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
 
 from kairos_runtime.contracts import RuntimeCapabilities, RuntimeEvent, RuntimeSession
 from kairos_runtime.errors import RuntimeErrorInfo
-from kairos_runtime.policy import capture_directory_identity, negotiate, validate_sandbox
+from kairos_runtime.policy import (
+    DirectoryIdentity,
+    capture_directory_identity,
+    negotiate,
+    revalidate_directory_identity,
+    validate_sandbox,
+)
+from kairos_state.writes import is_busy_error
 
 __all__ = ["RuntimeRepository"]
 
@@ -35,7 +42,9 @@ def _json_value(value: Any) -> Any:
 
 def _json_dump(value: Any) -> str:
     try:
-        return json.dumps(_json_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            _json_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
     except (TypeError, ValueError) as exc:
         raise _error("invalid_event", "payload de evento inválido") from exc
 
@@ -307,6 +316,335 @@ class RuntimeRepository:
             (session_id, start),
         ).fetchall()
         return tuple(self._event(row) for row in rows)
+
+    def enqueue_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
+        try:
+            self._begin()
+            now = clock()
+            row = self._conn.execute(
+                "SELECT t.state,r.canonical_cwd FROM runtime_turns t "
+                "JOIN runtime_sessions r ON r.session_id=t.session_id WHERE t.id=?",
+                (turn_id,),
+            ).fetchone()
+            if row is None:
+                raise _error("unavailable", "turno de runtime indisponível")
+            existing = self._conn.execute(
+                "SELECT state FROM runtime_queue WHERE turn_id=?", (turn_id,)
+            ).fetchone()
+            if existing is None:
+                if row["state"] != "queued":
+                    raise _error("invalid_event", "turno não pode entrar na fila")
+                self._conn.execute(
+                    "INSERT INTO runtime_queue(turn_id,canonical_cwd,state,created_at,updated_at) "
+                    "VALUES (?,?,'waiting',?,?)",
+                    (turn_id, row["canonical_cwd"], now, now),
+                )
+            elif existing["state"] != "waiting":
+                raise _error("invalid_event", "turno já saiu da fila")
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+
+    def claim_runtime_turn(
+        self, turn_id: str, holder: str, ttl: float, clock: Callable[[], float]
+    ) -> int | None:
+        try:
+            self._begin()
+            now = clock()
+            turn = self._conn.execute(
+                "SELECT t.session_id,t.state AS turn_state,q.state AS queue_state,q.ticket,"
+                "r.requested_cwd,r.canonical_cwd,r.directory_device,r.directory_inode "
+                "FROM runtime_turns t JOIN runtime_sessions r ON r.session_id=t.session_id "
+                "LEFT JOIN runtime_queue q ON q.turn_id=t.id WHERE t.id=?",
+                (turn_id,),
+            ).fetchone()
+            if turn is None:
+                raise _error("unavailable", "turno de runtime indisponível")
+            if turn["turn_state"] != "queued" or turn["queue_state"] != "waiting":
+                self._conn.rollback()
+                return None
+            first = self._conn.execute(
+                "SELECT ticket FROM runtime_queue "
+                "WHERE canonical_cwd=? AND state='waiting' ORDER BY ticket LIMIT 1",
+                (turn["canonical_cwd"],),
+            ).fetchone()
+            if first is None or first["ticket"] != turn["ticket"]:
+                self._conn.rollback()
+                return None
+
+            identity = DirectoryIdentity(
+                requested_path=turn["requested_cwd"],
+                canonical_path=turn["canonical_cwd"],
+                device=int(turn["directory_device"]),
+                inode=int(turn["directory_inode"]),
+            )
+            revalidate_directory_identity(identity)
+            directory = self._conn.execute(
+                "SELECT * FROM runtime_directory_leases WHERE canonical_cwd=?",
+                (turn["canonical_cwd"],),
+            ).fetchone()
+            if directory is not None and directory["quarantined"]:
+                self._conn.rollback()
+                return None
+            if directory is not None and directory["expires_at"] > now:
+                self._conn.rollback()
+                return None
+            if directory is not None and self._quarantine_if_uncertain(directory, now):
+                self._conn.commit()
+                return None
+
+            session_lease = self._conn.execute(
+                "SELECT holder,expires_at FROM session_turn_leases WHERE conversation_id=?",
+                (turn["session_id"],),
+            ).fetchone()
+            if (
+                session_lease is not None
+                and session_lease["expires_at"] is not None
+                and session_lease["expires_at"] > now
+            ):
+                self._conn.rollback()
+                return None
+
+            expires_at = now + ttl
+            self._conn.execute(
+                "INSERT INTO session_turn_leases(conversation_id,holder,acquired_at,expires_at) "
+                "VALUES (?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET "
+                "holder=excluded.holder,acquired_at=excluded.acquired_at,"
+                "expires_at=excluded.expires_at",
+                (turn["session_id"], holder, now, expires_at),
+            )
+            generation = 1 if directory is None else int(directory["generation"]) + 1
+            self._conn.execute(
+                "INSERT INTO runtime_directory_leases("
+                "canonical_cwd,turn_id,holder,generation,acquired_at,expires_at,quarantined,"
+                "created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?) "
+                "ON CONFLICT(canonical_cwd) DO UPDATE SET "
+                "turn_id=excluded.turn_id,holder=excluded.holder,generation=excluded.generation,"
+                "acquired_at=excluded.acquired_at,expires_at=excluded.expires_at,"
+                "quarantined=0,updated_at=excluded.updated_at",
+                (
+                    turn["canonical_cwd"],
+                    turn_id,
+                    holder,
+                    generation,
+                    now,
+                    expires_at,
+                    now,
+                    now,
+                ),
+            )
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='active',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_turns SET state='starting',updated_at=? WHERE id=?",
+                (now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='running',updated_at=? WHERE session_id=?",
+                (now, turn["session_id"]),
+            )
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if is_busy_error(exc):
+                return None
+            raise
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+            return generation
+
+    def renew_runtime_turn(
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        ttl: float,
+        clock: Callable[[], float],
+    ) -> bool:
+        try:
+            self._begin()
+            now = clock()
+            row = self._conn.execute(
+                "SELECT d.canonical_cwd,t.session_id FROM runtime_directory_leases d "
+                "JOIN runtime_turns t ON t.id=d.turn_id "
+                "JOIN session_turn_leases s ON s.conversation_id=t.session_id "
+                "WHERE d.turn_id=? AND d.holder=? AND d.generation=? "
+                "AND d.quarantined=0 AND d.expires_at>? "
+                "AND s.holder=? AND s.expires_at>?",
+                (turn_id, holder, generation, now, holder, now),
+            ).fetchone()
+            if row is None:
+                self._conn.rollback()
+                return False
+            expires_at = now + ttl
+            self._conn.execute(
+                "UPDATE runtime_directory_leases SET expires_at=?,updated_at=? "
+                "WHERE canonical_cwd=? AND holder=? AND generation=?",
+                (expires_at, now, row["canonical_cwd"], holder, generation),
+            )
+            self._conn.execute(
+                "UPDATE session_turn_leases SET expires_at=? WHERE conversation_id=? AND holder=?",
+                (expires_at, row["session_id"], holder),
+            )
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if is_busy_error(exc):
+                return False
+            raise
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+            return True
+
+    def release_runtime_turn(
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        clock: Callable[[], float],
+    ) -> bool:
+        try:
+            self._begin()
+            now = clock()
+            row = self._conn.execute(
+                "SELECT d.canonical_cwd,t.session_id,t.state,d.quarantined "
+                "FROM runtime_directory_leases d JOIN runtime_turns t ON t.id=d.turn_id "
+                "WHERE d.turn_id=? AND d.holder=? AND d.generation=?",
+                (turn_id, holder, generation),
+            ).fetchone()
+            if row is None or row["state"] not in {"completed", "failed", "cancelled"}:
+                self._conn.rollback()
+                return False
+            self._conn.execute(
+                "UPDATE runtime_directory_leases SET expires_at=?,quarantined=0,updated_at=? "
+                "WHERE canonical_cwd=? AND holder=? AND generation=?",
+                (now, now, row["canonical_cwd"], holder, generation),
+            )
+            self._conn.execute(
+                "UPDATE session_turn_leases SET holder=NULL,acquired_at=NULL,expires_at=NULL "
+                "WHERE conversation_id=? AND holder=?",
+                (row["session_id"], holder),
+            )
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='done',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='ready',updated_at=? WHERE session_id=?",
+                (now, row["session_id"]),
+            )
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if is_busy_error(exc):
+                return False
+            raise
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+            return True
+
+    def _quarantine_if_uncertain(self, directory: sqlite3.Row, now: float) -> bool:
+        previous = self._conn.execute(
+            "SELECT t.state,t.session_id FROM runtime_turns t WHERE t.id=?",
+            (directory["turn_id"],),
+        ).fetchone()
+        if previous is not None and previous["state"] in {
+            "completed",
+            "failed",
+            "cancelled",
+        }:
+            return False
+        if previous is not None:
+            self._conn.execute(
+                "UPDATE runtime_turns SET state='recovering',updated_at=? WHERE id=?",
+                (now, directory["turn_id"]),
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='recovering',updated_at=? WHERE session_id=?",
+                (now, previous["session_id"]),
+            )
+        self._conn.execute(
+            "UPDATE runtime_directory_leases SET quarantined=1,updated_at=? WHERE canonical_cwd=?",
+            (now, directory["canonical_cwd"]),
+        )
+        return True
+
+    def quarantine_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
+        try:
+            self._begin()
+            now = clock()
+            row = self._conn.execute(
+                "SELECT d.canonical_cwd,d.holder,t.session_id FROM runtime_directory_leases d "
+                "JOIN runtime_turns t ON t.id=d.turn_id WHERE d.turn_id=?",
+                (turn_id,),
+            ).fetchone()
+            if row is None:
+                raise _error("unavailable", "lease de runtime indisponível")
+            self._conn.execute(
+                "UPDATE runtime_directory_leases SET quarantined=1,expires_at=?,updated_at=? "
+                "WHERE canonical_cwd=?",
+                (now, now, row["canonical_cwd"]),
+            )
+            self._conn.execute(
+                "UPDATE session_turn_leases SET expires_at=? WHERE conversation_id=? AND holder=?",
+                (now, row["session_id"], row["holder"]),
+            )
+            self._conn.execute(
+                "UPDATE runtime_turns SET state='recovering',updated_at=? WHERE id=?",
+                (now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='recovering',updated_at=? WHERE session_id=?",
+                (now, row["session_id"]),
+            )
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='recovering',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+
+    def cancel_queued_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> bool:
+        try:
+            self._begin()
+            now = clock()
+            cursor = self._conn.execute(
+                "UPDATE runtime_turns SET state='cancelled',updated_at=? "
+                "WHERE id=? AND state='queued' AND EXISTS ("
+                "SELECT 1 FROM runtime_queue WHERE turn_id=? AND state='waiting')",
+                (now, turn_id, turn_id),
+            )
+            if cursor.rowcount == 0:
+                self._conn.rollback()
+                return False
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='cancelled',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+        except sqlite3.OperationalError as exc:
+            self._conn.rollback()
+            if is_busy_error(exc):
+                return False
+            raise
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+            return True
 
     def _event(self, row: sqlite3.Row) -> RuntimeEvent:
         return RuntimeEvent(

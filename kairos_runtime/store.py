@@ -57,10 +57,41 @@ class RuntimeStore:
     ) -> RuntimeEvent:
         return await self._call(lambda repo: repo.append(turn_id, event_id, kind, payload))
 
-    async def events_after(
-        self, session_id: str, cursor: str | None
-    ) -> tuple[RuntimeEvent, ...]:
+    async def events_after(self, session_id: str, cursor: str | None) -> tuple[RuntimeEvent, ...]:
         return await self._call(lambda repo: repo.events_after(session_id, cursor))
+
+    async def enqueue_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
+        await self._call(lambda repo: repo.enqueue_runtime_turn(turn_id, clock))
+
+    async def claim_runtime_turn(
+        self, turn_id: str, holder: str, ttl: float, clock: Callable[[], float]
+    ) -> int | None:
+        return await self._call(lambda repo: repo.claim_runtime_turn(turn_id, holder, ttl, clock))
+
+    async def renew_runtime_turn(
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        ttl: float,
+        clock: Callable[[], float],
+    ) -> bool:
+        return await self._call(
+            lambda repo: repo.renew_runtime_turn(turn_id, holder, generation, ttl, clock)
+        )
+
+    async def release_runtime_turn(
+        self, turn_id: str, holder: str, generation: int, clock: Callable[[], float]
+    ) -> bool:
+        return await self._call(
+            lambda repo: repo.release_runtime_turn(turn_id, holder, generation, clock)
+        )
+
+    async def quarantine_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
+        await self._call(lambda repo: repo.quarantine_runtime_turn(turn_id, clock))
+
+    async def cancel_queued_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> bool:
+        return await self._call(lambda repo: repo.cancel_queued_runtime_turn(turn_id, clock))
 
     async def _call(self, operation: Callable[[Any], _T]) -> _T:
         def run() -> _T:
