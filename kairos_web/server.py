@@ -30,6 +30,7 @@ from kairos_integration.interaction_contract import InteractionServiceUnavailabl
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
+from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_security.credentials import (
     CredentialNotFoundError,
     CredentialRef,
@@ -44,7 +45,7 @@ from kairos_web.chat_transport import (
 )
 from kairos_web.provider_api import list_models_payload, list_providers_payload, serialize_model
 from kairos_web.runtime_api import router as runtime_api_router
-from kairos_web.runtime_transport import runtime_websocket_session
+from kairos_web.runtime_transport import runtime_event_to_json, runtime_websocket_session
 
 logger = logging.getLogger(__name__)
 
@@ -887,47 +888,59 @@ async def websocket_runtime_endpoint(websocket: WebSocket):
     await runtime_websocket_session(websocket, client)
 
 
+async def _serve_chat_messages(websocket: WebSocket) -> None:
+    while True:
+        raw_data = await websocket.receive_text()
+        try:
+            data = json.loads(raw_data)
+        except Exception:  # noqa: BLE001, S112
+            continue
+        if not isinstance(data, Mapping):
+            continue
+
+        event_type = data.get("type", "message")
+        if event_type == "ping":
+            await websocket.send_text(json.dumps({"type": "pong"}))
+            continue
+        if event_type != "message":
+            continue
+
+        try:
+            envelope = interaction_envelope_from_json(data)
+        except (TypeError, ValueError):
+            continue
+        service = websocket.app.state.interaction_service
+        async with aclosing(service.stream(envelope)) as stream:
+            async for event in stream:
+                if isinstance(event, RuntimeEvent):
+                    payload = runtime_event_to_json(event)
+                else:
+                    payload = interaction_event_to_json(
+                        event,
+                        conversation_id=envelope.conversation_id,
+                    )
+                await websocket.send_text(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
 async def _chat_session(websocket: WebSocket) -> None:
     await websocket.accept()
     logger.info("WebSocket chat client connected")
 
     try:
-        while True:
-            raw_data = await websocket.receive_text()
-            try:
-                data = json.loads(raw_data)
-            except Exception:  # noqa: BLE001, S112
-                continue
-            if not isinstance(data, Mapping):
-                continue
-
-            event_type = data.get("type", "message")
-            if event_type == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
-                continue
-
-            if event_type == "message":
-                try:
-                    envelope = interaction_envelope_from_json(data)
-                except (TypeError, ValueError):
-                    continue
-                service = websocket.app.state.interaction_service
-                async with aclosing(service.stream(envelope)) as stream:
-                    async for event in stream:
-                        await websocket.send_text(
-                            json.dumps(
-                                interaction_event_to_json(
-                                    event,
-                                    conversation_id=envelope.conversation_id,
-                                )
-                            )
-                        )
+        await _serve_chat_messages(websocket)
 
     except WebSocketDisconnect:
         logger.info("WebSocket chat client disconnected")
     except InteractionServiceUnavailableError:
         try:
             await websocket.close(code=1012)
+        except Exception:  # noqa: BLE001, S110 - socket pode já estar fechado
+            pass
+    except RuntimeErrorInfo as exc:
+        safe = public_error(exc.code)
+        try:
+            await websocket.send_text(json.dumps({"error": safe}, ensure_ascii=False))
+            await websocket.close(code=1012 if exc.code in {"unavailable", "transport"} else 1008)
         except Exception:  # noqa: BLE001, S110 - socket pode já estar fechado
             pass
     except Exception as exc:

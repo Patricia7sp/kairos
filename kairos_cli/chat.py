@@ -81,6 +81,7 @@ async def run_chat(
                 override=override,
                 as_json=as_json,
                 idempotency_key=idempotency_key or (uuid.uuid4().hex if runtime_session else None),
+                runtime_session=runtime_session,
             )
         return await _run_interactive(
             service,
@@ -130,6 +131,7 @@ async def _run_interactive(
                 override=override,
                 as_json=as_json,
                 idempotency_key=uuid.uuid4().hex if runtime_session else None,
+                runtime_session=runtime_session,
             ),
         )
 
@@ -142,6 +144,7 @@ async def _run_turn(
     override: ProviderModelRef | None,
     as_json: bool,
     idempotency_key: str | None = None,
+    runtime_session: bool = False,
 ) -> int:
     envelope = InteractionEnvelope(
         conversation_id=session_id,
@@ -152,8 +155,19 @@ async def _run_turn(
     )
     renderer = _HumanRenderer()
     last_runtime_event: RuntimeEvent | None = None
+    accepted_turn_id: str | None = None
+
+    def retain_accepted_turn(turn_id: str) -> None:
+        nonlocal accepted_turn_id
+        accepted_turn_id = turn_id
+
     try:
-        async for event in service.stream(envelope):
+        stream = (
+            service.stream(envelope, on_runtime_accepted=retain_accepted_turn)
+            if runtime_session
+            else service.stream(envelope)
+        )
+        async for event in stream:
             if isinstance(event, RuntimeEvent):
                 last_runtime_event = event
                 if as_json:
@@ -182,8 +196,27 @@ async def _run_turn(
             else:
                 renderer.emit(event)
     except asyncio.CancelledError:
-        if last_runtime_event is not None:
-            await _cancel_and_confirm(service, last_runtime_event, as_json=as_json)
+        if accepted_turn_id is not None:
+            cursor = (
+                last_runtime_event.cursor
+                if last_runtime_event is not None and last_runtime_event.turn_id == accepted_turn_id
+                else None
+            )
+            await _cancel_and_confirm(
+                service,
+                session_id=session_id,
+                turn_id=accepted_turn_id,
+                cursor=cursor,
+                as_json=as_json,
+            )
+        elif last_runtime_event is not None:
+            await _cancel_and_confirm(
+                service,
+                session_id=last_runtime_event.session_id,
+                turn_id=last_runtime_event.turn_id,
+                cursor=last_runtime_event.cursor,
+                as_json=as_json,
+            )
         raise
     finally:
         renderer.finish_line()
@@ -222,16 +255,23 @@ def _is_runtime_session(home: Path, session_id: str) -> bool:
         connection.close()
 
 
-async def _cancel_and_confirm(service, event: RuntimeEvent, *, as_json: bool) -> None:
+async def _cancel_and_confirm(
+    service,
+    *,
+    session_id: str,
+    turn_id: str,
+    cursor: str | None,
+    as_json: bool,
+) -> None:
     """A Ctrl-C is a cancellation command; closing a stream alone is not."""
     client = getattr(service, "runtime_client", None)
     if client is None:
         return
     try:
-        await client.cancel(event.session_id, event.turn_id)
-        async with aclosing(client.subscribe(event.session_id, event.cursor)) as subscription:
+        await client.cancel(session_id, turn_id)
+        async with aclosing(client.subscribe(session_id, cursor)) as subscription:
             async for confirmation in subscription:
-                if confirmation.turn_id != event.turn_id:
+                if confirmation.turn_id != turn_id:
                     continue
                 await render_runtime_event(confirmation, as_json=as_json)
                 if confirmation.kind == "turn_end":

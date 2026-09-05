@@ -28,6 +28,7 @@ from kairos_providers import (
     TokenUsage,
     curated_models,
 )
+from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error, runtime_event_to_json
 from kairos_web import server
 from kairos_web.chat_transport import (
     interaction_envelope_from_json,
@@ -36,7 +37,7 @@ from kairos_web.chat_transport import (
 
 
 class FakeInteractionService:
-    def __init__(self, events: tuple[InteractionEvent, ...] = ()) -> None:
+    def __init__(self, events: tuple[InteractionEvent | RuntimeEvent, ...] = ()) -> None:
         self.events = events
         self.envelopes: list[InteractionEnvelope] = []
         self.close_calls = 0
@@ -61,6 +62,13 @@ class UnavailableInteractionService(FakeInteractionService):
     async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         self.envelopes.append(envelope)
         raise InteractionServiceUnavailableError() from RuntimeError("database-internal")
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
+class RuntimeUnavailableInteractionService(FakeInteractionService):
+    async def stream(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        self.envelopes.append(envelope)
+        raise RuntimeErrorInfo("unavailable", "private-runtime-sentinel", True)
         yield  # pragma: no cover - mantém a assinatura de async generator
 
 
@@ -406,6 +414,66 @@ def test_websocket_ignora_json_que_nao_e_objeto_sem_encerrar_conexao(
         assert ws.receive_json() == {"type": "pong"}
 
     assert fake_service.envelopes == []
+
+
+def test_websocket_chat_serializes_runtime_events_with_canonical_wire(
+    auth_client: TestClient,
+    fake_service: FakeInteractionService,
+) -> None:
+    event = RuntimeEvent(
+        1,
+        "runtime-event-1",
+        "runtime-session",
+        "runtime-turn",
+        1,
+        "v1:runtime-session:1",
+        "text",
+        {"delta": "olá do runtime"},
+    )
+    fake_service.events = (event,)
+
+    with auth_client.websocket_connect("/ws/chat") as ws:
+        ws.send_json(
+            {
+                "type": "message",
+                "protocol": 1,
+                "session_id": "runtime-session",
+                "content": "execute",
+                "idempotency_key": "durable-key",
+            }
+        )
+        assert ws.receive_json() == runtime_event_to_json(event)
+
+
+def test_websocket_chat_redacts_runtime_errors() -> None:
+    from starlette.websockets import WebSocketDisconnect
+
+    state = server.app.state
+    previous = getattr(state, "interaction_service", None)
+    had_previous = hasattr(state, "interaction_service")
+    state.interaction_service = RuntimeUnavailableInteractionService()
+    try:
+        with (
+            TestClient(
+                server.app,
+                headers={server.TOKEN_HEADER: server.SESSION_TOKEN},
+            ) as client,
+            client.websocket_connect("/ws/chat") as ws,
+        ):
+            ws.send_json({"type": "message", "protocol": 1, "content": "execute"})
+            payload = ws.receive_json()
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_json()
+    finally:
+        if had_previous:
+            state.interaction_service = previous
+        elif hasattr(state, "interaction_service"):
+            del state.interaction_service
+
+    assert payload == {"error": public_error("unavailable")}
+    assert closed.value.code == 1012
+    assert "private-runtime-sentinel" not in str(payload)
+    assert "private-runtime-sentinel" not in str(closed.value)
 
 
 def test_websocket_fecha_1011_sem_expor_excecao_inesperada() -> None:

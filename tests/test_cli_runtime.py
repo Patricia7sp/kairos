@@ -138,6 +138,19 @@ class InterruptibleService:
         await asyncio.Event().wait()
 
 
+class AcceptedBeforeEventService:
+    def __init__(self):
+        self.runtime_client = CancellationClient()
+        self.waiting = asyncio.Event()
+
+    async def stream(self, _envelope, *, on_runtime_accepted=None):
+        if on_runtime_accepted is not None:
+            on_runtime_accepted("turn-1")
+        self.waiting.set()
+        await asyncio.Event().wait()
+        yield  # pragma: no cover - mantém a assinatura de async generator
+
+
 @pytest.mark.anyio
 async def test_runtime_chat_cancellation_sends_explicit_cancel_and_watches_confirmation(capsys):
     service = InterruptibleService()
@@ -158,6 +171,31 @@ async def test_runtime_chat_cancellation_sends_explicit_cancel_and_watches_confi
     assert service.runtime_client.cancelled == [("s1", "turn-1")]
     payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [payload["event_id"] for payload in payloads] == ["start", "end"]
+
+
+@pytest.mark.anyio
+async def test_runtime_chat_cancels_after_acceptance_before_first_event(capsys):
+    service = AcceptedBeforeEventService()
+    task = asyncio.create_task(
+        chat._run_turn(
+            service,
+            session_id="s1",
+            content="execute",
+            override=None,
+            as_json=True,
+            idempotency_key="durable",
+            runtime_session=True,
+        )
+    )
+    await service.waiting.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert service.runtime_client.cancelled == [("s1", "turn-1")]
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [payload["event_id"] for payload in payloads] == ["end"]
 
 
 @pytest.mark.anyio

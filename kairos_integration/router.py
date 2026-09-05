@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,10 @@ class InteractionRouter:
         self._closed = False
 
     async def stream(
-        self, envelope: InteractionEnvelope
+        self,
+        envelope: InteractionEnvelope,
+        *,
+        on_runtime_accepted: Callable[[str], None] | None = None,
     ) -> AsyncIterator[InteractionEvent | RuntimeEvent]:
         if self._closed:
             raise RuntimeErrorInfo("unavailable", "roteador de interação encerrado", False)
@@ -48,6 +51,8 @@ class InteractionRouter:
         turn_id = await self.runtime_client.submit(
             envelope.conversation_id, envelope.content, envelope.idempotency_key
         )
+        if on_runtime_accepted is not None:
+            on_runtime_accepted(turn_id)
         async for event in self.runtime_client.subscribe(envelope.conversation_id):
             if event.turn_id != turn_id:
                 continue

@@ -55,6 +55,18 @@ class FakeRuntimeClient:
         self.closed = True
 
 
+class AcceptanceOrderingRuntimeClient(FakeRuntimeClient):
+    def __init__(self, accepted: list[str], events=()) -> None:
+        super().__init__(events)
+        self.accepted = accepted
+        self.accepted_before_subscribe: tuple[str, ...] | None = None
+
+    async def subscribe(self, session_id, cursor=None):
+        self.accepted_before_subscribe = tuple(self.accepted)
+        async for event in super().subscribe(session_id, cursor):
+            yield event
+
+
 def runtime_event(*, turn_id: str, sequence: int, kind: str) -> RuntimeEvent:
     return RuntimeEvent(
         protocol_version=1,
@@ -143,6 +155,44 @@ async def test_runtime_routes_persisted_identity_and_finishes_only_accepted_turn
     assert model.envelopes == []
     await router.aclose()
     assert model.closed and runtime.closed
+
+
+@async_test
+async def test_runtime_acceptance_callback_precedes_subscription(tmp_path: Path) -> None:
+    db = connect(tmp_path / "state.db")
+    initialize_schema(db)
+    db.close()
+    project = tmp_path / "project"
+    project.mkdir()
+    from runtime_support import runtime_session
+
+    from kairos_state.repositories.runtime import RuntimeRepository
+
+    with connect(tmp_path / "state.db") as db:
+        RuntimeRepository(db).create_session(
+            runtime_session(project, "runtime-session"),
+            "test",
+            allowed_directories=(str(project),),
+        )
+
+    accepted: list[str] = []
+    runtime = AcceptanceOrderingRuntimeClient(
+        accepted,
+        events=(runtime_event(turn_id="accepted-turn", sequence=1, kind="turn_end"),),
+    )
+    router = InteractionRouter(tmp_path, FakeModelService(), runtime)
+    envelope = InteractionEnvelope(
+        "runtime-session", "test", "execute", idempotency_key="durable-key"
+    )
+
+    received = [
+        event async for event in router.stream(envelope, on_runtime_accepted=accepted.append)
+    ]
+
+    assert accepted == ["accepted-turn"]
+    assert runtime.accepted_before_subscribe == ("accepted-turn",)
+    assert [event.event_id for event in received] == ["event-1"]
+    await router.aclose()
 
 
 @pytest.mark.parametrize(

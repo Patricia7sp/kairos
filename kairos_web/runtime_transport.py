@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
-from contextlib import aclosing
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -20,11 +20,39 @@ async def runtime_websocket_session(websocket: WebSocket, client) -> None:
     try:
         message = await websocket.receive_json()
         session_id, cursor = _subscription(message)
-        async with aclosing(client.subscribe(session_id, cursor)) as subscription:
+        subscription = client.subscribe(session_id, cursor)
+
+        async def forward_events() -> None:
             async for event in subscription:
                 await websocket.send_text(
                     json.dumps(runtime_event_to_json(event), ensure_ascii=False, sort_keys=True)
                 )
+
+        async def wait_for_disconnect() -> None:
+            message = await websocket.receive()
+            if message.get("type") != "websocket.disconnect":
+                raise ValueError("a assinatura de runtime aceita apenas um comando")
+
+        forward = asyncio.create_task(forward_events(), name="runtime-websocket-forward")
+        disconnected = asyncio.create_task(
+            wait_for_disconnect(), name="runtime-websocket-disconnect"
+        )
+        try:
+            done, _pending = await asyncio.wait(
+                {forward, disconnected}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if forward in done:
+                await forward
+            else:
+                await disconnected
+        finally:
+            for task in (forward, disconnected):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(forward, disconnected, return_exceptions=True)
+            close = getattr(subscription, "aclose", None)
+            if close is not None:
+                await close()
     except WebSocketDisconnect:
         return
     except RuntimeErrorInfo as exc:
