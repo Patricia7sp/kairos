@@ -81,7 +81,7 @@ class _Host:
             ):
                 raise RuntimeErrorInfo("invalid_event", "requisição de runtime inválida", False)
             if method == "events.subscribe":
-                await self._subscribe(params, writer)
+                await self._subscribe(params, reader, writer)
                 return
             result = await self._dispatch(method, params)
             writer.write(encode_message({"id": request_id, "result": result}))
@@ -153,12 +153,37 @@ class _Host:
                 return None
         raise RuntimeErrorInfo("invalid_event", "requisição de runtime inválida", False)
 
-    async def _subscribe(self, params: dict[str, Any], writer: asyncio.StreamWriter) -> None:
+    async def _subscribe(
+        self,
+        params: dict[str, Any],
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
         service = self._available_service()
         values = _exact(params, {"session_id"}, {"cursor"})
-        async for event in service.subscribe(**values):
-            writer.write(encode_message({"event": runtime_event_to_json(event)}))
-            await writer.drain()
+        subscription = service.subscribe(**values)
+
+        async def forward_events() -> None:
+            async for event in subscription:
+                writer.write(encode_message({"event": runtime_event_to_json(event)}))
+                await writer.drain()
+
+        forward = asyncio.create_task(forward_events(), name="runtime-subscription-forward")
+        disconnected = asyncio.create_task(reader.read(1), name="runtime-subscription-eof")
+        try:
+            done, _pending = await asyncio.wait(
+                {forward, disconnected}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if forward in done:
+                await forward
+        finally:
+            for task in (forward, disconnected):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(forward, disconnected, return_exceptions=True)
+            close = getattr(subscription, "aclose", None)
+            if close is not None:
+                await close()
 
     def _available_service(self):
         if not self._runtime_ready():

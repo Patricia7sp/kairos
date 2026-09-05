@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import shutil
 import socket
+import struct
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -186,10 +187,79 @@ def test_runtime_event_has_one_public_json_converter() -> None:
     }
 
 
-def test_peer_credentials_layout_available_on_linux() -> None:
+def test_peer_credentials_accept_current_uid_and_reject_other_uid() -> None:
     if not hasattr(socket, "SO_PEERCRED"):
         pytest.skip("SO_PEERCRED is Linux-specific")
-    assert os.getuid() >= 0
+
+    class PeerSocket:
+        def __init__(self, uid: int) -> None:
+            self.uid = uid
+
+        def getsockopt(self, level, option, size):
+            assert (level, option, size) == (socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+            return struct.pack("3i", os.getpid(), self.uid, os.getgid())
+
+    class Writer:
+        def __init__(self, uid: int) -> None:
+            self.peer = PeerSocket(uid)
+
+        def get_extra_info(self, name):
+            assert name == "socket"
+            return self.peer
+
+    _Host._check_peer(Writer(os.getuid()))
+
+    with pytest.raises(Exception) as raised:
+        _Host._check_peer(Writer(os.getuid() + 1))
+    assert getattr(raised.value, "code", None) == "unavailable"
+    assert getattr(raised.value, "message", None) == "peer de runtime inválido"
+    assert getattr(raised.value, "retryable", None) is False
+
+
+@async_test
+async def test_quiet_subscription_disconnect_closes_only_its_handler(tmp_path: Path) -> None:
+    subscribed = asyncio.Event()
+    subscription_closed = asyncio.Event()
+    keep_quiet = asyncio.Event()
+
+    class Service:
+        async def subscribe(self, session_id, cursor=None):
+            assert (session_id, cursor) == ("s1", None)
+            subscribed.set()
+            try:
+                await keep_quiet.wait()
+                yield  # pragma: no cover - this subscription deliberately stays quiet
+            finally:
+                subscription_closed.set()
+
+    host = _Host(config=SimpleNamespace(enabled=True), service=Service())
+    handlers = []
+
+    def connected(reader, writer):
+        handlers.append(asyncio.create_task(host.handle(reader, writer)))
+
+    socket_path = tmp_path / "subscription.sock"
+    server = await asyncio.start_unix_server(connected, path=socket_path)
+    try:
+        _reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(
+            b'{"id":"subscribe","method":"events.subscribe","params":{"session_id":"s1"}}\n'
+        )
+        await writer.drain()
+        await asyncio.wait_for(subscribed.wait(), 1)
+
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.wait_for(subscription_closed.wait(), 1)
+        await asyncio.wait_for(asyncio.gather(*handlers), 1)
+        assert all(task.done() and not task.cancelled() for task in handlers)
+    finally:
+        server.close()
+        await server.wait_closed()
+        for task in handlers:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*handlers, return_exceptions=True)
 
 
 @async_test
