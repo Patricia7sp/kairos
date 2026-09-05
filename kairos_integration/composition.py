@@ -14,6 +14,7 @@ import yaml
 from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
+from kairos_integration.router import InteractionRouter
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import ModelSelectionResolver
@@ -23,7 +24,11 @@ from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories import MessageRepository, SessionRepository
 
-__all__ = ["ComposedInteractionService", "build_interaction_service"]
+__all__ = [
+    "ComposedInteractionService",
+    "build_interaction_router",
+    "build_interaction_service",
+]
 
 
 def _load_config(home: Path) -> Mapping[str, Any]:
@@ -163,3 +168,16 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
                 [build_error, *cleanup_errors],
             ) from None
         raise
+
+
+def build_interaction_router(home: Path) -> InteractionRouter:
+    """Compose model execution with an explicit client for the shared runtime host."""
+    from kairos_runtime import RuntimeClient
+
+    canonical_home = Path(home).expanduser().resolve()
+    model_service = build_interaction_service(canonical_home)
+    return InteractionRouter(
+        canonical_home,
+        model_service,
+        RuntimeClient(canonical_home / "run" / "runtime.sock"),
+    )

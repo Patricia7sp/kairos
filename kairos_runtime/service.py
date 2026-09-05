@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 from .contracts import (
     AgentRuntimeProtocol,
@@ -59,6 +60,10 @@ class AgentRuntimeService:
         self._closed = False
         self._owners: dict[str, int] = {}
         self._cancel_deadlines: dict[str, float] = {}
+        self._dispatch_gate = asyncio.Event()
+        self._dispatch_gate.set()
+        self._dispatch_boundary = asyncio.Lock()
+        self._losing: set[str] = set()
 
     def _lock(self, session_id):
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -201,6 +206,7 @@ class AgentRuntimeService:
             while generation is None:
                 if (await self.store.get_turn(turn_id))["state"] != "queued":
                     return
+                await self._dispatch_gate.wait()
                 session = await self._authorize(turn["session_id"])
                 generation = await self.leases.claim(turn_id, self._holder)
                 if generation is None:
@@ -209,24 +215,69 @@ class AgentRuntimeService:
             heartbeat = asyncio.create_task(
                 self._heartbeat(turn_id, generation, asyncio.current_task())
             )
-            await self._authorize(session.session_id)
-            if not await self.leases.renew(turn_id, self._holder, generation):
-                raise RuntimeErrorInfo("lease_lost", "lease de runtime perdida", False)
-            process_generation = self.runtime.generation
-            if not await self._owned(turn_id, generation, "dispatch", turn_id, process_generation):
-                return
-            if self.runtime.generation != process_generation:
-                raise RuntimeErrorInfo("transport", "processo do runtime mudou", False)
-            external = await self.runtime.start_turn(session, turn_id, turn["content"])
-            await self._owned(turn_id, generation, "confirm_dispatch", turn_id, external)
+            async with self._dispatch_slot():
+                await self._authorize(session.session_id)
+                if not await self.leases.renew(turn_id, self._holder, generation):
+                    raise RuntimeErrorInfo("lease_lost", "lease de runtime perdida", False)
+                process_generation = self.runtime.generation
+                if not await self._owned(
+                    turn_id, generation, "dispatch", turn_id, process_generation
+                ):
+                    return
+                if self.runtime.generation != process_generation:
+                    raise RuntimeErrorInfo("transport", "processo do runtime mudou", False)
+                external = await self.runtime.start_turn(session, turn_id, turn["content"])
+                await self._owned(turn_id, generation, "confirm_dispatch", turn_id, external)
             self._wake(session.session_id)
             await self._read(session, turn_id, generation)
         except (Exception, asyncio.CancelledError):  # noqa: BLE001 - every failed execution must retain a durable uncertain outcome
-            await self._lost(turn_id)
+            await self._finish_lost(turn_id)
         finally:
             if heartbeat is not None:
                 heartbeat.cancel()
                 await asyncio.gather(heartbeat, return_exceptions=True)
+
+    @asynccontextmanager
+    async def _dispatch_slot(self):
+        """Enter the start boundary only while the runtime generation is admitted."""
+        while True:
+            await self._dispatch_gate.wait()
+            await self._dispatch_boundary.acquire()
+            if self._dispatch_gate.is_set():
+                break
+            self._dispatch_boundary.release()
+        try:
+            yield
+        finally:
+            self._dispatch_boundary.release()
+
+    async def pause_runtime(self, generation: str) -> None:
+        """Close dispatch and quiesce every runner owned by one process generation."""
+        if not isinstance(generation, str) or not generation:
+            raise RuntimeErrorInfo("invalid_event", "geração de runtime inválida", False)
+        self._dispatch_gate.clear()
+        async with self._dispatch_boundary:
+            runners = []
+            for turn_id, task in tuple(self._tasks.items()):
+                turn = await self.store.get_turn(turn_id)
+                if turn["process_generation"] == generation:
+                    runners.append((turn_id, task))
+        for turn_id, task in runners:
+            if not task.done() and turn_id not in self._losing:
+                task.cancel()
+        await asyncio.gather(*(task for _turn_id, task in runners), return_exceptions=True)
+
+    def resume_runtime(self) -> None:
+        """Reopen dispatch after the host has restarted and recovered the runtime."""
+        if not self._closed:
+            self._dispatch_gate.set()
+
+    async def _finish_lost(self, turn_id: str) -> None:
+        self._losing.add(turn_id)
+        try:
+            await self._lost(turn_id)
+        finally:
+            self._losing.discard(turn_id)
 
     async def _heartbeat(self, turn_id, generation, owner):
         while True:
@@ -717,7 +768,7 @@ class AgentRuntimeService:
             await self.runtime.attach_turn(session, turn_id, external_turn_id)
             await self._read(session, turn_id, generation)
         except (Exception, asyncio.CancelledError):  # noqa: BLE001 - recovery failures preserve uncertainty, never resend
-            await self._lost(turn_id)
+            await self._finish_lost(turn_id)
         finally:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)

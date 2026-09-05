@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from typing import Any
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "adapter"
@@ -96,6 +97,10 @@ interrupt_count = 0
 reply_count = 0
 last_thread_id = "thread-1"
 last_cwd = tempfile.gettempdir()
+host_turn: tuple[str, str] | None = None
+if MODE == "hold-lock":
+    with open(os.environ["KAIROS_FAKE_PID_FILE"], "w", encoding="utf-8") as pid_file:
+        pid_file.write(str(os.getpid()))
 
 for raw_line in sys.stdin:
     message = json.loads(raw_line)
@@ -233,6 +238,28 @@ for raw_line in sys.stdin:
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
     elif method == "turn/start":
         turn_id = "external-turn-1"
+        if MODE == "host-approval":
+            host_turn = (params["threadId"], turn_id)
+            send(
+                {
+                    "id": request_id,
+                    "result": {"turn": {"id": turn_id, "items": [], "status": "inProgress"}},
+                }
+            )
+            send(
+                {
+                    "id": 700,
+                    "method": "item/fileChange/requestApproval",
+                    "params": {
+                        "itemId": "change-1",
+                        "startedAtMs": 11,
+                        "threadId": params["threadId"],
+                        "turnId": turn_id,
+                        "grantRoot": "/outside",
+                    },
+                }
+            )
+            continue
         sandbox = params.get("sandboxPolicy", {})
         valid_sandbox = sandbox in (
             {"type": "readOnly", "networkAccess": False},
@@ -446,6 +473,21 @@ for raw_line in sys.stdin:
     elif request_id is not None and method is None:
         # Client reply to a server request.
         reply_count += 1
+        if MODE == "host-approval" and request_id == 700 and host_turn is not None:
+            thread_id, turn_id = host_turn
+            send(
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": thread_id,
+                        "turn": {"id": turn_id, "items": [], "status": "completed"},
+                    },
+                }
+            )
         continue
     else:
         send({"id": request_id, "result": {"ok": True}})
+
+if MODE == "hold-lock":
+    while True:
+        time.sleep(60)

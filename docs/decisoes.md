@@ -3,6 +3,33 @@
 Registro das divergências deliberadas em relação ao legado. Cada entrada
 nomeia a tarefa que a produziu e a evidência que a justifica.
 
+## Agent Runtime — host compartilhado
+
+### D-AR.1 — O cliente nunca inicia o host
+
+Cada `KAIROS_HOME` canônico possui no máximo um host de runtime, protegido por
+`run/runtime.lock`. Web e CLI usam conexões separadas em `run/runtime.sock` e
+fecham apenas seus clientes; o subprocesso Codex e os turnos pertencem ao host
+explicitamente iniciado. A configuração ausente ou `enabled: false` mantém um
+host ocioso somente para status, evitando ciclos de restart sob supervisão.
+
+### D-AR.2 — O lock acompanha o subprocesso
+
+O host conserva o descritor original do `flock` e entrega um `dup` ao
+supervisor, que o herda no App Server e só o fecha após reap confirmado. Assim,
+uma morte abrupta do host não permite outro App Server enquanto o filho antigo
+continuar vivo. Socket, diretório e lock recusam symlinks, tipos inesperados ou
+outro proprietário.
+
+### D-AR.3 — Recuperação fecha a fronteira de despacho
+
+O monitor marca o host indisponível e fecha um gate sincronizado com o limite
+entre lease, journal e `turn/start` antes de reiniciar o App Server. A pausa só
+termina depois que os runners da geração morta, inclusive os que já estão
+registrando perda, ficam quiescentes. Entradas `queued/not_sent` permanecem
+duráveis sem envio até `recover()` terminar e o host reabrir o gate. Assim, a
+recuperação não pula runners antigos em memória nem readmite trabalho cedo.
+
 ## Providers e Chat — runtime canônico
 
 ### D-PC.1 — Web e CLI usam uma única execução

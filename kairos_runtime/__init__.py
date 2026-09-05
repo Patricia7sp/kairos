@@ -1,5 +1,6 @@
 """Tipos e políticas públicas do Agent Runtime Kairos."""
 
+from .client import RuntimeClient
 from .codex_adapter import CodexAppServerAdapter
 from .codex_rpc import CodexRpc
 from .contracts import (
@@ -12,6 +13,7 @@ from .contracts import (
     Sandbox,
 )
 from .errors import RUNTIME_ERROR_CODES, RuntimeErrorInfo
+from .host import serve_runtime
 from .leases import (
     DEFAULT_RENEW_INTERVAL_SECONDS,
     DEFAULT_TTL_SECONDS,
@@ -29,10 +31,12 @@ from .policy import (
 from .service import AgentRuntimeService
 from .store import RuntimeStore
 from .supervisor import CodexSupervisor
+from .wire import MAX_MESSAGE_BYTES, json_value, runtime_event_to_json
 
 __all__ = [
     "DEFAULT_RENEW_INTERVAL_SECONDS",
     "DEFAULT_TTL_SECONDS",
+    "MAX_MESSAGE_BYTES",
     "RUNTIME_ERROR_CODES",
     "RUNTIME_V1_FEATURES",
     "AgentRuntimeProtocol",
@@ -43,6 +47,7 @@ __all__ = [
     "Decision",
     "DirectoryIdentity",
     "RuntimeCapabilities",
+    "RuntimeClient",
     "RuntimeErrorInfo",
     "RuntimeEvent",
     "RuntimeLeaseManager",
@@ -52,7 +57,10 @@ __all__ = [
     "Sandbox",
     "authorize_directory",
     "capture_directory_identity",
+    "json_value",
     "negotiate",
     "revalidate_directory_identity",
+    "runtime_event_to_json",
+    "serve_runtime",
     "validate_sandbox",
 ]

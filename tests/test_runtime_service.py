@@ -488,3 +488,71 @@ async def test_shutdown_preserves_queued_input_for_first_dispatch_after_recovery
     assert saved["send_state"] == "not_sent"
     assert saved["content"] == "durable waiting"
     assert saved["idempotency_key"] == "two"
+
+
+@async_test
+async def test_pause_closes_dispatch_gate_for_runner_returning_from_claim(tmp_path, monkeypatch):
+    service, store, runtime = await setup_service(tmp_path)
+    claimed = asyncio.Event()
+    release_claim = asyncio.Event()
+    original_claim = service.leases.claim
+
+    async def claim_then_wait(*args):
+        generation = await original_claim(*args)
+        if generation is not None:
+            claimed.set()
+            await release_claim.wait()
+        return generation
+
+    monkeypatch.setattr(service.leases, "claim", claim_then_wait)
+    try:
+        turn_id = await service.submit("s1", "hello", "key")
+        await claimed.wait()
+        pause = asyncio.create_task(service.pause_runtime(runtime.generation))
+        await asyncio.sleep(0)
+        release_claim.set()
+        await pause
+
+        turn = await store.get_turn(turn_id)
+        assert turn["send_state"] == "not_sent"
+        assert runtime.starts == []
+
+        service.resume_runtime()
+        await runtime.started.wait()
+        assert len(runtime.starts) == 1
+    finally:
+        release_claim.set()
+        service.resume_runtime()
+        await service.aclose()
+
+
+@async_test
+async def test_pause_waits_for_old_generation_runner_already_finishing_loss(tmp_path, monkeypatch):
+    service, store, runtime = await setup_service(tmp_path)
+    loss_started = asyncio.Event()
+    release_loss = asyncio.Event()
+    original_lose_turn = store.lose_turn
+
+    async def blocked_lose_turn(*args, **kwargs):
+        loss_started.set()
+        await release_loss.wait()
+        return await original_lose_turn(*args, **kwargs)
+
+    monkeypatch.setattr(store, "lose_turn", blocked_lose_turn)
+    try:
+        turn_id = await service.submit("s1", "hello", "key")
+        await runtime.started.wait()
+        await runtime.events.put(RuntimeErrorInfo("transport", "lost", True))
+        await loss_started.wait()
+
+        pause = asyncio.create_task(service.pause_runtime(runtime.generation))
+        await asyncio.sleep(0)
+        assert not pause.done()
+        release_loss.set()
+        await pause
+
+        assert (await store.get_turn(turn_id))["state"] == "interrupted"
+    finally:
+        release_loss.set()
+        service.resume_runtime()
+        await service.aclose()

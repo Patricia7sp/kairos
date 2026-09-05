@@ -111,6 +111,7 @@ class InteractionEnvelope:
     activity: str | None = None
     override: ProviderModelRef | None = None
     parameters: Mapping[str, Any] = field(default_factory=dict)
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.conversation_id, str) or not self.conversation_id.strip():
@@ -123,6 +124,8 @@ class InteractionEnvelope:
             raise TypeError("profile deve ser uma string ou None")
         if self.activity is not None and not isinstance(self.activity, str):
             raise TypeError("activity deve ser uma string ou None")
+        if self.idempotency_key is not None and not isinstance(self.idempotency_key, str):
+            raise TypeError("idempotency_key deve ser uma string ou None")
         object.__setattr__(self, "parameters", _immutable_parameters(self.parameters))
 
 
