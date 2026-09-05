@@ -91,7 +91,7 @@ class RuntimeRepository:
             "finish",
             "transition",
             "decide_approval",
-            "approval_delivered",
+            "continue_after_approval",
         }:
             raise ValueError("unsupported owned runtime operation")
         self._fence = (turn_id, holder, generation)
@@ -644,13 +644,34 @@ class RuntimeRepository:
             raise _error("approval_stale", "aprovação não está mais pendente")
         result = dict(row)
         result["request"] = json.loads(result.pop("request_json"))
+        event = self._conn.execute(
+            "SELECT payload_json FROM runtime_events WHERE turn_id=? AND event_id=? AND kind='approval_decision'",
+            (result["turn_id"], f"decision:{approval_id}"),
+        ).fetchone()
+        result["decision_receipt"] = json.loads(event[0]).get("receipt") if event else None
         return result
+
+    def _approval_identity(self, approval: dict, decision: str) -> dict:
+        turn = self.get_turn(approval["turn_id"])
+        return {
+            "approval_id": approval["id"],
+            "session_id": turn["session_id"],
+            "turn_id": turn["id"],
+            "external_turn_id": turn["external_turn_id"],
+            "process_generation": approval["process_generation"],
+            "external_request_id": approval["external_request_id"],
+            "external_item_id": approval["external_item_id"],
+            "request": approval["request"],
+            "decision": decision,
+        }
 
     def decide_approval(self, approval_id: str, decision: str) -> bool:
         if decision not in {"accept", "decline"}:
             raise _error("invalid_event", "decisão inválida")
         with self._transaction():
             approval = self.get_approval(approval_id)
+            if self._fence is not None and self._fence[0] != approval["turn_id"]:
+                raise _error("approval_stale", "aprovação não pertence à fence")
             if approval["decision"] is not None:
                 if approval["decision"] != decision:
                     raise _error("approval_stale", "decisão de aprovação conflitante")
@@ -660,17 +681,61 @@ class RuntimeRepository:
                 "UPDATE runtime_approvals SET decision=?,decided_at=?,updated_at=?,delivery_state='decided' WHERE id=?",
                 (decision, now, now, approval_id),
             )
+            payload = {
+                "approval_id": approval_id,
+                "decision": decision,
+                "delivery_state": "decided",
+            }
+            if self._fence is not None:
+                payload["receipt"] = {
+                    **self._approval_identity(approval, decision),
+                    "holder": self._fence[1],
+                    "lease_generation": self._fence[2],
+                }
             self._append(
                 approval["turn_id"],
                 f"decision:{approval_id}",
                 "approval_decision",
-                {"approval_id": approval_id, "decision": decision, "delivery_state": "decided"},
+                payload,
             )
             return True
 
-    def approval_delivered(self, approval_id: str) -> None:
+    def acknowledge_approval(self, approval_id: str, receipt: Mapping | None) -> None:
+        """Record a successful originating RPC write, not authority to run the turn."""
         with self._transaction():
             approval = self.get_approval(approval_id)
+            persisted = approval["decision_receipt"]
+            if not persisted or _json_dump(receipt) != _json_dump(persisted):
+                raise _error("approval_stale", "recibo de aprovação inválido")
+            identity = {
+                **self._approval_identity(approval, approval["decision"]),
+                "holder": persisted["holder"],
+                "lease_generation": persisted["lease_generation"],
+            }
+            turn = self.get_turn(approval["turn_id"])
+            # Release or reuse by ANOTHER turn does not invalidate historical evidence.
+            # A takeover of THIS turn does, even after its directory row is later reused.
+            takeovers = self._conn.execute(
+                "SELECT payload_json FROM runtime_events WHERE turn_id=? AND kind='recovery' "
+                "AND sequence>(SELECT sequence FROM runtime_events WHERE turn_id=? AND event_id=?)",
+                (turn["id"], turn["id"], f"decision:{approval_id}"),
+            ).fetchall()
+            if (
+                _json_dump(identity) != _json_dump(persisted)
+                or turn["process_generation"] != persisted["process_generation"]
+                or (
+                    turn["holder"] is not None
+                    and (turn["holder"], turn["lease_generation"])
+                    != (persisted["holder"], persisted["lease_generation"])
+                )
+                or any(
+                    json.loads(event[0]).get("reason") == "observation_attached"
+                    for event in takeovers
+                )
+            ):
+                raise _error("approval_stale", "recibo pertence a uma posse anterior")
+            if approval["delivery_state"] == "delivered":
+                return
             self._conn.execute(
                 "UPDATE runtime_approvals SET delivery_state='delivered',updated_at=? WHERE id=?",
                 (time.time(), approval_id),
@@ -681,6 +746,20 @@ class RuntimeRepository:
                 "approval_delivery",
                 {"approval_id": approval_id, "delivery_state": "delivered"},
             )
+
+    def continue_after_approval(self, approval_id: str) -> None:
+        """Resume lifecycle only under the original, still-live execution fence."""
+        with self._transaction():
+            approval = self.get_approval(approval_id)
+            receipt = approval["decision_receipt"]
+            if (
+                self._fence is None
+                or not receipt
+                or self._fence
+                != (approval["turn_id"], receipt["holder"], receipt["lease_generation"])
+                or approval["delivery_state"] != "delivered"
+            ):
+                raise _error("approval_stale", "aprovação não foi entregue sob esta fence")
             outstanding = self._conn.execute(
                 "SELECT 1 FROM runtime_approvals WHERE turn_id=? AND delivery_state IN ('pending','decided')",
                 (approval["turn_id"],),

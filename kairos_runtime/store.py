@@ -147,8 +147,8 @@ class RuntimeStore:
     async def decide_approval(self, approval_id: str, decision: str) -> bool:
         return await self._call(lambda repo: repo.decide_approval(approval_id, decision))
 
-    async def approval_delivered(self, approval_id: str) -> None:
-        await self._call(lambda repo: repo.approval_delivered(approval_id))
+    async def acknowledge_approval(self, approval_id: str, receipt: Mapping | None) -> None:
+        await self._call(lambda repo: repo.acknowledge_approval(approval_id, receipt))
 
     async def finish(self, turn_id: str, state: str, content: str, usage: dict | None) -> None:
         await self._call(lambda repo: repo.finish(turn_id, state, content, usage))

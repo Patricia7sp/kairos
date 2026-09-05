@@ -481,11 +481,19 @@ class AgentRuntimeService:
             if await self._owned(
                 turn["id"], turn["lease_generation"], "decide_approval", approval_id, decision
             ):
+                receipt = (await self.store.get_approval(approval_id))["decision_receipt"]
                 self._wake(session_id)
                 await self.runtime.respond_approval(approval["external_request_id"], decision)
-                await self._owned(
-                    turn["id"], turn["lease_generation"], "approval_delivered", approval_id
-                )
+                await self.store.acknowledge_approval(approval_id, receipt)
+                try:
+                    await self._owned(
+                        turn["id"], turn["lease_generation"], "continue_after_approval", approval_id
+                    )
+                except RuntimeErrorInfo as exc:
+                    if exc.code != "lease_lost":
+                        raise
+                    # Terminal release can win this race. Delivery is already durable;
+                    # lifecycle changes must still obey the live execution fence.
                 self._wake(session_id)
 
     async def cancel(self, session_id: str, turn_id: str) -> None:
