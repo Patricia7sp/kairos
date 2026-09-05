@@ -181,6 +181,41 @@ for raw_line in sys.stdin:
         last_cwd = params["cwd"]
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
     elif method == "thread/resume":
+        if MODE in {"missing-thread", "invalid-resume"}:
+            send(
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32600,
+                        "message": "no rollout found for thread id sensitive-id"
+                        if MODE == "missing-thread"
+                        else "invalid request sensitive-details",
+                    },
+                }
+            )
+            continue
+        if MODE in {"attach", "attach-barrier"}:
+            send(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": params["threadId"],
+                        "turnId": "external-turn-1",
+                        "itemId": "i1",
+                        "delta": "during resume",
+                    },
+                }
+            )
+        if MODE == "attach":
+            send(
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": params["threadId"],
+                        "turn": {"id": "external-turn-1", "status": "completed"},
+                    },
+                }
+            )
         if params.get("sandbox") == "workspace-write" and params.get("config") != {
             "sandbox_workspace_write": {
                 "writable_roots": [params["cwd"]],
@@ -331,6 +366,41 @@ for raw_line in sys.stdin:
             }
         )
     elif method == "thread/read":
+        if MODE == "attach-barrier":
+            snapshot = thread(
+                params["threadId"],
+                last_cwd,
+                turns=[
+                    {
+                        "id": "external-turn-1",
+                        "status": "inProgress",
+                        "items": [{"id": "i1", "type": "agentMessage", "text": "during resume"}],
+                    }
+                ],
+            )
+            snapshot["status"] = {"type": "active", "activeFlags": []}
+            batch = [
+                {"id": request_id, "result": {"thread": snapshot}},
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": params["threadId"],
+                        "turnId": "external-turn-1",
+                        "itemId": "i1",
+                        "delta": " after response",
+                    },
+                },
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": params["threadId"],
+                        "turn": {"id": "external-turn-1", "status": "completed"},
+                    },
+                },
+            ]
+            sys.stdout.write("".join(json.dumps(item) + "\n" for item in batch))
+            sys.stdout.flush()
+            continue
         turn_status = "interrupted" if params["threadId"] == "interrupted-thread" else "completed"
         turn_id = "cancelled-turn" if turn_status == "interrupted" else "external-turn-1"
         send(

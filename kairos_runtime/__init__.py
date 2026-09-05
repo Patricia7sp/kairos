@@ -26,6 +26,7 @@ from .policy import (
     revalidate_directory_identity,
     validate_sandbox,
 )
+from .service import AgentRuntimeService
 from .store import RuntimeStore
 from .supervisor import CodexSupervisor
 
@@ -35,6 +36,7 @@ __all__ = [
     "RUNTIME_ERROR_CODES",
     "RUNTIME_V1_FEATURES",
     "AgentRuntimeProtocol",
+    "AgentRuntimeService",
     "CodexAppServerAdapter",
     "CodexRpc",
     "CodexSupervisor",

@@ -61,6 +61,62 @@ async def test_create_and_resume_enforce_and_revalidate_effective_policy(tmp_pat
 
 
 @async_test
+async def test_attach_registers_before_resume_and_keeps_exact_recovered_turn(tmp_path):
+    runtime = await adapter(tmp_path, "attach")
+    active = session(tmp_path, thread_id="thread-1")
+    try:
+        snapshot = await runtime.attach_turn(active, "recovered-local", "external-turn-1")
+        assert snapshot.external_turn_id == "external-turn-1"
+        events = [event async for event in runtime.observe(active, "recovered-local")]
+        assert [event["kind"] for event in events] == ["text", "snapshot", "turn"]
+        assert events[0]["payload"]["delta"] == "during resume"
+        assert all(event["generation"] == runtime.generation for event in events)
+    finally:
+        await runtime.aclose()
+
+
+@async_test
+async def test_snapshot_barrier_precedes_delta_in_same_response_batch(tmp_path):
+    from kairos_runtime.contracts import RuntimeEvent
+    from kairos_runtime.recovery import TranscriptProjection
+
+    runtime = await adapter(tmp_path, "attach-barrier")
+    active = session(tmp_path, thread_id="thread-1")
+    projection = TranscriptProjection()
+    try:
+        await runtime.attach_turn(active, "recovered-local", "external-turn-1")
+        events = [event async for event in runtime.observe(active, "recovered-local")]
+        assert [event["kind"] for event in events] == ["text", "snapshot", "text", "turn"]
+        for index, event in enumerate(events, start=1):
+            kind = "reconciled" if event["kind"] == "snapshot" else event["kind"]
+            payload = {"snapshot": event["payload"]} if kind == "reconciled" else event["payload"]
+            projection.apply(
+                RuntimeEvent(1, str(index), "s1", "t1", index, f"cursor-{index}", kind, payload)
+            )
+        assert projection.content == "during resume after response"
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.parametrize(
+    "mode,code", [("missing-thread", "thread_missing"), ("invalid-resume", "transport")]
+)
+@async_test
+async def test_missing_rollout_remote_rejection_is_specific_and_transport_stays_alive(
+    tmp_path, mode, code
+):
+    runtime = await adapter(tmp_path, mode)
+    try:
+        with pytest.raises(RuntimeErrorInfo) as caught:
+            await runtime.resume_thread(session(tmp_path, thread_id="thread-missing"))
+        assert caught.value.code == code
+        assert "sensitive" not in str(caught.value)
+        assert await runtime.create_thread(session(tmp_path)) == "thread-1"
+    finally:
+        await runtime.aclose()
+
+
+@async_test
 async def test_turn_observer_is_registered_before_start_and_error_is_nonterminal(
     tmp_path: Path,
 ) -> None:
@@ -108,6 +164,7 @@ async def test_restricted_approval_accept_fails_closed_and_sends_decline(tmp_pat
         async for event in runtime.observe(active, "local-turn-1"):
             if event["kind"] == "approval":
                 approval = event
+                break
         assert approval is not None
 
         with pytest.raises(RuntimeErrorInfo) as exc_info:
@@ -255,6 +312,7 @@ async def test_queued_old_approval_keeps_origin_and_never_replies_to_replacement
         async for event in runtime.observe(active, "local-turn-1"):
             if event["kind"] == "approval":
                 approval = event
+                break
         assert approval is not None
         assert approval["generation"] == "generation-a"
         assert approval["payload"]["request_id"].startswith("generation-a:")

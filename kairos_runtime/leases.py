@@ -28,6 +28,31 @@ class RuntimeLeaseManager:
     async def enqueue(self, turn_id: str) -> None:
         await self._store.enqueue_runtime_turn(turn_id, self._clock)
 
+    async def adopt(
+        self,
+        turn_id: str,
+        previous_holder: str,
+        previous_generation: int,
+        holder: str,
+        *,
+        confirmed_inactive: bool = False,
+    ) -> int | None:
+        """Fence an existing turn's observer; caller attests predecessor inactivity."""
+        self._validate_owner(holder, DEFAULT_TTL_SECONDS)
+        self._validate_owner(previous_holder, DEFAULT_TTL_SECONDS)
+        self._validate_generation(previous_generation)
+        if type(confirmed_inactive) is not bool:
+            raise ValueError("confirmed_inactive must be boolean")
+        return await self._store.adopt_runtime_turn(
+            turn_id,
+            previous_holder,
+            previous_generation,
+            holder,
+            confirmed_inactive=confirmed_inactive,
+            ttl=DEFAULT_TTL_SECONDS,
+            clock=self._clock,
+        )
+
     async def claim(
         self, turn_id: str, holder: str, ttl: float = DEFAULT_TTL_SECONDS
     ) -> int | None:

@@ -248,6 +248,9 @@ class RuntimeObservation:
 
 
 class AgentRuntimeProtocol(Protocol):
+    @property
+    def generation(self) -> str: ...
+
     async def capabilities(self) -> RuntimeCapabilities: ...
 
     async def create_thread(self, session: RuntimeSession) -> str: ...
@@ -255,6 +258,10 @@ class AgentRuntimeProtocol(Protocol):
     async def resume_thread(self, session: RuntimeSession) -> RuntimeObservation: ...
 
     async def start_turn(self, session: RuntimeSession, turn_id: str, content: str) -> str: ...
+
+    async def attach_turn(
+        self, session: RuntimeSession, turn_id: str, external_turn_id: str
+    ) -> RuntimeObservation: ...
 
     def observe(
         self, session: RuntimeSession, turn_id: str

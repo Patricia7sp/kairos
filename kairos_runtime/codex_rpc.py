@@ -52,6 +52,7 @@ class CodexRpc:
         self._max_frame_bytes = max_frame_bytes
         self._write_lock = asyncio.Lock()
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._snapshot_barriers: dict[int, CodexSubscription] = {}
         self._abandoned: set[int] = set()
         self._subscriptions: set[CodexSubscription] = set()
         self._background_tasks: set[asyncio.Task[None]] = set()
@@ -75,7 +76,13 @@ class CodexRpc:
     def unsubscribe(self, subscription: CodexSubscription) -> None:
         self._subscriptions.discard(subscription)
 
-    async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        snapshot_subscription: CodexSubscription | None = None,
+    ) -> dict[str, Any]:
         if self._closed_error is not None:
             raise self._closed_error
         await self.start()
@@ -83,6 +90,8 @@ class CodexRpc:
         self._next_id += 1
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
+        if snapshot_subscription is not None:
+            self._snapshot_barriers[request_id] = snapshot_subscription
         try:
             await self._write({"id": request_id, "method": method, "params": params})
             return await future
@@ -92,6 +101,7 @@ class CodexRpc:
             raise
         finally:
             self._pending.pop(request_id, None)
+            self._snapshot_barriers.pop(request_id, None)
 
     async def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         if self._closed_error is not None:
@@ -215,8 +225,26 @@ class CodexRpc:
             raise _transport()
         result = message.get("result")
         if "error" in message or not isinstance(result, dict):
-            future.set_exception(_transport())
+            error = message.get("error")
+            missing = (
+                isinstance(error, dict)
+                and error.get("code") == -32600
+                and isinstance(error.get("message"), str)
+                and (
+                    error["message"].lower().startswith("no rollout found for thread id")
+                    or error["message"].lower().startswith("thread not found:")
+                )
+            )
+            future.set_exception(
+                RuntimeErrorInfo("thread_missing", "thread de runtime ausente", False)
+                if missing
+                else _transport()
+            )
         else:
+            subscription = self._snapshot_barriers.get(request_id)
+            if subscription is not None:
+                # Insert at the exact response boundary in the sole transport reader.
+                subscription.queue.put_nowait({"_kairos_snapshot": result})
             future.set_result(result)
 
     def _schedule_rejection(self, request_id: int | str) -> None:

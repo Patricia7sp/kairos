@@ -48,6 +48,7 @@ class CodexAppServerAdapter:
         self._external_turns: dict[str, str] = {}
         self._pending_approvals: dict[str, _PendingApproval] = {}
         self._cancelled: set[tuple[str, str]] = set()
+        self._attaching: set[str] = set()
 
     @property
     def generation(self) -> str:
@@ -109,6 +110,41 @@ class CodexAppServerAdapter:
             self._turn_subscriptions.pop(turn_id, None)
             raise
 
+    async def attach_turn(
+        self, session: RuntimeSession, turn_id: str, external_turn_id: str
+    ) -> RuntimeObservation:
+        """Attach an exact durable turn before resume, without ever dispatching input."""
+        thread_id = self._require_thread(session)
+        if not turn_id or not external_turn_id or turn_id in self._turn_subscriptions:
+            raise self._invalid_event()
+        rpc = self._supervisor.rpc
+        subscription = rpc.subscribe(thread_id)
+        self._turn_subscriptions[turn_id] = subscription
+        self._external_turns[turn_id] = external_turn_id
+        self._attaching.add(turn_id)
+        try:
+            result = await rpc.call(
+                "thread/resume",
+                {
+                    "threadId": thread_id,
+                    "excludeTurns": False,
+                    **self._thread_policy_params(session),
+                },
+            )
+            self._validate_effective_policy(result, session)
+            result = await rpc.call(
+                "thread/read",
+                {"threadId": thread_id, "includeTurns": True},
+                snapshot_subscription=subscription,
+            )
+            return self._observation(result.get("thread"), external_turn_id)
+        except BaseException:
+            rpc.unsubscribe(subscription)
+            self._turn_subscriptions.pop(turn_id, None)
+            self._external_turns.pop(turn_id, None)
+            self._attaching.discard(turn_id)
+            raise
+
     async def observe(
         self, session: RuntimeSession, turn_id: str
     ) -> AsyncIterator[Mapping[str, Any]]:
@@ -116,9 +152,26 @@ class CodexAppServerAdapter:
         if subscription is None:
             raise self._invalid_event()
         external_turn_id = self._external_turns.get(turn_id)
+        deferred_terminal = None
         try:
             while True:
                 message = await subscription.get()
+                if "_kairos_snapshot" in message:
+                    observation = self._observation(
+                        message["_kairos_snapshot"].get("thread"), external_turn_id
+                    )
+                    self._attaching.discard(turn_id)
+                    yield {
+                        "generation": subscription.generation,
+                        "external_thread_id": subscription.thread_id,
+                        "external_turn_id": external_turn_id,
+                        "kind": "snapshot",
+                        "payload": {"state": observation.state, "items": observation.items},
+                    }
+                    if deferred_terminal is not None:
+                        yield deferred_terminal
+                        return
+                    continue
                 message_turn_id = self._message_turn_id(message)
                 if "id" in message and message.get("method") not in APPROVAL_METHODS:
                     event = await self._translate(message, session, subscription)
@@ -130,16 +183,21 @@ class CodexAppServerAdapter:
                 event = await self._translate(message, session, subscription)
                 if event is None:
                     continue
-                yield event
                 if event["kind"] == "turn" and event["payload"]["state"] in {
                     "completed",
                     "failed",
                     "interrupted",
                 }:
+                    if turn_id in self._attaching:
+                        deferred_terminal = event
+                        continue
+                    yield event
                     return
+                yield event
         finally:
             subscription.rpc.unsubscribe(subscription)
             self._turn_subscriptions.pop(turn_id, None)
+            self._attaching.discard(turn_id)
 
     async def cancel_turn(self, session: RuntimeSession, external_turn_id: str) -> None:
         thread_id = self._require_thread(session)
@@ -324,6 +382,10 @@ class CodexAppServerAdapter:
         if not isinstance(turn_id, str):
             raise self._invalid_event()
         state = self._turn_state(selected.get("status"))
+        if state == "active" and (
+            not isinstance(thread.get("status"), dict) or thread["status"].get("type") != "active"
+        ):
+            state = "unknown"
         if state == "interrupted" and (thread.get("id"), turn_id) in self._cancelled:
             state = "cancelled"
         items = selected.get("items", [])

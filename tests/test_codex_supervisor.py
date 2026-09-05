@@ -159,7 +159,7 @@ async def test_real_binary_initialize_start_and_resume_compatibility_probe(
                     external_thread_id=thread_id,
                 )
             )
-        assert raised.value.code == "transport"
+        assert raised.value.code == "thread_missing"
         assert rpc_error_codes == [-32600]
         assert supervisor.process is not None
         assert supervisor.process.returncode is None

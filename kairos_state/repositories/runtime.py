@@ -9,6 +9,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from types import MappingProxyType
 from typing import Any
 
@@ -70,6 +71,104 @@ class RuntimeRepository:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
+        self._fence: tuple[str, str, int] | None = None
+        self._allow_expired = False
+
+    def owned(
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        operation: str,
+        *args,
+        allow_expired: bool = False,
+    ):
+        if operation not in {
+            "append",
+            "dispatch",
+            "confirm_dispatch",
+            "save_approval",
+            "finish",
+            "transition",
+            "decide_approval",
+            "approval_delivered",
+        }:
+            raise ValueError("unsupported owned runtime operation")
+        self._fence = (turn_id, holder, generation)
+        self._allow_expired = allow_expired
+        try:
+            return getattr(self, operation)(*args)
+        finally:
+            self._fence = None
+            self._allow_expired = False
+
+    def adopt_runtime_turn(
+        self,
+        turn_id: str,
+        previous_holder: str,
+        previous_generation: int,
+        holder: str,
+        *,
+        confirmed_inactive: bool,
+        ttl: float,
+        clock,
+    ) -> int | None:
+        with self._transaction():
+            turn = self.get_turn(turn_id)
+            now = clock()
+            row = self._conn.execute(
+                "SELECT d.*,s.holder AS session_holder,s.expires_at AS session_expiry,r.requested_cwd,r.directory_device,r.directory_inode "
+                "FROM runtime_directory_leases d JOIN runtime_turns t ON t.id=d.turn_id "
+                "JOIN runtime_sessions r ON r.session_id=t.session_id "
+                "JOIN session_turn_leases s ON s.conversation_id=t.session_id "
+                "WHERE d.turn_id=? AND d.holder=? AND d.generation=?",
+                (turn_id, previous_holder, previous_generation),
+            ).fetchone()
+            if (
+                row is None
+                or row["session_holder"] != previous_holder
+                or turn["state"] in {"completed", "failed", "cancelled"}
+            ):
+                return None
+            if not confirmed_inactive and (
+                row["quarantined"] or row["expires_at"] <= now or row["session_expiry"] <= now
+            ):
+                return None
+            revalidate_directory_identity(
+                DirectoryIdentity(
+                    row["requested_cwd"],
+                    row["canonical_cwd"],
+                    row["directory_device"],
+                    row["directory_inode"],
+                )
+            )
+            generation = previous_generation + 1
+            self._conn.execute(
+                "UPDATE runtime_directory_leases SET holder=?,generation=?,expires_at=?,quarantined=0,updated_at=? WHERE turn_id=?",
+                (holder, generation, now + ttl, now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE session_turn_leases SET holder=?,acquired_at=?,expires_at=? WHERE conversation_id=?",
+                (holder, now, now + ttl, turn["session_id"]),
+            )
+            self._conn.execute(
+                "UPDATE runtime_turns SET state='running',updated_at=? WHERE id=?", (now, turn_id)
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='running',updated_at=? WHERE session_id=?",
+                (now, turn["session_id"]),
+            )
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='active',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+            self._append(
+                turn_id,
+                uuid.uuid4().hex,
+                "recovery",
+                {"reason": "observation_attached", "lease_generation": generation},
+            )
+            return generation
 
     def create_session(
         self,
@@ -93,6 +192,10 @@ class RuntimeRepository:
 
         self._begin()
         try:
+            if self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session.session_id,)
+            ).fetchone():
+                raise _error("idempotency_conflict", "identidade de sessão conflitante")
             self._conn.execute(
                 "INSERT INTO sessions(id,source,parent_session_id,started_at,cwd,execution_kind) "
                 "VALUES (?,?,?,?,?,'agent_runtime')",
@@ -153,7 +256,8 @@ class RuntimeRepository:
                     raise _error("invalid_event", "identidade do runtime é imutável")
                 self._conn.execute(
                     "UPDATE runtime_sessions SET external_thread_id=?,protocol_version=?,"
-                    "capabilities_json=?,state='ready',updated_at=? WHERE session_id=?",
+                    "capabilities_json=?,state=CASE WHEN external_thread_id IS NULL "
+                    "THEN 'ready' ELSE state END,updated_at=? WHERE session_id=?",
                     (thread_id, negotiated.protocol_version, payload, now, session_id),
                 )
         except sqlite3.IntegrityError as exc:
@@ -236,59 +340,64 @@ class RuntimeRepository:
     def append(
         self, turn_id: str, event_id: str, kind: str, payload: Mapping[str, Any]
     ) -> RuntimeEvent:
-        if any(not isinstance(value, str) or not value for value in (turn_id, event_id, kind)):
-            raise _error("invalid_event", "evento inválido")
-        payload_snapshot = _snapshot_json(payload)
-        if not isinstance(payload_snapshot, Mapping):
-            raise _error("invalid_event", "payload de evento inválido")
-        payload_json = _json_dump(payload_snapshot)
+        payload = _snapshot_json(payload)
         self._begin()
         try:
-            turn = self._conn.execute(
-                "SELECT session_id FROM runtime_turns WHERE id=?", (turn_id,)
-            ).fetchone()
-            if turn is None:
-                raise _error("invalid_event", "turno do evento inexistente")
-            session_id = str(turn["session_id"])
-            duplicate = self._conn.execute(
-                "SELECT * FROM runtime_events WHERE event_id=?", (event_id,)
-            ).fetchone()
-            if duplicate is not None:
-                if (
-                    duplicate["turn_id"] != turn_id
-                    or duplicate["session_id"] != session_id
-                    or duplicate["kind"] != kind
-                    or duplicate["payload_json"] != payload_json
-                ):
-                    raise _error("invalid_event", "event_id reutilizado com conteúdo diferente")
-                event = self._event(duplicate)
-                self._conn.commit()
-                return event
-            sequence_row = self._conn.execute(
-                "UPDATE runtime_sessions SET next_sequence=next_sequence+1,updated_at=? "
-                "WHERE session_id=? RETURNING next_sequence-1",
-                (time.time(), session_id),
-            ).fetchone()
-            if sequence_row is None:
-                raise _error("unavailable", "sessão de runtime indisponível")
-            sequence = int(sequence_row[0])
-            cursor = f"v1:{session_id}:{sequence}"
-            now = time.time()
-            self._conn.execute(
-                "INSERT INTO runtime_events("
-                "event_id,session_id,turn_id,sequence,kind,payload_json,cursor,created_at,updated_at"
-                ") VALUES (?,?,?,?,?,?,?,?,?)",
-                (event_id, session_id, turn_id, sequence, kind, payload_json, cursor, now, now),
-            )
-            event = RuntimeEvent(
-                1, event_id, session_id, turn_id, sequence, cursor, kind, payload_snapshot
-            )
+            event = self._append(turn_id, event_id, kind, payload)
         except BaseException:
             self._conn.rollback()
             raise
         else:
             self._conn.commit()
         return event
+
+    def _append(
+        self, turn_id: str, event_id: str, kind: str, payload: Mapping[str, Any]
+    ) -> RuntimeEvent:
+        """Append inside the caller's transaction; never publish before its commit."""
+        if any(not isinstance(value, str) or not value for value in (turn_id, event_id, kind)):
+            raise _error("invalid_event", "evento inválido")
+        payload_snapshot = _snapshot_json(payload)
+        if not isinstance(payload_snapshot, Mapping):
+            raise _error("invalid_event", "payload de evento inválido")
+        payload_json = _json_dump(payload_snapshot)
+        turn = self._conn.execute(
+            "SELECT session_id FROM runtime_turns WHERE id=?", (turn_id,)
+        ).fetchone()
+        if turn is None:
+            raise _error("invalid_event", "turno do evento inexistente")
+        session_id = str(turn["session_id"])
+        duplicate = self._conn.execute(
+            "SELECT * FROM runtime_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        if duplicate is not None:
+            if (
+                duplicate["turn_id"] != turn_id
+                or duplicate["session_id"] != session_id
+                or duplicate["kind"] != kind
+                or duplicate["payload_json"] != payload_json
+            ):
+                raise _error("invalid_event", "event_id reutilizado com conteúdo diferente")
+            return self._event(duplicate)
+        sequence_row = self._conn.execute(
+            "UPDATE runtime_sessions SET next_sequence=next_sequence+1,updated_at=? "
+            "WHERE session_id=? RETURNING next_sequence-1",
+            (time.time(), session_id),
+        ).fetchone()
+        if sequence_row is None:
+            raise _error("unavailable", "sessão de runtime indisponível")
+        sequence = int(sequence_row[0])
+        cursor = f"v1:{session_id}:{sequence}"
+        now = time.time()
+        self._conn.execute(
+            "INSERT INTO runtime_events("
+            "event_id,session_id,turn_id,sequence,kind,payload_json,cursor,created_at,updated_at"
+            ") VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_id, session_id, turn_id, sequence, kind, payload_json, cursor, now, now),
+        )
+        return RuntimeEvent(
+            1, event_id, session_id, turn_id, sequence, cursor, kind, payload_snapshot
+        )
 
     def events_after(self, session_id: str, cursor: str | None) -> tuple[RuntimeEvent, ...]:
         start = 0
@@ -316,6 +425,328 @@ class RuntimeRepository:
             (session_id, start),
         ).fetchall()
         return tuple(self._event(row) for row in rows)
+
+    def session_details(self, session_id: str) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT r.*,s.source,s.parent_session_id FROM runtime_sessions r "
+            "JOIN sessions s ON s.id=r.session_id WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise _error("unavailable", "sessão de runtime indisponível")
+        result = dict(row)
+        result["capabilities"] = json.loads(result.pop("capabilities_json") or "null")
+        result["usage"] = {"status": "unknown"}
+        return result
+
+    def session_state(self, session_id: str, state: str) -> None:
+        with self._transaction():
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state=?,updated_at=? WHERE session_id=?",
+                (state, time.time(), session_id),
+            )
+            if state == "ended":
+                self._conn.execute(
+                    "UPDATE sessions SET ended_at=? WHERE id=?", (time.time(), session_id)
+                )
+
+    def unbound_sessions(self) -> tuple[dict, ...]:
+        return tuple(
+            dict(row)
+            for row in self._conn.execute(
+                "SELECT * FROM runtime_sessions WHERE external_thread_id IS NULL AND state<>'ended'"
+            )
+        )
+
+    def get_turn(self, turn_id: str) -> dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT t.*,m.content,d.holder,d.generation AS lease_generation "
+            "FROM runtime_turns t LEFT JOIN messages m ON m.id=t.user_message_id "
+            "LEFT JOIN runtime_directory_leases d ON d.turn_id=t.id WHERE t.id=?",
+            (turn_id,),
+        ).fetchone()
+        if row is None:
+            raise _error("unavailable", "turno de runtime indisponível")
+        result = dict(row)
+        dispatch = self._conn.execute(
+            "SELECT payload_json FROM runtime_events WHERE turn_id=? AND kind IN ('dispatching','observation_attached') "
+            "ORDER BY sequence DESC LIMIT 1",
+            (turn_id,),
+        ).fetchone()
+        result["process_generation"] = (
+            json.loads(dispatch[0]).get("generation") if dispatch else None
+        )
+        return result
+
+    def nonterminal_turns(self) -> tuple[dict, ...]:
+        return tuple(
+            self.get_turn(row[0])
+            for row in self._conn.execute(
+                "SELECT id FROM runtime_turns WHERE state NOT IN ('completed','failed','cancelled') "
+                "AND (state<>'interrupted' OR inactive_confirmed_at IS NULL)"
+            ).fetchall()
+        )
+
+    def terminal_without_event(self) -> tuple[dict, ...]:
+        return tuple(
+            self.get_turn(row[0])
+            for row in self._conn.execute(
+                "SELECT id FROM runtime_turns WHERE state IN ('completed','failed','cancelled','interrupted') "
+                "AND NOT EXISTS(SELECT 1 FROM runtime_events e WHERE e.turn_id=runtime_turns.id AND e.kind='turn_end')"
+            ).fetchall()
+        )
+
+    def transition(self, turn_id: str, expected: str, target: str) -> bool:
+        with self._transaction():
+            cursor = self._conn.execute(
+                "UPDATE runtime_turns SET state=?,updated_at=? WHERE id=? AND state=?",
+                (target, time.time(), turn_id, expected),
+            )
+            if not cursor.rowcount:
+                return False
+            self._append(turn_id, uuid.uuid4().hex, "turn_state", {"state": target})
+            state = (
+                target if target in {"waiting_approval", "recovering", "interrupted"} else "running"
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state=? WHERE session_id=(SELECT session_id FROM runtime_turns WHERE id=?)",
+                (state, turn_id),
+            )
+            return True
+
+    def dispatch(self, turn_id: str, generation: str) -> bool:
+        with self._transaction():
+            cursor = self._conn.execute(
+                "UPDATE runtime_turns SET send_state='dispatching',updated_at=? "
+                "WHERE id=? AND state='starting' AND send_state='not_sent'",
+                (time.time(), turn_id),
+            )
+            if not cursor.rowcount:
+                return False
+            self._append(turn_id, f"dispatch:{turn_id}", "dispatching", {"generation": generation})
+            return True
+
+    def confirm_dispatch(self, turn_id: str, external_turn_id: str) -> None:
+        with self._transaction():
+            self._conn.execute(
+                "UPDATE runtime_turns SET external_turn_id=?,send_state='confirmed',"
+                "state=CASE WHEN state='starting' THEN 'running' ELSE state END,updated_at=? "
+                "WHERE id=? AND send_state='dispatching'",
+                (external_turn_id, time.time(), turn_id),
+            )
+            self._append(
+                turn_id,
+                f"confirmed:{turn_id}",
+                "turn_start",
+                {"external_turn_id": external_turn_id},
+            )
+
+    def uncertain(self, turn_id: str) -> None:
+        with self._transaction():
+            self._conn.execute(
+                "UPDATE runtime_turns SET send_state=CASE WHEN send_state='dispatching' "
+                "THEN 'uncertain' ELSE send_state END,updated_at=? WHERE id=?",
+                (time.time(), turn_id),
+            )
+            self._append(turn_id, uuid.uuid4().hex, "recovery", {"reason": "observation_lost"})
+
+    def lose_turn(
+        self, turn_id: str, holder: str, generation: int, content: str, usage: dict | None
+    ) -> bool:
+        """Quarantine and preserve partial output atomically, including after lease expiry."""
+        with self._transaction():
+            directory = self._conn.execute(
+                "SELECT * FROM runtime_directory_leases WHERE turn_id=? AND holder=? AND generation=?",
+                (turn_id, holder, generation),
+            ).fetchone()
+            owner = self._directory_owner(turn_id)
+            if (
+                directory is None
+                or owner is None
+                or owner["state"] in {"completed", "failed", "cancelled"}
+            ):
+                return False
+            now = time.time()
+            self._quarantine_uncertain_owner(directory, owner, now)
+            self._conn.execute(
+                "UPDATE runtime_queue SET state='recovering',updated_at=? WHERE turn_id=?",
+                (now, turn_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_turns SET send_state=CASE WHEN send_state='dispatching' THEN 'uncertain' ELSE send_state END WHERE id=?",
+                (turn_id,),
+            )
+            self._append(turn_id, uuid.uuid4().hex, "recovery", {"reason": "observation_lost"})
+            self._finish(turn_id, "interrupted", content, usage)
+            return True
+
+    def save_approval(
+        self,
+        turn_id: str,
+        process_generation: str,
+        external_request_id: str,
+        external_item_id: str | None,
+        request: dict,
+    ) -> str:
+        with self._transaction():
+            existing = self._conn.execute(
+                "SELECT * FROM runtime_approvals WHERE process_generation=? AND external_request_id=?",
+                (process_generation, external_request_id),
+            ).fetchone()
+            payload = _json_dump(request)
+            if existing:
+                if (
+                    existing["turn_id"] != turn_id
+                    or existing["external_item_id"] != external_item_id
+                    or existing["request_json"] != payload
+                ):
+                    raise _error("invalid_event", "pedido externo conflitante")
+                return str(existing["id"])
+            turn = self.get_turn(turn_id)
+            if turn["state"] not in {"running", "waiting_approval"}:
+                raise _error("approval_stale", "aprovação não está mais pendente")
+            approval_id = uuid.uuid4().hex
+            now = time.time()
+            self._conn.execute(
+                "INSERT INTO runtime_approvals(id,turn_id,process_generation,external_request_id,"
+                "external_item_id,request_json,delivery_state,created_at,updated_at) VALUES (?,?,?,?,?,?,'pending',?,?)",
+                (
+                    approval_id,
+                    turn_id,
+                    process_generation,
+                    external_request_id,
+                    external_item_id,
+                    payload,
+                    now,
+                    now,
+                ),
+            )
+            self._append(
+                turn_id,
+                f"approval:{approval_id}",
+                "approval_request",
+                {"approval_id": approval_id, **request},
+            )
+            self._conn.execute(
+                "UPDATE runtime_turns SET state='waiting_approval' WHERE id=?", (turn_id,)
+            )
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state='waiting_approval' WHERE session_id=?",
+                (turn["session_id"],),
+            )
+            return approval_id
+
+    def get_approval(self, approval_id: str) -> dict:
+        row = self._conn.execute(
+            "SELECT * FROM runtime_approvals WHERE id=?", (approval_id,)
+        ).fetchone()
+        if row is None:
+            raise _error("approval_stale", "aprovação não está mais pendente")
+        result = dict(row)
+        result["request"] = json.loads(result.pop("request_json"))
+        return result
+
+    def decide_approval(self, approval_id: str, decision: str) -> bool:
+        if decision not in {"accept", "decline"}:
+            raise _error("invalid_event", "decisão inválida")
+        with self._transaction():
+            approval = self.get_approval(approval_id)
+            if approval["decision"] is not None:
+                if approval["decision"] != decision:
+                    raise _error("approval_stale", "decisão de aprovação conflitante")
+                return False
+            now = time.time()
+            self._conn.execute(
+                "UPDATE runtime_approvals SET decision=?,decided_at=?,updated_at=?,delivery_state='decided' WHERE id=?",
+                (decision, now, now, approval_id),
+            )
+            self._append(
+                approval["turn_id"],
+                f"decision:{approval_id}",
+                "approval_decision",
+                {"approval_id": approval_id, "decision": decision, "delivery_state": "decided"},
+            )
+            return True
+
+    def approval_delivered(self, approval_id: str) -> None:
+        with self._transaction():
+            approval = self.get_approval(approval_id)
+            self._conn.execute(
+                "UPDATE runtime_approvals SET delivery_state='delivered',updated_at=? WHERE id=?",
+                (time.time(), approval_id),
+            )
+            self._append(
+                approval["turn_id"],
+                f"delivered:{approval_id}",
+                "approval_delivery",
+                {"approval_id": approval_id, "delivery_state": "delivered"},
+            )
+            outstanding = self._conn.execute(
+                "SELECT 1 FROM runtime_approvals WHERE turn_id=? AND delivery_state IN ('pending','decided')",
+                (approval["turn_id"],),
+            ).fetchone()
+            if not outstanding:
+                self._conn.execute(
+                    "UPDATE runtime_turns SET state='running' WHERE id=? AND state='waiting_approval'",
+                    (approval["turn_id"],),
+                )
+                self._conn.execute(
+                    "UPDATE runtime_sessions SET state='running' WHERE session_id=(SELECT session_id FROM runtime_turns WHERE id=?) AND state='waiting_approval'",
+                    (approval["turn_id"],),
+                )
+
+    def finish(self, turn_id: str, state: str, content: str, usage: dict | None) -> None:
+        if state not in {"completed", "failed", "cancelled", "interrupted"}:
+            raise _error("invalid_event", "estado terminal inválido")
+        with self._transaction():
+            self._finish(turn_id, state, content, usage)
+
+    def _finish(self, turn_id: str, state: str, content: str, usage: dict | None) -> None:
+        turn = self.get_turn(turn_id)
+        usage_value = (
+            {"status": "unknown"} if usage is None else {"status": "known", "value": usage}
+        )
+        metadata = _json_dump({"runtime_kind": "codex", "turn_id": turn_id, "usage": usage_value})
+        now = time.time()
+        if turn["assistant_message_id"] is None:
+            message = self._conn.execute(
+                "INSERT INTO messages(session_id,role,content,api_content,timestamp,display_kind,display_metadata,finish_reason) VALUES (?,'assistant',?,?,?,'agent_runtime',?,?)",
+                (turn["session_id"], content, content, now, metadata, state),
+            )
+            message_id = message.lastrowid
+        else:
+            message_id = turn["assistant_message_id"]
+            self._conn.execute(
+                "UPDATE messages SET content=?,api_content=?,display_metadata=?,finish_reason=? WHERE id=?",
+                (content, content, metadata, state, message_id),
+            )
+        self._conn.execute(
+            "UPDATE runtime_turns SET state=?,assistant_message_id=?,updated_at=? WHERE id=?",
+            (state, message_id, now, turn_id),
+        )
+        self._conn.execute(
+            "UPDATE runtime_sessions SET state=?,updated_at=? WHERE session_id=? AND state NOT IN ('ended','unavailable')",
+            ("interrupted" if state == "interrupted" else "ready", now, turn["session_id"]),
+        )
+        self._conn.execute(
+            "UPDATE runtime_approvals SET delivery_state='stale',updated_at=? WHERE turn_id=? AND delivery_state<>'delivered'",
+            (now, turn_id),
+        )
+        # A later reconciliation may refine an interrupted outcome; retain both events.
+        payload = {"state": state, "content": content, "usage": usage_value}
+        digest = hashlib.sha256(_json_dump(payload).encode()).hexdigest()
+        self._append(turn_id, f"end:{turn_id}:{digest}", "turn_end", payload)
+
+    @contextmanager
+    def _transaction(self):
+        self._begin()
+        try:
+            yield
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
 
     def enqueue_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
         try:
@@ -674,6 +1105,7 @@ class RuntimeRepository:
                 "UPDATE runtime_queue SET state='cancelled',updated_at=? WHERE turn_id=?",
                 (now, turn_id),
             )
+            self._finish(turn_id, "cancelled", "", None)
         except sqlite3.OperationalError as exc:
             self._conn.rollback()
             if is_busy_error(exc):
@@ -702,3 +1134,23 @@ class RuntimeRepository:
         if self._conn.in_transaction:
             raise sqlite3.OperationalError("runtime write requires a transaction boundary")
         self._conn.execute("BEGIN IMMEDIATE")
+        if self._fence is not None:
+            turn_id, holder, generation = self._fence
+            row = self._conn.execute(
+                "SELECT 1 FROM runtime_directory_leases d JOIN runtime_turns t ON t.id=d.turn_id "
+                "JOIN session_turn_leases s ON s.conversation_id=t.session_id "
+                "WHERE d.turn_id=? AND d.holder=? AND d.generation=? AND s.holder=? "
+                "AND (? OR (d.quarantined=0 AND d.expires_at>? AND s.expires_at>?))",
+                (
+                    turn_id,
+                    holder,
+                    generation,
+                    holder,
+                    self._allow_expired,
+                    time.time(),
+                    time.time(),
+                ),
+            ).fetchone()
+            if row is None:
+                self._conn.rollback()
+                raise _error("lease_lost", "lease de runtime perdida")

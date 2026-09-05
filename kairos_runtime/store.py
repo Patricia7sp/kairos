@@ -20,6 +20,36 @@ class RuntimeStore:
     def __init__(self, db_path: str | os.PathLike[str]) -> None:
         self._db_path = Path(db_path)
 
+    async def owned(self, turn_id, holder, generation, operation, *args, allow_expired=False):
+        return await self._call(
+            lambda repo: repo.owned(
+                turn_id, holder, generation, operation, *args, allow_expired=allow_expired
+            )
+        )
+
+    async def adopt_runtime_turn(
+        self,
+        turn_id,
+        previous_holder,
+        previous_generation,
+        holder,
+        *,
+        confirmed_inactive,
+        ttl,
+        clock,
+    ):
+        return await self._call(
+            lambda repo: repo.adopt_runtime_turn(
+                turn_id,
+                previous_holder,
+                previous_generation,
+                holder,
+                confirmed_inactive=confirmed_inactive,
+                ttl=ttl,
+                clock=clock,
+            )
+        )
+
     async def create_session(
         self,
         session: RuntimeSession,
@@ -59,6 +89,69 @@ class RuntimeStore:
 
     async def events_after(self, session_id: str, cursor: str | None) -> tuple[RuntimeEvent, ...]:
         return await self._call(lambda repo: repo.events_after(session_id, cursor))
+
+    async def session_details(self, session_id: str) -> dict:
+        return await self._call(lambda repo: repo.session_details(session_id))
+
+    async def session_state(self, session_id: str, state: str) -> None:
+        await self._call(lambda repo: repo.session_state(session_id, state))
+
+    async def unbound_sessions(self) -> tuple[dict, ...]:
+        return await self._call(lambda repo: repo.unbound_sessions())
+
+    async def get_turn(self, turn_id: str) -> dict:
+        return await self._call(lambda repo: repo.get_turn(turn_id))
+
+    async def nonterminal_turns(self) -> tuple[dict, ...]:
+        return await self._call(lambda repo: repo.nonterminal_turns())
+
+    async def terminal_without_event(self) -> tuple[dict, ...]:
+        return await self._call(lambda repo: repo.terminal_without_event())
+
+    async def transition(self, turn_id: str, expected: str, target: str) -> bool:
+        return await self._call(lambda repo: repo.transition(turn_id, expected, target))
+
+    async def dispatch(self, turn_id: str, generation: str) -> bool:
+        return await self._call(lambda repo: repo.dispatch(turn_id, generation))
+
+    async def confirm_dispatch(self, turn_id: str, external_turn_id: str) -> None:
+        await self._call(lambda repo: repo.confirm_dispatch(turn_id, external_turn_id))
+
+    async def uncertain(self, turn_id: str) -> None:
+        await self._call(lambda repo: repo.uncertain(turn_id))
+
+    async def lose_turn(
+        self, turn_id: str, holder: str, generation: int, content: str, usage: dict | None
+    ) -> bool:
+        return await self._call(
+            lambda repo: repo.lose_turn(turn_id, holder, generation, content, usage)
+        )
+
+    async def save_approval(
+        self,
+        turn_id: str,
+        process_generation: str,
+        external_request_id: str,
+        external_item_id: str | None,
+        request: dict,
+    ) -> str:
+        return await self._call(
+            lambda repo: repo.save_approval(
+                turn_id, process_generation, external_request_id, external_item_id, request
+            )
+        )
+
+    async def get_approval(self, approval_id: str) -> dict:
+        return await self._call(lambda repo: repo.get_approval(approval_id))
+
+    async def decide_approval(self, approval_id: str, decision: str) -> bool:
+        return await self._call(lambda repo: repo.decide_approval(approval_id, decision))
+
+    async def approval_delivered(self, approval_id: str) -> None:
+        await self._call(lambda repo: repo.approval_delivered(approval_id))
+
+    async def finish(self, turn_id: str, state: str, content: str, usage: dict | None) -> None:
+        await self._call(lambda repo: repo.finish(turn_id, state, content, usage))
 
     async def enqueue_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
         await self._call(lambda repo: repo.enqueue_runtime_turn(turn_id, clock))
