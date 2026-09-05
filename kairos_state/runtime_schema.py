@@ -113,6 +113,20 @@ CREATE INDEX idx_runtime_approvals_delivery
 CREATE INDEX idx_runtime_directory_leases_expiry
     ON runtime_directory_leases(expires_at);
 
+CREATE TRIGGER runtime_sessions_identity_no_replace
+BEFORE INSERT ON runtime_sessions
+WHEN EXISTS (
+    SELECT 1 FROM runtime_sessions AS bound
+     WHERE bound.external_thread_id IS NOT NULL
+       AND (
+           bound.session_id = NEW.session_id OR
+           bound.external_thread_id = NEW.external_thread_id
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'bound runtime identity cannot be replaced');
+END;
+
 CREATE TRIGGER runtime_sessions_identity_immutable
 BEFORE UPDATE OF runtime_kind,external_thread_id,requested_cwd,canonical_cwd,sandbox_profile,
     broad_consent_at,directory_device,directory_inode
@@ -135,6 +149,21 @@ CREATE TRIGGER runtime_sessions_identity_no_delete
 BEFORE DELETE ON runtime_sessions
 BEGIN
     SELECT RAISE(ABORT, 'runtime identity cannot be deleted');
+END;
+
+CREATE TRIGGER sessions_execution_kind_no_replace
+BEFORE INSERT ON sessions
+WHEN EXISTS (
+    SELECT 1
+      FROM sessions AS bound_session
+      JOIN runtime_sessions AS runtime
+        ON runtime.session_id = bound_session.id
+     WHERE bound_session.id = NEW.id
+       AND bound_session.execution_kind = 'agent_runtime'
+       AND runtime.external_thread_id IS NOT NULL
+)
+BEGIN
+    SELECT RAISE(ABORT, 'bound runtime execution kind cannot be replaced');
 END;
 
 CREATE TRIGGER sessions_execution_kind_immutable

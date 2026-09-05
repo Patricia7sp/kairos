@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -79,12 +80,15 @@ class RuntimeStore:
             finally:
                 connection.close()
 
-        worker = asyncio.create_task(asyncio.to_thread(run))
+        context = contextvars.copy_context()
+        worker = asyncio.get_running_loop().run_in_executor(None, context.run, run)
         cancellation: asyncio.CancelledError | None = None
         while True:
             try:
                 result = await asyncio.shield(worker)
             except asyncio.CancelledError as exc:
+                if worker.cancelled():
+                    raise
                 cancellation = exc
                 continue
             except BaseException:

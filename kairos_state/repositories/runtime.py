@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import time
 import uuid
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 from kairos_runtime.contracts import RuntimeCapabilities, RuntimeEvent, RuntimeSession
@@ -36,6 +38,22 @@ def _json_dump(value: Any) -> str:
         return json.dumps(_json_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     except (TypeError, ValueError) as exc:
         raise _error("invalid_event", "payload de evento inválido") from exc
+
+
+def _snapshot_json(value: Any) -> Any:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise _error("invalid_event", "payload de evento inválido")
+        return value
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise _error("invalid_event", "payload de evento inválido")
+        return MappingProxyType({key: _snapshot_json(item) for key, item in value.items()})
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(_snapshot_json(item) for item in value)
+    raise _error("invalid_event", "payload de evento inválido")
 
 
 class RuntimeRepository:
@@ -211,7 +229,10 @@ class RuntimeRepository:
     ) -> RuntimeEvent:
         if any(not isinstance(value, str) or not value for value in (turn_id, event_id, kind)):
             raise _error("invalid_event", "evento inválido")
-        payload_json = _json_dump(payload)
+        payload_snapshot = _snapshot_json(payload)
+        if not isinstance(payload_snapshot, Mapping):
+            raise _error("invalid_event", "payload de evento inválido")
+        payload_json = _json_dump(payload_snapshot)
         self._begin()
         try:
             turn = self._conn.execute(
@@ -250,7 +271,9 @@ class RuntimeRepository:
                 ") VALUES (?,?,?,?,?,?,?,?,?)",
                 (event_id, session_id, turn_id, sequence, kind, payload_json, cursor, now, now),
             )
-            event = RuntimeEvent(1, event_id, session_id, turn_id, sequence, cursor, kind, payload)
+            event = RuntimeEvent(
+                1, event_id, session_id, turn_id, sequence, cursor, kind, payload_snapshot
+            )
         except BaseException:
             self._conn.rollback()
             raise

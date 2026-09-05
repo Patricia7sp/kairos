@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import subprocess
+import sys
+import textwrap
 import threading
 from pathlib import Path
 
@@ -212,6 +215,38 @@ def test_bind_negotiates_capabilities_and_freezes_identity(tmp_path: Path) -> No
             db.execute(sql)
 
 
+def test_bound_identity_cannot_be_replaced_via_insert_conflict(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    db = open_runtime_db(tmp_path / "state.db")
+    repo = RuntimeRepository(db)
+    session_id = _create_bound(repo, project, "s1")
+    repo.admit(session_id, "key", "content")
+
+    with pytest.raises(sqlite3.IntegrityError, match="identity"):
+        db.execute(
+            "INSERT OR REPLACE INTO runtime_sessions("
+            "session_id,runtime_kind,external_thread_id,requested_cwd,canonical_cwd,"
+            "sandbox_profile,protocol_version,capabilities_json,state,next_sequence,"
+            "directory_device,directory_inode,created_at,updated_at"
+            ") SELECT session_id,runtime_kind,external_thread_id,requested_cwd,'/tmp',"
+            "sandbox_profile,protocol_version,capabilities_json,state,next_sequence,"
+            "directory_device,directory_inode,created_at,updated_at "
+            "FROM runtime_sessions WHERE session_id='s1'"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="execution kind"):
+        db.execute(
+            "INSERT OR REPLACE INTO sessions(id,source,started_at,execution_kind) "
+            "VALUES ('s1','web',1,'model')"
+        )
+
+    row = db.execute(
+        "SELECT canonical_cwd FROM runtime_sessions WHERE session_id='s1'"
+    ).fetchone()
+    assert row["canonical_cwd"] == str(project)
+    assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_admit_is_atomic_and_idempotent(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -284,6 +319,58 @@ def test_append_sequences_events_and_returns_snapshot_isolated_payload(tmp_path:
     assert [event.event_id for event in repo.events_after("runtime-1", first.cursor)] == [
         "event-2"
     ]
+
+
+def test_append_returns_the_same_payload_snapshot_persisted_before_lock_wait(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "state.db"
+    setup = open_runtime_db(path)
+    turn = RuntimeRepository(setup).admit(
+        _create_bound(RuntimeRepository(setup), project), "key", "content"
+    )
+    setup.close()
+
+    begin_attempted = threading.Event()
+    payload = {"text": "before"}
+    locker = connect(path, timeout=5)
+    locker.execute("BEGIN IMMEDIATE")
+    result: list[object] = []
+
+    def append_while_locked() -> None:
+        connection = connect(path, timeout=5)
+        connection.set_trace_callback(
+            lambda statement: begin_attempted.set()
+            if statement == "BEGIN IMMEDIATE"
+            else None
+        )
+        try:
+            result.append(RuntimeRepository(connection).append(turn, "event", "output", payload))
+        except BaseException as exc:  # noqa: BLE001 - thread must return all failures
+            result.append(exc)
+        finally:
+            connection.close()
+
+    worker = threading.Thread(target=append_while_locked)
+    worker.start()
+    assert begin_attempted.wait(timeout=2)
+    payload["text"] = "after"
+    locker.commit()
+    worker.join(timeout=5)
+    locker.close()
+
+    assert not worker.is_alive()
+    assert len(result) == 1
+    assert not isinstance(result[0], BaseException)
+    event = result[0]
+    assert event.payload["text"] == "before"
+    check = connect(path)
+    assert json.loads(check.execute("SELECT payload_json FROM runtime_events").fetchone()[0]) == {
+        "text": "before"
+    }
+    check.close()
 
 
 def test_append_deduplicates_identical_event_and_rejects_conflicts(tmp_path: Path) -> None:
@@ -382,3 +469,55 @@ def test_async_store_opens_connections_in_worker_and_propagates_cancellation(
             timer.cancel()
 
     asyncio.run(exercise())
+
+
+def test_asyncio_run_shutdown_drains_store_worker_without_cancelling_it(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "state.db"
+    db = open_runtime_db(path)
+    repo = RuntimeRepository(db)
+    _create_bound(repo, project)
+    db.close()
+    marker = tmp_path / "worker-finished"
+    script = textwrap.dedent(
+        """
+        import asyncio
+        import sys
+        import time
+        from pathlib import Path
+
+        from kairos_runtime import RuntimeStore
+        from kairos_state.repositories.runtime import RuntimeRepository
+
+        db_path = Path(sys.argv[1])
+        marker = Path(sys.argv[2])
+        original = RuntimeRepository.get_session
+
+        def slow_get(repo, session_id):
+            time.sleep(0.2)
+            result = original(repo, session_id)
+            marker.write_text("done", encoding="utf-8")
+            return result
+
+        RuntimeRepository.get_session = slow_get
+
+        async def main():
+            asyncio.create_task(RuntimeStore(db_path).get_session("runtime-1"))
+            await asyncio.sleep(0.05)
+
+        asyncio.run(main())
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(path), str(marker)],
+        cwd=Path(__file__).parents[1],
+        text=True,
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert marker.read_text(encoding="utf-8") == "done"
