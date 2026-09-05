@@ -255,6 +255,9 @@ _NESTED_FIELDS = frozenset(
     }
 )
 
+_ARBITRARY_JSON_FIELDS = frozenset({"arguments", "structuredContent"})
+_AGENT_STATE_FIELDS = frozenset({"message", "status"})
+
 
 def public_error(code: str) -> dict[str, Any]:
     """Return one fixed message for a known code, or the internal fallback."""
@@ -273,20 +276,24 @@ def sanitize_payload(kind: str, payload: dict) -> dict[str, Any]:
         return {}
     allowed = _TOP_LEVEL_FIELDS.get(kind, frozenset())
     return {
-        key: _sanitize_value(value)
+        key: _sanitize_value(value, field=key)
         for key, value in payload.items()
         if key in allowed and _safe_json_value(value)
     }
 
 
-def _sanitize_value(value: Any) -> Any:
+def _sanitize_value(value: Any, *, field: str | None = None) -> Any:
+    if field in _ARBITRARY_JSON_FIELDS:
+        return _copy_json(value)
+    if field == "agentsStates":
+        return _sanitize_agent_states(value)
     if value is None or type(value) in {bool, int, str}:
         return value
     if type(value) is float:
         return value if math.isfinite(value) else None
     if isinstance(value, Mapping):
         return {
-            key: _sanitize_value(item)
+            key: _sanitize_value(item, field=key)
             for key, item in value.items()
             if isinstance(key, str) and key in _NESTED_FIELDS and _safe_json_value(item)
         }
@@ -294,6 +301,38 @@ def _sanitize_value(value: Any) -> Any:
         return [_sanitize_value(item) for item in value if _safe_json_value(item)]
     if isinstance(value, (set, frozenset)):
         return [_sanitize_value(item) for item in sorted(value, key=repr) if _safe_json_value(item)]
+    return None
+
+
+def _sanitize_agent_states(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        agent_id: {
+            key: _sanitize_value(item, field=key)
+            for key, item in state.items()
+            if isinstance(key, str) and key in _AGENT_STATE_FIELDS and _safe_json_value(item)
+        }
+        for agent_id, state in value.items()
+        if isinstance(agent_id, str) and isinstance(state, Mapping)
+    }
+
+
+def _copy_json(value: Any) -> Any:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        return {
+            key: _copy_json(item)
+            for key, item in value.items()
+            if isinstance(key, str) and _safe_json_value(item)
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_copy_json(item) for item in value if _safe_json_value(item)]
+    if isinstance(value, (set, frozenset)):
+        return [_copy_json(item) for item in sorted(value, key=repr) if _safe_json_value(item)]
     return None
 
 

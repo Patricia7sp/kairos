@@ -64,6 +64,45 @@ def test_runtime_event_wire_applies_payload_allowlist_without_mutilating_transcr
     assert SENTINEL not in encoded
 
 
+def test_tool_payload_preserves_schema_declared_arbitrary_json_and_dynamic_agent_keys():
+    payload = sanitize_payload(
+        "tool",
+        {
+            "item": {
+                "id": "tool-1",
+                "type": "mcpToolCall",
+                "arguments": {"customer_id": "42", "filters": [{"region": "south"}]},
+                "result": {
+                    "content": [],
+                    "structuredContent": {"temperature_celsius": 21},
+                },
+                "agentsStates": {
+                    "agent-dynamic-key": {
+                        "status": "running",
+                        "message": "working",
+                        "accessToken": SENTINEL,
+                    }
+                },
+                "authorization": SENTINEL,
+            }
+        },
+    )
+
+    assert payload == {
+        "item": {
+            "id": "tool-1",
+            "type": "mcpToolCall",
+            "arguments": {"customer_id": "42", "filters": [{"region": "south"}]},
+            "result": {
+                "content": [],
+                "structuredContent": {"temperature_celsius": 21},
+            },
+            "agentsStates": {"agent-dynamic-key": {"status": "running", "message": "working"}},
+        }
+    }
+    assert SENTINEL not in json.dumps(payload)
+
+
 def test_repository_sanitizes_event_and_approval_before_database_write(tmp_path: Path):
     database = tmp_path / "state.db"
     connection = open_runtime_db(database)

@@ -143,6 +143,41 @@ async def test_status_without_login_is_a_fixed_allowlisted_shape():
         await auth.aclose()
 
 
+@async_test
+async def test_close_cancels_and_drains_an_inflight_account_rpc():
+    class BlockingRpc(FakeRpc):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.call_cancelled = False
+
+        async def call(self, method, params):
+            if method == "account/read":
+                self.started.set()
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    self.call_cancelled = True
+                    raise
+            return await super().call(method, params)
+
+    rpc = BlockingRpc()
+    auth = RuntimeAuth(rpc)
+    status = asyncio.create_task(auth.status())
+    await rpc.started.wait()
+    close = asyncio.create_task(auth.aclose())
+    try:
+        done, _ = await asyncio.wait({close}, timeout=0.1)
+        assert close in done
+        await close
+        assert status.cancelled()
+        assert rpc.call_cancelled
+    finally:
+        status.cancel()
+        close.cancel()
+        await asyncio.gather(status, close, return_exceptions=True)
+
+
 @pytest.mark.parametrize(
     ("mode", "api_key", "expected_params", "expected"),
     [

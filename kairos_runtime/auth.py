@@ -54,12 +54,13 @@ class RuntimeAuth:
         self._pending_login_id: str | None = None
         self._early_completion: tuple[str, bool] | None = None
         self._login_state = "idle"
+        self._inflight_call: asyncio.Task[Any] | None = None
         self._closed = False
 
     async def status(self) -> dict[str, Any]:
         async with self._operation_lock:
             rpc, generation = self._current_rpc()
-            result = await rpc.call("account/read", {"refreshToken": False})
+            result = await self._call(rpc, "account/read", {"refreshToken": False})
             if rpc is not self._rpc or generation != self._generation:
                 raise RuntimeErrorInfo("unavailable", "runtime indisponível", True)
             account = _parse_account(result)
@@ -93,7 +94,7 @@ class RuntimeAuth:
                 self._early_completion = None
                 self._login_state = "starting"
             try:
-                result = await rpc.call("account/login/start", params)
+                result = await self._call(rpc, "account/login/start", params)
                 response = _parse_login_response(mode, result)
             except BaseException:
                 async with self._state_lock:
@@ -125,7 +126,7 @@ class RuntimeAuth:
             async with self._state_lock:
                 if login_id != self._pending_login_id:
                     raise _invalid()
-            result = await rpc.call("account/login/cancel", {"loginId": login_id})
+            result = await self._call(rpc, "account/login/cancel", {"loginId": login_id})
             if result.get("status") not in {"canceled", "notFound"}:
                 raise _invalid()
             if rpc is not self._rpc or generation != self._generation:
@@ -138,7 +139,7 @@ class RuntimeAuth:
     async def logout(self) -> None:
         async with self._operation_lock:
             rpc, generation = self._current_rpc()
-            result = await rpc.call("account/logout", {})
+            result = await self._call(rpc, "account/logout", {})
             if not isinstance(result, dict):
                 raise _invalid()
             if rpc is not self._rpc or generation != self._generation:
@@ -171,10 +172,14 @@ class RuntimeAuth:
                 self._login_state = "idle"
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        inflight = self._inflight_call
+        if inflight is not None:
+            inflight.cancel()
+            await asyncio.gather(inflight, return_exceptions=True)
         async with self._operation_lock:
-            if self._closed:
-                return
-            self._closed = True
             self._rpc.unsubscribe(self._subscription)
             self._listener.cancel()
             await asyncio.gather(self._listener, return_exceptions=True)
@@ -182,6 +187,15 @@ class RuntimeAuth:
                 self._pending_login_id = None
                 self._early_completion = None
                 self._login_state = "idle"
+
+    async def _call(self, rpc: CodexRpc, method: str, params: dict[str, Any]) -> Any:
+        call = asyncio.create_task(rpc.call(method, params))
+        self._inflight_call = call
+        try:
+            return await call
+        finally:
+            if self._inflight_call is call:
+                self._inflight_call = None
 
     def _current_rpc(self) -> tuple[CodexRpc, str]:
         if self._closed:
