@@ -391,9 +391,13 @@ class RuntimeRepository:
             if directory is not None and directory["expires_at"] > now:
                 self._conn.rollback()
                 return None
-            if directory is not None and self._quarantine_if_uncertain(directory, now):
-                self._conn.commit()
-                return None
+            if directory is not None:
+                previous = self._directory_owner(directory["turn_id"])
+                if not self._owner_is_confirmed_inactive(previous):
+                    self._quarantine_uncertain_owner(directory, previous, now)
+                    self._conn.commit()
+                    return None
+                self._finalize_inactive_owner(directory, previous, now)
 
             session_lease = self._conn.execute(
                 "SELECT holder,expires_at FROM session_turn_leases WHERE conversation_id=?",
@@ -510,37 +514,45 @@ class RuntimeRepository:
         holder: str,
         generation: int,
         clock: Callable[[], float],
+        *,
+        confirmed_inactive: bool = False,
     ) -> bool:
         try:
             self._begin()
             now = clock()
             row = self._conn.execute(
-                "SELECT d.canonical_cwd,t.session_id,t.state,d.quarantined "
+                "SELECT d.canonical_cwd,d.turn_id,d.holder,t.session_id,t.state,"
+                "t.inactive_confirmed_at,r.state AS session_state,s.ended_at "
                 "FROM runtime_directory_leases d JOIN runtime_turns t ON t.id=d.turn_id "
+                "JOIN runtime_sessions r ON r.session_id=t.session_id "
+                "JOIN sessions s ON s.id=t.session_id "
                 "WHERE d.turn_id=? AND d.holder=? AND d.generation=?",
                 (turn_id, holder, generation),
             ).fetchone()
-            if row is None or row["state"] not in {"completed", "failed", "cancelled"}:
+            if row is None or row["state"] not in {
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted",
+            }:
                 self._conn.rollback()
                 return False
+            if row["state"] == "interrupted" and not (
+                row["inactive_confirmed_at"] is not None or confirmed_inactive
+            ):
+                self._conn.rollback()
+                return False
+            if confirmed_inactive:
+                self._conn.execute(
+                    "UPDATE runtime_turns SET inactive_confirmed_at=?,updated_at=? WHERE id=?",
+                    (now, now, turn_id),
+                )
             self._conn.execute(
                 "UPDATE runtime_directory_leases SET expires_at=?,quarantined=0,updated_at=? "
                 "WHERE canonical_cwd=? AND holder=? AND generation=?",
                 (now, now, row["canonical_cwd"], holder, generation),
             )
-            self._conn.execute(
-                "UPDATE session_turn_leases SET holder=NULL,acquired_at=NULL,expires_at=NULL "
-                "WHERE conversation_id=? AND holder=?",
-                (row["session_id"], holder),
-            )
-            self._conn.execute(
-                "UPDATE runtime_queue SET state='done',updated_at=? WHERE turn_id=?",
-                (now, turn_id),
-            )
-            self._conn.execute(
-                "UPDATE runtime_sessions SET state='ready',updated_at=? WHERE session_id=?",
-                (now, row["session_id"]),
-            )
+            self._finalize_inactive_owner(row, row, now)
         except sqlite3.OperationalError as exc:
             self._conn.rollback()
             if is_busy_error(exc):
@@ -553,20 +565,29 @@ class RuntimeRepository:
             self._conn.commit()
             return True
 
-    def _quarantine_if_uncertain(self, directory: sqlite3.Row, now: float) -> bool:
-        previous = self._conn.execute(
-            "SELECT t.state,t.session_id FROM runtime_turns t WHERE t.id=?",
-            (directory["turn_id"],),
+    def _directory_owner(self, turn_id: str) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT t.id AS turn_id,t.state,t.session_id,t.inactive_confirmed_at,"
+            "r.state AS session_state,s.ended_at "
+            "FROM runtime_turns t JOIN runtime_sessions r ON r.session_id=t.session_id "
+            "JOIN sessions s ON s.id=t.session_id WHERE t.id=?",
+            (turn_id,),
         ).fetchone()
-        if previous is not None and previous["state"] in {
-            "completed",
-            "failed",
-            "cancelled",
-        }:
-            return False
+
+    @staticmethod
+    def _owner_is_confirmed_inactive(owner: sqlite3.Row | None) -> bool:
+        return owner is not None and (
+            owner["state"] in {"completed", "failed", "cancelled"}
+            or (owner["state"] == "interrupted" and owner["inactive_confirmed_at"] is not None)
+        )
+
+    def _quarantine_uncertain_owner(
+        self, directory: sqlite3.Row, previous: sqlite3.Row | None, now: float
+    ) -> None:
         if previous is not None:
             self._conn.execute(
-                "UPDATE runtime_turns SET state='recovering',updated_at=? WHERE id=?",
+                "UPDATE runtime_turns SET state='recovering',updated_at=? "
+                "WHERE id=? AND state<>'interrupted'",
                 (now, directory["turn_id"]),
             )
             self._conn.execute(
@@ -577,7 +598,25 @@ class RuntimeRepository:
             "UPDATE runtime_directory_leases SET quarantined=1,updated_at=? WHERE canonical_cwd=?",
             (now, directory["canonical_cwd"]),
         )
-        return True
+
+    def _finalize_inactive_owner(
+        self, directory: sqlite3.Row, owner: sqlite3.Row, now: float
+    ) -> None:
+        self._conn.execute(
+            "UPDATE session_turn_leases SET holder=NULL,acquired_at=NULL,expires_at=NULL "
+            "WHERE conversation_id=? AND holder=?",
+            (owner["session_id"], directory["holder"]),
+        )
+        self._conn.execute(
+            "UPDATE runtime_queue SET state='done',updated_at=? WHERE turn_id=?",
+            (now, directory["turn_id"]),
+        )
+        if owner["session_state"] not in {"ended", "unavailable"}:
+            state = "ended" if owner["ended_at"] is not None else "ready"
+            self._conn.execute(
+                "UPDATE runtime_sessions SET state=?,updated_at=? WHERE session_id=?",
+                (state, now, owner["session_id"]),
+            )
 
     def quarantine_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:
         try:
@@ -600,7 +639,8 @@ class RuntimeRepository:
                 (now, row["session_id"], row["holder"]),
             )
             self._conn.execute(
-                "UPDATE runtime_turns SET state='recovering',updated_at=? WHERE id=?",
+                "UPDATE runtime_turns SET state='recovering',updated_at=? "
+                "WHERE id=? AND state<>'interrupted'",
                 (now, turn_id),
             )
             self._conn.execute(

@@ -81,10 +81,22 @@ class RuntimeStore:
         )
 
     async def release_runtime_turn(
-        self, turn_id: str, holder: str, generation: int, clock: Callable[[], float]
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        clock: Callable[[], float],
+        *,
+        confirmed_inactive: bool = False,
     ) -> bool:
         return await self._call(
-            lambda repo: repo.release_runtime_turn(turn_id, holder, generation, clock)
+            lambda repo: repo.release_runtime_turn(
+                turn_id,
+                holder,
+                generation,
+                clock,
+                confirmed_inactive=confirmed_inactive,
+            )
         )
 
     async def quarantine_runtime_turn(self, turn_id: str, clock: Callable[[], float]) -> None:

@@ -47,6 +47,7 @@ CREATE TABLE runtime_turns (
     )),
     user_message_id INTEGER REFERENCES messages(id),
     assistant_message_id INTEGER REFERENCES messages(id),
+    inactive_confirmed_at REAL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     UNIQUE(session_id,idempotency_key),

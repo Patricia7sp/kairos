@@ -157,6 +157,46 @@ async def test_expired_uncertain_owner_quarantines_until_external_inactivity(
 
 
 @async_test
+async def test_reclaim_finalizes_terminal_predecessor_after_crash_before_release(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "state.db"
+    open_runtime_db(path).close()
+    store = RuntimeStore(path)
+    clock = Clock()
+    leases = RuntimeLeaseManager(store, clock)
+    first = await _admit(store, project, "first")
+    second = await _admit(store, project, "second")
+    await leases.enqueue(first)
+    await leases.enqueue(second)
+    first_generation = await leases.claim(first, "old-host", 30)
+    assert first_generation == 1
+    _set_turn_state(path, first, "completed")
+    clock.now += 31
+
+    assert await leases.claim(second, "new-host", 30) == 2
+    db = connect(path)
+    assert (
+        db.execute("SELECT state FROM runtime_queue WHERE turn_id=?", (first,)).fetchone()[0]
+        == "done"
+    )
+    assert (
+        db.execute("SELECT state FROM runtime_sessions WHERE session_id='first'").fetchone()[0]
+        == "ready"
+    )
+    assert tuple(
+        db.execute(
+            "SELECT holder,acquired_at,expires_at FROM session_turn_leases "
+            "WHERE conversation_id='first'"
+        ).fetchone()
+    ) == (None, None, None)
+    db.close()
+    assert not await leases.release(first, "old-host", first_generation)
+
+
+@async_test
 async def test_queued_cancellation_retires_turn_without_runtime_rpc(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -269,10 +309,49 @@ async def test_release_requires_confirmed_inactivity(tmp_path: Path) -> None:
     assert not await leases.release(turn, "host", generation)
     await leases.quarantine(turn)
     assert not await leases.release(turn, "host", generation)
-    _set_turn_state(path, turn, "completed")
-    assert await leases.release(turn, "host", generation)
+    assert not await leases.release(turn, "stale-host", generation, confirmed_inactive=True)
+    assert not await leases.release(turn, "host", generation + 1, confirmed_inactive=True)
     db = connect(path)
+    assert (
+        db.execute(
+            "SELECT inactive_confirmed_at FROM runtime_turns WHERE id=?", (turn,)
+        ).fetchone()[0]
+        is None
+    )
+    db.close()
+
+    assert await leases.release(turn, "host", generation, confirmed_inactive=True)
+    db = connect(path)
+    row = db.execute(
+        "SELECT state,inactive_confirmed_at FROM runtime_turns WHERE id=?", (turn,)
+    ).fetchone()
+    assert row["state"] == "interrupted"
+    assert row["inactive_confirmed_at"] == 1_000.0
     assert db.execute("SELECT quarantined FROM runtime_directory_leases").fetchone()[0] == 0
+    db.close()
+
+
+@async_test
+async def test_confirmed_inactive_does_not_release_nonterminal_turn(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "state.db"
+    open_runtime_db(path).close()
+    store = RuntimeStore(path)
+    leases = RuntimeLeaseManager(store, Clock())
+    turn = await _admit(store, project, "session")
+    await leases.enqueue(turn)
+    generation = await leases.claim(turn, "host", 30)
+    assert generation == 1
+
+    assert not await leases.release(turn, "host", generation, confirmed_inactive=True)
+    db = connect(path)
+    assert (
+        db.execute(
+            "SELECT inactive_confirmed_at FROM runtime_turns WHERE id=?", (turn,)
+        ).fetchone()[0]
+        is None
+    )
     db.close()
 
 

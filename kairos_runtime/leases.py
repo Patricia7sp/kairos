@@ -45,10 +45,25 @@ class RuntimeLeaseManager:
         self._validate_generation(generation)
         return await self._store.renew_runtime_turn(turn_id, holder, generation, ttl, self._clock)
 
-    async def release(self, turn_id: str, holder: str, generation: int) -> bool:
+    async def release(
+        self,
+        turn_id: str,
+        holder: str,
+        generation: int,
+        *,
+        confirmed_inactive: bool = False,
+    ) -> bool:
         self._validate_owner(holder, DEFAULT_TTL_SECONDS)
         self._validate_generation(generation)
-        return await self._store.release_runtime_turn(turn_id, holder, generation, self._clock)
+        if type(confirmed_inactive) is not bool:
+            raise ValueError("confirmed_inactive must be boolean")
+        return await self._store.release_runtime_turn(
+            turn_id,
+            holder,
+            generation,
+            self._clock,
+            confirmed_inactive=confirmed_inactive,
+        )
 
     async def quarantine(self, turn_id: str) -> None:
         await self._store.quarantine_runtime_turn(turn_id, self._clock)
