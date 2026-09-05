@@ -19,6 +19,7 @@ from .policy import (
     revalidate_directory_identity,
     validate_sandbox,
 )
+from .store import RuntimeStore
 
 __all__ = [
     "RUNTIME_ERROR_CODES",
@@ -31,6 +32,7 @@ __all__ = [
     "RuntimeEvent",
     "RuntimeObservation",
     "RuntimeSession",
+    "RuntimeStore",
     "Sandbox",
     "authorize_directory",
     "capture_directory_identity",
