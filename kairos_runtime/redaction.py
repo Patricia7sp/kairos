@@ -87,13 +87,11 @@ _NESTED_FIELDS = frozenset(
         "activeFlags",
         "agentPath",
         "agentThreadId",
-        "agentsStates",
         "aggregatedOutput",
         "appName",
         "appearance",
         "approval_id",
         "approvalId",
-        "arguments",
         "audioUrl",
         "audio_url",
         "branch",
@@ -224,7 +222,6 @@ _NESTED_FIELDS = frozenset(
         "startedAtMs",
         "state",
         "status",
-        "structuredContent",
         "subAgent",
         "subpath",
         "success",
@@ -255,8 +252,15 @@ _NESTED_FIELDS = frozenset(
     }
 )
 
-_ARBITRARY_JSON_FIELDS = frozenset({"arguments", "structuredContent"})
 _AGENT_STATE_FIELDS = frozenset({"message", "status"})
+_THREAD_ITEM_PATHS = frozenset(
+    {
+        ("tool", "item"),
+        ("snapshot", "items", "*"),
+        ("reconciled", "snapshot", "items", "*"),
+    }
+)
+_ARGUMENT_ITEM_TYPES = frozenset({"dynamicToolCall", "mcpToolCall"})
 
 
 def public_error(code: str) -> dict[str, Any]:
@@ -276,32 +280,86 @@ def sanitize_payload(kind: str, payload: dict) -> dict[str, Any]:
         return {}
     allowed = _TOP_LEVEL_FIELDS.get(kind, frozenset())
     return {
-        key: _sanitize_value(value, field=key)
+        key: _sanitize_value(value, path=(kind, key))
         for key, value in payload.items()
         if key in allowed and _safe_json_value(value)
     }
 
 
-def _sanitize_value(value: Any, *, field: str | None = None) -> Any:
-    if field in _ARBITRARY_JSON_FIELDS:
-        return _copy_json(value)
-    if field == "agentsStates":
-        return _sanitize_agent_states(value)
+def _sanitize_value(
+    value: Any, *, path: tuple[str, ...], allow_structured_content: bool = False
+) -> Any:
     if value is None or type(value) in {bool, int, str}:
         return value
     if type(value) is float:
         return value if math.isfinite(value) else None
     if isinstance(value, Mapping):
+        item_type = value.get("type") if path in _THREAD_ITEM_PATHS else None
         return {
-            key: _sanitize_value(item, field=key)
+            key: _sanitize_mapping_field(
+                key,
+                item,
+                path=path,
+                item_type=item_type,
+            )
             for key, item in value.items()
-            if isinstance(key, str) and key in _NESTED_FIELDS and _safe_json_value(item)
+            if isinstance(key, str)
+            and _mapping_field_allowed(
+                key,
+                item,
+                item_type=item_type,
+                allow_structured_content=allow_structured_content,
+            )
         }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_sanitize_value(item) for item in value if _safe_json_value(item)]
+        return [
+            _sanitize_value(item, path=(*path, "*")) for item in value if _safe_json_value(item)
+        ]
     if isinstance(value, (set, frozenset)):
-        return [_sanitize_value(item) for item in sorted(value, key=repr) if _safe_json_value(item)]
+        return [
+            _sanitize_value(item, path=(*path, "*"))
+            for item in sorted(value, key=repr)
+            if _safe_json_value(item)
+        ]
     return None
+
+
+def _mapping_field_allowed(
+    key: str,
+    value: Any,
+    *,
+    item_type: Any,
+    allow_structured_content: bool,
+) -> bool:
+    if not _safe_json_value(value):
+        return False
+    if key == "arguments":
+        return item_type in _ARGUMENT_ITEM_TYPES
+    if key == "agentsStates":
+        return item_type == "collabAgentToolCall"
+    if key == "structuredContent":
+        return allow_structured_content
+    return key in _NESTED_FIELDS
+
+
+def _sanitize_mapping_field(
+    key: str,
+    value: Any,
+    *,
+    path: tuple[str, ...],
+    item_type: Any,
+) -> Any:
+    if key == "arguments":
+        return _copy_json(value)
+    if key == "agentsStates":
+        return _sanitize_agent_states(value)
+    if key == "structuredContent":
+        return _copy_json(value)
+    return _sanitize_value(
+        value,
+        path=(*path, key),
+        allow_structured_content=key == "result" and item_type == "mcpToolCall",
+    )
 
 
 def _sanitize_agent_states(value: Any) -> dict[str, Any]:
@@ -309,7 +367,7 @@ def _sanitize_agent_states(value: Any) -> dict[str, Any]:
         return {}
     return {
         agent_id: {
-            key: _sanitize_value(item, field=key)
+            key: _sanitize_value(item, path=("agentsStates", "*", key))
             for key, item in state.items()
             if isinstance(key, str) and key in _AGENT_STATE_FIELDS and _safe_json_value(item)
         }

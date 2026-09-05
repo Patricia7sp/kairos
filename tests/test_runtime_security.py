@@ -65,7 +65,7 @@ def test_runtime_event_wire_applies_payload_allowlist_without_mutilating_transcr
 
 
 def test_tool_payload_preserves_schema_declared_arbitrary_json_and_dynamic_agent_keys():
-    payload = sanitize_payload(
+    mcp_payload = sanitize_payload(
         "tool",
         {
             "item": {
@@ -76,19 +76,31 @@ def test_tool_payload_preserves_schema_declared_arbitrary_json_and_dynamic_agent
                     "content": [],
                     "structuredContent": {"temperature_celsius": 21},
                 },
-                "agentsStates": {
-                    "agent-dynamic-key": {
-                        "status": "running",
-                        "message": "working",
-                        "accessToken": SENTINEL,
-                    }
-                },
                 "authorization": SENTINEL,
             }
         },
     )
+    collab_payload = sanitize_payload(
+        "snapshot",
+        {
+            "state": "active",
+            "items": [
+                {
+                    "id": "collab-1",
+                    "type": "collabAgentToolCall",
+                    "agentsStates": {
+                        "agent-dynamic-key": {
+                            "status": "running",
+                            "message": "working",
+                            "accessToken": SENTINEL,
+                        }
+                    },
+                }
+            ],
+        },
+    )
 
-    assert payload == {
+    assert mcp_payload == {
         "item": {
             "id": "tool-1",
             "type": "mcpToolCall",
@@ -97,9 +109,43 @@ def test_tool_payload_preserves_schema_declared_arbitrary_json_and_dynamic_agent
                 "content": [],
                 "structuredContent": {"temperature_celsius": 21},
             },
-            "agentsStates": {"agent-dynamic-key": {"status": "running", "message": "working"}},
         }
     }
+    assert collab_payload == {
+        "state": "active",
+        "items": [
+            {
+                "id": "collab-1",
+                "type": "collabAgentToolCall",
+                "agentsStates": {
+                    "agent-dynamic-key": {
+                        "status": "running",
+                        "message": "working",
+                    }
+                },
+            }
+        ],
+    }
+    assert SENTINEL not in json.dumps([mcp_payload, collab_payload])
+
+
+def test_arbitrary_json_exemption_does_not_apply_to_off_path_field_names():
+    payload = sanitize_payload(
+        "usage",
+        {
+            "tokenUsage": {
+                "inputTokens": 3,
+                "arguments": {
+                    "accessToken": SENTINEL,
+                    "authorization": SENTINEL,
+                },
+                "structuredContent": {"accessToken": SENTINEL},
+                "agentsStates": {"agent-1": {"accessToken": SENTINEL}},
+            }
+        },
+    )
+
+    assert payload == {"tokenUsage": {"inputTokens": 3}}
     assert SENTINEL not in json.dumps(payload)
 
 
