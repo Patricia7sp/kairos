@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .codex_rpc import CodexSubscription
+from .codex_rpc import CodexRpc, CodexSubscription
 from .contracts import Decision, RuntimeCapabilities, RuntimeObservation, RuntimeSession
 from .errors import RuntimeErrorInfo
 from .policy import RUNTIME_V1_FEATURES
@@ -31,6 +31,7 @@ APPROVAL_METHODS = frozenset(
 
 @dataclass(frozen=True)
 class _PendingApproval:
+    rpc: CodexRpc
     rpc_request_id: int | str
     method: str
     sandbox: str
@@ -81,10 +82,11 @@ class CodexAppServerAdapter:
             raise self._invalid_event()
         if turn_id in self._turn_subscriptions:
             raise RuntimeErrorInfo("session_busy", "turno já está ativo", False)
-        subscription = self._supervisor.rpc.subscribe(thread_id)
+        rpc = self._supervisor.rpc
+        subscription = rpc.subscribe(thread_id)
         self._turn_subscriptions[turn_id] = subscription
         try:
-            result = await self._supervisor.rpc.call(
+            result = await rpc.call(
                 "turn/start",
                 {
                     "threadId": thread_id,
@@ -103,7 +105,7 @@ class CodexAppServerAdapter:
             self._external_turns[turn_id] = external_turn_id
             return external_turn_id
         except BaseException:
-            self._supervisor.rpc.unsubscribe(subscription)
+            subscription.rpc.unsubscribe(subscription)
             self._turn_subscriptions.pop(turn_id, None)
             raise
 
@@ -118,9 +120,14 @@ class CodexAppServerAdapter:
             while True:
                 message = await subscription.get()
                 message_turn_id = self._message_turn_id(message)
+                if "id" in message and message.get("method") not in APPROVAL_METHODS:
+                    event = await self._translate(message, session, subscription)
+                    if event is not None:
+                        yield event
+                    continue
                 if external_turn_id is not None and message_turn_id != external_turn_id:
                     continue
-                event = await self._translate(message, session)
+                event = await self._translate(message, session, subscription)
                 if event is None:
                     continue
                 yield event
@@ -131,7 +138,7 @@ class CodexAppServerAdapter:
                 }:
                     return
         finally:
-            self._supervisor.rpc.unsubscribe(subscription)
+            subscription.rpc.unsubscribe(subscription)
             self._turn_subscriptions.pop(turn_id, None)
 
     async def cancel_turn(self, session: RuntimeSession, external_turn_id: str) -> None:
@@ -146,23 +153,23 @@ class CodexAppServerAdapter:
         if pending is None:
             raise RuntimeErrorInfo("approval_stale", "aprovação não está mais pendente", False)
         try:
-            current_generation = self.generation
+            current_rpc = self._supervisor.rpc
         except RuntimeErrorInfo as exc:
             raise RuntimeErrorInfo(
                 "approval_stale", "aprovação pertence a um processo encerrado", False
             ) from exc
-        if pending.generation != current_generation:
+        if pending.rpc is not current_rpc or pending.generation != current_rpc.generation:
             raise RuntimeErrorInfo(
                 "approval_stale", "aprovação pertence a um processo encerrado", False
             )
         if decision == "accept" and pending.sandbox != "broad_access":
-            await self._supervisor.rpc.reply(pending.rpc_request_id, {"decision": "decline"})
+            await pending.rpc.reply(pending.rpc_request_id, {"decision": "decline"})
             raise RuntimeErrorInfo(
                 "invalid_policy",
                 "a permissão exige uma nova sessão broad_access com consentimento",
                 False,
             )
-        await self._supervisor.rpc.reply(
+        await pending.rpc.reply(
             pending.rpc_request_id,
             {"decision": "accept" if decision == "accept" else "decline"},
         )
@@ -189,36 +196,40 @@ class CodexAppServerAdapter:
 
     async def aclose(self) -> None:
         for subscription in tuple(self._turn_subscriptions.values()):
-            self._supervisor.rpc.unsubscribe(subscription)
+            subscription.rpc.unsubscribe(subscription)
         self._turn_subscriptions.clear()
         await self._supervisor.aclose()
 
     async def _translate(
-        self, message: dict[str, Any], session: RuntimeSession
+        self,
+        message: dict[str, Any],
+        session: RuntimeSession,
+        subscription: CodexSubscription,
     ) -> dict[str, Any] | None:
         method = message["method"]
         params = message["params"]
         base = {
-            "generation": self.generation,
+            "generation": subscription.generation,
             "external_thread_id": params.get("threadId"),
             "external_turn_id": self._message_turn_id(message),
         }
         if "id" in message:
             if method not in APPROVAL_METHODS:
-                await self._supervisor.rpc.reply_error(message["id"])
+                await subscription.rpc.reply_error(message["id"])
                 return {**base, "kind": "approval_error", "payload": {"unsupported": True}}
             if not self._valid_approval(params):
-                await self._supervisor.rpc.reply_error(
+                await subscription.rpc.reply_error(
                     message["id"], code=-32602, message="invalid approval request"
                 )
                 return {**base, "kind": "approval_error", "payload": {"invalid": True}}
-            token = self._approval_token(message["id"])
+            token = self._approval_token(subscription.generation, message["id"])
             self._pending_approvals[token] = _PendingApproval(
+                rpc=subscription.rpc,
                 rpc_request_id=message["id"],
                 method=method,
                 sandbox=session.sandbox,
                 thread_id=params["threadId"],
-                generation=self.generation,
+                generation=subscription.generation,
             )
             return {
                 **base,
@@ -267,9 +278,10 @@ class CodexAppServerAdapter:
             }
         return None
 
-    def _approval_token(self, request_id: int | str) -> str:
+    @staticmethod
+    def _approval_token(generation: str, request_id: int | str) -> str:
         prefix = "integer" if type(request_id) is int else "string"
-        return f"{self.generation}:{prefix}:{request_id}"
+        return f"{generation}:{prefix}:{request_id}"
 
     @staticmethod
     def _valid_approval(params: object) -> bool:
@@ -333,7 +345,7 @@ class CodexAppServerAdapter:
                 pending.append(
                     {
                         "request_id": request_id,
-                        "generation": self.generation,
+                        "generation": approval.generation,
                         "request_kind": approval.method,
                     }
                 )
@@ -353,12 +365,22 @@ class CodexAppServerAdapter:
 
     @staticmethod
     def _thread_policy_params(session: RuntimeSession) -> dict[str, Any]:
-        return {
+        params: dict[str, Any] = {
             "cwd": session.cwd,
             "sandbox": THREAD_SANDBOX[session.sandbox],
             "approvalPolicy": "on-request",
             "approvalsReviewer": "user",
         }
+        if session.sandbox == "workspace_write":
+            params["config"] = {
+                "sandbox_workspace_write": {
+                    "writable_roots": [session.cwd],
+                    "network_access": False,
+                    "exclude_slash_tmp": True,
+                    "exclude_tmpdir_env_var": True,
+                }
+            }
+        return params
 
     @staticmethod
     def _turn_sandbox_policy(session: RuntimeSession) -> dict[str, Any]:
@@ -376,11 +398,23 @@ class CodexAppServerAdapter:
 
     @classmethod
     def _validate_effective_policy(cls, result: dict[str, Any], session: RuntimeSession) -> None:
+        effective_sandbox = result.get("sandbox")
+        valid_sandbox = effective_sandbox == cls._turn_sandbox_policy(session)
+        valid_workspace_roots = True
+        if session.sandbox == "workspace_write" and isinstance(effective_sandbox, dict):
+            additional_roots = effective_sandbox.get("writableRoots")
+            valid_sandbox = {
+                **effective_sandbox,
+                "writableRoots": [session.cwd],
+            } == cls._turn_sandbox_policy(session) and additional_roots in ([], [session.cwd])
+            if "runtimeWorkspaceRoots" in result:
+                valid_workspace_roots = result["runtimeWorkspaceRoots"] == [session.cwd]
         if (
             result.get("cwd") != session.cwd
             or result.get("approvalPolicy") != "on-request"
             or result.get("approvalsReviewer") != "user"
-            or result.get("sandbox") != cls._turn_sandbox_policy(session)
+            or not valid_sandbox
+            or not valid_workspace_roots
         ):
             raise RuntimeErrorInfo("invalid_policy", "política efetiva divergente", False)
         if not isinstance(result.get("modelProvider"), str) or not result["modelProvider"]:

@@ -8,6 +8,13 @@ from typing import Any
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "adapter"
 
+if MODE == "version":
+    print("codex-cli 0.153.4")
+    raise SystemExit(0)
+if MODE == "bad-version":
+    print("codex-cli 9.9.9")
+    raise SystemExit(0)
+
 
 def send(message: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
@@ -59,12 +66,24 @@ def effective_result(params: dict[str, Any], thread_id: str) -> dict[str, Any]:
     sandbox = params.get("sandbox", "workspace-write")
     policy = sandbox_policy(sandbox)
     if policy["type"] == "workspaceWrite":
-        policy["writableRoots"] = [params["cwd"]]
+        config = params.get("config")
+        workspace = config.get("sandbox_workspace_write") if isinstance(config, dict) else None
+        if isinstance(workspace, dict):
+            policy = {
+                "type": "workspaceWrite",
+                "writableRoots": [
+                    root for root in workspace.get("writable_roots", []) if root != params["cwd"]
+                ],
+                "networkAccess": workspace.get("network_access", False),
+                "excludeSlashTmp": workspace.get("exclude_slash_tmp", False),
+                "excludeTmpdirEnvVar": workspace.get("exclude_tmpdir_env_var", False),
+            }
     return {
         "thread": thread(thread_id, params["cwd"]),
         "model": "gpt-5",
         "modelProvider": "openai",
         "cwd": params["cwd"],
+        "runtimeWorkspaceRoots": [params["cwd"]],
         "approvalPolicy": params["approvalPolicy"],
         "approvalsReviewer": params["approvalsReviewer"],
         "sandbox": policy,
@@ -72,6 +91,7 @@ def effective_result(params: dict[str, Any], thread_id: str) -> dict[str, Any]:
 
 
 pending_slow: int | str | None = None
+reply_count = 0
 last_thread_id = "thread-1"
 last_cwd = tempfile.gettempdir()
 
@@ -92,7 +112,7 @@ for raw_line in sys.stdin:
                     "codexHome": os.environ["CODEX_HOME"],
                     "platformFamily": "unix",
                     "platformOs": "linux",
-                    "userAgent": "codex/0.153.4",
+                    "userAgent": "kairos/0.153.4 (Ubuntu 26.4.0; x86_64) dumb (kairos; 0.1.0)",
                 },
             }
         )
@@ -144,11 +164,33 @@ for raw_line in sys.stdin:
             send({"id": request_id, "result": {"rejected": True}})
         else:
             send({"id": request_id, "error": {"code": -32000, "message": "unsafe reply"}})
+    elif method == "check/replies":
+        send({"id": request_id, "result": {"replyCount": reply_count}})
     elif method == "thread/start":
+        if params.get("sandbox") == "workspace-write" and params.get("config") != {
+            "sandbox_workspace_write": {
+                "writable_roots": [params["cwd"]],
+                "network_access": False,
+                "exclude_slash_tmp": True,
+                "exclude_tmpdir_env_var": True,
+            }
+        }:
+            send({"id": request_id, "error": {"code": -32602, "message": "bad config"}})
+            continue
         last_thread_id = "thread-1"
         last_cwd = params["cwd"]
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
     elif method == "thread/resume":
+        if params.get("sandbox") == "workspace-write" and params.get("config") != {
+            "sandbox_workspace_write": {
+                "writable_roots": [params["cwd"]],
+                "network_access": False,
+                "exclude_slash_tmp": True,
+                "exclude_tmpdir_env_var": True,
+            }
+        }:
+            send({"id": request_id, "error": {"code": -32602, "message": "bad config"}})
+            continue
         last_thread_id = params["threadId"]
         last_cwd = params["cwd"]
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
@@ -195,14 +237,14 @@ for raw_line in sys.stdin:
                 "id": 700,
                 "method": (
                     "future/requestApproval"
-                    if MODE == "unknown-request"
+                    if MODE in {"unknown-request", "unknown-request-other-turn"}
                     else "item/fileChange/requestApproval"
                 ),
                 "params": {
                     "itemId": "change-1",
                     "startedAtMs": 11,
                     "threadId": params["threadId"],
-                    "turnId": turn_id,
+                    "turnId": ("other-turn" if MODE == "unknown-request-other-turn" else turn_id),
                     "grantRoot": "/outside",
                 },
             }
@@ -308,6 +350,7 @@ for raw_line in sys.stdin:
         send({"id": request_id, "result": result})
     elif request_id is not None and method is None:
         # Client reply to a server request.
+        reply_count += 1
         continue
     else:
         send({"id": request_id, "result": {"ok": True}})

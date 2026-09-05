@@ -41,6 +41,7 @@ async def adapter(codex_home: Path, mode: str = "adapter") -> CodexAppServerAdap
     supervisor = CodexSupervisor(
         codex_home=str(codex_home),
         executable=sys.executable,
+        version_args=(str(FIXTURE), "version"),
         server_args=(str(FIXTURE), mode),
     )
     await supervisor.start()
@@ -171,6 +172,19 @@ async def test_unknown_server_request_is_explicit_error_without_consent(tmp_path
         await runtime.aclose()
 
 
+@async_test
+async def test_unknown_scoped_request_is_rejected_before_turn_filter(tmp_path: Path) -> None:
+    runtime = await adapter(tmp_path, "unknown-request-other-turn")
+    active = session(tmp_path, thread_id="thread-1")
+    try:
+        await runtime.start_turn(active, "local-turn-1", "hello")
+        events = [event async for event in runtime.observe(active, "local-turn-1")]
+        assert any(event["kind"] == "approval_error" for event in events)
+        assert all(event["kind"] != "approval" for event in events)
+    finally:
+        await runtime.aclose()
+
+
 @pytest.mark.parametrize("sandbox", ["read_only", "workspace_write", "broad_access"])
 @async_test
 async def test_turn_sends_exact_sandbox_policy_without_model_provider_override(
@@ -192,6 +206,7 @@ async def test_approval_from_previous_process_generation_is_stale(tmp_path: Path
     supervisor = CodexSupervisor(
         codex_home=str(tmp_path),
         executable=sys.executable,
+        version_args=(str(FIXTURE), "version"),
         server_args=(str(FIXTURE), "adapter"),
         sleep=no_sleep,
         generation_factory=iter(("generation-a", "generation-b")).__next__,
@@ -210,5 +225,45 @@ async def test_approval_from_previous_process_generation_is_stale(tmp_path: Path
         with pytest.raises(RuntimeErrorInfo) as exc_info:
             await runtime.respond_approval(request_id, "decline")
         assert exc_info.value.code == "approval_stale"
+    finally:
+        await runtime.aclose()
+
+
+@async_test
+async def test_queued_old_approval_keeps_origin_and_never_replies_to_replacement(
+    tmp_path: Path,
+) -> None:
+    async def no_sleep(delay: float) -> None:
+        del delay
+
+    supervisor = CodexSupervisor(
+        codex_home=str(tmp_path),
+        executable=sys.executable,
+        version_args=(str(FIXTURE), "version"),
+        server_args=(str(FIXTURE), "adapter"),
+        sleep=no_sleep,
+        generation_factory=iter(("generation-a", "generation-b")).__next__,
+    )
+    await supervisor.start()
+    runtime = CodexAppServerAdapter(supervisor)
+    active = session(tmp_path, sandbox="broad_access", thread_id="thread-1")
+    try:
+        await runtime.start_turn(active, "local-turn-1", "hello")
+        await supervisor.restart()
+
+        approval = None
+        async for event in runtime.observe(active, "local-turn-1"):
+            if event["kind"] == "approval":
+                approval = event
+        assert approval is not None
+        assert approval["generation"] == "generation-a"
+        assert approval["payload"]["request_id"].startswith("generation-a:")
+
+        snapshot = await runtime.inspect_turn(active, "external-turn-1")
+        assert snapshot.pending_requests[0]["generation"] == "generation-a"
+        with pytest.raises(RuntimeErrorInfo) as exc_info:
+            await runtime.respond_approval(approval["payload"]["request_id"], "accept")
+        assert exc_info.value.code == "approval_stale"
+        assert await supervisor.rpc.call("check/replies", {}) == {"replyCount": 0}
     finally:
         await runtime.aclose()

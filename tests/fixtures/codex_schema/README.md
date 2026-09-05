@@ -5,6 +5,28 @@ Only schemas used by the Kairos stdio RPC, thread/turn adapter, approval bridge,
 and observation mapping are retained. No authenticated request or personal Codex
 configuration was used.
 
+The 2026-09-05 isolated compatibility probe used a fresh temporary `CODEX_HOME`
+and workspace with no login and no turn. `codex --version` returned
+`codex-cli 0.153.4`; initialize, `thread/start`, and the workspace config map
+were accepted. Initialize returned the real schema-shaped user agent
+`kairos/0.153.4 (Ubuntu 26.4.0; x86_64) dumb (kairos; 0.1.0)`, not the
+abbreviated plan example. The effective start response safely summarized to
+`cwd=<workspace>`, `runtimeWorkspaceRoots=[<workspace>]`,
+`approvalPolicy=on-request`, `approvalsReviewer=user`, `modelProvider=openai`,
+and sandbox `workspaceWrite` with no additional writable roots, network disabled,
+and both temporary-directory exclusions enabled. The extra
+`runtimeWorkspaceRoots` field is permitted by the generated response schema's
+additional-properties rule. The official config reference documents
+`sandbox_workspace_write.writable_roots` as roots additional to cwd, plus
+`network_access`, `exclude_slash_tmp`, and `exclude_tmpdir_env_var`:
+https://learn.chatgpt.com/docs/config-file/config-reference
+
+The same no-turn probe sent `thread/resume` after restarting the process. The
+server returned JSON-RPC code `-32600` while staying alive because a newly
+created empty thread has no persisted rollout to load. Successful resume and
+the exact config map are therefore covered by the realistic fake; the probe
+does not fabricate a turn or use credentials merely to create a rollout.
+
 SHA-256 manifest:
 
 ```text

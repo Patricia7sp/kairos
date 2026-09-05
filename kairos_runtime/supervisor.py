@@ -11,6 +11,11 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from kairos_providers._async_cleanup import (
+    PersistentCleanupOutcome,
+    run_persistent_cleanup,
+)
+
 from .codex_rpc import CodexRpc
 from .errors import RuntimeErrorInfo
 
@@ -18,7 +23,9 @@ __all__ = ["CodexSupervisor"]
 
 
 PRODUCTION_EXECUTABLE = "codex"
+PRODUCTION_VERSION_ARGS = ("--version",)
 PRODUCTION_ARGS = ("app-server", "--listen", "stdio://")
+EXPECTED_CODEX_VERSION = "codex-cli 0.153.4"
 RESTART_BACKOFF_SECONDS = (1, 2, 4, 8, 16, 30)
 MAX_RESTART_ATTEMPTS = 5
 STDERR_DIAGNOSTIC_LIMIT = 64 * 1024
@@ -39,6 +46,7 @@ class CodexSupervisor:
         *,
         codex_home: str,
         executable: str = PRODUCTION_EXECUTABLE,
+        version_args: Sequence[str] = PRODUCTION_VERSION_ARGS,
         server_args: Sequence[str] = PRODUCTION_ARGS,
         subprocess_exec: SubprocessFactory = asyncio.create_subprocess_exec,
         clock: Callable[[], float] = time.monotonic,
@@ -49,11 +57,18 @@ class CodexSupervisor:
     ) -> None:
         if not os.path.isabs(codex_home) or not os.path.isdir(codex_home):
             raise ValueError("codex_home dedicado deve ser um diretório absoluto existente")
-        if not executable or not server_args or any(not arg for arg in server_args):
+        if (
+            not executable
+            or not version_args
+            or any(not arg for arg in version_args)
+            or not server_args
+            or any(not arg for arg in server_args)
+        ):
             raise ValueError("comando do App Server inválido")
         if any(type(fd) is not int or fd < 0 for fd in lock_fds):
             raise ValueError("lock_fds inválido")
         self._command = (executable, *tuple(server_args))
+        self._version_command = (executable, *tuple(version_args))
         self._codex_home = codex_home
         self._subprocess_exec = subprocess_exec
         self._clock = clock
@@ -62,12 +77,14 @@ class CodexSupervisor:
         self._lock_fds = lock_fds
         self._logger = logger or logging.getLogger(__name__)
         self._process: asyncio.subprocess.Process | None = None
+        self._preflight_process: asyncio.subprocess.Process | None = None
         self._rpc: CodexRpc | None = None
         self._generation: str | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._closed = False
         self._lifecycle_lock = asyncio.Lock()
         self._started_at: float | None = None
+        self._version_validated = False
 
     @property
     def generation(self) -> str:
@@ -110,29 +127,27 @@ class CodexSupervisor:
             raise _unavailable() from last_error
 
     async def aclose(self) -> None:
-        cancelled = False
-        cleanup = asyncio.create_task(self._close_owned_resources())
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            cancelled = True
-            await cleanup
-        if cancelled:
-            raise asyncio.CancelledError
+        outcome = await run_persistent_cleanup(
+            self._close_owned_resources,
+            task_name="codex-supervisor-close",
+        )
+        self._raise_cleanup_outcome(outcome)
 
     async def _close_owned_resources(self) -> None:
         async with self._lifecycle_lock:
             if self._closed:
                 return
-            self._closed = True
-            await self._cleanup_process()
+            await self._cleanup_process_once()
             for fd in self._lock_fds:
                 try:
                     os.close(fd)
                 except OSError:
                     pass
+            self._lock_fds = ()
+            self._closed = True
 
     async def _launch(self) -> CodexRpc:
+        await self._preflight_version()
         generation = self._generation_factory()
         environment = os.environ.copy()
         environment["CODEX_HOME"] = self._codex_home
@@ -152,18 +167,18 @@ class CodexSupervisor:
             )
         except OSError as exc:
             raise _unavailable() from exc
+        self._process = process
+        self._generation = generation
+        self._started_at = self._clock()
         if process.stdin is None or process.stdout is None or process.stderr is None:
-            await self._terminate_and_reap(process)
+            await self._cleanup_process()
             raise _unavailable()
 
         rpc = CodexRpc(process.stdout, process.stdin, generation=generation)
-        self._process = process
         self._rpc = rpc
-        self._generation = generation
-        self._started_at = self._clock()
         self._stderr_task = asyncio.create_task(self._drain_stderr(process.stderr))
-        await rpc.start()
         try:
+            await rpc.start()
             response = await rpc.call(
                 "initialize",
                 {
@@ -176,10 +191,44 @@ class CodexSupervisor:
             )
             self._validate_initialize(response)
             await rpc.notify("initialized")
-        except (OSError, RuntimeErrorInfo):
+        except BaseException:
             await self._cleanup_process()
             raise
         return rpc
+
+    async def _preflight_version(self) -> None:
+        if self._version_validated:
+            return
+        environment = os.environ.copy()
+        environment["CODEX_HOME"] = self._codex_home
+        try:
+            process_or_awaitable = self._subprocess_exec(
+                *self._version_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=environment,
+            )
+            process = (
+                await process_or_awaitable
+                if inspect.isawaitable(process_or_awaitable)
+                else process_or_awaitable
+            )
+        except OSError as exc:
+            raise _unavailable() from exc
+        self._preflight_process = process
+        try:
+            stdout, _stderr = await process.communicate()
+        except BaseException:
+            await self._cleanup_process()
+            raise
+        if self._preflight_process is process:
+            self._preflight_process = None
+        if (
+            process.returncode != 0
+            or stdout.decode(errors="replace").strip() != EXPECTED_CODEX_VERSION
+        ):
+            raise RuntimeErrorInfo("incompatible", "versão do Codex incompatível", False)
+        self._version_validated = True
 
     def _validate_initialize(self, response: dict[str, Any]) -> None:
         required_text = ("codexHome", "platformFamily", "platformOs", "userAgent")
@@ -188,31 +237,86 @@ class CodexSupervisor:
             for field in required_text
         ):
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
-        if response["userAgent"] != "codex/0.153.4":
-            raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
         if not os.path.isabs(response["codexHome"]):
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
         if response["codexHome"] != self._codex_home:
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
 
     async def _cleanup_process(self) -> None:
+        outcome = await run_persistent_cleanup(
+            self._cleanup_process_once,
+            task_name="codex-supervisor-process-cleanup",
+        )
+        self._raise_cleanup_outcome(outcome)
+
+    async def _cleanup_process_once(self) -> None:
         rpc, process, stderr_task = self._rpc, self._process, self._stderr_task
-        self._rpc = None
-        self._process = None
-        self._stderr_task = None
-        self._generation = None
-        self._started_at = None
-        if rpc is not None:
+        preflight_process = self._preflight_process
+        errors = (
+            await self._close_rpc(rpc),
+            await self._reap_process(process),
+            await self._reap_process(preflight_process),
+            await self._finish_stderr(stderr_task),
+        )
+
+        process_reaped = process is None or process.returncode is not None
+        preflight_reaped = preflight_process is None or preflight_process.returncode is not None
+        if preflight_reaped and self._preflight_process is preflight_process:
+            self._preflight_process = None
+        if process_reaped:
+            if self._rpc is rpc:
+                self._rpc = None
+            if self._process is process:
+                self._process = None
+            if self._stderr_task is stderr_task:
+                self._stderr_task = None
+            self._generation = None
+            self._started_at = None
+        first_error = next((error for error in errors if error is not None), None)
+        if first_error is not None:
+            raise first_error
+
+    @staticmethod
+    async def _close_rpc(rpc: CodexRpc | None) -> BaseException | None:
+        if rpc is None:
+            return None
+        try:
             await rpc.aclose()
-        if process is not None:
+        except BaseException as exc:  # noqa: BLE001 - reap ainda precisa ser tentado
+            return exc
+        return None
+
+    async def _reap_process(
+        self, process: asyncio.subprocess.Process | None
+    ) -> BaseException | None:
+        if process is None:
+            return None
+        try:
             await self._terminate_and_reap(process)
-        if stderr_task is not None:
-            if not stderr_task.done():
-                stderr_task.cancel()
-            try:
-                await stderr_task
-            except asyncio.CancelledError:
-                pass
+        except BaseException as exc:  # noqa: BLE001 - ownership fica retido para retry
+            return exc
+        return None
+
+    @staticmethod
+    async def _finish_stderr(stderr_task: asyncio.Task[None] | None) -> BaseException | None:
+        if stderr_task is None:
+            return None
+        if not stderr_task.done():
+            stderr_task.cancel()
+        try:
+            await stderr_task
+        except asyncio.CancelledError:
+            return None
+        except BaseException as exc:  # noqa: BLE001 - publica após tentar todos recursos
+            return exc
+        return None
+
+    @staticmethod
+    def _raise_cleanup_outcome(outcome: PersistentCleanupOutcome) -> None:
+        if outcome.error is not None:
+            raise outcome.error
+        if outcome.cancellation is not None:
+            raise outcome.cancellation
 
     @staticmethod
     async def _terminate_and_reap(process: asyncio.subprocess.Process) -> None:

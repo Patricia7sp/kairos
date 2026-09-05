@@ -23,6 +23,8 @@ def _transport() -> RuntimeErrorInfo:
 class CodexSubscription:
     """Fila registrada antes de iniciar um turno para não perder mensagens adiantadas."""
 
+    rpc: CodexRpc
+    generation: str
     thread_id: str
     queue: asyncio.Queue[dict[str, Any] | RuntimeErrorInfo] = field(default_factory=asyncio.Queue)
 
@@ -50,6 +52,7 @@ class CodexRpc:
         self._max_frame_bytes = max_frame_bytes
         self._write_lock = asyncio.Lock()
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._abandoned: set[int] = set()
         self._subscriptions: set[CodexSubscription] = set()
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._next_id = 1
@@ -63,7 +66,7 @@ class CodexRpc:
     def subscribe(self, thread_id: str) -> CodexSubscription:
         if not thread_id:
             raise ValueError("thread_id é obrigatório")
-        subscription = CodexSubscription(thread_id)
+        subscription = CodexSubscription(self, self.generation, thread_id)
         self._subscriptions.add(subscription)
         if self._closed_error is not None:
             subscription.queue.put_nowait(self._closed_error)
@@ -83,6 +86,10 @@ class CodexRpc:
         try:
             await self._write({"id": request_id, "method": method, "params": params})
             return await future
+        except asyncio.CancelledError:
+            if self._pending.get(request_id) is future:
+                self._abandoned.add(request_id)
+            raise
         finally:
             self._pending.pop(request_id, None)
 
@@ -168,17 +175,7 @@ class CodexRpc:
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         if "method" not in message:
-            request_id = message.get("id")
-            if type(request_id) is not int:
-                raise _transport()
-            future = self._pending.get(request_id)
-            if future is None:
-                raise _transport()
-            result = message.get("result")
-            if "error" in message or not isinstance(result, dict):
-                future.set_exception(_transport())
-            else:
-                future.set_result(result)
+            self._dispatch_response(message)
             return
 
         method = message.get("method")
@@ -201,6 +198,27 @@ class CodexRpc:
         if "id" in message and not matched:
             self._schedule_rejection(message["id"])
 
+    def _dispatch_response(self, message: dict[str, Any]) -> None:
+        request_id = message.get("id")
+        if type(request_id) is not int:
+            raise _transport()
+        future = self._pending.get(request_id)
+        if future is None:
+            if request_id in self._abandoned:
+                self._abandoned.remove(request_id)
+                return
+            raise _transport()
+        if future.cancelled():
+            self._pending.pop(request_id, None)
+            return
+        if future.done():
+            raise _transport()
+        result = message.get("result")
+        if "error" in message or not isinstance(result, dict):
+            future.set_exception(_transport())
+        else:
+            future.set_result(result)
+
     def _schedule_rejection(self, request_id: int | str) -> None:
         task = asyncio.create_task(self._reject_unhandled(request_id))
         self._background_tasks.add(task)
@@ -216,6 +234,7 @@ class CodexRpc:
         if self._closed_error is not None:
             return
         self._closed_error = error
+        self._abandoned.clear()
         for future in tuple(self._pending.values()):
             if not future.done():
                 future.set_exception(error)

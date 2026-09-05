@@ -120,3 +120,20 @@ async def test_unscoped_server_request_is_rejected_instead_of_waiting_forever() 
         assert result == {"rejected": True}
     finally:
         await close_process(process, rpc)
+
+
+@async_test
+async def test_late_response_for_cancelled_call_does_not_poison_other_calls() -> None:
+    process, rpc = await rpc_process()
+    try:
+        slow = asyncio.create_task(rpc.call("slow", {}))
+        await asyncio.sleep(0)
+        slow.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await slow
+
+        assert await rpc.call("fast", {}) == {"value": "fast"}
+        await asyncio.sleep(0)
+        assert await rpc.call("check/replies", {}) == {"replyCount": 0}
+    finally:
+        await close_process(process, rpc)
