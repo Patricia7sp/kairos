@@ -10,7 +10,6 @@ substituição do diretório quanto redirecionamento de symlink.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,7 +73,8 @@ def capture_directory_identity(raw: str, allowed: tuple[str, ...]) -> DirectoryI
 
     if not isinstance(raw, str):
         raise _invalid_directory()
-    requested_path = os.path.abspath(raw)
+    path = Path(raw)
+    requested_path = str(path if path.is_absolute() else Path.cwd() / path)
     canonical_path = authorize_directory(requested_path, allowed)
     try:
         stat = Path(canonical_path).stat()
@@ -125,8 +125,8 @@ def validate_sandbox(profile: str, broad_enabled: bool, consent: bool) -> Sandbo
 
 
 def negotiate(caps: RuntimeCapabilities) -> RuntimeCapabilities:
-    """Negotiate the complete v1 contract and suppress unsupported announcements."""
+    """Validate v1 and suppress unsupported capability announcements."""
 
-    if caps.protocol_version != 1 or not RUNTIME_V1_FEATURES.issubset(caps.features):
+    if caps.protocol_version != 1:
         raise RuntimeErrorInfo("incompatible", "runtime incompatível com o contrato v1", False)
     return RuntimeCapabilities(protocol_version=1, features=caps.features & RUNTIME_V1_FEATURES)

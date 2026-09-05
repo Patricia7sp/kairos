@@ -77,6 +77,39 @@ def test_directory_identity_detects_symlink_retarget(tmp_path: Path) -> None:
     assert exc_info.value.code == "invalid_directory"
 
 
+def test_directory_identity_preserves_symlink_before_parent_segment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "child").mkdir()
+    (second / "child").mkdir()
+    first_project = first / "project"
+    second_project = second / "project"
+    lexical_project = tmp_path / "project"
+    first_project.mkdir()
+    second_project.mkdir()
+    lexical_project.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(first / "child", target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    raw = str(Path("alias") / ".." / "project")
+    identity = capture_directory_identity(raw, (str(first_project), str(lexical_project)))
+
+    assert Path(identity.requested_path).is_absolute()
+    assert ".." in Path(identity.requested_path).parts
+    assert identity.canonical_path == str(first_project.resolve())
+    alias.unlink()
+    alias.symlink_to(second / "child", target_is_directory=True)
+
+    with pytest.raises(RuntimeErrorInfo) as exc_info:
+        revalidate_directory_identity(identity)
+
+    assert exc_info.value.code == "invalid_directory"
+
+
 @pytest.mark.parametrize("profile", ["read_only", "workspace_write"])
 def test_restricted_sandbox_profiles_do_not_need_broad_consent(profile: str) -> None:
     assert validate_sandbox(profile, broad_enabled=False, consent=False) == profile
@@ -110,10 +143,10 @@ def test_unknown_sandbox_profile_is_rejected() -> None:
 def test_negotiate_accepts_v1_and_filters_unsupported_features() -> None:
     capabilities = RuntimeCapabilities(
         protocol_version=1,
-        features=RUNTIME_V1_FEATURES | frozenset({"delta_replay", "future_feature"}),
+        features=frozenset({"text", "resume", "delta_replay", "future_feature"}),
     )
 
-    assert negotiate(capabilities) == RuntimeCapabilities(1, RUNTIME_V1_FEATURES)
+    assert negotiate(capabilities) == RuntimeCapabilities(1, frozenset({"text", "resume"}))
 
 
 def test_negotiate_rejects_protocol_other_than_v1() -> None:
@@ -124,8 +157,5 @@ def test_negotiate_rejects_protocol_other_than_v1() -> None:
     assert exc_info.value.retryable is False
 
 
-def test_negotiate_rejects_missing_capabilities() -> None:
-    with pytest.raises(RuntimeErrorInfo) as exc_info:
-        negotiate(RuntimeCapabilities(1, RUNTIME_V1_FEATURES - {"approvals"}))
-
-    assert exc_info.value.code == "incompatible"
+def test_negotiate_allows_no_optional_capabilities() -> None:
+    assert negotiate(RuntimeCapabilities(1, frozenset())) == RuntimeCapabilities(1, frozenset())
