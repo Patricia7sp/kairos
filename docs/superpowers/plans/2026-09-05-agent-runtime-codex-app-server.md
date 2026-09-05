@@ -116,7 +116,7 @@ class AgentRuntimeProtocol(Protocol):
 
 Erros em `errors.py`: `RuntimeErrorInfo(code: str, message: str, retryable: bool)`, subclasse de `Exception`, com `str(error)` contendo código e mensagem pública. Códigos: `unavailable`, `incompatible`, `thread_missing`, `invalid_directory`, `invalid_policy`, `session_busy`, `idempotency_conflict`, `lease_lost`, `approval_denied`, `approval_stale`, `cancel_partial`, `transport`, `invalid_event`, `sequence_gap`, `runtime_internal`. `retryable` autoriza repetir consultas; nunca autoriza reenviar `turn/start`.
 
-## Tarefa 1: Contrato, identidade e política
+## Task 1: Contrato, identidade e política
 
 **Arquivos:** criar `kairos_runtime/__init__.py`, `contracts.py`, `errors.py`, `policy.py`; testar em `tests/test_runtime_contract.py` e `tests/test_runtime_policy.py`.
 
@@ -147,7 +147,7 @@ return str(candidate)
 - [ ] Cobrir versão diferente de 1, campos aditivos ignoráveis, sequência positiva, payload imutável, `broad_access` sem configuração ou consentimento, e capabilities ausentes. Repetir os dois testes; esperar verde.
 - [ ] Commit `feat(runtime): define contrato v1 e politicas de sessao`.
 
-## Tarefa 2: Migração transacional e journal
+## Task 2: Migração transacional e journal
 
 **Arquivos:** criar `kairos_state/runtime_schema.py`, `kairos_state/repositories/runtime.py`, `kairos_runtime/store.py`, `tests/runtime_support.py`, `tests/test_runtime_storage.py`; modificar `kairos_state/schema.py`, `migrations.py`, `connection.py`, `tests/test_schema.py` e `tests/test_state.py`.
 
@@ -190,7 +190,7 @@ COMMIT;
 - [ ] Acrescentar tabelas auditáveis ao fingerprint de reparo, sem classificá-las como objetos reconstruíveis. Tornar inicialização vazia e migração antiga convergentes. Rodar `uv run pytest -q tests/test_runtime_storage.py tests/test_schema.py tests/test_state.py` e verificar rollback, FK órfã, imutabilidade e rejeição de cursor inválido.
 - [ ] Commit `feat(state): persiste sessoes e eventos de runtime`.
 
-## Tarefa 3: Ownership, fila e quarentena
+## Task 3: Ownership, fila e quarentena
 
 **Arquivos:** criar `kairos_runtime/leases.py`, `tests/test_runtime_leases.py`; estender `kairos_state/repositories/runtime.py` e `kairos_runtime/store.py`.
 
@@ -210,7 +210,7 @@ assert await leases.claim(turn_c, "host-1", 30) is not None
 - [ ] Cobrir dono antigo renovando após troca, cancelamento na fila sem RPC, falta de heartbeat, symlink trocado e integridade após rollback. Rodar `uv run pytest -q tests/test_runtime_leases.py tests/test_state.py tests/test_interaction_service.py`.
 - [ ] Commit `feat(runtime): serializa projetos com leases duraveis`.
 
-## Tarefa 4: RPC Codex, supervisor e adapter simulado
+## Task 4: RPC Codex, supervisor e adapter simulado
 
 **Arquivos:** criar `kairos_runtime/codex_rpc.py`, `supervisor.py`, `codex_adapter.py`, `tests/fixtures/codex_app_server.py`, `tests/test_codex_rpc.py`, `tests/test_codex_adapter.py`, `tests/test_codex_supervisor.py`, `tests/fixtures/codex_schema/README.md` e schemas usados nesse diretório.
 
@@ -244,7 +244,7 @@ params = {
 - [ ] Supervisor reinicia com backoff 1/2/4/8/16/30 s, limitado a 5 tentativas consecutivas; drena stderr com redaction e tamanho limitado, aguarda término/reap e nunca chama `turn/start` no restart. Testar cancelamento do cleanup e ausência de processos órfãos.
 - [ ] Repetir os três arquivos de testes; commit `feat(runtime): adapta Codex App Server com supervisor`.
 
-## Tarefa 5: Serviço, aprovações e recuperação
+## Task 5: Serviço, aprovações e recuperação
 
 **Arquivos:** criar `kairos_runtime/service.py`, `recovery.py`, `tests/test_runtime_service.py`, `tests/test_runtime_recovery.py`, `tests/test_runtime_approvals.py`; estender store e repository.
 
@@ -271,7 +271,7 @@ assert fake.start_count == 1
 - [ ] Atualizar mensagem assistant, uso conhecido e estado terminal atomicamente; sem usage recebido, gravar desconhecido, nunca custo zero inventado. Não usar ledger de tentativa de provider para runtime. Marcar sessão ready após terminal confirmado, unavailable para thread ausente e interrupted para resultado incerto. Sessão sucessora usa parent_session_id e thread nova.
 - [ ] Testar restart Kairos/Codex em cada fronteira de persistência, evento duplicado/conflitante, gap, partial text, thread ausente, aprovação negada/desconectada e runtime incompatível. Repetir testes; commit `feat(runtime): coordena turnos e recuperacao sem replay`.
 
-## Tarefa 6: Host compartilhado e InteractionRouter
+## Task 6: Host compartilhado e InteractionRouter
 
 **Arquivos:** criar `kairos_runtime/host.py`, `client.py`, `wire.py`, `kairos_integration/router.py`, `tests/test_runtime_host.py`, `tests/test_interaction_router.py`; modificar `kairos_integration/interaction_contract.py`, `composition.py`, `__init__.py` e `docs/decisoes.md`.
 
@@ -288,7 +288,7 @@ assert fake.start_count == 1
 - [ ] Router consulta sessão no banco: ausência mantém criação model legada, campo ausente equivale a model, runtime sempre usa RuntimeClient. Rejeitar overrides de provider e alteração de identidade em runtime. Não criar App Server dentro de `build_interaction_service`. Desligar router não encerra host.
 - [ ] Repetir testes incluindo processos, flag desabilitada e regressão `uv run pytest -q tests/test_interaction_composition.py tests/test_cli_chat.py tests/test_web_chat_transport.py`; commit `feat(integration): compartilha runtime entre Web e CLI`.
 
-## Tarefa 7: Autenticação oficial e redaction
+## Task 7: Autenticação oficial e redaction
 
 **Arquivos:** criar `kairos_runtime/auth.py`, `redaction.py`, `tests/test_runtime_auth.py`, `tests/test_runtime_security.py`; modificar adapter e host.
 
@@ -307,7 +307,7 @@ assert sentinel not in serialized_events
 - [ ] Configurar CODEX_HOME dedicado ao runtime sob volume persistente, diferente do Codex que desenvolve o projeto. Não ler seu conteúdo no Kairos. Redaction por allowlist de campos de evento e mensagens de erro fixas; nunca serializar exception RPC bruta. Sanitizar mensagens técnicas e valores conhecidos sensíveis sem prometer remover segredos arbitrários escritos pelo usuário.
 - [ ] Cobrir logout com turno ativo (recusar até encerramento), status sem login, falha/cancelamento do login e ausência de token no log. Repetir testes; commit `feat(runtime): integra login Codex sem persistir credenciais`.
 
-## Tarefa 8: REST, WebSocket e CLI com paridade
+## Task 8: REST, WebSocket e CLI com paridade
 
 **Arquivos:** criar `kairos_web/runtime_api.py`, `runtime_transport.py`, `kairos_cli/runtime.py`, `tests/test_web_runtime_api.py`, `tests/test_web_runtime_transport.py`, `tests/test_cli_runtime.py`, `tests/test_runtime_parity.py`; modificar `kairos_web/server.py`, `chat_transport.py`, `kairos_cli/chat.py`, `commands.py`, `main.py`, `handlers.py`.
 
@@ -328,7 +328,7 @@ assert expected["execution_kind"] == "agent_runtime"
 - [ ] Ctrl-C solicita cancelamento explícito e acompanha confirmação; EOF/desconexão apenas sai da assinatura. Aprovação aparece no terminal e pode ser respondida por segundo comando. Adicionar `protocol_version`, IDs, cursor e `execution_kind` no wire runtime, preservando JSON model existente.
 - [ ] Rodar regressão `uv run pytest -q tests/test_chat_parity.py tests/test_cli_chat.py tests/test_cli.py tests/test_cli_surface.py tests/test_web_chat_transport.py tests/test_spa_chat_contract.py` e testes novos; commit `feat(runtime): entrega paridade REST WebSocket e CLI`.
 
-## Tarefa 9: SPA de runtime
+## Task 9: SPA de runtime
 
 **Arquivos:** criar `kairos_web/ui/js/runtime-client.js`, `kairos_web/ui/js/views/runtime.js`, `web/src/__tests__/runtime.test.ts`; modificar `kairos_web/ui/js/api.js`, `app.js`, `views/chat.js`, `views/sessoes.js` e `kairos_web/ui/styles/views.css`.
 
@@ -348,7 +348,7 @@ expect(after.cursor).toBe(event.cursor);
 - [ ] Testar eventos maliciosos de HTML, reconexão, cursor repetido, aprovação sem conexão, cancelamento parcial e runtime desabilitado. Verificar import do módulo da SPA pelos testes e smoke da raiz com `tests/test_spa_chat_contract.py`.
 - [ ] Rodar `npm --prefix web test`, `npm --prefix web run typecheck`, `uv run pytest -q tests/test_spa_chat_contract.py`; commit `feat(web): apresenta sessoes e aprovacoes de runtime`.
 
-## Tarefa 10: Container, CI e aceite operacional
+## Task 10: Container, CI e aceite operacional
 
 **Arquivos:** modificar `Dockerfile`, `compose.yaml`, `docker/config.default.yaml`, `.github/workflows/ci.yml`, `tests/test_container.py`, `tests/test_compose_config.py`, `pyproject.toml`; criar `docker/s6-rc.d/runtime/run`, `runtime/type`, `runtime/dependencies.d/base`, `docker/s6-rc.d/user/contents.d/runtime`, `tests/test_runtime_e2e.py`, `tests/test_runtime_live.py`, `docs/agent-runtime.md` e `docs/agent-runtime-acceptance.md`.
 
