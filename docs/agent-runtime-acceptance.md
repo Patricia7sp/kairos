@@ -200,3 +200,37 @@ e os custos de revisão assumidos durante a implementação. O aceite operaciona
 continua separado: login/turnos reais dedicados, CI remota e deploy não foram
 executados. O runtime permanece desabilitado por padrão e falha de forma
 controlada quando a plataforma bloqueia o namespace da sandbox.
+
+## Retomada e publicação do PR — 2026-09-06
+
+A branch foi publicada e o [PR #12](https://github.com/Patricia7sp/kairos/pull/12)
+foi aberto em rascunho contra `main`. A worktree foi preservada. Não houve
+merge, deploy, ativação do runtime ou autenticação live.
+
+Validação repetida sobre `d8387d6`:
+
+- `scripts/ci.sh --fast`: exit 0; 1371 passed, 22 deselected e 5561 subtests,
+  93 testes frontend e os três typechecks, Ruff lint/format, shellcheck,
+  recall e lockfile aprovados. A execução inicial dentro da sandbox da sessão
+  parou de avançar e foi encerrada; a execução completa fora dela passou.
+- `RealImageTests`: 21 passed e 23 subtests, sem skips, em 48,90 s contra a
+  imagem final registrada acima.
+- Probe descartável sem rede, como UID 10000: `bwrap` ainda recusa criação de
+  namespace. O container usa `docker-default (enforce)` e seccomp modo 2;
+  o host informa `unprivileged_userns_clone=1`. Esses dados não isolam qual
+  restrição recusa a chamada. Nenhuma política foi relaxada.
+
+A [primeira CI remota](https://github.com/Patricia7sp/kairos/actions/runs/34061224262)
+passou em sete dos oito jobs, incluindo build e integração da imagem. O
+hadolint identificou DL4006 no pipeline usado para verificar o checksum do
+Codex. O aviso foi reproduzido localmente antes da correção. O Dockerfile
+agora grava o checksum em arquivo temporário, verifica com `sha256sum` e
+remove o arquivo na mesma camada; todas as etapas continuam encadeadas por
+`&&`, sem pipeline ou supressão de lint. Hadolint, `docker build --check` e os
+46 testes de Dockerfile/configuração passaram após a mudança. O resultado
+da CI sobre o commit corrigido deve ser consultado nos checks do PR.
+
+O rebuild local corrigido terminou com exit 0, imagem
+`sha256:8b29fa85795b9f62ff19f04ce56c91ea6cf10e40ed870466142990192c6c5b51`.
+Os testes contra essa imagem passaram: 21 passed e 23 subtests, sem skips,
+em 43,76 s. `git diff --check` também passou.

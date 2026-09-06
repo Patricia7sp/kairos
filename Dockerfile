@@ -52,11 +52,12 @@ RUN test "${TARGETARCH}" = "amd64" \
     && curl -fsSL \
         "https://releases.openai.com/codex/releases/${CODEX_VERSION}/codex-package-x86_64-unknown-linux-musl.tar.gz" \
         -o /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz \
-    && echo "${CODEX_SHA256}  /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz" | sha256sum -c - \
+    && printf '%s  %s\n' "${CODEX_SHA256}" /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz > /tmp/codex-package.sha256 \
+    && sha256sum -c - < /tmp/codex-package.sha256 \
     && mkdir -p /usr/local/lib/codex \
     && tar -C /usr/local/lib/codex -xzf /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz \
     && ln -s /usr/local/lib/codex/bin/codex /usr/local/bin/codex \
-    && rm -f /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz
+    && rm -f /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz /tmp/codex-package.sha256
 
 # --- usuário não-privilegiado -------------------------------------------------
 # O container COMEÇA como root de propósito: o stage2 precisa de root para
