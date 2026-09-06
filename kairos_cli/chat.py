@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+import uuid
+from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairos_cli.runtime import RuntimeHumanRenderer, render_runtime_event
 from kairos_integration import (
     InteractionEnvelope,
     InteractionEvent,
     InteractionEventKind,
-    build_interaction_service,
     interaction_event_to_json,
 )
+from kairos_integration import build_interaction_router as build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers import ProviderModelRef
+from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
+from kairos_runtime.wire import runtime_event_to_json
 
 __all__ = ["ChatUsageError", "run_chat"]
 
@@ -55,10 +61,16 @@ async def run_chat(
     model: str | None,
     as_json: bool,
     quiet: bool = False,
+    idempotency_key: str | None = None,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
     override = _model_override(provider, model)
+    if idempotency_key is not None and not idempotency_key.strip():
+        raise ChatUsageError("--idempotency-key exige um valor não vazio")
+    if idempotency_key is not None and not prompt:
+        raise ChatUsageError("--idempotency-key só pode ser usado com uma mensagem")
+    runtime_session = _is_runtime_session(home, session_id)
     service = build_interaction_service(home)
     try:
         if prompt:
@@ -68,6 +80,8 @@ async def run_chat(
                 content=prompt,
                 override=override,
                 as_json=as_json,
+                idempotency_key=idempotency_key or (uuid.uuid4().hex if runtime_session else None),
+                runtime_session=runtime_session,
             )
         return await _run_interactive(
             service,
@@ -75,9 +89,13 @@ async def run_chat(
             override=override,
             as_json=as_json,
             quiet=quiet,
+            runtime_session=runtime_session,
         )
     except InteractionServiceUnavailableError as exc:
         print(exc.message, file=sys.stderr, flush=True)
+        return 1
+    except RuntimeErrorInfo as exc:
+        print(public_error(exc.code)["message"], file=sys.stderr, flush=True)
         return 1
     finally:
         await service.aclose()
@@ -90,6 +108,7 @@ async def _run_interactive(
     override: ProviderModelRef | None,
     as_json: bool,
     quiet: bool,
+    runtime_session: bool = False,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -111,6 +130,8 @@ async def _run_interactive(
                 content=line,
                 override=override,
                 as_json=as_json,
+                idempotency_key=uuid.uuid4().hex if runtime_session else None,
+                runtime_session=runtime_session,
             ),
         )
 
@@ -122,16 +143,46 @@ async def _run_turn(
     content: str,
     override: ProviderModelRef | None,
     as_json: bool,
+    idempotency_key: str | None = None,
+    runtime_session: bool = False,
 ) -> int:
     envelope = InteractionEnvelope(
         conversation_id=session_id,
         source="cli",
         content=content,
         override=override,
+        idempotency_key=idempotency_key,
     )
     renderer = _HumanRenderer()
+    runtime_renderer = RuntimeHumanRenderer()
+    last_runtime_event: RuntimeEvent | None = None
+    accepted_turn_id: str | None = None
+
+    def retain_accepted_turn(turn_id: str) -> None:
+        nonlocal accepted_turn_id
+        accepted_turn_id = turn_id
+
     try:
-        async for event in service.stream(envelope):
+        stream = (
+            service.stream(envelope, on_runtime_accepted=retain_accepted_turn)
+            if runtime_session
+            else service.stream(envelope)
+        )
+        async for event in stream:
+            if isinstance(event, RuntimeEvent):
+                last_runtime_event = event
+                if as_json:
+                    print(
+                        json.dumps(
+                            runtime_event_to_json(event), ensure_ascii=False, sort_keys=True
+                        ),
+                        flush=True,
+                    )
+                else:
+                    await render_runtime_event(event, as_json=False, renderer=runtime_renderer)
+                if event.kind == "error":
+                    renderer.failed = True
+                continue
             if as_json:
                 print(
                     json.dumps(
@@ -145,6 +196,29 @@ async def _run_turn(
                     renderer.failed = True
             else:
                 renderer.emit(event)
+    except asyncio.CancelledError:
+        if accepted_turn_id is not None:
+            cursor = (
+                last_runtime_event.cursor
+                if last_runtime_event is not None and last_runtime_event.turn_id == accepted_turn_id
+                else None
+            )
+            await _cancel_and_confirm(
+                service,
+                session_id=session_id,
+                turn_id=accepted_turn_id,
+                cursor=cursor,
+                as_json=as_json,
+            )
+        elif last_runtime_event is not None:
+            await _cancel_and_confirm(
+                service,
+                session_id=last_runtime_event.session_id,
+                turn_id=last_runtime_event.turn_id,
+                cursor=last_runtime_event.cursor,
+                as_json=as_json,
+            )
+        raise
     finally:
         renderer.finish_line()
     return 1 if renderer.failed else 0
@@ -162,3 +236,46 @@ def _required_session_id(session_id: str) -> str:
     if not isinstance(session_id, str) or not session_id.strip():
         raise ChatUsageError("--session exige um ID não vazio")
     return session_id.strip()
+
+
+def _is_runtime_session(home: Path, session_id: str) -> bool:
+    from kairos_state import connect
+
+    db_path = Path(home) / "state.db"
+    if not db_path.exists():
+        return False
+    connection = connect(db_path)
+    try:
+        row = connection.execute(
+            "SELECT execution_kind FROM sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return row is not None and row["execution_kind"] == "agent_runtime"
+    except Exception:  # noqa: BLE001 - legacy/uninitialized DB remains model-compatible
+        return False
+    finally:
+        connection.close()
+
+
+async def _cancel_and_confirm(
+    service,
+    *,
+    session_id: str,
+    turn_id: str,
+    cursor: str | None,
+    as_json: bool,
+) -> None:
+    """A Ctrl-C is a cancellation command; closing a stream alone is not."""
+    client = getattr(service, "runtime_client", None)
+    if client is None:
+        return
+    try:
+        await client.cancel(session_id, turn_id)
+        async with aclosing(client.subscribe(session_id, cursor)) as subscription:
+            async for confirmation in subscription:
+                if confirmation.turn_id != turn_id:
+                    continue
+                await render_runtime_event(confirmation, as_json=as_json)
+                if confirmation.kind == "turn_end":
+                    return
+    except RuntimeErrorInfo as exc:
+        print(public_error(exc.code)["message"], file=sys.stderr, flush=True)

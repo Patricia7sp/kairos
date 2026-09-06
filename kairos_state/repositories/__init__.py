@@ -9,6 +9,7 @@ substituição — `SessionRepository`, `MessageRepository`, `LedgerRepository`,
 from kairos_state.repositories.leases import LeaseRepository
 from kairos_state.repositories.ledger import LedgerRepository
 from kairos_state.repositories.messages import CompressionLockLost, MessageRepository
+from kairos_state.repositories.runtime import RuntimeRepository
 from kairos_state.repositories.search import (
     Route,
     SearchCapabilities,
@@ -25,6 +26,7 @@ __all__ = [
     "LedgerRepository",
     "MessageRepository",
     "Route",
+    "RuntimeRepository",
     "SearchCapabilities",
     "SearchIndex",
     "SessionRepository",

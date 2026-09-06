@@ -14,6 +14,7 @@ from pathlib import Path
 
 from kairos_state import schema as _schema
 from kairos_state.connection import read_schema_version
+from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 
 __all__ = [
     "CANONICAL_TABLES",
@@ -55,9 +56,13 @@ class Migration:
 
 
 def _v1_base_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(_schema.SCHEMA_SQL)
-    conn.executescript(_schema.FTS_SQL)
-    conn.executescript(_schema.FTS_TRIGGERS)
+    execute_schema(conn, _schema.SCHEMA_SQL)
+    execute_schema(conn, _schema.FTS_SQL)
+    execute_schema(conn, _schema.FTS_TRIGGERS)
+
+
+def _v2_runtime_schema(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, RUNTIME_SCHEMA_SQL)
 
 
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
@@ -65,6 +70,7 @@ def _v1_base_schema(conn: sqlite3.Connection) -> None:
 #: registrada faz o segundo passe não encontrar degrau pendente.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "schema base — forma final do v26 do legado", _v1_base_schema),
+    Migration(2, "sessões e journal durável de agent runtime", _v2_runtime_schema),
 )
 
 
@@ -76,24 +82,28 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
     anterior, íntegro — nunca num estado intermediário sem nome.
     """
     ceiling = target if target is not None else _schema.SCHEMA_VERSION
-    current = read_schema_version(conn)
+    if conn.in_transaction:
+        raise sqlite3.OperationalError("cannot migrate inside an existing transaction")
 
-    if current is None:
-        current = 0
-        with conn:
-            conn.executescript(
-                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
-            )
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        current = read_schema_version(conn)
+        if current is None:
+            current = 0
+            conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
             conn.execute("INSERT INTO schema_version(version) VALUES (0)")
 
-    for migration in MIGRATIONS:
-        if migration.version <= current or migration.version > ceiling:
-            continue
-        with conn:
+        for migration in MIGRATIONS:
+            if migration.version <= current or migration.version > ceiling:
+                continue
             migration.apply(conn)
             conn.execute("UPDATE schema_version SET version = ?", (migration.version,))
-        current = migration.version
-
+            current = migration.version
+    except BaseException:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
     return current
 
 
@@ -125,7 +135,19 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 
 #: Tabelas cujas linhas são o dado do usuário. O reparo pode recriar índices,
 #: gatilhos, tabelas FTS e objetos derivados — nunca tocar nestas.
-CANONICAL_TABLES = frozenset({"sessions", "messages", "system_prompts"})
+CANONICAL_TABLES = frozenset(
+    {
+        "sessions",
+        "messages",
+        "system_prompts",
+        "runtime_sessions",
+        "runtime_turns",
+        "runtime_events",
+        "runtime_approvals",
+        "runtime_directory_leases",
+        "runtime_queue",
+    }
+)
 
 #: Derivados: reconstrutíveis a partir das canônicas, e portanto descartáveis
 #: no reparo.

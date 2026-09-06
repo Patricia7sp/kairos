@@ -16,6 +16,7 @@ import { modelosView } from "./views/modelos.js";
 import { provedoresView } from "./views/provedores.js";
 import { emBreveView } from "./views/em-breve.js";
 import { loginView } from "./views/login.js";
+import { runtimeView } from "./views/runtime.js";
 import { api } from "./api.js";
 
 const ROTAS = [
@@ -23,6 +24,7 @@ const ROTAS = [
   { id: "chat",        titulo: "Chat",        icone: "sessions",  grupo: "Agente", view: chatView },
   { id: "skills",      titulo: "Skills",      icone: "skills",    grupo: "Agente", view: skillsView },
   { id: "sessoes",     titulo: "Sessões",     icone: "sessions",  grupo: "Agente", view: sessoesView },
+  { id: "runtime",     titulo: "Agent Runtime", icone: "tools",     grupo: "Agente", view: runtimeView },
   { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
   { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: provedoresView },
   { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: emBreveView },
@@ -31,6 +33,15 @@ const ROTAS = [
 
 const PADRAO = "visao-geral";
 const rotaPorId = (id) => ROTAS.find((r) => r.id === id);
+let viewCleanup = null;
+let viewAbort = null;
+
+function disposeView() {
+  viewAbort?.abort();
+  viewAbort = null;
+  if (typeof viewCleanup === "function") viewCleanup();
+  viewCleanup = null;
+}
 
 function montarNav() {
   const grupos = [];
@@ -98,6 +109,9 @@ function pintarBotaoTema() {
 }
 
 async function navegar() {
+  disposeView();
+  const controller = new AbortController();
+  viewAbort = controller;
   const id = (location.hash.replace(/^#\/?/, "") || PADRAO).split("?")[0];
   const rota = rotaPorId(id) || rotaPorId(PADRAO);
 
@@ -114,10 +128,16 @@ async function navegar() {
   const main = document.querySelector("#conteudo");
   main.innerHTML = "";
   try {
-    await rota.view(main, rota);
+    const cleanup = await rota.view(main, rota, { signal: controller.signal });
+    if (controller.signal.aborted) {
+      if (typeof cleanup === "function") cleanup();
+      return;
+    }
+    viewCleanup = typeof cleanup === "function" ? cleanup : null;
   } catch (e) {
-    main.innerHTML = `<div class="k-error" role="alert"><h3>Esta tela falhou ao montar</h3>
-      <p>${String(e.message || e)}</p></div>`;
+    if (controller.signal.aborted) return;
+    main.innerHTML = `<div class="k-error" role="alert"><h3>Esta tela falhou ao montar</h3><p></p></div>`;
+    main.querySelector(".k-error p").textContent = String(e.message || e);
   }
   main.focus({ preventScroll: true });
 }
@@ -135,6 +155,7 @@ async function pintarSaude() {
 }
 
 async function sair() {
+  disposeView();
   try {
     await api.logout();
   } finally {

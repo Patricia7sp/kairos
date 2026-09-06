@@ -55,7 +55,9 @@ def build_parser():
             help=argparse.SUPPRESS,
         )
 
-        if cmd.subcommands:
+        if cmd.name == "runtime":
+            _runtime_branch(p, cmd, argparse)
+        elif cmd.subcommands:
             # `dest` nomeado por comando: é o que permite ao handler saber
             # qual subcomando veio sem inspecionar o parser.
             dest = f"{cmd.name.replace('-', '_')}_command"
@@ -111,6 +113,10 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
             )
         parser.add_argument("--provider", help="provider do override deste turno")
         parser.add_argument("--model", help="modelo do override deste turno")
+        parser.add_argument(
+            "--idempotency-key",
+            help="chave durável para repetir manualmente o mesmo turno de runtime",
+        )
     elif command == "gateway" and subcommand in ("run", None):
         parser.add_argument("--once", action="store_true", help="Roda um único tick e sai")
         parser.add_argument(
@@ -154,6 +160,60 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
         parser.add_argument(
             "--no-browser", action="store_true", help="Não abre o navegador automaticamente"
         )
+
+
+def _runtime_branch(parser, command, argparse) -> None:
+    """Build the sole three-level CLI branch without changing legacy dispatch."""
+    subparsers = parser.add_subparsers(dest="runtime_command", metavar="<subcomando>")
+    for child in command.subcommands:
+        child_parser = subparsers.add_parser(child.name, help=child.help)
+        child_parser.add_argument(
+            "--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+        )
+        if child.name == "session":
+            session_parsers = child_parser.add_subparsers(
+                dest="runtime_session_command", metavar="<subcomando>"
+            )
+            for leaf in child.subcommands:
+                leaf_parser = session_parsers.add_parser(leaf.name, help=leaf.help)
+                leaf_parser.add_argument(
+                    "--json",
+                    action="store_true",
+                    default=argparse.SUPPRESS,
+                    help=argparse.SUPPRESS,
+                )
+                _runtime_args(leaf.name, leaf_parser, session=True)
+        else:
+            _runtime_args(child.name, child_parser, session=False)
+
+
+def _runtime_args(command: str, parser, *, session: bool) -> None:
+    if session and command == "create":
+        parser.add_argument("--cwd", required=True)
+        parser.add_argument(
+            "--sandbox",
+            required=True,
+            choices=["read_only", "workspace_write", "broad_access"],
+        )
+        parser.add_argument("--consent", action="store_true")
+        parser.add_argument("--session", dest="session_id")
+        parser.add_argument("--parent-session")
+    elif session and command == "end":
+        parser.add_argument("--session", required=True, type=_nonblank_session)
+    elif command == "login":
+        parser.add_argument(
+            "--method", required=True, choices=["apiKey", "chatgpt", "chatgptDeviceCode"]
+        )
+    elif command == "approve":
+        parser.add_argument("--session", required=True, type=_nonblank_session)
+        parser.add_argument("--approval", required=True)
+        parser.add_argument("--decision", required=True, choices=["accept", "decline"])
+    elif command == "cancel":
+        parser.add_argument("--session", required=True, type=_nonblank_session)
+        parser.add_argument("--turn", required=True)
+    elif command == "watch":
+        parser.add_argument("--session", required=True, type=_nonblank_session)
+        parser.add_argument("--cursor")
 
 
 def _nonblank_session(value: str) -> str:

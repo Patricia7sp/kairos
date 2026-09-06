@@ -117,6 +117,30 @@ export const api = {
   testarProvedor: (provider) =>
     request(`/api/providers/${encodeURIComponent(provider)}/test`, { method: "POST" }),
   wsTicket: () => request("/api/auth/ws-ticket", { method: "POST" }),
+  runtimeStatus:  () => request("/api/runtime/status"),
+  runtimeAccount: () => request("/api/runtime/account"),
+  runtimeLogin: (method, apiKey) => request("/api/runtime/login", {
+    method: "POST", body: { method, ...(apiKey ? { api_key: apiKey } : {}) },
+  }),
+  runtimeLoginCancel: (loginId) => request("/api/runtime/login/cancel", {
+    method: "POST", body: { login_id: loginId },
+  }),
+  runtimeLogout: () => request("/api/runtime/logout", { method: "POST" }),
+  runtimeCreate: (session) => request("/api/runtime/sessions", {
+    method: "POST", body: session,
+  }),
+  runtimeTurn: (sessionId, turn) => request(`/api/runtime/sessions/${encodeURIComponent(sessionId)}/turns`,
+    { method: "POST", body: turn },
+  ),
+  runtimeEnd: (sessionId) => request(`/api/runtime/sessions/${encodeURIComponent(sessionId)}/end`,
+    { method: "POST" },
+  ),
+  runtimeCancel: (sessionId, turnId) => request(`/api/runtime/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    { method: "POST", body: { turn_id: turnId } },
+  ),
+  runtimeApprove: (sessionId, approvalId, decision) => request(`/api/runtime/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}`,
+    { method: "POST", body: { decision } },
+  ),
   toolsets:  () => request("/api/tools/toolsets"),
   uso:       () => request("/api/analytics/usage"),
 };

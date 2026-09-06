@@ -12,6 +12,8 @@ services:
       context: .
       dockerfile: Dockerfile
     image: kairos:local
+    # s6-overlay e o pacote Codex fixado desta imagem são x86_64.
+    platform: linux/amd64
     container_name: kairos
     restart: unless-stopped
 
@@ -19,12 +21,18 @@ services:
       - "100.87.25.101:9119:9119"
 
     volumes:
-      # /opt/data é KAIROS_HOME: state.db, auth.json, skills e o marcador de
-      # drenagem. Volume nomeado, não bind: o container faz chown no arranque.
+      # /opt/data é KAIROS_HOME: state.db, auth.json, skills, codex-runtime e o
+      # marcador de drenagem. Assim o CODEX_HOME dedicado persiste no mesmo
+      # volume nomeado sem copiar credenciais para a imagem.
       - kairos-data:/opt/data
       # O fallback criptografado recebe a passphrase por arquivo administrado,
       # nunca por argumento ou variável de ambiente inspecionável.
       - /etc/komodo/secrets/kairos-vault-passphrase:/run/secrets/kairos-vault-passphrase:ro
+      # O runtime vem desabilitado e sem projetos. Para ativá-lo, monte aqui
+      # somente cada diretório cadastrado em agent_runtime.allowed_directories,
+      # usando no config exatamente o caminho de destino dentro do container.
+      # Exemplo deliberadamente inativo (não aponta para projeto do operador):
+      # - /srv/projects/example:/projects/example:rw
 
     environment:
       KAIROS_DASHBOARD_PORT: "9119"

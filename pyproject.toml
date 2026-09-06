@@ -37,8 +37,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not runtime_live'"
 markers = [
     "integration: exige Docker; pulado quando a imagem não foi construída",
+    "runtime_live: exige opt-in, autenticação Codex dedicada e pode consumir turnos",
 ]
 
 [tool.ruff]

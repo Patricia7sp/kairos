@@ -15,6 +15,9 @@ FROM python:3.11-slim-bookworm AS base
 
 ARG S6_OVERLAY_VERSION=3.2.0.2
 ARG KAIROS_UID=10000
+ARG TARGETARCH
+ARG CODEX_VERSION=0.153.4
+ARG CODEX_SHA256=a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -40,6 +43,21 @@ ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLA
 RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
     && tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz \
     && rm -f /tmp/s6-overlay-*.tar.xz
+
+# --- Codex CLI ---------------------------------------------------------------
+# O s6-overlay desta imagem já é x86_64; recusar outra arquitetura evita uma
+# imagem híbrida que constrói e só falha no boot. O pacote standalone inteiro
+# é preservado porque bwrap, zsh, rg e o code-mode-host fazem parte do runtime.
+RUN test "${TARGETARCH}" = "amd64" \
+    && curl -fsSL \
+        "https://releases.openai.com/codex/releases/${CODEX_VERSION}/codex-package-x86_64-unknown-linux-musl.tar.gz" \
+        -o /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz \
+    && printf '%s  %s\n' "${CODEX_SHA256}" /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz > /tmp/codex-package.sha256 \
+    && sha256sum -c - < /tmp/codex-package.sha256 \
+    && mkdir -p /usr/local/lib/codex \
+    && tar -C /usr/local/lib/codex -xzf /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz \
+    && ln -s /usr/local/lib/codex/bin/codex /usr/local/bin/codex \
+    && rm -f /tmp/codex-package-x86_64-unknown-linux-musl.tar.gz /tmp/codex-package.sha256
 
 # --- usuário não-privilegiado -------------------------------------------------
 # O container COMEÇA como root de propósito: o stage2 precisa de root para
@@ -71,6 +89,7 @@ COPY kairos_cli/ ./kairos_cli/
 COPY kairos_tui_host/ ./kairos_tui_host/
 COPY kairos_acp/ ./kairos_acp/
 COPY kairos_integration/ ./kairos_integration/
+COPY kairos_runtime/ ./kairos_runtime/
 COPY kairos_evals/ ./kairos_evals/
 COPY kairos_web/ ./kairos_web/
 COPY kairos_security/ ./kairos_security/

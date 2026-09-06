@@ -149,31 +149,26 @@ def initialize_schema(
     para FTS5 base → trigram → ``LIKE``: **fail-open**, nunca fail-closed —
     um índice ausente reduz a qualidade da busca, não derruba o agente.
     """
-    with conn:
-        conn.executescript(_schema.SCHEMA_SQL)
-        conn.executescript(_schema.FTS_SQL)
-        conn.executescript(_schema.FTS_TRIGGERS)
+    from kairos_state.migrations import migrate
+    from kairos_state.runtime_schema import execute_schema
 
+    version = migrate(conn)
+
+    with conn:
         if deferred_indexes:
-            conn.executescript(_schema.DEFERRED_INDEX_SQL)
+            execute_schema(conn, _schema.DEFERRED_INDEX_SQL)
 
         if cjk:
             try:
-                conn.executescript(_schema.FTS_CJK_SQL)
-                conn.executescript(_schema.FTS_CJK_TRIGGERS)
+                execute_schema(conn, _schema.FTS_CJK_SQL)
+                execute_schema(conn, _schema.FTS_CJK_TRIGGERS)
             except sqlite3.OperationalError as exc:
                 raise CJKExtensionUnavailable(
                     "tokenizer 'cjk_unicode61' indisponível — a extensão fts5_cjk "
                     "não está carregada nesta conexão"
                 ) from exc
 
-        row = conn.execute("SELECT version FROM schema_version").fetchone()
-        if row is None:
-            conn.execute(
-                "INSERT INTO schema_version(version) VALUES (?)", (_schema.SCHEMA_VERSION,)
-            )
-            return _schema.SCHEMA_VERSION
-        return int(row["version"])
+    return version
 
 
 def read_schema_version(conn: sqlite3.Connection) -> int | None:

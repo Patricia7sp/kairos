@@ -14,7 +14,7 @@ import time
 import unittest
 from pathlib import Path
 
-from kairos_state import connect, initialize_schema
+from kairos_state import SCHEMA_VERSION, connect, initialize_schema
 from kairos_state.connection import apply_wal_with_fallback, read_connection
 from kairos_state.contention import (
     BUDGET_SECONDS,
@@ -523,7 +523,7 @@ class MigrationTests(Base):
     def test_migracao_em_banco_vazio_chega_a_versao_alvo(self):
         with tempfile.TemporaryDirectory() as d:
             conn = connect(Path(d) / "novo.db")
-            self.assertEqual(migrate(conn), 1)
+            self.assertEqual(migrate(conn), SCHEMA_VERSION)
             tabelas = {
                 r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }

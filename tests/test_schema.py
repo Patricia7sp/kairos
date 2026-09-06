@@ -57,8 +57,8 @@ class SchemaTestCase(unittest.TestCase):
     def test_as_dez_tabelas_do_erd_existem(self):
         self.assertLessEqual(EXPECTED_TABLES, self.tables())
 
-    def test_sessions_tem_56_colunas(self):
-        self.assertEqual(len(self.columns("sessions")), 56)
+    def test_sessions_tem_57_colunas(self):
+        self.assertEqual(len(self.columns("sessions")), 57)
 
     def test_messages_tem_23_colunas(self):
         self.assertEqual(len(self.columns("messages")), 23)
@@ -99,10 +99,9 @@ class SchemaTestCase(unittest.TestCase):
         self.assertLessEqual({"messages_fts", "messages_fts_trigram"}, self.tables())
 
     def test_versao_do_schema_e_propria_do_kairos(self):
-        # O Kairos nasce na versão 1 com a FORMA do v26 do legado; a versão
-        # do legado fica registrada para rastreabilidade, não como a nossa.
+        # A versão do legado fica registrada para rastreabilidade, não como a nossa.
         self.assertEqual(read_schema_version(self.db), SCHEMA_VERSION)
-        self.assertEqual(SCHEMA_VERSION, 1)
+        self.assertEqual(SCHEMA_VERSION, 2)
         self.assertEqual(LEGACY_SHAPE_VERSION, 26)
 
     def test_inicializacao_e_idempotente(self):

@@ -214,6 +214,9 @@ async function abrirSessao(id, painel, recarregar) {
           <span class="k-dialog__cat"><code>${esc(sessao.id)}</code></span>
         </div>
         <div class="k-ses__acoes">
+          ${sessao.execution_kind === "agent_runtime"
+            ? `<a class="k-btn k-btn--primary" href="#/runtime?session=${encodeURIComponent(sessao.id)}">Abrir runtime</a>`
+            : ""}
           <button type="button" class="k-btn k-btn--ghost" data-exportar-sessao>Exportar JSON</button>
           <button type="button" class="k-btn k-btn--ghost" data-exportar-markdown>Exportar Markdown</button>
           <button type="button" class="k-btn k-btn--ghost" data-fixar-sessao>${sessao.pinned ? "Desafixar" : "Fixar"}</button>
