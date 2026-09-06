@@ -32,6 +32,10 @@ DOCKER = REPO / "docker"
 DOCKERFILE = REPO / "Dockerfile"
 
 
+def _runtime_state_for_probe(returncode: int) -> str:
+    return "ready" if returncode == 0 else "unavailable"
+
+
 class ShellHarness(unittest.TestCase):
     """Executa um script com `id` e `s6-setuidgid` falsos."""
 
@@ -389,6 +393,10 @@ class DockerfileTests(unittest.TestCase):
 
     def test_a_imagem_copia_o_pacote_runtime(self):
         self.assertIn("COPY kairos_runtime/ ./kairos_runtime/", self.src)
+
+    def test_estado_runtime_esperado_segue_o_retorno_do_probe_real(self):
+        self.assertEqual(_runtime_state_for_probe(0), "ready")
+        self.assertEqual(_runtime_state_for_probe(1), "unavailable")
 
     def test_distribuicao_descobre_subpacotes_e_inclui_spa(self):
         config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
@@ -811,7 +819,7 @@ class RealImageTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "codex-cli 0.153.4")
 
-    def test_runtime_enabled_falha_fechado_quando_bwrap_nao_cria_namespace(self):
+    def test_runtime_enabled_reflete_o_probe_real_da_plataforma(self):
         name = "kairos-test-runtime-sandbox"
         config = REPO / "tests" / "fixtures" / "container_runtime_enabled.yaml"
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
@@ -851,13 +859,37 @@ class RealImageTests(unittest.TestCase):
                     status = _json.loads(result.stdout)
                     break
                 time.sleep(0.2)
+            probe = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "--user",
+                    "10000:10000",
+                    name,
+                    "/opt/kairos/.venv/bin/python",
+                    "-c",
+                    "import asyncio\n"
+                    "from kairos_runtime.supervisor import CodexSupervisor\n"
+                    "async def main():\n"
+                    "    supervisor = CodexSupervisor(codex_home='/opt/data/codex-runtime')\n"
+                    "    try:\n"
+                    "        await supervisor.probe_sandbox()\n"
+                    "    finally:\n"
+                    "        await supervisor.aclose()\n"
+                    "asyncio.run(main())\n",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
             self.assertEqual(
                 status,
                 {
                     "authorized_projects": [],
                     "enabled": True,
                     "sandbox_profiles": ["read_only", "workspace_write"],
-                    "state": "unavailable",
+                    "state": _runtime_state_for_probe(probe.returncode),
                 },
             )
         finally:

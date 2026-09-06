@@ -103,3 +103,28 @@ Nenhum workflow remoto foi disparado. CI completa continua exigindo todos os
 jobs obrigatórios do GitHub Actions; os resultados locais não substituem esse
 gate. Nenhum deploy, push, merge, backup ou alteração em container/volume de
 produção foi realizado.
+
+## Correções após revisão local
+
+Em 2026-09-06, a revisão do commit `05d16f4` encontrou três lacunas nos testes;
+nenhuma exigiu mudança em código de produção ou rebuild da imagem.
+
+- RED focado: 6 failed em 1,81 s. Os testes novos demonstraram que a expectativa
+  da imagem era fixa, o processo auxiliar ignorava a saída antecipada de
+  `serve_runtime`, `_start` não devolvia ownership limpo na falha e faltavam as
+  asserções temporais do smoke live.
+- GREEN focado: 6 passed em 1,84 s. O E2E offline completo mais os testes
+  temporais terminaram com 6 passed e 1 live deselected em 4,29 s.
+- O caso RealImage alterado passou em 3,61 s contra `kairos:test` existente. Ele
+  agora invoca o probe de `CodexSupervisor` como UID 10000; o próprio probe usa
+  o `CODEX_HOME` dedicado e sanitiza o ambiente antes de executar
+  `codex sandbox /bin/true`. O teste compara `ready`/`unavailable` com esse
+  retorno real. A falha determinística continua coberta pelo wrapper do teste
+  de host.
+- O smoke live agora espera `turn_start` e confirma o lease do primeiro turno
+  antes de submeter outro turno no mesmo projeto e um em projeto distinto. Os
+  timestamps duráveis exigem ausência de sobreposição no mesmo projeto e
+  sobreposição entre projetos; testes offline rejeitam ambas as regressões.
+- Ruff lint dos três arquivos passou. O format-check apontou uma expressão no
+  helper live, corrigida mecanicamente; a checagem final passou. O smoke live
+  continuou não executado, sem flag ou credencial dedicada.

@@ -10,6 +10,7 @@ import time
 from concurrent.futures import CancelledError
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from kairos_runtime.host import serve_runtime
@@ -29,12 +30,18 @@ def _host_process(home: str, audit: str) -> None:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stopped.set)
-        task = asyncio.create_task(serve_runtime(Path(home)))
+        host = asyncio.create_task(serve_runtime(Path(home)))
+        stopping = asyncio.create_task(stopped.wait())
         try:
-            await stopped.wait()
+            done, _pending = await asyncio.wait(
+                {host, stopping}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if host in done:
+                await host
         finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            stopping.cancel()
+            host.cancel()
+            await asyncio.gather(stopping, host, return_exceptions=True)
 
     asyncio.run(run())
 
@@ -42,24 +49,32 @@ def _host_process(home: str, audit: str) -> None:
 def _stop(process: multiprocessing.Process) -> None:
     if process.is_alive():
         process.terminate()
-        process.join(10)
+    process.join(10)
     if process.is_alive():
         process.kill()
         process.join(5)
     assert not process.is_alive()
+    assert process.exitcode is not None
 
 
-def _start(home: Path, audit: Path) -> multiprocessing.Process:
+def _start(home: Path, audit: Path, *, timeout: float = 10.0) -> multiprocessing.Process:
+    if timeout <= 0:
+        raise ValueError("timeout de startup deve ser positivo")
     process = multiprocessing.get_context("spawn").Process(
         target=_host_process, args=(str(home), str(audit))
     )
     process.start()
-    socket = home / "run" / "runtime.sock"
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not socket.exists() and process.is_alive():
-        time.sleep(0.02)
-    assert process.is_alive() and socket.exists()
-    return process
+    try:
+        socket = home / "run" / "runtime.sock"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not socket.exists() and process.is_alive():
+            time.sleep(0.02)
+        if not process.is_alive() or not socket.exists():
+            raise AssertionError("host de runtime não iniciou")
+        return process
+    except BaseException:
+        _stop(process)
+        raise
 
 
 def _cli(home: Path, *args: str) -> dict:
@@ -234,3 +249,31 @@ def test_fake_web_cli_restart_preserva_journal_sem_duplicar_turn_start(tmp_path,
             assert counts == {"thread_id": "thread-e2e", "thread_start": 1, "turn_start": 2}
     finally:
         _stop(process)
+
+
+def test_host_process_observa_falha_antecipada_do_serve_runtime(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "run").write_text("impede diretório de runtime", encoding="utf-8")
+    process = multiprocessing.get_context("spawn").Process(
+        target=_host_process, args=(str(home), str(tmp_path / "audit.json"))
+    )
+    process.start()
+    try:
+        process.join(1)
+        assert not process.is_alive()
+        assert process.exitcode not in {None, 0}
+    finally:
+        _stop(process)
+
+
+def test_start_falho_entrega_processo_encerrado_e_reaped(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "run").write_text("impede diretório de runtime", encoding="utf-8")
+    before = {child.pid for child in multiprocessing.active_children()}
+
+    with pytest.raises(AssertionError, match="host de runtime não iniciou"):
+        _start(home, tmp_path / "audit.json", timeout=0.5)
+
+    assert {child.pid for child in multiprocessing.active_children()} <= before
