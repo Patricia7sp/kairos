@@ -1,0 +1,5 @@
+# Imagem descartável para strace, nunca usada pelo compose de produção.
+FROM kairos:local
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends strace \
+    && rm -rf /var/lib/apt/lists/*
