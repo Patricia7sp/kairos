@@ -26,6 +26,7 @@ PRODUCTION_EXECUTABLE = "codex"
 PRODUCTION_VERSION_ARGS = ("--version",)
 PRODUCTION_ARGS = ("app-server", "--listen", "stdio://")
 EXPECTED_CODEX_VERSION = "codex-cli 0.153.4"
+SANDBOX_PROBE_ARGS = ("sandbox", "/bin/true")
 RESTART_BACKOFF_SECONDS = (1, 2, 4, 8, 16, 30)
 MAX_RESTART_ATTEMPTS = 5
 STDERR_DIAGNOSTIC_LIMIT = 64 * 1024
@@ -107,6 +108,7 @@ class CodexSupervisor:
         self._lifecycle_lock = asyncio.Lock()
         self._started_at: float | None = None
         self._version_validated = False
+        self._sandbox_validated = False
 
     @property
     def generation(self) -> str:
@@ -132,6 +134,43 @@ class CodexSupervisor:
                 return self.rpc
             await self._cleanup_process()
             return await self._launch()
+
+    async def probe_sandbox(self, *, timeout: float = 10.0) -> None:
+        """Prove the packaged sandbox can execute before container admission."""
+        if self._sandbox_validated:
+            return
+        if timeout <= 0:
+            raise ValueError("timeout do probe deve ser positivo")
+        environment = _runtime_environment(self._codex_home)
+        try:
+            process_or_awaitable = self._subprocess_exec(
+                self._command[0],
+                *SANDBOX_PROBE_ARGS,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=environment,
+            )
+            process = (
+                await process_or_awaitable
+                if inspect.isawaitable(process_or_awaitable)
+                else process_or_awaitable
+            )
+        except OSError as exc:
+            raise self._sandbox_unavailable() from exc
+        self._preflight_process = process
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except TimeoutError as exc:
+            await self._cleanup_process()
+            raise self._sandbox_unavailable() from exc
+        except BaseException:
+            await self._cleanup_process()
+            raise
+        if self._preflight_process is process:
+            self._preflight_process = None
+        if process.returncode != 0:
+            raise self._sandbox_unavailable()
+        self._sandbox_validated = True
 
     async def restart(self) -> CodexRpc:
         async with self._lifecycle_lock:
@@ -257,10 +296,15 @@ class CodexSupervisor:
             for field in required_text
         ):
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
+
         if not os.path.isabs(response["codexHome"]):
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
         if response["codexHome"] != self._codex_home:
             raise RuntimeErrorInfo("incompatible", "Codex App Server incompatível", False)
+
+    @staticmethod
+    def _sandbox_unavailable() -> RuntimeErrorInfo:
+        return RuntimeErrorInfo("unavailable", "sandbox do runtime indisponível", False)
 
     async def _cleanup_process(self) -> None:
         outcome = await run_persistent_cleanup(

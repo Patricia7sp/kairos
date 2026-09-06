@@ -46,9 +46,7 @@ def test_v2_migration_rolls_back_all_ddl_and_version_on_failure(
 ) -> None:
     db = connect(tmp_path / "state.db")
     migrate(db, target=1)
-    before = db.execute(
-        "SELECT type,name,sql FROM sqlite_master ORDER BY type,name"
-    ).fetchall()
+    before = db.execute("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").fetchall()
 
     from kairos_state import migrations
 
@@ -97,7 +95,10 @@ def test_concurrent_migrations_converge_without_duplicate_alter(tmp_path: Path) 
     assert errors == []
     check = connect(path)
     assert read_schema_version(check) == SCHEMA_VERSION
-    assert sum(row["name"] == "execution_kind" for row in check.execute("PRAGMA table_info(sessions)")) == 1
+    assert (
+        sum(row["name"] == "execution_kind" for row in check.execute("PRAGMA table_info(sessions)"))
+        == 1
+    )
 
 
 def test_runtime_tables_are_canonical_and_have_required_constraints(tmp_path: Path) -> None:
@@ -111,10 +112,12 @@ def test_runtime_tables_are_canonical_and_have_required_constraints(tmp_path: Pa
         "runtime_queue",
     }
     assert expected <= CANONICAL_TABLES
-    assert not expected & __import__("kairos_state.migrations", fromlist=["DERIVED_OBJECTS"]).DERIVED_OBJECTS
+    assert (
+        not expected
+        & __import__("kairos_state.migrations", fromlist=["DERIVED_OBJECTS"]).DERIVED_OBJECTS
+    )
     tables = {
-        row["name"]
-        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert expected <= tables
     with pytest.raises(sqlite3.IntegrityError):
@@ -157,7 +160,10 @@ def test_create_authorizes_and_persists_original_directory_identity(tmp_path: Pa
     assert (row["directory_device"], row["directory_inode"]) == (stat.st_dev, stat.st_ino)
     assert row["broad_consent_at"] is None
     assert row["state"] == "ready"
-    assert db.execute("SELECT execution_kind FROM sessions WHERE id='s1'").fetchone()[0] == "agent_runtime"
+    assert (
+        db.execute("SELECT execution_kind FROM sessions WHERE id='s1'").fetchone()[0]
+        == "agent_runtime"
+    )
 
 
 def test_create_rejects_unauthorized_directory_and_broad_access_without_consent(
@@ -240,9 +246,7 @@ def test_bound_identity_cannot_be_replaced_via_insert_conflict(tmp_path: Path) -
             "VALUES ('s1','web',1,'model')"
         )
 
-    row = db.execute(
-        "SELECT canonical_cwd FROM runtime_sessions WHERE session_id='s1'"
-    ).fetchone()
+    row = db.execute("SELECT canonical_cwd FROM runtime_sessions WHERE session_id='s1'").fetchone()
     assert row["canonical_cwd"] == str(project)
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
@@ -316,9 +320,7 @@ def test_append_sequences_events_and_returns_snapshot_isolated_payload(tmp_path:
         "one",
     )
     assert (second.sequence, second.cursor) == (2, "v1:runtime-1:2")
-    assert [event.event_id for event in repo.events_after("runtime-1", first.cursor)] == [
-        "event-2"
-    ]
+    assert [event.event_id for event in repo.events_after("runtime-1", first.cursor)] == ["event-2"]
 
 
 def test_append_returns_the_same_payload_snapshot_persisted_before_lock_wait(
@@ -342,9 +344,7 @@ def test_append_returns_the_same_payload_snapshot_persisted_before_lock_wait(
     def append_while_locked() -> None:
         connection = connect(path, timeout=5)
         connection.set_trace_callback(
-            lambda statement: begin_attempted.set()
-            if statement == "BEGIN IMMEDIATE"
-            else None
+            lambda statement: begin_attempted.set() if statement == "BEGIN IMMEDIATE" else None
         )
         try:
             result.append(RuntimeRepository(connection).append(turn, "event", "output", payload))

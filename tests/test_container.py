@@ -309,20 +309,20 @@ class ContInitOrderTests(unittest.TestCase):
 class ServicesTests(unittest.TestCase):
     """RF-12, RF-14, RF-19."""
 
-    def test_rf14_dois_servicos_distintos_dependentes_de_base(self):
-        for svc in ("main-kairos", "dashboard"):
+    def test_rf14_servicos_distintos_dependentes_de_base(self):
+        for svc in ("main-kairos", "dashboard", "runtime"):
             with self.subTest(svc=svc):
                 d = DOCKER / "s6-rc.d" / svc
                 self.assertEqual((d / "type").read_text().strip(), "longrun")
                 self.assertTrue((d / "dependencies.d" / "base").exists())
                 self.assertTrue((d / "run").exists())
 
-    def test_o_bundle_user_contem_os_dois(self):
+    def test_o_bundle_user_contem_todos_os_servicos(self):
         contents = {p.name for p in (DOCKER / "s6-rc.d/user/contents.d").iterdir()}
-        self.assertEqual(contents, {"main-kairos", "dashboard"})
+        self.assertEqual(contents, {"main-kairos", "dashboard", "runtime"})
 
     def test_rf19_cada_servico_derruba_o_proprio_privilegio(self):
-        for svc in ("main-kairos", "dashboard"):
+        for svc in ("main-kairos", "dashboard", "runtime"):
             with self.subTest(svc=svc):
                 self.assertIn("s6-setuidgid", code_only(DOCKER / "s6-rc.d" / svc / "run"))
 
@@ -376,6 +376,19 @@ class DockerfileTests(unittest.TestCase):
 
     def test_a_extensao_cjk_falhar_nao_derruba_o_build(self):
         self.assertIn("build.sh /opt/kairos/lib ||", self.src)
+
+    def test_codex_pinned_preserva_o_pacote_verificado_amd64(self):
+        self.assertIn("ARG CODEX_VERSION=0.153.4", self.src)
+        self.assertIn(
+            "a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821",
+            self.src,
+        )
+        self.assertIn("codex-package-x86_64-unknown-linux-musl.tar.gz", self.src)
+        self.assertIn("sha256sum -c -", self.src)
+        self.assertIn("/usr/local/lib/codex", self.src)
+
+    def test_a_imagem_copia_o_pacote_runtime(self):
+        self.assertIn("COPY kairos_runtime/ ./kairos_runtime/", self.src)
 
     def test_distribuicao_descobre_subpacotes_e_inclui_spa(self):
         config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
@@ -700,6 +713,7 @@ class RealImageTests(unittest.TestCase):
         saida = r.stdout + r.stderr
         self.assertIn("GATEWAY uid=10000", saida)
         self.assertIn("DASH uid=10000", saida)
+        self.assertIn("RUNTIME uid=10000", saida)
 
     def test_o_cont_init_roda_na_ordem_e_todos_saem_zero(self):
         if not self._stub_available():
@@ -784,6 +798,70 @@ class RealImageTests(unittest.TestCase):
         porque não havia entry point. Agora há."""
         r = self.run_in("-c", "test -x /opt/kairos/.venv/bin/kairos && echo ok")
         self.assertEqual(r.stdout.strip(), "ok", r.stderr)
+
+    def test_codex_real_tem_versao_e_recursos_fixados(self):
+        r = self.run_in(
+            "-c",
+            "codex --version && "
+            "test -x /usr/local/lib/codex/codex-resources/bwrap && "
+            "test -x /usr/local/lib/codex/codex-resources/zsh/bin/zsh && "
+            "test -x /usr/local/lib/codex/codex-path/rg && "
+            "test -x /usr/local/lib/codex/bin/codex-code-mode-host",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "codex-cli 0.153.4")
+
+    def test_runtime_enabled_falha_fechado_quando_bwrap_nao_cria_namespace(self):
+        name = "kairos-test-runtime-sandbox"
+        config = REPO / "tests" / "fixtures" / "container_runtime_enabled.yaml"
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+        try:
+            started = subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    name,
+                    "-v",
+                    f"{config}:/opt/data/config.yaml:ro",
+                    "-e",
+                    "KAIROS_WEB_TOKEN=teste-nao-secreto",
+                    self.IMAGE,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+            deadline = time.monotonic() + 30
+            status = None
+            while time.monotonic() < deadline:
+                result = subprocess.run(
+                    ["docker", "exec", name, "kairos", "runtime", "status", "--json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    import json as _json
+
+                    status = _json.loads(result.stdout)
+                    break
+                time.sleep(0.2)
+            self.assertEqual(
+                status,
+                {
+                    "authorized_projects": [],
+                    "enabled": True,
+                    "sandbox_profiles": ["read_only", "workspace_write"],
+                    "state": "unavailable",
+                },
+            )
+        finally:
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
     def test_o_container_RODA_o_comando_pedido(self):
         r = self.run_in("--version", entrypoint=None)

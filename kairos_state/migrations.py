@@ -90,9 +90,7 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
         current = read_schema_version(conn)
         if current is None:
             current = 0
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
-            )
+            conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
             conn.execute("INSERT INTO schema_version(version) VALUES (0)")
 
         for migration in MIGRATIONS:

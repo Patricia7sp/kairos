@@ -4,3 +4,9 @@ display:
   language: en
 sessions:
   cjk_fts: true
+agent_runtime:
+  enabled: false
+  codex_binary: /usr/local/bin/codex
+  codex_version: 0.153.4
+  allowed_directories: []
+  broad_access_enabled: false

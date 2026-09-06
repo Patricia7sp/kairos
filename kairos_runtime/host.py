@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from kairos_container import CONTAINER_MODE_FILENAME
+
 from .auth import RuntimeAuth
 from .codex_adapter import CodexAppServerAdapter
 from .errors import RuntimeErrorInfo
@@ -300,6 +302,8 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                 except BaseException:
                     os.close(inherited_fd)
                     raise
+                if (canonical_home / CONTAINER_MODE_FILENAME).is_file():
+                    await supervisor.probe_sandbox()
                 await supervisor.start()
                 runtime = CodexAppServerAdapter(supervisor)
                 auth = RuntimeAuth(supervisor.rpc)

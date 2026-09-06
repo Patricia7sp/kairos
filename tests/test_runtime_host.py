@@ -59,12 +59,115 @@ def _write_codex_wrapper(path: Path, mode: str) -> Path:
     return wrapper
 
 
+def _write_container_probe_wrapper(
+    path: Path, sandbox_exit: int, started: Path, probed: Path | None = None
+) -> Path:
+    wrapper = path / f"codex-sandbox-{sandbox_exit}"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "sandbox" ]; then '
+        + (f'touch "{probed}"; ' if probed is not None else "")
+        + "exit "
+        f"{sandbox_exit}; fi\n"
+        'if [ "$1" = "--version" ]; then\n'
+        f'  exec "{sys.executable}" "{FIXTURE}" version\n'
+        "fi\n"
+        f'touch "{started}"\n'
+        f'exec "{sys.executable}" "{FIXTURE}" adapter\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+    return wrapper
+
+
+def async_test(function):
+    @functools.wraps(function)
+    def run(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return run
+
+
 async def _wait_for_socket(socket_path: Path) -> None:
     for _ in range(300):
         if socket_path.exists():
             return
         await asyncio.sleep(0.01)
     raise AssertionError("runtime socket was not created")
+
+
+@async_test
+async def test_container_sandbox_failure_keeps_status_unavailable_without_app_server(
+    tmp_path: Path,
+) -> None:
+    started = tmp_path / "app-server-started"
+    binary = _write_container_probe_wrapper(tmp_path, 1, started)
+    (tmp_path / ".container-mode").write_text("runtime=s6\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        f"agent_runtime:\n  enabled: true\n  codex_binary: {binary}\n  allowed_directories: []\n",
+        encoding="utf-8",
+    )
+    task = asyncio.create_task(serve_runtime(tmp_path))
+    client = RuntimeClient(tmp_path / "run" / "runtime.sock")
+    try:
+        await _wait_for_socket(tmp_path / "run" / "runtime.sock")
+        assert await client.status() == {
+            "enabled": True,
+            "state": "unavailable",
+            "authorized_projects": [],
+            "sandbox_profiles": ["read_only", "workspace_write"],
+        }
+        assert not started.exists()
+    finally:
+        await client.aclose()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@async_test
+async def test_container_sandbox_success_allows_ready_and_disabled_skips_probe(
+    tmp_path: Path,
+) -> None:
+    enabled_home = tmp_path / "enabled"
+    enabled_home.mkdir()
+    started = enabled_home / "app-server-started"
+    probed = enabled_home / "sandbox-probed"
+    binary = _write_container_probe_wrapper(enabled_home, 0, started, probed)
+    (enabled_home / ".container-mode").write_text("runtime=s6\n", encoding="utf-8")
+    (enabled_home / "config.yaml").write_text(
+        f"agent_runtime:\n  enabled: true\n  codex_binary: {binary}\n  allowed_directories: []\n",
+        encoding="utf-8",
+    )
+    task = asyncio.create_task(serve_runtime(enabled_home))
+    client = RuntimeClient(enabled_home / "run" / "runtime.sock")
+    try:
+        await _wait_for_socket(enabled_home / "run" / "runtime.sock")
+        assert (await client.status())["state"] == "ready"
+        assert probed.exists()
+        assert started.exists()
+    finally:
+        await client.aclose()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    disabled_home = tmp_path / "disabled"
+    disabled_home.mkdir()
+    sentinel = disabled_home / "must-not-run"
+    (disabled_home / ".container-mode").write_text("runtime=s6\n", encoding="utf-8")
+    (disabled_home / "config.yaml").write_text(
+        f"agent_runtime:\n  enabled: false\n  codex_binary: {sentinel}\n",
+        encoding="utf-8",
+    )
+    task = asyncio.create_task(serve_runtime(disabled_home))
+    client = RuntimeClient(disabled_home / "run" / "runtime.sock")
+    try:
+        await _wait_for_socket(disabled_home / "run" / "runtime.sock")
+        assert (await client.status())["state"] == "disabled"
+        assert not sentinel.exists()
+    finally:
+        await client.aclose()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def _wait_for_child(parent_pid: int) -> int:
@@ -88,14 +191,6 @@ def _runtime_lock_fds(pid: int) -> list[str]:
         if target.endswith("/run/runtime.lock"):
             targets.append(target)
     return targets
-
-
-def async_test(function):
-    @functools.wraps(function)
-    def run(*args, **kwargs):
-        return asyncio.run(function(*args, **kwargs))
-
-    return run
 
 
 @async_test

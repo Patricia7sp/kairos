@@ -20,12 +20,109 @@ from kairos_runtime.supervisor import CodexSupervisor
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_app_server.py"
 
 
+class _ProbeProcess:
+    def __init__(self, returncode: int, *, block: bool = False) -> None:
+        self.returncode: int | None = None if block else returncode
+        self._result = returncode
+        self.block = block
+        self.terminated = False
+        self.killed = False
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        if self.block:
+            await asyncio.Future()
+        return b"", b"private sandbox diagnostic"
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        assert self.returncode is not None
+        return self.returncode
+
+
 def async_test(function: Callable[..., Any]) -> Callable[..., None]:
     @functools.wraps(function)
     def run(*args: Any, **kwargs: Any) -> None:
         asyncio.run(function(*args, **kwargs))
 
     return run
+
+
+@async_test
+async def test_container_sandbox_probe_uses_dedicated_sanitized_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process = _ProbeProcess(0)
+    calls = []
+
+    async def create_process(*args, **kwargs):
+        calls.append((args, kwargs))
+        return process
+
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-cross")
+    supervisor = CodexSupervisor(
+        codex_home=str(tmp_path),
+        executable="fake-codex",
+        subprocess_exec=create_process,
+    )
+
+    await supervisor.probe_sandbox(timeout=0.1)
+
+    assert calls[0][0] == ("fake-codex", "sandbox", "/bin/true")
+    assert calls[0][1]["env"]["CODEX_HOME"] == str(tmp_path)
+    assert "OPENAI_API_KEY" not in calls[0][1]["env"]
+    await supervisor.aclose()
+
+
+@async_test
+async def test_container_sandbox_probe_failure_is_static_and_reaped(tmp_path: Path) -> None:
+    process = _ProbeProcess(1)
+
+    async def create_process(*_args, **_kwargs):
+        return process
+
+    supervisor = CodexSupervisor(
+        codex_home=str(tmp_path),
+        executable="fake-codex",
+        subprocess_exec=create_process,
+    )
+    with pytest.raises(RuntimeErrorInfo) as raised:
+        await supervisor.probe_sandbox(timeout=0.1)
+
+    assert (raised.value.code, raised.value.message, raised.value.retryable) == (
+        "unavailable",
+        "sandbox do runtime indisponível",
+        False,
+    )
+    assert supervisor.process is None
+    await supervisor.aclose()
+
+
+@async_test
+async def test_container_sandbox_probe_timeout_terminates_and_reaps(tmp_path: Path) -> None:
+    process = _ProbeProcess(0, block=True)
+
+    async def create_process(*_args, **_kwargs):
+        return process
+
+    supervisor = CodexSupervisor(
+        codex_home=str(tmp_path),
+        executable="fake-codex",
+        subprocess_exec=create_process,
+    )
+    with pytest.raises(RuntimeErrorInfo) as raised:
+        await supervisor.probe_sandbox(timeout=0.01)
+
+    assert raised.value.code == "unavailable"
+    assert process.terminated
+    assert process.returncode is not None
+    await supervisor.aclose()
 
 
 @async_test

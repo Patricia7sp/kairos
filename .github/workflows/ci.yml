@@ -24,6 +24,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
+  KAIROS_RUNTIME_LIVE: "0"
 
 jobs:
   tests:
@@ -39,7 +40,7 @@ jobs:
       # Sem Docker aqui: os testes de integração ficam no job `image`, para
       # que uma falha de build não se confunda com falha de lógica.
       - name: pytest
-        run: uv run pytest -q --deselect tests/test_container.py::RealImageTests
+        run: uv run pytest -q -m "not runtime_live" --deselect tests/test_container.py::RealImageTests
 
   lint:
     name: Lint (ruff)
@@ -68,11 +69,11 @@ jobs:
           scandir: "."
           additional_files: "kairos"
           # `additional_files: kairos` existe para apanhar o executável, mas
-          # o glob apanha junto o marcador s6-rc user/contents.d/main-kairos —
-          # que é um arquivo VAZIO, não um script, e por isso rende SC2148
+          # o glob apanha junto os marcadores s6-rc em user/contents.d —
+          # arquivos VAZIOS, não scripts, e por isso rendem SC2148
           # (sem shebang). Não há shebang a acrescentar: no s6-rc o que
           # importa é o NOME do arquivo, e o conteúdo é deliberadamente nada.
-          ignore_names: "main-kairos"
+          ignore_names: "main-kairos runtime"
           # `skills/` é conteúdo instalável de terceiros — mesma razão pela
           # qual o ruff também o ignora.
           ignore_paths: "skills"
@@ -105,7 +106,7 @@ jobs:
       - name: Imagem-stub para o ciclo de vida s6
         run: |
           printf 'FROM kairos:test\nRUN printf %s > /opt/kairos/.venv/bin/kairos && chmod +x /opt/kairos/.venv/bin/kairos\n' \
-            "'#!/bin/bash\ncase \"\$1\" in\n  gateway) echo \"GATEWAY uid=\$(id -u)\"; sleep 3 ;;\n  dashboard) echo \"DASH uid=\$(id -u)\"; sleep 3 ;;\n  boom) exit 42 ;;\n  echo) cat ;;\n  *) echo \"CLI uid=\$(id -u) args=\$*\" ;;\nesac\n'" \
+            "'#!/bin/bash\ncase \"\$1\" in\n  gateway) echo \"GATEWAY uid=\$(id -u)\"; sleep 3 ;;\n  dashboard) echo \"DASH uid=\$(id -u)\"; sleep 3 ;;\n  runtime) echo \"RUNTIME uid=\$(id -u)\"; sleep 3 ;;\n  boom) exit 42 ;;\n  echo) cat ;;\n  *) echo \"CLI uid=\$(id -u) args=\$*\" ;;\nesac\n'" \
             > Dockerfile.stub
           docker build -t kairos:stub -f Dockerfile.stub .
       - name: Testes de integração

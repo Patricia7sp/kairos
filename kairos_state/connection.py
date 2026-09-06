@@ -155,7 +155,6 @@ def initialize_schema(
     version = migrate(conn)
 
     with conn:
-
         if deferred_indexes:
             execute_schema(conn, _schema.DEFERRED_INDEX_SQL)
 

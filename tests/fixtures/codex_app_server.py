@@ -98,6 +98,26 @@ reply_count = 0
 last_thread_id = "thread-1"
 last_cwd = tempfile.gettempdir()
 host_turn: tuple[str, str] | None = None
+
+
+def read_audit() -> dict[str, Any]:
+    path = os.environ.get("KAIROS_FAKE_AUDIT")
+    if not path or not os.path.exists(path):
+        return {"thread_id": "thread-e2e", "thread_start": 0, "turn_start": 0}
+    with open(path, encoding="utf-8") as source:
+        return json.load(source)
+
+
+def write_audit(audit: dict[str, Any]) -> None:
+    path = os.environ["KAIROS_FAKE_AUDIT"]
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w", encoding="utf-8") as target:
+        json.dump(audit, target, sort_keys=True)
+        target.flush()
+        os.fsync(target.fileno())
+    os.replace(temporary, path)
+
+
 if MODE == "hold-lock":
     with open(os.environ["KAIROS_FAKE_PID_FILE"], "w", encoding="utf-8") as pid_file:
         pid_file.write(str(os.getpid()))
@@ -174,6 +194,14 @@ for raw_line in sys.stdin:
     elif method == "check/replies":
         send({"id": request_id, "result": {"replyCount": reply_count}})
     elif method == "thread/start":
+        if MODE == "persistent-e2e":
+            audit = read_audit()
+            audit["thread_start"] += 1
+            write_audit(audit)
+            last_thread_id = audit["thread_id"]
+            last_cwd = params["cwd"]
+            send({"id": request_id, "result": effective_result(params, last_thread_id)})
+            continue
         if params.get("sandbox") == "workspace-write" and params.get("config") != {
             "sandbox_workspace_write": {
                 "writable_roots": [params["cwd"]],
@@ -237,6 +265,33 @@ for raw_line in sys.stdin:
         last_cwd = params["cwd"]
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
     elif method == "turn/start":
+        if MODE == "persistent-e2e":
+            audit = read_audit()
+            audit["turn_start"] += 1
+            write_audit(audit)
+            turn_id = f"external-turn-{audit['turn_start']}"
+            host_turn = (params["threadId"], turn_id)
+            approval_rpc_id = 700 + audit["turn_start"]
+            send(
+                {
+                    "id": request_id,
+                    "result": {"turn": {"id": turn_id, "items": [], "status": "inProgress"}},
+                }
+            )
+            send(
+                {
+                    "id": approval_rpc_id,
+                    "method": "item/fileChange/requestApproval",
+                    "params": {
+                        "itemId": f"change-{audit['turn_start']}",
+                        "startedAtMs": 11,
+                        "threadId": params["threadId"],
+                        "turnId": turn_id,
+                        "grantRoot": params["cwd"],
+                    },
+                }
+            )
+            continue
         turn_id = "external-turn-1"
         if MODE == "host-approval":
             host_turn = (params["threadId"], turn_id)
@@ -473,7 +528,7 @@ for raw_line in sys.stdin:
     elif request_id is not None and method is None:
         # Client reply to a server request.
         reply_count += 1
-        if MODE == "host-approval" and request_id == 700 and host_turn is not None:
+        if MODE in {"host-approval", "persistent-e2e"} and host_turn is not None:
             thread_id, turn_id = host_turn
             send(
                 {
