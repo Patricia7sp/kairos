@@ -178,3 +178,25 @@ Não houve relaxamento de privilégios, autenticação live, turno pago, push,
 merge, CI remota ou deploy. M2 (helper privado de cleanup) permanece diferida
 pela decisão de mínimo impacto. O aceite operacional live e remoto segue
 pendente, separado destes resultados locais.
+
+## Resultado da revisão final
+
+A revisão geral e a revisão restrita da correção funcional `771e9fe` encerraram
+os cinco achados obrigatórios e o diagnóstico de startup, sem nova falha
+Important/Critical. A implementação local está concluída e permanece na branch
+`feat/agent-runtime-codex`, em worktree preservada. Os artefatos foram verificados
+contra os arquivos funcionais desse commit.
+
+Duas pendências menores não bloqueiam a entrega local:
+
+- A instrução canônica pode aparecer novamente quando o App Server entrega um
+  `userMessage` dentro de um evento `tool`; falta deduplicar também essa forma
+  na exibição do transcript.
+- O supervisor ainda importa o helper genérico privado de cleanup do pacote de
+  providers; sua extração para infraestrutura neutra fica para mudança própria.
+
+O [registro de decisões](agent-runtime-decisions.md) preserva as justificativas
+e os custos de revisão assumidos durante a implementação. O aceite operacional
+continua separado: login/turnos reais dedicados, CI remota e deploy não foram
+executados. O runtime permanece desabilitado por padrão e falha de forma
+controlada quando a plataforma bloqueia o namespace da sandbox.
