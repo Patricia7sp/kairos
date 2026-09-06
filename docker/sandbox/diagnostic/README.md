@@ -32,7 +32,7 @@ argumentos de mount; a regra de caminho correspondente fica no AppArmor.
 `apparmor-probe` é o template oficial materializado como perfil independente
 `kairos-runtime-diagnostic`, ABI 3.0, com os includes de tunables/global e
 abstractions/base. Substitui somente `deny mount` por permissão de propagação
-recursiva slave sobre `/`. As demais operações de mount continuam negadas por
+recursiva slave com o flag silent sobre `/`. As demais operações de mount continuam negadas por
 ausência de allow. As negações de `/proc`, `/sys` e AF_ALG são preservadas.
 Não altera `docker-default` nem configura o daemon.
 
@@ -52,9 +52,14 @@ bind mounts ou volume de produção, sem credenciais e sem capabilities extras.
    consultado; negações explícitas de AppArmor podem ser silenciosas.
 4. Teste negativo com `seccomp-probe.json`: unshare só de mount, setns e mount
    com outros flags continuam retornando EPERM.
-5. Parser AppArmor (`-Q -T`) aceita `apparmor-probe`. A carga no kernel ainda
-   não foi executada: `sudo -n apparmor_parser -r -W ...` devolveu
-   `sudo: interactive authentication is required`.
+5. O operador carregou o perfil AppArmor em 2026-09-06T22:33:29Z. Containers
+   descartáveis confirmaram `kairos-runtime-diagnostic (enforce)`. O probe
+   continuou falhando, com e sem strace.
+6. O journal confirmou `operation="mount"`, `info="failed flags match"`,
+   destino `/` e flags `rw, silent, rslave`: faltava `silent` na regra inicial.
+   A regra foi corrigida para corresponder aos flags exatos, sem ampliar
+   destinos. O parser (`-Q -T`) aceita a correção. A recarga ainda depende do
+   operador: `sudo -n apparmor_parser -r -W ...` exige autenticação interativa.
 
 ## Próximo teste, com intervenção administrativa
 
@@ -77,7 +82,7 @@ sudo apparmor_parser -r -W docker/sandbox/diagnostic/apparmor-probe
 
 A cópia idêntica oferecida ao operador nesta sessão está em
 `/tmp/kairos-runtime-diagnostic.apparmor`, SHA-256
-`2a3faa617ee1760e555e469d3600914f8aa8f00e80b5dcd012c9158b5b7a2c46`.
+`38eb47263c8ee1b696cfe096680729b055a603dd352d2785499dd4eea71669da`.
 
 Executar somente o probe inofensivo, sem volumes de produção:
 
