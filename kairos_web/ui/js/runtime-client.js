@@ -5,6 +5,11 @@ import { api } from "./api.js";
 
 const defaultDelay = (attempt) => Math.min(10_000, 500 * (2 ** attempt));
 
+const retryableTicketError = (error) => {
+  if (error?.body?.retryable === false || error?.retryable === false) return false;
+  return error?.status !== 401;
+};
+
 export class RuntimeClient {
   constructor({
     ticket = () => api.wsTicket(),
@@ -37,9 +42,17 @@ export class RuntimeClient {
     this.sessionId = sessionId;
     this.disposed = false;
     const generation = ++this.generation;
-    const result = await this.ticket();
+    let result;
+    try {
+      result = await this.ticket();
+      if (!result?.ticket) throw new Error("ticket WebSocket obrigatório");
+    } catch (error) {
+      if (this.disposed || generation !== this.generation) return null;
+      this.onError(error);
+      if (retryableTicketError(error)) this.scheduleReconnect();
+      return null;
+    }
     if (this.disposed || generation !== this.generation) return null;
-    if (!result?.ticket) throw new Error("ticket WebSocket obrigatório");
     const protocol = globalThis.location?.protocol === "https:" ? "wss" : "ws";
     const host = globalThis.location?.host || "localhost";
     const socket = new this.WebSocketImpl(
@@ -73,12 +86,7 @@ export class RuntimeClient {
       if (this.disposed || generation !== this.generation) return;
       const reconnectable = event.code !== 4401;
       this.onClose({ code: event.code, reconnectable });
-      if (!reconnectable) return;
-      const wait = this.reconnectDelay(this.attempt++);
-      this.timer = setTimeout(() => {
-        this.timer = null;
-        void this.connect(this.sessionId).catch((error) => this.onError(error));
-      }, wait);
+      if (reconnectable) this.scheduleReconnect();
     });
     return socket;
   }
@@ -88,6 +96,15 @@ export class RuntimeClient {
     const socket = this.socket;
     if (socket) socket.close(1012, "reconcile");
     else void this.connect(this.sessionId).catch((error) => this.onError(error));
+  }
+
+  scheduleReconnect() {
+    if (this.disposed || this.timer !== null) return;
+    const wait = this.reconnectDelay(this.attempt++);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.connect(this.sessionId).catch((error) => this.onError(error));
+    }, wait);
   }
 
   dispose() {

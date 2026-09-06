@@ -39,6 +39,9 @@ const snapshotItems = (snapshot) => (Array.isArray(snapshot?.items) ? snapshot.i
     value: item,
   }));
 
+const reconcileItems = (items, snapshot) => snapshotItems(snapshot)
+  .reduce((merged, item) => upsertItem(merged, item), items);
+
 export function initialRuntimeState(sessionId, capabilities = []) {
   return {
     sessionId,
@@ -92,7 +95,7 @@ export function reduceRuntime(state, event) {
   } else if (event.kind === "snapshot") {
     next.items = snapshotItems(payload);
   } else if (event.kind === "reconciled") {
-    next.items = snapshotItems(payload.snapshot);
+    next.items = reconcileItems(state.items, payload.snapshot);
     next.status = payload.snapshot?.state || state.status;
     next.reconciled = true;
     next.gap = state.gap;
@@ -163,7 +166,17 @@ export function renderRuntimeSession(root, state, session, {
   runtimeReady = true,
   error = null,
 } = {}) {
+  const previousComposer = root.dataset.runtimeSession === session.session_id
+    ? root.querySelector("[data-runtime-composer] [name=content]")
+    : null;
+  const draft = previousComposer ? {
+    value: previousComposer.value,
+    focused: document.activeElement === previousComposer,
+    selectionStart: previousComposer.selectionStart,
+    selectionEnd: previousComposer.selectionEnd,
+  } : null;
   root.replaceChildren();
+  root.dataset.runtimeSession = session.session_id;
   const features = featuresOf(session?.capabilities || state.capabilities);
   const card = node("section", "k-runtime k-card");
   const heading = node("header", "k-runtime__head");
@@ -225,15 +238,19 @@ export function renderRuntimeSession(root, state, session, {
   card.append(approvals);
 
   card.append(node("p", "k-runtime__usage", usageText(state.usage)));
-  const interrupted = ["interrupted", "unavailable"].includes(session.state || session.runtime_state)
+  const durableState = session.state || session.runtime_state;
+  const interrupted = ["interrupted", "unavailable"].includes(durableState)
     || state.status === "interrupted";
   if (interrupted) {
     const recovery = node("div", "k-runtime__recovery");
-    recovery.append(node("p", "", "Esta sessão foi interrompida. O histórico permanece disponível."));
+    recovery.append(node("p", "", durableState === "unavailable"
+      ? "A thread desta sessão está indisponível. O histórico permanece disponível."
+      : "Esta sessão foi interrompida. O histórico permanece disponível."));
     const resume = node("button", "k-btn k-btn--primary", "Continuar nesta sessão");
     resume.type = "button";
     resume.dataset.runtimeResume = "";
-    resume.disabled = !connected || !runtimeReady || !features.has("resume");
+    resume.disabled = durableState === "unavailable"
+      || !connected || !runtimeReady || !features.has("resume");
     const successor = node("button", "k-btn k-btn--ghost", "Criar sessão sucessora");
     successor.type = "button";
     successor.dataset.runtimeSuccessor = "";
@@ -251,7 +268,7 @@ export function renderRuntimeSession(root, state, session, {
   const send = node("button", "k-btn k-btn--primary", "Enviar");
   send.type = "submit";
   const canSend = connected && runtimeReady && features.has("text")
-    && !["ended", "unavailable"].includes(session.state || session.runtime_state);
+    && !["ended", "unavailable"].includes(durableState);
   textarea.disabled = !canSend;
   send.disabled = !canSend;
   composer.append(textarea, send);
@@ -262,6 +279,13 @@ export function renderRuntimeSession(root, state, session, {
   composer.append(cancel);
   card.append(composer);
   root.append(card);
+  if (draft) {
+    textarea.value = draft.value;
+    if (draft.focused && !textarea.disabled) {
+      textarea.focus();
+      textarea.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    }
+  }
 }
 
 export function renderRuntimeSetup(root, status, account, loginResult = null) {
@@ -379,6 +403,19 @@ const hashSessionId = () => {
   return new URLSearchParams(query).get("session");
 };
 
+const settled = (promise) => promise.then(
+  (value) => ({ value }),
+  (error) => ({ error }),
+);
+
+const persistedItems = (payload) => (payload?.messages || payload || []).map((message, index) => ({
+  id: String(message?.id || `message-${index}`),
+  type: String(message?.role || "message"),
+  text: String(message?.content || ""),
+  value: null,
+  historical: true,
+}));
+
 export async function runtimeView(root, _route, { signal } = {}) {
   root.innerHTML = `<div class="k-page-head"><h1>Agent Runtime</h1>
     <p>Sessões locais do Codex com projeto, sandbox e aprovações explícitas.</p></div>
@@ -390,6 +427,11 @@ export async function runtimeView(root, _route, { signal } = {}) {
   let poll = null;
   let status;
   let account;
+  const requested = hashSessionId();
+  const statusLoad = settled(api.runtimeStatus());
+  const accountLoad = settled(api.runtimeAccount());
+  const sessionLoad = requested ? settled(api.sessao(requested)) : null;
+  const messagesLoad = requested ? settled(api.mensagens(requested)) : null;
 
   const dispose = () => {
     disposed = true;
@@ -399,15 +441,15 @@ export async function runtimeView(root, _route, { signal } = {}) {
   };
   signal?.addEventListener("abort", dispose, { once: true });
 
-  try {
-    [status, account] = await Promise.all([api.runtimeStatus(), api.runtimeAccount()]);
-  } catch (error) {
-    if (!disposed) mount.replaceChildren(node("div", "k-error", errorValue(error).message || "Runtime indisponível."));
-    return dispose;
-  }
+  const statusResult = await statusLoad;
+  status = statusResult.value || {
+    enabled: true, state: "unavailable", authorized_projects: [], sandbox_profiles: [],
+  };
   if (disposed) return dispose;
-  const requested = hashSessionId();
   if (!requested) {
+    const accountResult = await accountLoad;
+    account = accountResult.value || null;
+    if (disposed) return dispose;
     const renderSetup = () => {
       renderRuntimeSetup(mount, status, account, loginResult);
       bindSetup();
@@ -491,25 +533,31 @@ export async function runtimeView(root, _route, { signal } = {}) {
       });
     };
     renderSetup();
+    const setupError = statusResult.error || accountResult.error;
+    if (setupError) mount.append(node("div", "k-error", errorValue(setupError).message));
     return dispose;
   }
 
-  let session;
-  try {
-    session = await api.sessao(requested);
-  } catch (error) {
-    mount.replaceChildren(node("div", "k-error", errorValue(error).message || "Sessão não encontrada."));
+  const [sessionResult, messagesResult] = await Promise.all([sessionLoad, messagesLoad]);
+  if (sessionResult.error) {
+    mount.replaceChildren(node("div", "k-error", errorValue(sessionResult.error).message || "Sessão não encontrada."));
     return dispose;
   }
+  let session = sessionResult.value;
   if (session.execution_kind !== "agent_runtime") {
     mount.replaceChildren(node("div", "k-error", "Esta sessão usa o runtime de modelo."));
     return dispose;
   }
   session = { ...session, session_id: session.id, state: session.runtime_state };
   let state = initialRuntimeState(session.session_id, session.capabilities);
-  let viewError = null;
-  let reconciling = false;
   const runtimeReady = status.enabled === true && status.state === "ready";
+  if (!runtimeReady && !messagesResult.error) {
+    state = { ...state, items: persistedItems(messagesResult.value) };
+  }
+  let viewError = statusResult.error
+    ? errorValue(statusResult.error)
+    : messagesResult.error ? errorValue(messagesResult.error) : null;
+  let reconciling = false;
   const render = () => {
     if (disposed) return;
     renderRuntimeSession(mount, state, session, {

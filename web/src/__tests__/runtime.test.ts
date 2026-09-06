@@ -64,6 +64,26 @@ describe("reducer do runtime servido", () => {
     expect(after.reconciled).toBe(true);
   });
 
+  it("snapshot de um turno substitui por identidade sem apagar itens anteriores", () => {
+    let before = reduceRuntime(initialRuntimeState("runtime-1"), event({
+      payload: { itemId: "older", delta: "Turno anterior" },
+    }));
+    before = reduceRuntime(before, event({
+      event_id: "event-2", sequence: 2, cursor: "v1:runtime-1:2",
+      payload: { itemId: "current", delta: "Parcial" },
+    }));
+    const after = reduceRuntime(before, event({
+      event_id: "event-3", sequence: 3, cursor: "v1:runtime-1:3", kind: "reconciled",
+      payload: { reason: "recovery", snapshot: { state: "completed", items: [
+        { id: "current", type: "agentMessage", text: "Resposta final" },
+      ] } },
+    }));
+
+    expect(after.items.map((item: { id: string }) => item.id)).toEqual(["older", "current"]);
+    expect(after.items.map((item: { text: string }) => item.text))
+      .toEqual(["Turno anterior", "Resposta final"]);
+  });
+
   it("mantém uso desconhecido visível até chegar uso conhecido", () => {
     const state = reduceRuntime(initialRuntimeState("runtime-1"), event({
       kind: "turn_end", payload: { state: "completed", usage: { status: "unknown" } },
@@ -136,6 +156,44 @@ describe("DOM e controles do runtime", () => {
 
     expect(root.textContent).toContain("Trecho já recebido");
     expect(root.textContent).toContain("Cancelamento ainda não confirmado");
+  });
+
+  it("preserva rascunho, foco e seleção quando um evento rerenderiza a sessão", () => {
+    const session = { session_id: "runtime-1", runtime_kind: "codex", canonical_cwd: "/work",
+      sandbox: "workspace_write", state: "ready", capabilities: { features: ["text"] } };
+    const root = document.createElement("div");
+    document.body.append(root);
+    let state = initialRuntimeState("runtime-1", ["text"]);
+    renderRuntimeSession(root, state, session, { connected: true });
+    const composer = root.querySelector<HTMLTextAreaElement>("[name=content]")!;
+    composer.value = "Draft still typing";
+    composer.focus();
+    composer.setSelectionRange(6, 11);
+
+    state = reduceRuntime(state, event());
+    renderRuntimeSession(root, state, session, { connected: true });
+    const after = root.querySelector<HTMLTextAreaElement>("[name=content]")!;
+
+    expect(after.value).toBe("Draft still typing");
+    expect(document.activeElement).toBe(after);
+    expect([after.selectionStart, after.selectionEnd]).toEqual([6, 11]);
+    root.remove();
+  });
+
+  it("sessão unavailable oferece somente sucessora; interrupted pode continuar com resume", () => {
+    const root = document.createElement("div");
+    const base = { session_id: "runtime-1", runtime_kind: "codex", canonical_cwd: "/work",
+      sandbox: "workspace_write", capabilities: { features: ["text", "resume"] } };
+    renderRuntimeSession(root, initialRuntimeState("runtime-1", ["text", "resume"]),
+      { ...base, state: "unavailable" }, { connected: true, runtimeReady: true });
+    expect(root.querySelector<HTMLButtonElement>("[data-runtime-resume]")!.disabled).toBe(true);
+    expect(root.querySelector<HTMLTextAreaElement>("[name=content]")!.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>("[data-runtime-successor]")!.disabled).toBe(false);
+
+    renderRuntimeSession(root, initialRuntimeState("runtime-1", ["text", "resume"]),
+      { ...base, state: "interrupted" }, { connected: true, runtimeReady: true });
+    expect(root.querySelector<HTMLButtonElement>("[data-runtime-resume]")!.disabled).toBe(false);
+    expect(root.querySelector<HTMLTextAreaElement>("[name=content]")!.disabled).toBe(false);
   });
 
   it("bloqueia criação quando runtime está desabilitado e exige consentimento broad_access", () => {
@@ -238,6 +296,28 @@ describe("DOM e controles do runtime", () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  it("carrega transcript persistido quando account falha e o host está unavailable", async () => {
+    location.hash = "#/runtime?session=runtime-1";
+    vi.spyOn(api, "runtimeStatus").mockResolvedValue({ enabled: true, state: "unavailable",
+      authorized_projects: ["/work"], sandbox_profiles: ["read_only"] });
+    vi.spyOn(api, "runtimeAccount").mockRejectedValue(new Error("host offline"));
+    const sessionLoad = vi.spyOn(api, "sessao").mockResolvedValue({ id: "runtime-1",
+      execution_kind: "agent_runtime", runtime_kind: "codex", canonical_cwd: "/work",
+      sandbox: "read_only", runtime_state: "interrupted",
+      capabilities: { features: ["text", "resume"] } });
+    vi.spyOn(api, "mensagens").mockResolvedValue({ messages: [
+      { id: "message-1", role: "assistant", content: "Resposta persistida", turn_id: "turn-1",
+        turn_state: "interrupted", execution_kind: "agent_runtime" },
+    ] });
+    const root = document.createElement("div");
+    const cleanup = await runtimeView(root);
+
+    expect(sessionLoad).toHaveBeenCalledOnce();
+    expect(root.textContent).toContain("Resposta persistida");
+    expect(root.querySelector<HTMLTextAreaElement>("[name=content]")!.disabled).toBe(true);
+    cleanup();
+  });
+
   it("remove URL e código transitórios quando o login é cancelado", async () => {
     location.hash = "#/runtime";
     vi.spyOn(api, "runtimeStatus").mockResolvedValue({
@@ -278,6 +358,10 @@ describe("DOM e controles do runtime", () => {
 });
 
 describe("cliente WebSocket do runtime", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("reconecta com o último cursor aplicado sem reenviar turno", async () => {
     const sockets: FakeSocket[] = [];
     class FakeSocket {
@@ -318,6 +402,40 @@ describe("cliente WebSocket do runtime", () => {
       type: "subscribe", session_id: "runtime-1", cursor: "v1:runtime-1:7",
     });
     expect(ticket).toHaveBeenCalledTimes(2);
+    client.dispose();
+  });
+
+  it("reagenda uma falha transitória de ticket antes de criar novo socket", async () => {
+    vi.useFakeTimers();
+    const sockets: RetrySocket[] = [];
+    class RetrySocket {
+      readyState = 0;
+      listeners = new Map<string, ((event: any) => void)[]>();
+      constructor(_url: string) { sockets.push(this); }
+      addEventListener(name: string, fn: (event: any) => void) {
+        this.listeners.set(name, [...(this.listeners.get(name) || []), fn]);
+      }
+      emit(name: string, value: any = {}) {
+        if (name === "open") this.readyState = 1;
+        for (const fn of this.listeners.get(name) || []) fn(value);
+      }
+      send() {}
+      close() { this.readyState = 3; this.emit("close", { code: 1012 }); }
+    }
+    const ticket = vi.fn()
+      .mockResolvedValueOnce({ ticket: "one" })
+      .mockRejectedValueOnce(new Error("ticket transient"))
+      .mockResolvedValueOnce({ ticket: "three" });
+    const client = new RuntimeClient({
+      ticket, reconnectDelay: () => 0, WebSocketImpl: RetrySocket as any,
+    });
+    await client.connect("runtime-1");
+    sockets[0]!.emit("open");
+    sockets[0]!.close();
+    await vi.runAllTimersAsync();
+
+    expect(ticket).toHaveBeenCalledTimes(3);
+    expect(sockets).toHaveLength(2);
     client.dispose();
   });
 
