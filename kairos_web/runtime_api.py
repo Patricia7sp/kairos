@@ -95,6 +95,15 @@ class RuntimeApprovalRequest(_StrictModel):
 class RuntimeStatusResponse(_StrictModel):
     enabled: bool
     state: Literal["disabled", "unavailable", "ready"]
+    authorized_projects: list[str]
+    sandbox_profiles: list[Literal["read_only", "workspace_write", "broad_access"]]
+
+    @field_validator("authorized_projects")
+    @classmethod
+    def nonblank_projects(cls, value: list[str]) -> list[str]:
+        if any(not project.strip() for project in value):
+            raise ValueError("authorized_projects contém caminho vazio")
+        return value
 
 
 class AccountStatusResponse(_StrictModel):

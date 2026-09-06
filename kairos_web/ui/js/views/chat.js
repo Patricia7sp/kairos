@@ -51,9 +51,12 @@ export function chatShellMarkup({
   return `<div class="k-chat" data-chat>
     <aside class="k-chat__sessions" aria-label="Conversas">
       <button class="k-btn k-btn--primary" type="button" data-new-chat>Nova conversa</button>
-      <nav data-session-list>${sessions.map((session) => `<button class="k-chat__session" type="button"
-        data-session-id="${esc(session.id)}"><strong>${esc(session.title || "Sem título")}</strong>
-        <small>${esc(session.model || "")}</small></button>`).join("") || "<p>Nenhuma conversa ainda.</p>"}</nav>
+      <nav data-session-list>${sessions.map((session) => session.execution_kind === "agent_runtime"
+        ? `<a class="k-chat__session" href="#/runtime?session=${encodeURIComponent(session.id)}">
+          <strong>${esc(session.title || "Sessão Codex")}</strong><small>Agent Runtime · ${esc(session.runtime_state || "")}</small></a>`
+        : `<button class="k-chat__session" type="button" data-session-id="${esc(session.id)}">
+          <strong>${esc(session.title || "Sem título")}</strong><small>${esc(session.model || "")}</small></button>`
+      ).join("") || "<p>Nenhuma conversa ainda.</p>"}</nav>
     </aside>
     <section class="k-chat__conversation" aria-label="Conversa">
       <div class="k-chat__messages" data-chat-messages aria-live="polite"></div>
@@ -108,7 +111,8 @@ export async function chatView(root) {
   const messages = chat.querySelector("[data-chat-messages]");
   const form = chat.querySelector("[data-chat-form]");
   const status = chat.querySelector("[data-chat-status]");
-  let sessionId = sessionPayload.sessions?.[0]?.id || crypto.randomUUID();
+  const firstModelSession = sessionPayload.sessions?.find((item) => item.execution_kind !== "agent_runtime");
+  let sessionId = firstModelSession?.id || crypto.randomUUID();
   let turn = initialTurnState();
   let frame = null;
 
@@ -154,7 +158,7 @@ export async function chatView(root) {
     const payload = await api.mensagens(id);
     messages.innerHTML = payload.messages.map(messageMarkup).join("");
   };
-  if (sessionPayload.sessions?.[0]) await loadSession(sessionId);
+  if (firstModelSession) await loadSession(sessionId);
   chat.querySelector("[data-session-list]").addEventListener("click", (event) => {
     const button = event.target.closest("[data-session-id]");
     if (button) loadSession(button.dataset.sessionId);

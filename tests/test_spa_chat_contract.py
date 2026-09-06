@@ -31,11 +31,19 @@ def _spa_api_paths() -> set[str]:
 
 
 def test_cada_prefixo_de_api_da_spa_tem_rota_fastapi() -> None:
-    registered = {
-        _normalized_route(route.path)
-        for route in app.routes
-        if getattr(route, "path", "").startswith("/api/")
-    }
+    def paths(routes) -> set[str]:
+        found = {
+            _normalized_route(route.path)
+            for route in routes
+            if getattr(route, "path", "").startswith("/api/")
+        }
+        for route in routes:
+            included = getattr(route, "original_router", None)
+            if included is not None:
+                found.update(paths(included.routes))
+        return found
+
+    registered = paths(app.routes)
 
     assert _spa_api_paths() <= registered
 
@@ -47,4 +55,5 @@ def test_raiz_serve_spa_principal_que_registra_chat() -> None:
     assert response.status_code == 200
     assert "/ui/js/app.js" in response.text
     assert 'id: "chat"' in app_source
+    assert 'id: "runtime"' in app_source
     assert 'href="/legacy"' not in response.text

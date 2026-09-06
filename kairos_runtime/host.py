@@ -128,10 +128,31 @@ class _Host:
     async def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         if method == "runtime.status":
             if self.config is not None and not self.config.enabled:
-                return {"enabled": False, "state": "disabled"}
+                return {
+                    "enabled": False,
+                    "state": "disabled",
+                    "authorized_projects": [],
+                    "sandbox_profiles": [],
+                }
+            choices = {
+                "authorized_projects": list(self.config.allowed_directories)
+                if self.config is not None
+                else [],
+                "sandbox_profiles": [
+                    "read_only",
+                    "workspace_write",
+                    *(
+                        ["broad_access"]
+                        if self.config is not None and self.config.broad_enabled
+                        else []
+                    ),
+                ]
+                if self.config is not None
+                else [],
+            }
             if not self._runtime_ready():
-                return {"enabled": True, "state": "unavailable"}
-            return {"enabled": True, "state": "ready"}
+                return {"enabled": True, "state": "unavailable", **choices}
+            return {"enabled": True, "state": "ready", **choices}
         if method.startswith("account."):
             return await self._dispatch_account(method, params)
         # Fail immediately while recovery owns the mutation fence, then verify

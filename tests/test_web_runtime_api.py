@@ -16,7 +16,12 @@ class FakeRuntimeClient:
         self.calls: list[tuple] = []
 
     async def status(self):
-        return {"enabled": True, "state": "ready"}
+        return {
+            "enabled": True,
+            "state": "ready",
+            "authorized_projects": ["/srv/project"],
+            "sandbox_profiles": ["read_only", "workspace_write"],
+        }
 
     async def account_status(self):
         return {
@@ -77,7 +82,12 @@ def runtime_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_runtime_rest_roundtrip_is_authenticated_strict_and_returns_durable_turn(runtime_api):
     client, fake, project = runtime_api
-    assert client.get("/api/runtime/status").json() == {"enabled": True, "state": "ready"}
+    assert client.get("/api/runtime/status").json() == {
+        "enabled": True,
+        "state": "ready",
+        "authorized_projects": ["/srv/project"],
+        "sandbox_profiles": ["read_only", "workspace_write"],
+    }
     assert client.get("/api/runtime/account").json()["auth_mode"] is None
     created = client.post(
         "/api/runtime/sessions",
@@ -144,6 +154,25 @@ def test_runtime_account_response_is_exact_and_rejects_unknown_host_fields(
     assert response.status_code == 422
     assert response.json()["error"] == "invalid_event"
     assert secret not in response.text
+
+
+def test_runtime_status_response_rejects_unknown_or_malformed_metadata(runtime_api, monkeypatch):
+    client, fake, _project = runtime_api
+
+    async def unsafe_status():
+        return {
+            "enabled": True,
+            "state": "ready",
+            "authorized_projects": ["/srv/project"],
+            "sandbox_profiles": ["read_only"],
+            "raw_config": {"codex_binary": "/private/codex"},
+        }
+
+    monkeypatch.setattr(fake, "status", unsafe_status)
+    response = client.get("/api/runtime/status")
+    assert response.status_code == 422
+    assert response.json()["error"] == "invalid_event"
+    assert "/private/codex" not in response.text
 
 
 def test_runtime_rest_maps_identity_missing_policy_and_unavailable(runtime_api, monkeypatch):

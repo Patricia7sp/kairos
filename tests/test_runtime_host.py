@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from kairos_runtime.client import RuntimeClient
-from kairos_runtime.host import _Host, _monitor_runtime, serve_runtime
+from kairos_runtime.host import _Config, _Host, _monitor_runtime, serve_runtime
 from kairos_runtime.wire import MAX_MESSAGE_BYTES, runtime_event_to_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_app_server.py"
@@ -109,7 +109,12 @@ async def test_disabled_host_is_status_only_and_never_autostarts(tmp_path: Path)
                 break
             await asyncio.sleep(0.01)
         client = RuntimeClient(socket_path)
-        assert await client.status() == {"enabled": False, "state": "disabled"}
+        assert await client.status() == {
+            "enabled": False,
+            "state": "disabled",
+            "authorized_projects": [],
+            "sandbox_profiles": [],
+        }
         with pytest.raises(Exception) as raised:
             await client.get("missing")
         assert getattr(raised.value, "code", None) == "unavailable"
@@ -119,6 +124,33 @@ async def test_disabled_host_is_status_only_and_never_autostarts(tmp_path: Path)
         with pytest.raises(asyncio.CancelledError):
             await task
     assert not socket_path.exists()
+
+
+@async_test
+async def test_status_exposes_only_host_configured_runtime_choices() -> None:
+    host = _Host(
+        config=_Config(
+            enabled=True,
+            executable="codex",
+            allowed_directories=("/srv/project-a", "/srv/project-b"),
+            broad_enabled=False,
+        ),
+        service=object(),
+    )
+
+    assert await host._dispatch("runtime.status", {}) == {
+        "enabled": True,
+        "state": "ready",
+        "authorized_projects": ["/srv/project-a", "/srv/project-b"],
+        "sandbox_profiles": ["read_only", "workspace_write"],
+    }
+
+    broad = _Host(config=_Config(True, "codex", ("/srv/project-a",), True), service=object())
+    assert (await broad._dispatch("runtime.status", {}))["sandbox_profiles"] == [
+        "read_only",
+        "workspace_write",
+        "broad_access",
+    ]
 
 
 @async_test
@@ -332,7 +364,7 @@ async def test_child_exit_blocks_admission_until_restart_recovery_finishes() -> 
 
     supervisor = Supervisor()
     service = Service()
-    host = _Host(config=SimpleNamespace(enabled=True), service=service, supervisor=supervisor)
+    host = _Host(config=_Config(True, "codex", (), False), service=service, supervisor=supervisor)
     monitor = asyncio.create_task(_monitor_runtime(host, supervisor, service))
     try:
         old_process.exit()
@@ -343,6 +375,8 @@ async def test_child_exit_blocks_admission_until_restart_recovery_finishes() -> 
         assert await host._dispatch("runtime.status", {}) == {
             "enabled": True,
             "state": "unavailable",
+            "authorized_projects": [],
+            "sandbox_profiles": ["read_only", "workspace_write"],
         }
         with pytest.raises(Exception) as raised:
             await host._dispatch("session.get", {"session_id": "s1"})
@@ -447,7 +481,12 @@ async def test_second_host_is_refused_without_disturbing_first(tmp_path: Path) -
         assert second.exitcode == 0
         assert results.get(timeout=1) == ("unavailable", "host de runtime já está ativo")
         client = RuntimeClient(socket_path)
-        assert await client.status() == {"enabled": False, "state": "disabled"}
+        assert await client.status() == {
+            "enabled": False,
+            "state": "disabled",
+            "authorized_projects": [],
+            "sandbox_profiles": [],
+        }
         await client.aclose()
     finally:
         first.kill()
@@ -518,7 +557,12 @@ async def test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death(
     try:
         await _wait_for_socket(socket_path)
         client = RuntimeClient(socket_path)
-        assert await client.status() == {"enabled": True, "state": "ready"}
+        assert await client.status() == {
+            "enabled": True,
+            "state": "ready",
+            "authorized_projects": [],
+            "sandbox_profiles": ["read_only", "workspace_write"],
+        }
         await client.aclose()
         child_pid = await _wait_for_child(host.pid)
         host.kill()
