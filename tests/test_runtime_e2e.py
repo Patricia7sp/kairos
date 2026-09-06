@@ -246,7 +246,12 @@ def test_fake_web_cli_restart_preserva_journal_sem_duplicar_turn_start(tmp_path,
             )
             _events_until_end(web, session_id, approval["cursor"])
             counts = json.loads(audit.read_text(encoding="utf-8"))
-            assert counts == {"thread_id": "thread-e2e", "thread_start": 1, "turn_start": 2}
+            assert counts == {
+                "thread_id": "thread-e2e",
+                "thread_start": 1,
+                "thread_resume": 1,
+                "turn_start": 2,
+            }
     finally:
         _stop(process)
 
@@ -260,7 +265,9 @@ def test_host_process_observa_falha_antecipada_do_serve_runtime(tmp_path):
     )
     process.start()
     try:
-        process.join(1)
+        # Spawn imports FastAPI and the runtime before reaching the deliberate error.
+        # Allow bounded startup under concurrent CI/build load.
+        process.join(5)
         assert not process.is_alive()
         assert process.exitcode not in {None, 0}
     finally:

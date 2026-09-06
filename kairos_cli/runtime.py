@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import sys
+from collections.abc import Mapping
 from contextlib import aclosing
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from kairos_runtime import (
     public_error,
     serve_runtime,
 )
+from kairos_runtime.recovery import TranscriptProjection, json_value
 from kairos_runtime.wire import runtime_event_to_json
 
 __all__ = ["render_runtime_event", "run_runtime"]
@@ -30,28 +32,76 @@ def _emit(value, *, as_json: bool) -> None:
         print(value)
 
 
-async def render_runtime_event(event: RuntimeEvent, *, as_json: bool) -> None:
-    """Render RuntimeEvent directly; model-event enum logic does not enter here."""
+class RuntimeHumanRenderer:
+    """One stream's projection; stdout corrections are explicitly labelled."""
+
+    def __init__(self):
+        self.projections: dict[tuple[str, str], TranscriptProjection] = {}
+        self.seen: set[tuple[str, str]] = set()
+
+    def render(self, event: RuntimeEvent) -> None:  # noqa: PLR0912 - canonical event variants remain explicit
+        identity = (event.session_id, event.event_id)
+        if identity in self.seen:
+            return
+        self.seen.add(identity)
+        projection = self.projections.setdefault(
+            (event.session_id, event.turn_id), TranscriptProjection()
+        )
+        before = projection.content
+        projection.apply(event)
+        payload = event.payload
+        if event.kind == "text":
+            item = payload.get("item")
+            if isinstance(item, Mapping):
+                if projection.content != before:
+                    print(f"\n[resposta confirmada]\n{projection.content}", flush=True)
+            elif isinstance(payload.get("delta"), str):
+                print(payload["delta"], end="", flush=True)
+        elif event.kind == "reconciled":
+            if projection.content != before:
+                print(f"\n[resposta reconciliada]\n{projection.content}", flush=True)
+            snapshot = payload["snapshot"]
+            for item in snapshot["items"]:
+                if item.get("type") not in {"agentMessage", "userMessage", "reasoning"}:
+                    self._tool(item)
+            self._state(snapshot.get("state", "recovering"))
+        elif event.kind == "tool":
+            self._tool(payload.get("item", payload))
+        elif event.kind == "approval_request":
+            approval_id = payload.get("approval_id")
+            print(
+                f"\naprovação pendente {approval_id}; responda em outro terminal: "
+                f"kairos runtime approve --session {event.session_id} "
+                f"--approval {approval_id} --decision accept",
+                flush=True,
+            )
+        elif event.kind in {"turn_state", "turn_start"}:
+            self._state(payload.get("state", "running"))
+        elif event.kind == "turn_end":
+            content = payload.get("content")
+            if isinstance(content, str) and content != projection.content:
+                print(f"\n[resposta final]\n{content}", flush=True)
+            self._state(payload.get("state", "completed"))
+        elif event.kind == "error":
+            print("falha no runtime", file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _tool(item):
+        print("\n[ferramenta] " + json.dumps(json_value(item), ensure_ascii=False), flush=True)
+
+    @staticmethod
+    def _state(state):
+        print(f"\n[estado: {state}]", flush=True)
+
+
+async def render_runtime_event(
+    event: RuntimeEvent, *, as_json: bool, renderer: RuntimeHumanRenderer | None = None
+) -> None:
+    """Render a canonical event, optionally retaining a consumer's stream projection."""
     if as_json:
         _emit(runtime_event_to_json(event), as_json=True)
-        return
-    payload = dict(event.payload)
-    if event.kind == "text":
-        text = payload.get("delta")
-        if isinstance(text, str):
-            print(text, end="", flush=True)
-    elif event.kind == "approval_request":
-        approval_id = payload.get("approval_id")
-        print(
-            f"\naprovação pendente {approval_id}; responda em outro terminal: "
-            f"kairos runtime approve --session {event.session_id} "
-            f"--approval {approval_id} --decision accept",
-            flush=True,
-        )
-    elif event.kind == "turn_end":
-        print(flush=True)
-    elif event.kind == "error":
-        print("falha no runtime", file=sys.stderr, flush=True)
+    else:
+        (renderer or RuntimeHumanRenderer()).render(event)
 
 
 async def run_runtime(*, home: Path, args) -> int:  # noqa: PLR0912 - mirrors CLI grammar
@@ -102,9 +152,10 @@ async def run_runtime(*, home: Path, args) -> int:  # noqa: PLR0912 - mirrors CL
             await client.cancel(args.session, args.turn)
             result = {"session_id": args.session, "turn_id": args.turn, "status": "cancelled"}
         elif command == "watch":
+            renderer = RuntimeHumanRenderer()
             async with aclosing(client.subscribe(args.session, args.cursor)) as subscription:
                 async for event in subscription:
-                    await render_runtime_event(event, as_json=as_json)
+                    await render_runtime_event(event, as_json=as_json, renderer=renderer)
             return 0
         else:
             return 2

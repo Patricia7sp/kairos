@@ -39,6 +39,10 @@ jobs:
         run: uv sync --python "$PYTHON_VERSION" --extra dev
       # Sem Docker aqui: os testes de integração ficam no job `image`, para
       # que uma falha de build não se confunda com falha de lógica.
+      # Regressões cruzam o journal Python com o reducer JavaScript servido.
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "22"
       - name: pytest
         run: uv run pytest -q -m "not runtime_live" --deselect tests/test_container.py::RealImageTests
 

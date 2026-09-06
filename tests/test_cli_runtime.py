@@ -212,3 +212,65 @@ async def test_runtime_interactive_eof_exits_without_cancelling(monkeypatch):
     )
     assert result == 0
     assert service.runtime_client.cancelled == []
+
+
+def test_human_watch_projects_replacements_snapshots_tools_and_state(monkeypatch, tmp_path, capsys):
+    events = [
+        ("turn_state", {"state": "queued"}),
+        ("text", {"itemId": "answer", "delta": "ha"}),
+        ("text", {"itemId": "answer", "delta": "ha"}),
+        ("text", {"item": {"id": "answer", "text": "haha final"}, "replace": True}),
+        (
+            "tool",
+            {
+                "item": {
+                    "id": "tool",
+                    "type": "commandExecution",
+                    "command": "pwd",
+                    "status": "completed",
+                }
+            },
+        ),
+        (
+            "reconciled",
+            {
+                "snapshot": {
+                    "state": "completed",
+                    "items": [
+                        {"id": "answer", "type": "agentMessage", "text": "confirmed snapshot"},
+                    ],
+                }
+            },
+        ),
+        ("turn_end", {"state": "completed", "content": "terminal authoritative"}),
+    ]
+
+    async def journal(self, session_id, cursor=None):
+        for sequence, (kind, payload) in enumerate(events, 1):
+            if cursor and sequence <= 5:
+                continue
+            yield RuntimeEvent(
+                1,
+                f"e{sequence}",
+                session_id,
+                "t1",
+                sequence,
+                f"v1:{session_id}:{sequence}",
+                kind,
+                payload,
+            )
+
+    monkeypatch.setattr(runtime, "RuntimeClient", FakeClient)
+    monkeypatch.setattr(FakeClient, "subscribe", journal)
+    monkeypatch.setenv("KAIROS_HOME", str(tmp_path))
+    assert main(["runtime", "watch", "--session", "s1"]) == 0
+    output = capsys.readouterr().out
+    assert "haha" in output
+    assert "haha final" in output
+    assert "confirmed snapshot" in output
+    assert "terminal authoritative" in output
+    assert "pwd" in output and "completed" in output and "queued" in output
+    assert main(["runtime", "watch", "--session", "s1", "--cursor", "v1:s1:5"]) == 0
+    resumed = capsys.readouterr().out
+    assert "confirmed snapshot" in resumed
+    assert "terminal authoritative" in resumed

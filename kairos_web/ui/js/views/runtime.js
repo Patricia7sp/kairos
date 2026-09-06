@@ -26,20 +26,21 @@ const itemId = (payload, fallback) => String(
 );
 
 const upsertItem = (items, incoming) => {
-  const index = items.findIndex((item) => item.id === incoming.id);
+  const index = items.findIndex((item) => item.id === incoming.id && item.turnId === incoming.turnId);
   if (index < 0) return [...items, incoming];
   return items.map((item, position) => position === index ? { ...item, ...incoming } : item);
 };
 
-const snapshotItems = (snapshot) => (Array.isArray(snapshot?.items) ? snapshot.items : [])
+const snapshotItems = (snapshot, turnId) => (Array.isArray(snapshot?.items) ? snapshot.items : [])
   .map((item, index) => ({
     id: String(item?.id || item?.itemId || `snapshot-${index}`),
     type: String(item?.type || item?.kind || "output"),
     text: typeof item?.text === "string" ? item.text : undefined,
     value: item,
+    turnId,
   }));
 
-const reconcileItems = (items, snapshot) => snapshotItems(snapshot)
+const reconcileItems = (items, snapshot, turnId) => snapshotItems(snapshot, turnId)
   .reduce((merged, item) => upsertItem(merged, item), items);
 
 export function initialRuntimeState(sessionId, capabilities = []) {
@@ -48,11 +49,14 @@ export function initialRuntimeState(sessionId, capabilities = []) {
     cursor: null,
     lastSequence: 0,
     items: [],
+    messages: [],
+    terminalTurns: [],
     approvals: [],
     status: "idle",
     capabilities: [...featuresOf(capabilities)],
     usage: null,
     activeTurnId: null,
+    cancellableTurnId: null,
     gap: false,
     reconciled: false,
     queue: [],
@@ -71,44 +75,48 @@ export function reduceRuntime(state, event) {
   let next = { ...state, cursor: event.cursor, lastSequence: event.sequence };
   if (event.kind === "text" || event.kind === "reasoning") {
     const id = itemId(payload, `${event.kind}-${event.sequence}`);
-    const previous = state.items.find((item) => item.id === id);
+    const previous = state.items.find((item) => item.id === id && item.turnId === event.turn_id);
     const text = payload.replace === true
       ? String(payload.delta || payload.item?.text || "")
       : String(previous?.text || "") + String(payload.delta || payload.item?.text || "");
     next.items = upsertItem(state.items, {
-      id, type: event.kind, text,
+      id, type: event.kind, text, turnId: event.turn_id,
       value: payload.item || previous?.value || null,
     });
   } else if (event.kind === "tool") {
     const value = payload.item || payload;
     next.items = upsertItem(state.items, {
-      id: itemId(payload, `tool-${event.sequence}`), type: "tool", value,
+      id: itemId(payload, `tool-${event.sequence}`), type: "tool", value, turnId: event.turn_id,
       text: typeof payload.delta === "string" ? payload.delta : undefined,
     });
   } else if (event.kind === "output") {
-    if (Array.isArray(payload.items)) next.items = snapshotItems(payload);
+    if (Array.isArray(payload.items)) next.items = reconcileItems(state.items, payload, event.turn_id);
     else if (typeof payload.text === "string") {
       next.items = upsertItem(state.items, {
-        id: `output-${event.sequence}`, type: "output", text: payload.text, value: payload,
+        id: `output-${event.sequence}`, type: "output", text: payload.text, value: payload, turnId: event.turn_id,
       });
     }
   } else if (event.kind === "snapshot") {
-    next.items = snapshotItems(payload);
+    next.items = reconcileItems(state.items, payload, event.turn_id);
   } else if (event.kind === "reconciled") {
-    next.items = reconcileItems(state.items, payload.snapshot);
+    next.items = reconcileItems(state.items, payload.snapshot, event.turn_id);
     next.status = payload.snapshot?.state || state.status;
     next.reconciled = true;
     next.gap = state.gap;
   } else if (event.kind === "approval_request" || event.kind === "approval") {
     const approval = {
       id: String(payload.approval_id || payload.request_id || event.event_id),
+      turnId: event.turn_id,
       kind: String(payload.request_kind || "aprovação"),
       details: payload.details || {},
     };
     next.approvals = [...state.approvals.filter((item) => item.id !== approval.id), approval];
   } else if (["approval_decision", "approval_delivery", "approval_rejected"].includes(event.kind)) {
     const id = String(payload.approval_id || "");
-    next.approvals = state.approvals.filter((item) => item.id !== id);
+    next.approvals = event.kind === "approval_rejected" && payload.effective_decision == null
+      ? state.approvals.map((item) => item.id === id
+        ? { ...item, rejection: "A tentativa de aprovação foi rejeitada. O pedido continua pendente; você pode negar." } : item)
+      : state.approvals.filter((item) => item.id !== id);
   } else if (event.kind === "turn_start") {
     next.status = "running";
     next.activeTurnId = event.turn_id;
@@ -119,7 +127,9 @@ export function reduceRuntime(state, event) {
       ? [...state.queue, event.turn_id] : state.queue;
   } else if (event.kind === "turn_end") {
     next.status = payload.state || "completed";
-    next.activeTurnId = null;
+    next.activeTurnId = state.activeTurnId === event.turn_id ? null : state.activeTurnId;
+    next.terminalTurns = [...new Set([...state.terminalTurns, event.turn_id])];
+    next.approvals = state.approvals.filter((item) => item.turnId !== event.turn_id);
     next.usage = payload.usage || { status: "unknown" };
     next.queue = state.queue.filter((turnId) => turnId !== event.turn_id);
   } else if (event.kind === "usage") {
@@ -127,6 +137,7 @@ export function reduceRuntime(state, event) {
   } else if (event.kind === "error") {
     next.status = "error";
   }
+  next.cancellableTurnId = next.activeTurnId || next.queue[0] || null;
   return next;
 }
 
@@ -207,13 +218,14 @@ export function renderRuntimeSession(root, state, session, {
 
   const transcript = node("div", "k-runtime__items");
   transcript.dataset.runtimeItems = "";
-  for (const item of state.items) {
+  const visibleItems = transcriptItems(state);
+  for (const item of visibleItems) {
     const article = node("article", `k-runtime-item k-runtime-item--${item.type}`);
     article.append(node("header", "", item.type === "tool" ? "Ferramenta" : item.type));
     article.append(node("pre", "", item.type === "tool" ? toolText(item) : (item.text ?? toolText(item))));
     transcript.append(article);
   }
-  if (!state.items.length) transcript.append(node("p", "k-runtime__empty", "Aguardando eventos desta sessão."));
+  if (!visibleItems.length) transcript.append(node("p", "k-runtime__empty", "Aguardando eventos desta sessão."));
   card.append(transcript);
 
   const approvals = node("section", "k-runtime__approvals");
@@ -231,6 +243,7 @@ export function renderRuntimeSession(root, state, session, {
       actions.append(button);
     }
     row.append(actions);
+    if (approval.rejection) row.append(node("p", "k-error", approval.rejection));
     if (!connected) row.append(node("small", "", "Reconecte para responder."));
     approvals.append(row);
   }
@@ -275,7 +288,7 @@ export function renderRuntimeSession(root, state, session, {
   const cancel = node("button", "k-btn k-btn--ghost", "Cancelar turno");
   cancel.type = "button";
   cancel.dataset.runtimeCancel = "";
-  cancel.disabled = !connected || !runtimeReady || !features.has("cancel") || !state.activeTurnId;
+  cancel.disabled = !connected || !runtimeReady || !features.has("cancel") || !state.cancellableTurnId;
   composer.append(cancel);
   card.append(composer);
   root.append(card);
@@ -414,7 +427,39 @@ const persistedItems = (payload) => (payload?.messages || payload || []).map((me
   text: String(message?.content || ""),
   value: null,
   historical: true,
+  turnId: message?.turn_id || null,
+  turnState: message?.turn_state || null,
 }));
+
+// Canonical messages survive queued cancellation; journal items carry richer output.
+const transcriptItems = (state) => {
+  const groups = new Map();
+  const add = (item) => {
+    const key = item.turnId || item.id;
+    groups.set(key, [...(groups.get(key) || []), item]);
+  };
+  for (const message of state.messages) {
+    const hasOutput = state.items.some((item) => item.turnId === message.turnId
+      && ["text", "agentMessage", "output"].includes(item.type));
+    if (message.type !== "assistant" || !hasOutput) add(message);
+  }
+  for (const item of state.items) {
+    const hasUser = state.messages.some((message) => message.turnId === item.turnId && message.type === "user");
+    if (item.type !== "userMessage" || !hasUser) add(item);
+  }
+  return [...groups.values()].flat();
+};
+
+const mergeMessages = (state, incoming) => {
+  const messages = [...state.messages];
+  for (const message of incoming) {
+    const index = messages.findIndex((old) => old.id === message.id
+      || (message.turnId && old.turnId === message.turnId && old.type === message.type));
+    if (index < 0) messages.push(message);
+    else messages[index] = message;
+  }
+  return { ...state, messages };
+};
 
 export async function runtimeView(root, _route, { signal } = {}) {
   root.innerHTML = `<div class="k-page-head"><h1>Agent Runtime</h1>
@@ -551,8 +596,8 @@ export async function runtimeView(root, _route, { signal } = {}) {
   session = { ...session, session_id: session.id, state: session.runtime_state };
   let state = initialRuntimeState(session.session_id, session.capabilities);
   const runtimeReady = status.enabled === true && status.state === "ready";
-  if (!runtimeReady && !messagesResult.error) {
-    state = { ...state, items: persistedItems(messagesResult.value) };
+  if (!messagesResult.error) {
+    state = mergeMessages(state, persistedItems(messagesResult.value));
   }
   let viewError = statusResult.error
     ? errorValue(statusResult.error)
@@ -587,11 +632,19 @@ export async function runtimeView(root, _route, { signal } = {}) {
         const accepted = await api.runtimeTurn(session.session_id, {
           content, idempotency_key: crypto.randomUUID(),
         });
-        state = { ...state, queue: [...state.queue, accepted.turn_id] };
+        const queue = state.activeTurnId === accepted.turn_id || state.terminalTurns.includes(accepted.turn_id)
+          ? state.queue : [...new Set([...state.queue, accepted.turn_id])];
+        state = mergeMessages({ ...state, queue,
+          cancellableTurnId: state.activeTurnId || queue[0] || null }, [{
+          id: `accepted-${accepted.turn_id}`, type: "user", text: content,
+          turnId: accepted.turn_id, historical: true,
+        }]);
+        render();
+        state = mergeMessages(state, persistedItems(await api.mensagens(session.session_id)));
       });
     });
     mount.querySelector("[data-runtime-cancel]")?.addEventListener("click", () => {
-      const turnId = state.activeTurnId;
+      const turnId = state.cancellableTurnId;
       if (turnId) void run(() => api.runtimeCancel(session.session_id, turnId));
     });
     mount.querySelector("[data-runtime-resume]")?.addEventListener("click", () => {

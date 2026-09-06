@@ -10,7 +10,7 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
 
-from kairos_cli.runtime import render_runtime_event
+from kairos_cli.runtime import RuntimeHumanRenderer, render_runtime_event
 from kairos_integration import (
     InteractionEnvelope,
     InteractionEvent,
@@ -154,6 +154,7 @@ async def _run_turn(
         idempotency_key=idempotency_key,
     )
     renderer = _HumanRenderer()
+    runtime_renderer = RuntimeHumanRenderer()
     last_runtime_event: RuntimeEvent | None = None
     accepted_turn_id: str | None = None
 
@@ -178,7 +179,7 @@ async def _run_turn(
                         flush=True,
                     )
                 else:
-                    await render_runtime_event(event, as_json=False)
+                    await render_runtime_event(event, as_json=False, renderer=runtime_renderer)
                 if event.kind == "error":
                     renderer.failed = True
                 continue

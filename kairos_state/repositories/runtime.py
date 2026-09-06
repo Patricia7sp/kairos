@@ -93,6 +93,7 @@ class RuntimeRepository:
             "transition",
             "decide_approval",
             "continue_after_approval",
+            "session_state",
         }:
             raise ValueError("unsupported owned runtime operation")
         self._fence = (turn_id, holder, generation)

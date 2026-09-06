@@ -564,3 +564,51 @@ describe("cliente WebSocket do runtime", () => {
     expect(sockets).toHaveLength(0);
   });
 });
+
+it("mantém instrução aceita online, no reload e após cancelar, mesclando journal por turno", async () => {
+  location.hash = "#/runtime?session=runtime-1";
+  vi.spyOn(api, "runtimeStatus").mockResolvedValue({ enabled: true, state: "ready" });
+  vi.spyOn(api, "runtimeAccount").mockResolvedValue({ requires_openai_auth: false });
+  vi.spyOn(api, "sessao").mockResolvedValue({ id: "runtime-1", execution_kind: "agent_runtime",
+    runtime_state: "ready", capabilities: { features: ["text", "cancel"] } });
+  const messages = vi.spyOn(api, "mensagens").mockResolvedValue({ messages: [] });
+  vi.spyOn(api, "runtimeTurn").mockResolvedValue({ turn_id: "queued-real" });
+  const cancel = vi.spyOn(api, "runtimeCancel").mockResolvedValue({});
+  let connection: any;
+  vi.spyOn(RuntimeClient.prototype, "connect").mockImplementation(async function (this: any) {
+    connection = this;
+    this.socket = { readyState: 1, close() {} };
+    this.onOpen();
+  });
+  const root = document.createElement("div");
+  let cleanup = await runtimeView(root);
+  const form = root.querySelector<HTMLFormElement>("[data-runtime-composer]")!;
+  form.querySelector<HTMLTextAreaElement>("textarea")!.value = "Instrução preservada";
+  messages.mockResolvedValue({ messages: [{ id: 12, role: "user", content: "Instrução preservada",
+    turn_id: "queued-real", turn_state: "queued" }] });
+  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(root.textContent).toContain("Instrução preservada"));
+  expect(root.querySelector<HTMLButtonElement>("[data-runtime-cancel]")!.disabled).toBe(false);
+  cleanup();
+  cleanup = await runtimeView(root);
+  connection.onEvent(event({ turn_id: "queued-real", kind: "turn_state", payload: { state: "queued" } }));
+  expect(root.textContent).toContain("Instrução preservada");
+  root.querySelector<HTMLButtonElement>("[data-runtime-cancel]")!.click();
+  await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith("runtime-1", "queued-real"));
+  connection.onEvent(event({ turn_id: "queued-real", sequence: 2, kind: "turn_end",
+    payload: { state: "cancelled", content: "" } }));
+  expect(root.textContent).toContain("Instrução preservada");
+  expect(root.querySelector<HTMLButtonElement>("[data-runtime-cancel]")!.disabled).toBe(true);
+  cleanup();
+  messages.mockResolvedValue({ messages: [
+    { id: 12, role: "user", content: "Instrução preservada", turn_id: "queued-real", turn_state: "cancelled" },
+    { id: 13, role: "assistant", content: "Resposta final", turn_id: "other", turn_state: "completed" },
+  ] });
+  cleanup = await runtimeView(root);
+  connection.onEvent(event({ turn_id: "other", kind: "reconciled", payload: { snapshot: {
+    items: [{ id: "answer", type: "agentMessage", text: "Resposta final" }], state: "completed",
+  } } }));
+  expect(root.textContent!.split("Resposta final")).toHaveLength(2);
+  expect(root.textContent).toContain("Instrução preservada");
+  cleanup();
+});

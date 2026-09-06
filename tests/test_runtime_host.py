@@ -99,6 +99,7 @@ async def _wait_for_socket(socket_path: Path) -> None:
 @async_test
 async def test_container_sandbox_failure_keeps_status_unavailable_without_app_server(
     tmp_path: Path,
+    caplog,
 ) -> None:
     started = tmp_path / "app-server-started"
     binary = _write_container_probe_wrapper(tmp_path, 1, started)
@@ -118,6 +119,7 @@ async def test_container_sandbox_failure_keeps_status_unavailable_without_app_se
             "sandbox_profiles": ["read_only", "workspace_write"],
         }
         assert not started.exists()
+        assert "sandbox do runtime indisponível" in caplog.text
     finally:
         await client.aclose()
         task.cancel()
@@ -679,3 +681,36 @@ async def test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death(
                 os.kill(child_pid, 9)
             except ProcessLookupError:
                 pass
+
+
+@pytest.mark.parametrize(
+    "cause, expected",
+    [
+        ("configuration", "configuração de runtime inválida"),
+        ("version", "versão ou protocolo do runtime incompatível"),
+    ],
+)
+@async_test
+async def test_startup_logs_static_diagnosis_without_private_details(
+    tmp_path, caplog, cause, expected
+):
+    if cause == "configuration":
+        config = "agent_runtime: [private-secret]"
+    else:
+        binary = tmp_path / "codex-private-secret"
+        binary.write_text("#!/bin/sh\necho 'codex-cli 9.9.9 private-secret'\n")
+        binary.chmod(0o700)
+        config = f"agent_runtime:\n  enabled: true\n  codex_binary: {binary}\n"
+    (tmp_path / "config.yaml").write_text(config)
+    task = asyncio.create_task(serve_runtime(tmp_path))
+    client = RuntimeClient(tmp_path / "run" / "runtime.sock")
+    try:
+        await _wait_for_socket(tmp_path / "run" / "runtime.sock")
+        assert (await client.status())["state"] == "unavailable"
+        assert expected in caplog.text
+        assert "private-secret" not in caplog.text
+        assert len([r for r in caplog.records if r.name == "kairos_runtime.host"]) == 1
+    finally:
+        await client.aclose()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

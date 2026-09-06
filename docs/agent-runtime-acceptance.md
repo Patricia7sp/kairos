@@ -128,3 +128,53 @@ nenhuma exigiu mudança em código de produção ou rebuild da imagem.
 - Ruff lint dos três arquivos passou. O format-check apontou uma expressão no
   helper live, corrigida mecanicamente; a checagem final passou. O smoke live
   continuou não executado, sem flag ou credencial dedicada.
+
+## Onda final da revisão geral — I1–I5 e M1
+
+2026-09-06, sobre `c708029`: corrigida a retomada da thread ociosa antes de
+novo envio em outra geração; o fake exige carregamento por geração e confirma
+`thread/start=1`, `thread/resume=1`, `turn/start=2` através do restart. Falhas
+antes de dispatch conservam `not_sent`, não criam thread nem uncertain e
+liberam os leases. Recuperação de turno ativo conserva `attach_turn` e a
+barreira existente.
+
+As superfícies agora conservam a aprovação rejeitada sem decisão efetiva,
+permitem cancelar o ID real do turno queued, preservam instruções canônicas
+online/reload/cancel e mesclam respostas por identidade. O CLI humano projeta
+replacements, reconciliação, finais, ferramentas e estados com uma instância
+por stream. O host registra um único diagnóstico allowlisted por falha de
+startup, sem expor stdout/stderr ou credenciais; o contrato de status mantém
+`unavailable`.
+
+As regressões foram observadas RED antes das respectivas correções: E2E após
+restart, journal real de aprovação/fila no reducer servido, instrução ausente
+na view, resposta final ausente no CLI e diagnóstico não emitido no startup.
+O relatório detalhado local está em
+`.superpowers/sdd/2026-09-05-agent-runtime-codex-app-server/final-fix-report.md`.
+
+Validação final local após as mudanças semânticas:
+
+- Python completo: **1371 passed, 22 deselected, 5561 subtests passed**, 40,69 s,
+  por `uv run pytest -q --deselect tests/test_container.py::RealImageTests`.
+  A primeira execução completa teve apenas uma falha de prazo preexistente:
+  `process.join(1)` excedido durante spawn/import do teste de falha antecipada.
+  A espera foi limitada a 5 s, preservando a exigência de exit com erro; o foco
+  passou e essa falha justificou a única repetição completa.
+- Web: **58 passed**; TUI: **17 passed**; Desktop: **18 passed**.
+  Os três `tsc --noEmit` passaram.
+- Ruff lint e format, shellcheck, `uv lock --check` e `git diff --check`:
+  exit 0. Nenhum comando agregado `scripts/ci.sh --fast` é declarado verde.
+- Controller: `uv build` final gerou wheel/sdist atuais, exit 0. O wheel teve
+  service, host, CLI e SPA comparados byte a byte ao source congelado. Apenas
+  o pacote foi repetido após a correção do teste para incluir o sdist atual.
+- Controller: `docker build --check .`, build `kairos:test` e rebuild da
+  fixture stub: exit 0. Imagem final
+  `sha256:f92652d8d477deaa459bb437a4dc377846c4434c934bca9d69bc697df378723e`.
+  `uv run pytest -q tests/test_container.py::RealImageTests`:
+  **21 passed, 23 subtests passed**, 43,06 s, sem skips.
+
+A limitação local de namespaces continua tratada com runtime indisponível.
+Não houve relaxamento de privilégios, autenticação live, turno pago, push,
+merge, CI remota ou deploy. M2 (helper privado de cleanup) permanece diferida
+pela decisão de mínimo impacto. O aceite operacional live e remoto segue
+pendente, separado destes resultados locais.

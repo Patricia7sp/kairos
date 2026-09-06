@@ -106,3 +106,14 @@ uv run pytest -q -m runtime_live tests/test_runtime_live.py
 Use `KAIROS_RUNTIME_LIVE_CODEX` para apontar outro binário 0.153.4. Nunca rode
 esse teste com autenticação pessoal herdada. A ausência da chave dedicada é um
 skip explícito, não um aceite.
+
+
+### Diagnóstico seguro de inicialização
+
+O host emite uma única linha `Agent Runtime: ...` por falha de inicialização,
+visível no stderr/log do serviço `runtime`. As mensagens são fixas:
+`configuração de runtime inválida`, `versão ou protocolo do runtime incompatível`,
+`sandbox do runtime indisponível` ou `runtime indisponível durante inicialização`.
+O log não inclui exceções, caminhos, stdout/stderr do Codex nem credenciais.
+O status HTTP/IPC continua retornando `unavailable`; consulte o log do serviço
+para distinguir a causa sem ampliar os contratos públicos.

@@ -255,6 +255,7 @@ tests/test_runtime_recovery.py
 tests/test_runtime_security.py
 tests/test_runtime_service.py
 tests/test_runtime_storage.py
+tests/test_runtime_surface_regressions.py
 tests/test_schema.py
 tests/test_security_audit.py
 tests/test_skills.py

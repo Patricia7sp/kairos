@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import fcntl
+import logging
 import os
 import socket
 import stat
@@ -287,9 +288,11 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
     monitor = None
     config = None
     startup_error = None
+    startup_phase = "configuration"
     try:
         try:
             config = _load_config(canonical_home)
+            startup_phase = "runtime"
             if config.enabled:
                 codex_home = _secure_directory(canonical_home / "codex-runtime")
                 inherited_fd = os.dup(lock_fd)
@@ -303,7 +306,9 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                     os.close(inherited_fd)
                     raise
                 if (canonical_home / CONTAINER_MODE_FILENAME).is_file():
+                    startup_phase = "sandbox"
                     await supervisor.probe_sandbox()
+                    startup_phase = "runtime"
                 await supervisor.start()
                 runtime = CodexAppServerAdapter(supervisor)
                 auth = RuntimeAuth(supervisor.rpc)
@@ -319,6 +324,16 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                 await service.recover()
         except Exception as exc:  # noqa: BLE001 - status evita restart loop
             startup_error = _public_error(exc)
+            # One fixed diagnosis per failed startup; never interpolate exception data.
+            if isinstance(exc, RuntimeErrorInfo) and exc.code == "incompatible":
+                diagnosis = "versão ou protocolo do runtime incompatível"
+            elif startup_phase == "configuration":
+                diagnosis = "configuração de runtime inválida"
+            elif startup_phase == "sandbox":
+                diagnosis = "sandbox do runtime indisponível"
+            else:
+                diagnosis = "runtime indisponível durante inicialização"
+            logging.getLogger(__name__).error("Agent Runtime: %s", diagnosis)
             if auth is not None:
                 await auth.aclose()
                 auth = None

@@ -65,6 +65,7 @@ class AgentRuntimeService:
         self._dispatch_gate.set()
         self._dispatch_boundary = asyncio.Lock()
         self._losing: set[str] = set()
+        self._loaded_threads: dict[str, str] = {}
 
     def _lock(self, session_id):
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -125,8 +126,10 @@ class AgentRuntimeService:
             try:
                 caps = negotiate(await self.runtime.capabilities())
                 await self._authorize(session_id)
+                process_generation = self.runtime.generation
                 thread = await self.runtime.create_thread(await self.store.get_session(session_id))
                 await self.store.bind_thread(session_id, thread, caps)
+                self._loaded_threads[session_id] = process_generation
             except BaseException:
                 await self.store.session_state(session_id, "interrupted")
                 raise
@@ -199,7 +202,7 @@ class AgentRuntimeService:
                 except TimeoutError:
                     pass
 
-    async def _execute(self, turn_id):
+    async def _execute(self, turn_id):  # noqa: PLR0912 - resume and dispatch fencing stay in one boundary
         turn = await self.store.get_turn(turn_id)
         generation = None
         heartbeat = None
@@ -221,6 +224,29 @@ class AgentRuntimeService:
                 if not await self.leases.renew(turn_id, self._holder, generation):
                     raise RuntimeErrorInfo("lease_lost", "lease de runtime perdida", False)
                 process_generation = self.runtime.generation
+                if self._loaded_threads.get(session.session_id) != process_generation:
+                    try:
+                        snapshot = await self.runtime.resume_thread(session)
+                        if snapshot.state == "missing":
+                            raise RuntimeErrorInfo(
+                                "thread_missing", "thread de runtime ausente", False
+                            )
+                    except RuntimeErrorInfo as exc:
+                        if exc.code == "thread_missing":
+                            await self._owned(
+                                turn_id,
+                                generation,
+                                "session_state",
+                                session.session_id,
+                                "unavailable",
+                            )
+                        raise
+                    if self.runtime.generation != process_generation:
+                        raise RuntimeErrorInfo("transport", "processo do runtime mudou", False)
+                    if not await self.leases.renew(turn_id, self._holder, generation):
+                        raise RuntimeErrorInfo("lease_lost", "lease de runtime perdida", False)
+                    await self._authorize(session.session_id)
+                    self._loaded_threads[session.session_id] = process_generation
                 if not await self._owned(
                     turn_id, generation, "dispatch", turn_id, process_generation
                 ):

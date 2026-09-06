@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ class FakeRuntime:
 
     def __init__(self):
         self.starts = []
+        self.resumes = []
+        self.resume_failure = None
         self.creates = 0
         self.replies = []
         self.events = asyncio.Queue()
@@ -33,6 +36,12 @@ class FakeRuntime:
     async def create_thread(self, session):
         self.creates += 1
         return "thread-" + session.session_id
+
+    async def resume_thread(self, session):
+        self.resumes.append(session)
+        if self.resume_failure:
+            raise self.resume_failure
+        return self.snapshot
 
     async def start_turn(self, session, turn_id, content):
         self.starts.append((session, turn_id, content))
@@ -555,4 +564,77 @@ async def test_pause_waits_for_old_generation_runner_already_finishing_loss(tmp_
     finally:
         release_loss.set()
         service.resume_runtime()
+        await service.aclose()
+
+
+@pytest.mark.parametrize(
+    "code", ["thread_missing", "invalid_policy", "transport", "missing_snapshot"]
+)
+@async_test
+async def test_resume_failure_before_dispatch_is_not_uncertain(tmp_path, code):
+    service, store, runtime = await setup_service(tmp_path)
+    try:
+        runtime.generation = "process-2"
+        if code == "missing_snapshot":
+            runtime.snapshot = RuntimeObservation("missing", None, (), ())
+        else:
+            runtime.resume_failure = RuntimeErrorInfo(code, "private failure", False)
+        turn = await service.submit("s1", "queued instruction", "key")
+        assert (await terminal(service)).payload["state"] == "failed"
+        row = await store.get_turn(turn)
+        assert row["send_state"] == "not_sent"
+        assert row["process_generation"] is None
+        assert runtime.starts == []
+        assert runtime.creates == 1
+        assert len(runtime.resumes) == 1
+        assert not any(e.kind == "turn_start" for e in await store.events_after("s1", None))
+        if code in {"thread_missing", "missing_snapshot"}:
+            assert (await service.get("s1"))["state"] == "unavailable"
+        await asyncio.gather(*tuple(service._tasks.values()))
+        db = connect(tmp_path / "state.db")
+        try:
+            assert db.execute("SELECT holder FROM session_turn_leases").fetchone()[0] is None
+            lease = db.execute(
+                "SELECT expires_at,quarantined FROM runtime_directory_leases"
+            ).fetchone()
+            assert lease["expires_at"] <= time.time()
+            assert lease["quarantined"] == 0
+        finally:
+            db.close()
+    finally:
+        await service.aclose()
+
+
+@async_test
+async def test_generation_change_during_resume_never_dispatches_and_releases_leases(tmp_path):
+    service, store, runtime = await setup_service(tmp_path)
+    try:
+        runtime.generation = "process-2"
+
+        async def changed(session):
+            runtime.resumes.append(session)
+            runtime.generation = "process-3"
+            return RuntimeObservation("unknown", None, (), ())
+
+        runtime.resume_thread = changed
+        turn = await service.submit("s1", "explicit message", "key")
+        assert (await terminal(service)).payload["state"] == "failed"
+        await asyncio.gather(*tuple(service._tasks.values()))
+        row = await store.get_turn(turn)
+        assert row["send_state"] == "not_sent"
+        assert row["process_generation"] is None
+        assert runtime.starts == []
+        assert runtime.creates == 1
+        assert len(runtime.resumes) == 1
+        db = connect(tmp_path / "state.db")
+        try:
+            assert db.execute("SELECT holder FROM session_turn_leases").fetchone()[0] is None
+            lease = db.execute(
+                "SELECT expires_at,quarantined FROM runtime_directory_leases"
+            ).fetchone()
+            assert lease["expires_at"] <= time.time()
+            assert lease["quarantined"] == 0
+        finally:
+            db.close()
+    finally:
         await service.aclose()

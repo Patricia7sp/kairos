@@ -7,6 +7,8 @@ import tempfile
 import time
 from typing import Any
 
+loaded_threads = set()
+
 MODE = sys.argv[1] if len(sys.argv) > 1 else "adapter"
 
 if MODE == "version":
@@ -197,6 +199,7 @@ for raw_line in sys.stdin:
         if MODE == "persistent-e2e":
             audit = read_audit()
             audit["thread_start"] += 1
+            loaded_threads.add(audit["thread_id"])
             write_audit(audit)
             last_thread_id = audit["thread_id"]
             last_cwd = params["cwd"]
@@ -261,12 +264,20 @@ for raw_line in sys.stdin:
         }:
             send({"id": request_id, "error": {"code": -32602, "message": "bad config"}})
             continue
+        if MODE == "persistent-e2e":
+            audit = read_audit()
+            audit["thread_resume"] = audit.get("thread_resume", 0) + 1
+            write_audit(audit)
+            loaded_threads.add(params["threadId"])
         last_thread_id = params["threadId"]
         last_cwd = params["cwd"]
         send({"id": request_id, "result": effective_result(params, last_thread_id)})
     elif method == "turn/start":
         if MODE == "persistent-e2e":
             audit = read_audit()
+            if params["threadId"] not in loaded_threads:
+                send({"id": request_id, "error": {"code": -32600, "message": "thread not loaded"}})
+                continue
             audit["turn_start"] += 1
             write_audit(audit)
             turn_id = f"external-turn-{audit['turn_start']}"
