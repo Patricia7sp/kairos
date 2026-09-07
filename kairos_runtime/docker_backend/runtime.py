@@ -286,7 +286,13 @@ class DockerSessionRuntime:
                 )
                 await self._discard(entry)
                 entry.finalized = True
-                if observation is not None:
+                # Cache only stable, identified turns. A missing historical turn
+                # must never occupy the None key used to inspect the latest turn.
+                if (
+                    observation is not None
+                    and observation.external_turn_id is not None
+                    and observation.state in TERMINAL_STATES
+                ):
                     key = (entry.session.session_id, observation.external_turn_id)
                     self._snapshots[key] = observation
                     self._snapshots.move_to_end(key)

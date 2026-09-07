@@ -665,6 +665,78 @@ def test_finished_lifecycle_releases_cached_outputs(tmp_path, close_runtime):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_missing_historical_snapshot_cannot_shadow_a_later_completed_turn(
+    tmp_path, monkeypatch, reconcile
+):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            missing = await runtime.inspect_turn(session, "absent-historical-turn")
+            assert missing.state == "unknown"
+            assert missing.external_turn_id is None
+
+            external = await runtime.start_turn(session, "new-turn", "continue")
+            worker = factory.workers[-1]
+            worker.rpc.turn["items"] = [
+                {"type": "agentMessage", "id": "answer", "text": "latest answer"}
+            ]
+            worker.rpc.complete()
+            completed = dict(worker.rpc.turn)
+            _ = [event async for event in runtime.observe(session, "new-turn")]
+            original = FakeRpc.call
+
+            async def restored_history(rpc, method, params, **kwargs):
+                result = await original(rpc, method, params, **kwargs)
+                if method == "thread/read":
+                    result["thread"]["turns"] = [completed]
+                return result
+
+            monkeypatch.setattr(FakeRpc, "call", restored_history)
+            latest = (
+                await runtime.reconcile(session, None)
+                if reconcile
+                else await runtime.inspect_turn(session, None)
+            )
+            assert latest.state == "completed"
+            assert latest.external_turn_id == external
+            assert latest.items[0]["text"] == "latest answer"
+            assert not registry.list_workers()
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_unknown_historical_snapshot_does_not_hide_later_confirmed_history(tmp_path, monkeypatch):
+    async def run():
+        runtime, registry, _factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            historical = {"id": "historical", "status": "inProgress", "items": []}
+            original = FakeRpc.call
+
+            async def restored_history(rpc, method, params, **kwargs):
+                result = await original(rpc, method, params, **kwargs)
+                if method == "thread/read":
+                    result["thread"]["turns"] = [historical]
+                return result
+
+            monkeypatch.setattr(FakeRpc, "call", restored_history)
+            assert (await runtime.inspect_turn(session, "historical")).state == "unknown"
+            historical["status"] = "completed"
+            confirmed = await runtime.inspect_turn(session, "historical")
+            assert confirmed.state == "completed"
+            assert confirmed.external_turn_id == "historical"
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
 def test_shutdown_cancels_waiting_admission_even_when_worker_removal_fails(tmp_path):
     async def run():
         runtime, registry, factory, first = await setup(tmp_path, max_workers=1)

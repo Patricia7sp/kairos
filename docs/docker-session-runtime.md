@@ -160,6 +160,15 @@ selecionar esse grupo mesmo quando o gerenciador systemd foi iniciado antes da
 inclusão; isso não concede associação nova nem modifica o socket. Depois,
 `setpriv --no-new-privs` inicia o broker com elevação adicional bloqueada. O check
 de acesso ao socket impede uma partida aparentemente saudável sem acesso Docker.
+Como algumas implementações de `sg` mantêm um processo pai, o launcher informa
+ao systemd o PID que executará o broker antes do `exec`. A unidade `Type=notify`
+com `NotifyAccess=all` aceita essa identificação do filho; assim o SIGINT chega
+ao broker, preservando `KillMode=mixed`. A notificação confirma a entrega do
+processo ao supervisor; a prontidão funcional continua sendo `runtime status`.
+O `ExecStop` envia SIGINT ao PID informado e aguarda sua saída por até 85 segundos,
+antes do limite global de 90 segundos. Essa espera explícita também cobre PIDs
+adotados que não são filhos diretos do systemd; não encerra antecipadamente os
+clientes Docker ou o processo de autenticação enquanto o broker faz cleanup.
 
 ```sh
 mkdir -p ~/.config/systemd/user

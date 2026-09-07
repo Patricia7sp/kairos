@@ -86,3 +86,15 @@ complementar, junto da correção de seleção do grupo Docker do serviço.
 O cancelamento interrompe o Codex antes de revogar o relay e remove o worker se
 a interrupção falhar. O cache tem limite de 32 observações e é limpo no encerramento;
 consultas de turnos removidos do cache recorrem ao histórico durável, sem redispatch.
+
+O [PR #14](https://github.com/Patricia7sp/kairos/pull/14) reúne essas correções.
+Observações sem ID ou não terminais não entram no cache: uma consulta a histórico
+ausente não pode ocultar o último turno em `inspect(None)` ou `reconcile`.
+
+A compatibilidade de parada foi verificada com um processo pai sintético que
+não repassa SIGINT, reproduzindo a variante shadow-utils de `sg`. O launcher
+notifica o PID do broker e o `ExecStop` aguarda sua saída explicitamente.
+O teste confirmou entrega de SIGINT e preservação de uma limpeza com atraso,
+terminando em 1,069 s. A unidade real `Type=notify` também reiniciou e ficou
+`ready`, sem reinícios automáticos. A escolha do PID segue o contrato de
+[systemd-notify](https://github.com/systemd/systemd/blob/main/man/systemd-notify.xml).
