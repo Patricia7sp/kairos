@@ -131,7 +131,7 @@ class DockerWorker:
         if version.decode().strip() != EXPECTED_CODEX_VERSION:
             raise ValueError("versão Codex incompatível")
 
-    async def _start_server(self, args: list[str]):
+    async def _start_server(self, args: list[str], *, experimental_api=False):
         self._process = await self._spawn(
             "exec",
             "-i",
@@ -155,6 +155,7 @@ class DockerWorker:
             "initialize",
             {
                 "clientInfo": {"name": "kairos-sandbox-prototype", "version": "0.1.0"},
+                **({"capabilities": {"experimentalApi": True}} if experimental_api else {}),
             },
         )
         if initialized.get("codexHome") != ENVIRONMENT["CODEX_HOME"]:

@@ -54,7 +54,11 @@ def _local_tool(tool: object) -> bool:
     return (
         isinstance(tool, dict)
         and isinstance(tool.get("type"), str)
-        and tool["type"] in LOCAL_TOOL_TYPES
+        and (
+            tool["type"] in LOCAL_TOOL_TYPES
+            # Pinned Codex's tool discovery handler executes inside the worker.
+            or (tool["type"] == "tool_search" and tool.get("execution") == "client")
+        )
     )
 
 
@@ -79,7 +83,9 @@ def _local_input(items: object) -> bool:
         extra = item.get("additional_tools", [])
         if not isinstance(extra, list) or not all(_local_tool(tool) for tool in extra):
             return False
-        if item.get("type") == "additional_tools":
+        if item.get("type") == "tool_search_output" and item.get("execution") != "client":
+            return False
+        if item.get("type") in ("additional_tools", "tool_search_output"):
             tools = item.get("tools")
             if not isinstance(tools, list) or not all(_local_tool(tool) for tool in tools):
                 return False

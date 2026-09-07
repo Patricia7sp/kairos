@@ -89,13 +89,14 @@ caminhos que escapem da raiz. Para obter uma cópia revisável sem extrair no ho
 from pathlib import Path
 from kairos_runtime.docker_backend.registry import SessionRegistry
 
-registry = SessionRegistry(Path('/caminho/privado/kairos-lab/docker-sessions'))
+registry = SessionRegistry(Path("/caminho/privado/kairos-lab/docker-sessions"))
 try:
-    workspace, _home = registry.archives('ID_DA_SESSAO')
+    workspace, _home = registry.archives("ID_DA_SESSAO")
     # Use um destino novo. O arquivo pode conter dados privados do projeto.
     import os
-    fd = os.open('/tmp/kairos-workspace.tar', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'wb') as output:
+
+    fd = os.open("/tmp/kairos-workspace.tar", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as output:
         output.write(workspace)
 finally:
     registry.close()

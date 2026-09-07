@@ -31,6 +31,18 @@ def _unavailable() -> RuntimeErrorInfo:
 
 
 class _SandboxAdapter(CodexAppServerAdapter):
+    async def create_thread(self, session: RuntimeSession) -> str:
+        result = await self._supervisor.rpc.call(
+            "thread/start", {**self._thread_policy_params(session), "historyMode": "legacy"}
+        )
+        self._validate_effective_policy(result, session)
+        thread = result.get("thread")
+        if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
+            raise self._invalid_event()
+        if thread.get("historyMode") != "legacy":
+            raise RuntimeErrorInfo("incompatible", "histórico de thread incompatível", False)
+        return thread["id"]
+
     @staticmethod
     def _thread_policy_params(session: RuntimeSession) -> dict[str, Any]:
         return {
@@ -162,7 +174,7 @@ class DockerSessionRuntime:
 
                 self._remover = remove_recorded_worker
             for record in self.registry.list_workers():
-                await self._remover(record.worker_name)
+                await self._remover(record.worker_name, confirmed=record.worker_confirmed)
                 self.registry.worker_removed(record.session_id)
         except BaseException:
             self._blocked = True
@@ -210,6 +222,7 @@ class DockerSessionRuntime:
             entry.registered = True
             self._entries[session.session_id] = entry
             await worker.__aenter__()
+            self.registry.worker_created(session.session_id)
             if not self.ready:
                 raise _unavailable()
             entry.generation = worker.generation
@@ -290,6 +303,12 @@ class DockerSessionRuntime:
             entry = await self._open(session, restore=False)
             try:
                 thread_id = await entry.adapter.create_thread(entry.session)
+                # Pinned Codex lazily persists an empty thread. A native metadata
+                # update explicitly materializes its rollout without a model turn.
+                await entry.worker.rpc.call(
+                    "thread/name/set",
+                    {"threadId": thread_id, "name": "Kairos " + session.session_id},
+                )
                 self.registry.bind_thread(session.session_id, thread_id)
                 entry.session = replace(entry.session, external_thread_id=thread_id)
                 await self._checkpoint(entry)

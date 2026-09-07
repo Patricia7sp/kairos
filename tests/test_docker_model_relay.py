@@ -391,7 +391,7 @@ def test_hosted_tools_cannot_enable_network_services():
 
 
 @pytest.mark.parametrize("extra", [[{"type": "web_search"}], [{"type": "mcp"}], "invalid"])
-@pytest.mark.parametrize("shape", ["field", "item"])
+@pytest.mark.parametrize("shape", ["field", "item", "search_output"])
 def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra, shape):
     async def run():
         seen = []
@@ -408,6 +408,8 @@ def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra, shape):
                 if shape == "field"
                 else {"type": "additional_tools", "role": "developer", "tools": extra}
             )
+            if shape == "search_output":
+                item = {"type": "tool_search_output", "execution": "client", "tools": extra}
             feed(reader, request(input=[item]))
             await eventually(lambda: bool(writer.frames))
             assert writer.frames[0]["type"] == "error"
@@ -417,3 +419,20 @@ def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra, shape):
             await relay.aclose()
 
     asyncio.run(run())
+
+
+def test_only_client_executed_tool_search_is_allowed():
+    from kairos_runtime.docker_backend.model_relay import _local_tool
+
+    assert _local_tool({"type": "tool_search", "execution": "client"})
+    assert not _local_tool({"type": "tool_search", "execution": "server"})
+    assert not _local_tool({"type": "tool_search"})
+
+
+def test_tool_search_output_requires_local_execution_and_safe_definitions():
+    from kairos_runtime.docker_backend.model_relay import _local_input
+
+    safe = {"type": "tool_search_output", "execution": "client", "tools": [{"type": "function"}]}
+    assert _local_input([safe])
+    assert not _local_input([{**safe, "execution": "server"}])
+    assert not _local_input([{k: v for k, v in safe.items() if k != "execution"}])

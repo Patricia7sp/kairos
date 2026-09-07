@@ -116,6 +116,15 @@ class SessionWorker(DockerWorker):
             "features.responses_websockets=false",
             "features.responses_websockets_v2=false",
             "features.remote_compaction=false",
+            "features.remote_compaction_v2=false",
+            "features.apps=false",
+            "features.plugins=false",
+            "features.remote_plugin=false",
+            "features.skill_search=false",
+            "features.browser_use=false",
+            "features.computer_use=false",
+            "features.multi_agent=false",
+            "features.tool_suggest=false",
         ]
         return [part for setting in config for part in ("-c", setting)]
 
@@ -153,7 +162,7 @@ class SessionWorker(DockerWorker):
             self._bridge.stdout, self._bridge.stdin, self._transport, self._model
         )
         await self._relay.start()
-        await self._start_server(self._server_args())
+        await self._start_server(self._server_args(), experimental_api=True)
 
     async def _stop_server(self):
         if self._rpc is None or self._process is None:

@@ -90,7 +90,8 @@ def test_start_restores_home_before_credential_free_server(worker, monkeypatch):
             events.append(("bridge", args))
             return Bridge()
 
-        async def server(args):
+        async def server(args, *, experimental_api):
+            assert experimental_api is True
             events.append(("server", args))
 
         monkeypatch.setattr(worker, "_prepare", prepare)

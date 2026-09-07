@@ -46,6 +46,7 @@ class FakeRpc:
             return {
                 "thread": {
                     "id": thread_id,
+                    "historyMode": "legacy",
                     "turns": [self.turn] if self.turn else [],
                     "status": {"type": "active"},
                 },
@@ -63,6 +64,9 @@ class FakeRpc:
             return {}
         if method == "thread/unsubscribe":
             return {"status": "unsubscribed"}
+        if method == "thread/name/set":
+            self.worker.log.append("persist")
+            return {}
         raise AssertionError(method)
 
     async def reply(self, request_id, result):
@@ -132,6 +136,10 @@ class FakeWorker:
         return self
 
     async def checkpoint(self):
+        assert any(
+            row.worker_name == self.name and row.worker_confirmed
+            for row in self.factory.registry.list_workers()
+        )
         self.log.append("checkpoint")
         if self.factory.gate:
             await self.factory.gate.wait()
@@ -152,7 +160,7 @@ async def setup(tmp_path, *, max_workers=2):
     registry = SessionRegistry(tmp_path / "registry")
     factory = Factory(registry)
 
-    async def remover(name):
+    async def remover(name, *, confirmed=False):
         pass
 
     runtime = DockerSessionRuntime(
@@ -176,6 +184,7 @@ def test_create_checkpoints_initial_thread_and_dispatch_restores_under_exact_pol
             thread = await runtime.create_thread(session)
             session = replace(session, external_thread_id=thread)
             assert factory.workers[0].closed
+            assert factory.workers[0].log == ["enter", "persist", "checkpoint", "close"]
             assert not registry.list_workers()
             assert registry.archives(session.session_id) is not None
             await runtime.start_turn(session, "local-turn", "hello")
@@ -285,7 +294,8 @@ def test_restart_reaps_recorded_workers_before_admission_without_replaying_turn(
         registry.record_worker(session.session_id, "abandoned-worker")
         removed = []
 
-        async def remove(name):
+        async def remove(name, *, confirmed):
+            assert confirmed is False
             removed.append(name)
 
         replacement = DockerSessionRuntime(
@@ -436,7 +446,7 @@ def test_failed_recovery_retains_record_and_disables_admission(tmp_path):
         registry.create(session)
         registry.record_worker(session.session_id, "abandoned")
 
-        async def failing_remove(name):
+        async def failing_remove(name, *, confirmed):
             raise RuntimeError("Docker unavailable")
 
         replacement = DockerSessionRuntime(
