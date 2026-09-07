@@ -58,8 +58,10 @@ bind mounts ou volume de produção, sem credenciais e sem capabilities extras.
 6. O journal confirmou `operation="mount"`, `info="failed flags match"`,
    destino `/` e flags `rw, silent, rslave`: faltava `silent` na regra inicial.
    A regra foi corrigida para corresponder aos flags exatos, sem ampliar
-   destinos. O parser (`-Q -T`) aceita a correção. A recarga ainda depende do
-   operador: `sudo -n apparmor_parser -r -W ...` exige autenticação interativa.
+   destinos. Após a recarga pelo operador, esse mount passou. O próximo
+   bloqueio foi `mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL)`,
+   com EPERM. A imagem de strace havia sido removida e foi reconstruída a
+   partir de `kairos:local`, sem alterar a imagem ou o container de produção.
 
 ## Próximo teste, com intervenção administrativa
 
@@ -116,3 +118,71 @@ sudo apparmor_parser -R docker/sandbox/diagnostic/apparmor-probe
 - Credencial dedicada e aceite real de turnos, aprovação e recuperação.
 
 Nenhuma configuração de produção foi alterada nesta investigação.
+
+## Candidato da sequência de montagem — ainda não validado
+
+Para reduzir recargas administrativas, `apparmor-candidate` e
+`seccomp-candidate.json` cobrem a sequência de montagem derivada do código
+oficial de [bubblewrap.c](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/vendor/bubblewrap/bubblewrap.c)
+e [bind-mount.c](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/vendor/bubblewrap/bind-mount.c).
+Esses arquivos são candidatos de diagnóstico, não substitutos aprovados dos
+perfis de produção. A revisão estática não prova compatibilidade no kernel.
+
+O seccomp original continua intacto, com 12 exceções adicionais:
+
+- Clone exato do primeiro namespace, como no probe mínimo.
+- Mounts com flags exatos para propagação slave, tmpfs, proc, devpts, bind
+  inicial (incluindo o marcador legado MS_MGC_VAL), rbind e propagação private.
+- Remount com máscara que exige BIND, REMOUNT, SILENT e NOSUID; somente
+  RDONLY, NODEV, NOEXEC, NOATIME, NODIRATIME e RELATIME podem variar.
+- `pivot_root`, com caminhos limitados no AppArmor.
+- `umount2` somente com MNT_DETACH.
+- `unshare` somente de CLONE_NEWUSER: o Codex usa `--dev`, cujo devpts requer
+  UID0 no primeiro user namespace; bwrap cria o segundo para restaurar UID10000.
+  Não se permite unshare de mount, rede, PID ou combinações adicionais.
+
+No AppArmor, as permissões de montagem ficam nos caminhos temporários de
+construção `/tmp`, `/oldroot` e `/newroot`; tmpfs, proc e devpts têm tipos e
+flags restritos. Os dois pivot_root seguem os pares de caminhos da fonte.
+As combinações de remount estão enumeradas e sempre exigem nosuid.
+
+**Limitação identificada na revisão:** as permissões valem para todos os
+processos do perfil, não somente para bwrap. Binds podem criar aliases; as
+negações herdadas para `/proc` e `/sys` não cobrem automaticamente caminhos
+alternativos sob `/oldroot` ou `/newroot`. Portanto este candidato não
+sustenta equivalência ao confinamento docker-default e não deve ser ligado
+ao serviço Kairos. O desenho final precisa de revisão de isolamento além de
+um probe funcional; VM dedicada permanece uma alternativa se a política do
+container não puder ser restringida adequadamente.
+
+Validação antes da carga: AppArmor aceita pelo parser; seccomp aceito pelo
+Docker. Sete testes negativos retornaram EPERM: unshare de mount, unshare
+combinando user+mount, setns, mount sem flags permitidos, remount sem nosuid,
+umount forçado e bpf. O teste usa AppArmor mínimo já carregado e o seccomp
+candidato; não prova que a sequência completa funciona.
+
+Revisar e carregar o novo perfil, separado do anterior:
+
+```bash
+sudo apparmor_parser -r -W /tmp/kairos-runtime-candidate.apparmor
+```
+
+Cópia versionada: `docker/sandbox/diagnostic/apparmor-candidate`.
+SHA-256 do AppArmor candidato:
+`9a659ba16709de46c988d916d55cf03c299b0963f03a4da7612a08214d51e4c6`.
+SHA-256 do seccomp candidato:
+`c4e2537ba74df4a282b7e2b0c1ea38de36b8f3ed39514412ba6b4fb13df9f6df`.
+
+Depois da confirmação administrativa, repetir o probe usando
+`--security-opt apparmor=kairos-runtime-candidate` e
+`--security-opt seccomp=./docker/sandbox/diagnostic/seccomp-candidate.json`.
+Para os negativos, dentro de um container descartável UID10000 com os mesmos
+perfis, executar `check-negative-syscalls.py` pela entrada padrão do Python.
+O script recusa execução fora de amd64, UID10000, seccomp ativo e perfil
+de diagnóstico em enforce, ou com capabilities efetivas.
+
+Ao terminar, encerrar os containers de teste e remover apenas este perfil:
+
+```bash
+sudo apparmor_parser -R /tmp/kairos-runtime-candidate.apparmor
+```
