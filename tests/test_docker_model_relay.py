@@ -388,3 +388,26 @@ def test_hosted_tools_cannot_enable_network_services():
             await relay.aclose()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("extra", [[{"type": "web_search"}], [{"type": "mcp"}], "invalid"])
+def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra):
+    async def run():
+        seen = []
+
+        async def transport(body):
+            seen.append(body)
+            yield b"data: done\n\n"
+
+        relay, reader, writer = await setup_relay(transport)
+        try:
+            relay.allow_turn("turn")
+            feed(reader, request(input=[{"role": "developer", "additional_tools": extra}]))
+            await eventually(lambda: bool(writer.frames))
+            assert writer.frames[0]["type"] == "error"
+            assert writer.frames[0]["status"] == 400
+            assert not seen
+        finally:
+            await relay.aclose()
+
+    asyncio.run(run())

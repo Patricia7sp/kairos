@@ -69,6 +69,19 @@ def _local_tool_choice(choice: object) -> bool:
     return False
 
 
+def _local_input(items: object) -> bool:
+    if not isinstance(items, list):
+        return False
+    for item in items:
+        if not isinstance(item, dict):
+            return False
+        # Responses Lite carries executable tool definitions on developer items.
+        extra = item.get("additional_tools", [])
+        if not isinstance(extra, list) or not all(_local_tool(tool) for tool in extra):
+            return False
+    return True
+
+
 class ModelRelay:
     """One bridge, at most one admitted request, with admission revoked per turn."""
 
@@ -202,6 +215,8 @@ class ModelRelay:
         if not isinstance(local_tools, list) or not all(_local_tool(tool) for tool in local_tools):
             return 400
         if not _local_tool_choice(body.get("tool_choice", "auto")):
+            return 400
+        if not _local_input(body.get("input", [])):
             return 400
         try:
             encoded = json.dumps(body, separators=(",", ":"), allow_nan=False).encode()

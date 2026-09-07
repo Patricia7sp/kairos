@@ -149,7 +149,7 @@ class ChatGPTModelTransport:
                     raise _unavailable()
                 if not response.headers.get("content-type", "").startswith("text/event-stream"):
                     raise _unavailable()
-                async for chunk in response.aiter_bytes(chunk_size=65536):
+                async for chunk in response.aiter_bytes():
                     yield chunk
         except Exception:  # noqa: BLE001 - upstream error bodies may contain sensitive data
             raise _unavailable() from None

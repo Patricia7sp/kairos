@@ -154,3 +154,37 @@ def test_fedramp_account_is_refused_until_supported(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(RuntimeErrorInfo):
         read_chatgpt_headers(tmp_path)
+
+
+def test_transport_forwards_small_sse_without_waiting_for_upstream_completion():
+    async def scenario():
+        class Auth:
+            async def headers(self):
+                return {"Authorization": "Bearer synthetic"}
+
+        release = asyncio.Event()
+
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"data: first\n\n"
+                await release.wait()
+                yield b"data: last\n\n"
+
+        async def upstream(_request):
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, stream=Stream()
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+            transport = ChatGPTModelTransport(Auth(), model="gpt-5.5", client=client)
+            stream = transport({"model": "gpt-5.5"})
+            try:
+                async with asyncio.timeout(0.5):
+                    assert await anext(stream) == b"data: first\n\n"
+                release.set()
+                assert [chunk async for chunk in stream] == [b"data: last\n\n"]
+            finally:
+                release.set()
+                await stream.aclose()
+
+    asyncio.run(scenario())
