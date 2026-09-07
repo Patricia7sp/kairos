@@ -81,6 +81,11 @@ workspace e estado da thread, grava ambos atomicamente e remove o worker antes
 de publicar a conclusão. Nenhuma alteração é aplicada automaticamente ao projeto
 original. O modo `read_only` também usa workspace somente leitura no container.
 
+A thread é materializada e salva já na criação da sessão, antes do primeiro
+turno. Isso permite retomar em outro worker sem manter um container ocioso.
+O relay aceita ferramentas locais; descoberta de ferramentas exige execução
+`client`. Ferramentas hospedadas e namespaces de ferramentas são recusados.
+
 Os checkpoints ficam em `docker-sessions/manifest.sqlite` e
 `docker-sessions/blobs/<sha256>`. São arquivos tar validados, sem links ou
 caminhos que escapem da raiz. Para obter uma cópia revisável sem extrair no host:
@@ -132,3 +137,7 @@ KAIROS_EXTERNAL_SANDBOX_TEST=1 uv run pytest -q tests/test_docker_session_worker
 Os testes reais de container usam um transporte de modelo simulado. Login real,
 acesso ao modelo da conta, CI remota e ativação em produção exigem evidências
 separadas; não são comprovados por esse smoke offline.
+
+O [aceite local de 2026-09-07](superpowers/specs/2026-09-07-docker-sessions-acceptance.md)
+registra separadamente o login ChatGPT concluído e um turno real via RuntimeClient
+com resposta `KAIROS_OK`. CI remota, merge e deploy desta branch continuam pendentes.

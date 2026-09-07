@@ -28,10 +28,10 @@ Files: `kairos_runtime/docker_backend/model_relay.py`,
 Interface: `ModelRelay(reader, writer, transport, model)` with start/close and
 turn-scoped admission; transport takes validated request and yields byte chunks.
 
-- [ ] Write rejection/streaming/cancellation tests before implementation.
-- [ ] Run focused tests and observe RED, then implement bounded stdio HTTP bridge.
-- [ ] Validate fixed endpoint/header isolation and zero admission outside a turn.
-- [ ] Independent review of relay and regression results.
+- [x] Rejection, streaming and cancellation tests implemented and passing.
+- [x] Bounded stdio HTTP bridge implemented and validated with focused tests.
+- [x] Fixed endpoint/header isolation and zero admission outside a turn validated.
+- [x] Independent review of relay and regression results completed; findings addressed.
 
 ## Task 2: Session registry and checkpoint archives
 
@@ -41,25 +41,28 @@ Interfaces: `SessionRegistry(root)` owns manifest/opaque blobs; validates identi
 stores worker name before launch, commits workspace/home/thread atomically and
 lists workers for recovery; `validate_archive(bytes)` rejects unsafe/oversized tar.
 
-- [ ] Write tests for traversal/links/corruption, identity rebinding, atomic checkpoints.
-- [ ] Observe RED, implement registry and archive boundary, run focused suite.
-- [ ] Review security properties and provide concrete signatures to integration task.
+- [x] Tests cover traversal/links/corruption, identity rebinding and atomic checkpoints.
+- [x] Registry and archive boundary implemented; focused suite passing.
+- [x] Security properties reviewed and concrete interfaces integrated.
 
 ## Task 3: Docker session backend and ChatGPT host integration
 
-Files: `kairos_runtime/docker_backend/{runtime,adapter,auth}.py`,
+Files: `kairos_runtime/docker_backend/{runtime,worker,auth}.py`,
 `kairos_runtime/host.py`, experimental worker transport helpers, Dockerfile,
 tests for real offline threaded Codex + RuntimeClient.
 
-- [ ] Add worker server lifecycle/export/import and bounded relay process helpers.
-- [ ] Implement per-session adapter preserving events and strict policy validation.
-- [ ] Implement broker-owned ChatGPT auth headers using dedicated Codex refresh.
-- [ ] Wire opt-in backend into host; preserve local behavior and account surfaces.
-- [ ] Validate real threaded tool execution, checkpoint/restore, cancellation and routing.
-- [ ] Run full relevant regressions; address independent review findings.
+- [x] Worker lifecycle/export/import and bounded relay process helpers implemented.
+- [x] Per-session adapter preserves events and validates policy strictly.
+- [x] Broker-owned ChatGPT headers and dedicated Codex refresh implemented.
+- [x] Opt-in backend wired into host; local behavior and account surfaces preserved.
+- [x] Real Docker tool execution and checkpoint/restore validated; cancellation and routing covered by regression tests.
+- [x] Relevant regressions passed; independent review findings addressed.
 
 ## Task 4: Operational acceptance
 
-- [ ] Document opt-in broker configuration, exports, restart limits and dedicated login.
-- [ ] Record actual tests and limitations; commit clean branch.
-- [ ] Present concrete next user action only if interactive ChatGPT login remains necessary.
+- [x] Opt-in configuration, exports, restart limits and dedicated login documented.
+- [x] Tests and limitations recorded in the local acceptance document.
+- [x] Interactive ChatGPT login completed; real RuntimeClient turn returned `KAIROS_OK`.
+
+Acceptance: [local evidence and integration limits](../specs/2026-09-07-docker-sessions-acceptance.md).
+Remote CI, merge and production deployment remain outside this local acceptance.
