@@ -59,6 +59,10 @@ class _Config:
     executable: str
     allowed_directories: tuple[str, ...]
     broad_enabled: bool
+    backend: str = "local"
+    docker_image: str = "kairos:external-sandbox"
+    model: str = "gpt-5.5"
+    max_workers: int = 2
 
 
 class _Host:
@@ -196,6 +200,8 @@ class _Host:
             if method == "account.status":
                 return await auth.status(**_exact(params, set()))
             if method == "account.login":
+                if self.config is not None and getattr(self.config, "backend", "local") == "docker":
+                    await service.ensure_account_idle()
                 return await auth.login(**_exact(params, {"mode"}, {"api_key"}))
             if method == "account.cancel":
                 await auth.cancel(**_exact(params, {"login_id"}))
@@ -252,6 +258,9 @@ class _Host:
     def _runtime_ready(self) -> bool:
         if not self.accepting or self.service is None:
             return False
+        runtime = getattr(self.service, "runtime", None)
+        if runtime is not None and not getattr(runtime, "ready", True):
+            return False
         if self.supervisor is None:
             return True
         process = self.supervisor.process
@@ -289,6 +298,7 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
     config = None
     startup_error = None
     startup_phase = "configuration"
+    docker_resources = []
     try:
         try:
             config = _load_config(canonical_home)
@@ -297,21 +307,57 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
                 codex_home = _secure_directory(canonical_home / "codex-runtime")
                 inherited_fd = os.dup(lock_fd)
                 try:
+                    options = {}
+                    if config.backend == "docker":
+                        options = {
+                            "server_args": (
+                                "-c",
+                                'cli_auth_credentials_store="file"',
+                                "app-server",
+                                "--listen",
+                                "stdio://",
+                            ),
+                            "subprocess_exec": _auth_subprocess,
+                        }
                     supervisor = CodexSupervisor(
                         codex_home=str(codex_home),
                         executable=config.executable,
                         lock_fds=(inherited_fd,),
+                        **options,
                     )
                 except BaseException:
                     os.close(inherited_fd)
                     raise
-                if (canonical_home / CONTAINER_MODE_FILENAME).is_file():
+                if (
+                    config.backend == "local"
+                    and (canonical_home / CONTAINER_MODE_FILENAME).is_file()
+                ):
                     startup_phase = "sandbox"
                     await supervisor.probe_sandbox()
                     startup_phase = "runtime"
                 await supervisor.start()
-                runtime = CodexAppServerAdapter(supervisor)
-                auth = RuntimeAuth(supervisor.rpc)
+                if config.backend == "docker":
+                    from .docker_backend.auth import ChatGPTAuth, ChatGPTModelTransport
+                    from .docker_backend.registry import SessionRegistry
+                    from .docker_backend.runtime import DockerSessionRuntime
+
+                    auth = ChatGPTAuth(supervisor.rpc, codex_home)
+                    registry = SessionRegistry(canonical_home / "docker-sessions")
+                    docker_resources.append(registry)
+                    transport = ChatGPTModelTransport(auth, model=config.model)
+                    docker_resources.insert(0, transport)
+                    runtime = DockerSessionRuntime(
+                        registry,
+                        image=config.docker_image,
+                        transport=transport,
+                        model=config.model,
+                        max_workers=config.max_workers,
+                    )
+                    docker_resources.insert(0, runtime)
+                    await runtime.recover()
+                else:
+                    runtime = CodexAppServerAdapter(supervisor)
+                    auth = RuntimeAuth(supervisor.rpc)
                 service = AgentRuntimeService(
                     RuntimeStore(canonical_home / "state.db"),
                     runtime,
@@ -334,15 +380,9 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
             else:
                 diagnosis = "runtime indisponível durante inicialização"
             logging.getLogger(__name__).error("Agent Runtime: %s", diagnosis)
-            if auth is not None:
-                await auth.aclose()
-                auth = None
-            if service is not None:
-                await service.aclose()
-                service = None
-            elif supervisor is not None:
-                await supervisor.aclose()
-                supervisor = None
+            await _close_host_resources(auth, service, supervisor, docker_resources)
+            auth = service = supervisor = None
+            docker_resources.clear()
         host = _Host(
             config=config,
             service=service,
@@ -351,8 +391,9 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
             startup_error=startup_error,
         )
         if service is not None and supervisor is not None:
+            monitor_function = _monitor_docker if config.backend == "docker" else _monitor_runtime
             monitor = asyncio.create_task(
-                _monitor_runtime(host, supervisor, service), name="runtime-host-monitor"
+                monitor_function(host, supervisor, service), name="runtime-host-monitor"
             )
         server = await asyncio.start_unix_server(
             host.handle, path=str(socket_path), limit=MAX_MESSAGE_BYTES + 2
@@ -372,20 +413,63 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
             await asyncio.gather(monitor, return_exceptions=True)
         close_error = None
         try:
-            if auth is not None:
-                await auth.aclose()
-            if service is not None:
-                await service.aclose()
-            elif supervisor is not None:
-                await supervisor.aclose()
+            await _close_host_resources(auth, service, supervisor, docker_resources)
         except BaseException as exc:  # noqa: BLE001 - ownership incerta deve ficar retida
             close_error = exc
         if close_error is None:
             _unlink_owned_socket(socket_path)
             os.close(lock_fd)
         if close_error is not None:
-            _RETAINED_CLEANUPS.append((lock_fd, service, supervisor))
+            _RETAINED_CLEANUPS.append((lock_fd, service, (supervisor, docker_resources)))
             raise close_error
+
+
+async def _close_host_resources(auth, service, supervisor, docker_resources):
+    errors = []
+    asynchronous = [service, auth]
+    if service is None or docker_resources:
+        asynchronous.append(supervisor)
+    asynchronous.extend(resource for resource in docker_resources if hasattr(resource, "aclose"))
+    for resource in asynchronous:
+        if resource is not None:
+            try:
+                await resource.aclose()
+            except BaseException as exc:  # noqa: BLE001 - attempt every owned process
+                errors.append(exc)
+    if errors:
+        # Keep the registry descriptors available for retry of uncertain removal.
+        raise errors[0]
+    for resource in docker_resources:
+        if not hasattr(resource, "aclose"):
+            resource.close()
+
+
+async def _auth_subprocess(*args, env, **kwargs):
+    """Auth-only Codex runs outside project configuration and personal profiles."""
+    home = env["CODEX_HOME"]
+    return await asyncio.create_subprocess_exec(
+        *args,
+        **kwargs,
+        cwd=home,
+        env={
+            "PATH": os.environ.get("PATH", os.defpath),
+            "LANG": "C.UTF-8",
+            "HOME": home,
+            "CODEX_HOME": home,
+        },
+    )
+
+
+async def _monitor_docker(host, supervisor, service):
+    """An auth broker crash closes admission; restart performs durable worker recovery."""
+    process = supervisor.process
+    if process is not None:
+        await process.wait()
+    if host.running:
+        host.accepting = False
+        async with host.mutations:
+            await service.pause_runtime(service.runtime.generation)
+            await service.runtime.aclose()
 
 
 def _canonical_home(home: Path) -> Path:
@@ -495,6 +579,10 @@ def _load_config(home: Path) -> _Config:
     broad = section.get("broad_access_enabled", False)
     binary = section.get("codex_binary", "codex")
     roots = section.get("allowed_directories", [])
+    backend = section.get("backend", "local")
+    image = section.get("docker_image", "kairos:external-sandbox")
+    model = section.get("model", "gpt-5.5")
+    max_workers = section.get("max_workers", 2)
     if (
         type(enabled) is not bool
         or type(broad) is not bool
@@ -502,9 +590,26 @@ def _load_config(home: Path) -> _Config:
         or not binary.strip()
         or not isinstance(roots, list)
         or any(not isinstance(root, str) or not root.strip() for root in roots)
+        or backend not in ("local", "docker")
+        or not isinstance(image, str)
+        or not image
+        or image.startswith("-")
+        or not isinstance(model, str)
+        or not model.strip()
+        or type(max_workers) is not int
+        or not 1 <= max_workers <= 64
+        or (backend == "docker" and broad)
     ):
         raise RuntimeErrorInfo("invalid_policy", "configuração de runtime inválida", False)
-    return _Config(enabled, binary, tuple(roots), broad)
+    if backend == "docker":
+        broker = home.resolve()
+        for root in roots:
+            project = Path(root).expanduser().resolve()
+            if project.is_relative_to(broker) or broker.is_relative_to(project):
+                raise RuntimeErrorInfo(
+                    "invalid_policy", "projeto sobrepõe diretório privado do broker", False
+                )
+    return _Config(enabled, binary, tuple(roots), broad, backend, image, model, max_workers)
 
 
 def _attests_inactive(lock_fd: int, runtime: CodexAppServerAdapter, generation: str) -> bool:
@@ -514,6 +619,9 @@ def _attests_inactive(lock_fd: int, runtime: CodexAppServerAdapter, generation: 
         current_generation = runtime.generation
     except (OSError, RuntimeErrorInfo):
         return False
+    checker = getattr(runtime, "attests_inactive", None)
+    if checker is not None:
+        return checker(generation)
     return generation != current_generation
 
 

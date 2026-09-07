@@ -1,0 +1,30 @@
+{
+  "experimental": true,
+  "image_id": "sha256:bad209be2735d28a6ea4bed73cf028478fdd568b1a0693e15cd26154fe5481df",
+  "worker": "kairos-worker-0ab7ed0d526441f58febd1fd15054939",
+  "workspace_writable": false,
+  "kernel": {
+    "uid": 10000,
+    "status": {
+      "CapEff": "0000000000000000",
+      "CapPrm": "0000000000000000",
+      "CapBnd": "0000000000000000",
+      "NoNewPrivs": "1",
+      "Seccomp": "2"
+    },
+    "apparmor": "docker-default (enforce)",
+    "memory": "536870912",
+    "swap": "0",
+    "pids": "128",
+    "cpu": "100000 100000",
+    "interfaces": [
+      "lo"
+    ]
+  },
+  "command": {
+    "exitCode": 0,
+    "stdout": "42\n",
+    "stderr": ""
+  },
+  "container_removed": true
+}

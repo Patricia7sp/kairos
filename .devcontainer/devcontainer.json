@@ -1,0 +1,19 @@
+{
+  "name": "Kairos — desenvolvimento isolado",
+  "build": {"dockerfile": "Dockerfile", "context": ".."},
+  "workspaceMount": "source=kairos-dev-${devcontainerId},target=/workspace,type=volume",
+  "workspaceFolder": "/workspace/kairos",
+  "containerUser": "worker",
+  "remoteUser": "worker",
+  "updateRemoteUserUID": false,
+  "init": true,
+  "runArgs": ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=512", "--memory=2g", "--memory-swap=2g", "--cpus=2"],
+  "containerEnv": {"KAIROS_HOME": "/home/worker/kairos-dev"},
+  "remoteEnv": {"SSH_AUTH_SOCK": "", "GIT_ASKPASS": "/bin/false"},
+  "customizations": {
+    "vscode": {
+      "settings": {"python.defaultInterpreterPath": "/workspace/kairos/.venv/bin/python"}
+    }
+  },
+  "shutdownAction": "stopContainer"
+}
