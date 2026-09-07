@@ -143,6 +143,8 @@ registra separadamente o login ChatGPT concluído e um turno real via RuntimeCli
 com resposta `KAIROS_OK`. A integração remota está no
 [PR #13](https://github.com/Patricia7sp/kairos/pull/13); esse aceite local é um
 registro anterior ao merge. Deploy e habilitação em produção são etapas separadas.
+O [aceite do piloto](superpowers/specs/2026-09-07-docker-pilot-acceptance.md)
+registra a integração, supervisão, backup e retomada pela API Web com modelo real.
 
 ## Broker supervisionado no piloto
 
@@ -152,6 +154,12 @@ se sua instalação for diferente. Instale as dependências com `uv sync --froze
 no checkout validado e fixe `docker_image` no ID da imagem aceita. Pare qualquer
 broker iniciado manualmente antes de habilitar a unidade; mantenha o perfil de
 autenticação dedicado existente.
+
+O usuário precisa ser membro do grupo `docker`. A unidade usa `sg docker` para
+selecionar esse grupo mesmo quando o gerenciador systemd foi iniciado antes da
+inclusão; isso não concede associação nova nem modifica o socket. Depois,
+`setpriv --no-new-privs` inicia o broker com elevação adicional bloqueada. O check
+de acesso ao socket impede uma partida aparentemente saudável sem acesso Docker.
 
 ```sh
 mkdir -p ~/.config/systemd/user
