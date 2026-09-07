@@ -90,6 +90,10 @@ class DockerWorker:
     async def _start(self):
         # Freeze before any container exists. No source path is ever mounted.
         archive = snapshot_project(self.project)
+        await self._prepare(archive)
+        await self._start_server([])
+
+    async def _prepare(self, archive: bytes):
         _, raw, _ = await self._run("image", "inspect", self.image)
         image = json.loads(raw)[0]
         config = image.get("Config", {})
@@ -126,12 +130,15 @@ class DockerWorker:
         _, version, _ = await self._run("exec", self.name, "codex", "--version")
         if version.decode().strip() != EXPECTED_CODEX_VERSION:
             raise ValueError("versão Codex incompatível")
+
+    async def _start_server(self, args: list[str]):
         self._process = await self._spawn(
             "exec",
             "-i",
             self.name,
             "codex",
             "app-server",
+            *args,
             "--listen",
             "stdio://",
         )

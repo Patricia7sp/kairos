@@ -17,10 +17,13 @@ RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates
     && rm /tmp/codex.tar.gz /tmp/codex.sha256 \
     && groupadd -g 10000 worker \
     && useradd -l -u 10000 -g 10000 -m -d /home/worker worker \
-    && mkdir /workspace && chown worker:worker /workspace
+    && mkdir /workspace && chown worker:worker /workspace \
+    && mkdir -p -m 0755 /usr/local/lib/kairos-worker
 
 ENV HOME=/home/worker CODEX_HOME=/home/worker/.codex \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY --chmod=0444 docker/external-sandbox/model_bridge.py /usr/local/lib/kairos-worker/model_bridge.py
+COPY --chmod=0444 kairos_runtime/experimental/snapshot.py /usr/local/lib/kairos-worker/snapshot.py
 USER 10000:10000
 WORKDIR /workspace
 CMD ["/bin/sleep", "infinity"]

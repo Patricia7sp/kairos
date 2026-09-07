@@ -14,12 +14,18 @@ EXCLUDED = frozenset(
 
 
 def snapshot_project(
-    project: Path, *, max_bytes: int = 64 * 1024**2, max_entries: int = 10000
+    project: Path,
+    *,
+    max_bytes: int = 64 * 1024**2,
+    max_entries: int = 10000,
+    include_all: bool = False,
 ) -> bytes:
     """Freeze regular files through directory-relative, no-follow descriptors.
 
     The caller authorizes the project contents. Exclusions are conveniences,
     not general secret detection. Ownership/permissions in the tar are normalized.
+    include_all is reserved for isolated worker checkpoints, preserving generated
+    hidden state instead of applying the initial host-project exclusions.
     """
     if max_bytes <= 0 or max_entries <= 0:
         raise ValueError("limites de snapshot inválidos")
@@ -34,7 +40,9 @@ def snapshot_project(
         output = io.BytesIO()
         budget = [max_bytes, max_entries]
         with tarfile.open(fileobj=output, mode="w") as archive:
-            _add_directory(archive, root_fd, "", budget, os.fstat(root_fd).st_dev)
+            _add_directory(
+                archive, root_fd, "", budget, os.fstat(root_fd).st_dev, include_all=include_all
+            )
         return output.getvalue()
     except OSError as exc:
         raise ValueError("projeto contém caminho inválido ou inacessível") from exc
@@ -42,9 +50,9 @@ def snapshot_project(
         os.close(root_fd)
 
 
-def _add_directory(archive, directory_fd, prefix, budget, device):
+def _add_directory(archive, directory_fd, prefix, budget, device, *, include_all):
     for name in sorted(os.listdir(directory_fd)):
-        if name in EXCLUDED or name.startswith(".env"):
+        if not include_all and (name in EXCLUDED or name.startswith(".env")):
             continue
         budget[1] -= 1
         if budget[1] < 0:
@@ -68,7 +76,7 @@ def _add_directory(archive, directory_fd, prefix, budget, device):
                 member.type = tarfile.DIRTYPE
                 member.mode = 0o755
                 archive.addfile(member)
-                _add_directory(archive, fd, path + "/", budget, device)
+                _add_directory(archive, fd, path + "/", budget, device, include_all=include_all)
             else:
                 if opened.st_nlink != 1 or opened.st_size > budget[0]:
                     raise ValueError("hardlink ou limite de snapshot excedido")
