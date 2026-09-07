@@ -257,11 +257,21 @@ class SessionWorker(DockerWorker):
             raise errors[0]
 
 
-async def remove_recorded_worker(name: str) -> None:
-    """Recover only exact broker-generated names with verified Docker ownership."""
-    if not isinstance(name, str) or not re.fullmatch(r"kairos-worker-[0-9a-f]{32}", name):
+async def remove_recorded_worker(name: str, *, confirmed: bool = False) -> None:
+    """Recover exact broker-generated names, retaining uncertain daemon creation.
+
+    Absence alone cannot settle a create request still pending when the broker
+    crashed. Only a durable startup confirmation or observing/removing the named
+    container establishes that a late create cannot leave an orphan worker.
+    """
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"kairos-worker-[0-9a-f]{32}", name)
+        or type(confirmed) is not bool
+    ):
         raise ValueError("invalid recorded worker name")
     worker = DockerWorker(Path("/"), image="recovery-unused")
     worker.name = name
     worker._owned = True
+    worker._creation_uncertain = not confirmed
     await worker.aclose()

@@ -116,6 +116,11 @@ def test_registry_survives_restart_with_worker_and_atomic_pair(tmp_path, session
         os.stat(session.cwd).st_ino,
     )
     registry.record_worker(session.session_id, "kairos-worker-1")
+    assert registry.get(session.session_id).worker_confirmed is False
+    registry.close()
+    registry = SessionRegistry(root)
+    assert registry.list_workers()[0].worker_confirmed is False
+    registry.worker_created(session.session_id)
     workspace, home = archive(("edited", tarfile.REGTYPE, b"new")), archive()
     registry.checkpoint(session.session_id, workspace, home, thread_id="thread-1")
     registry.close()
@@ -123,11 +128,57 @@ def test_registry_survives_restart_with_worker_and_atomic_pair(tmp_path, session
     assert reopened.archives(session.session_id) == (workspace, home)
     assert reopened.get(session.session_id).external_thread_id == "thread-1"
     assert reopened.list_workers()[0].worker_name == "kairos-worker-1"
+    assert reopened.list_workers()[0].worker_confirmed is True
     reopened.worker_removed(session.session_id)
     assert reopened.list_workers() == []
+    assert reopened.get(session.session_id).worker_confirmed is False
     assert (root.stat().st_mode & 0o777) == 0o700
     assert (root / "manifest.sqlite").stat().st_mode & 0o777 == 0o600
     assert not (tmp_path / "edited").exists()
+    reopened.close()
+
+
+def test_recording_worker_resets_confirmation_and_requires_a_name(registry, session):
+    registry.create(session)
+    with pytest.raises(ValueError):
+        registry.worker_created(session.session_id)
+    registry.record_worker(session.session_id, "worker-1")
+    assert registry.worker_created(session.session_id).worker_confirmed is True
+    assert registry.record_worker(session.session_id, "worker-1").worker_confirmed is False
+
+
+def test_old_registry_migrates_workers_as_unconfirmed(tmp_path, session):
+    root = tmp_path / "state"
+    root.mkdir(mode=0o700)
+    manifest = root / "manifest.sqlite"
+    metadata = os.stat(session.cwd)
+    with sqlite3.connect(manifest) as db:
+        db.execute("""CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY, runtime_kind TEXT NOT NULL,
+            cwd TEXT NOT NULL, sandbox TEXT NOT NULL,
+            directory_device INTEGER NOT NULL, directory_inode INTEGER NOT NULL,
+            external_thread_id TEXT, worker_name TEXT UNIQUE,
+            workspace_digest TEXT, home_digest TEXT
+        )""")
+        db.execute(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
+            (
+                session.session_id,
+                session.runtime_kind,
+                session.cwd,
+                session.sandbox,
+                metadata.st_dev,
+                metadata.st_ino,
+                "worker-before-upgrade",
+            ),
+        )
+    manifest.chmod(0o600)
+    registry = SessionRegistry(root)
+    assert registry.list_workers()[0].worker_confirmed is False
+    registry.worker_created(session.session_id)
+    registry.close()
+    reopened = SessionRegistry(root)
+    assert reopened.list_workers()[0].worker_confirmed is True
     reopened.close()
 
 

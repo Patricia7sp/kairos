@@ -76,6 +76,7 @@ class SessionRecord:
     worker_name: str | None
     workspace_digest: str | None
     home_digest: str | None
+    worker_confirmed: bool = False
 
 
 class SessionRegistry:
@@ -118,8 +119,16 @@ class SessionRegistry:
                     worker_name TEXT UNIQUE,
                     workspace_digest TEXT,
                     home_digest TEXT,
+                    worker_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(worker_confirmed IN (0, 1)),
                     CHECK((workspace_digest IS NULL) = (home_digest IS NULL))
                 )""")
+                columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)")}
+                if "worker_confirmed" not in columns:
+                    # An older record proves only that creation was requested.
+                    # Never infer successful daemon creation during migration.
+                    db.execute(
+                        "ALTER TABLE sessions ADD COLUMN worker_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(worker_confirmed IN (0, 1))"
+                    )
         except (OSError, ValueError):
             self.close()
             raise ValueError("unsafe or corrupt session registry") from None
@@ -156,7 +165,12 @@ class SessionRegistry:
 
     @staticmethod
     def _record(row) -> SessionRecord:
-        record = SessionRecord(**dict(row))
+        fields = dict(row)
+        confirmed = fields["worker_confirmed"]
+        if type(confirmed) is not int or confirmed not in {0, 1}:
+            raise ValueError("corrupt worker creation state")
+        fields["worker_confirmed"] = bool(confirmed)
+        record = SessionRecord(**fields)
         _identifier(record.session_id)
         if (
             not isinstance(record.cwd, str)
@@ -178,6 +192,8 @@ class SessionRegistry:
             raise ValueError("corrupt sandbox identity")
         if record.worker_name is not None:
             _identifier(record.worker_name)
+        elif record.worker_confirmed:
+            raise ValueError("confirmed worker has no identity")
         if (record.workspace_digest is None) != (record.home_digest is None):
             raise ValueError("partial checkpoint")
         for digest in (record.workspace_digest, record.home_digest):
@@ -235,7 +251,7 @@ class SessionRegistry:
                 return existing
             with self._connection() as db:
                 db.execute(
-                    "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)",
+                    "INSERT INTO sessions (session_id, runtime_kind, cwd, sandbox, directory_device, directory_inode, external_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         session.session_id,
                         session.runtime_kind,
@@ -277,7 +293,19 @@ class SessionRegistry:
                 raise ValueError("registered worker must be removed first")
             with self._connection() as db:
                 db.execute(
-                    "UPDATE sessions SET worker_name = ? WHERE session_id = ?", (name, session_id)
+                    "UPDATE sessions SET worker_name = ?, worker_confirmed = 0 WHERE session_id = ?",
+                    (name, session_id),
+                )
+            return self._require(session_id)
+
+    def worker_created(self, session_id: str) -> SessionRecord:
+        """Durably acknowledge a completed, attested worker startup."""
+        with self._lock:
+            if self._require(session_id).worker_name is None:
+                raise ValueError("worker must be recorded before creation is confirmed")
+            with self._connection() as db:
+                db.execute(
+                    "UPDATE sessions SET worker_confirmed = 1 WHERE session_id = ?", (session_id,)
                 )
             return self._require(session_id)
 
@@ -286,7 +314,8 @@ class SessionRegistry:
             self._require(session_id)
             with self._connection() as db:
                 db.execute(
-                    "UPDATE sessions SET worker_name = NULL WHERE session_id = ?", (session_id,)
+                    "UPDATE sessions SET worker_name = NULL, worker_confirmed = 0 WHERE session_id = ?",
+                    (session_id,),
                 )
 
     def list_workers(self) -> list[SessionRecord]:

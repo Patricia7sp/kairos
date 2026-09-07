@@ -267,6 +267,41 @@ def test_recovery_removes_exact_recorded_name_without_starting(monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("confirmed,present", [(False, False), (True, False), (False, True)])
+def test_recovery_preserves_uncertain_creation_until_container_is_observed(
+    monkeypatch, confirmed, present
+):
+    from kairos_runtime.docker_backend.worker import remove_recorded_worker
+
+    async def scenario():
+        operations = []
+
+        async def daemon(_worker, *args, **_kwargs):
+            operations.append(args[0])
+            if args[0] == "inspect":
+                if not present:
+                    return 1, b"", b""
+                return 0, b'[{"Config":{"Labels":{"io.kairos.external-sandbox":"prototype"}}}]', b""
+            return 0, b"", b""
+
+        monkeypatch.setattr(
+            "kairos_runtime.experimental.docker_worker.shutil.which", lambda _: "/usr/bin/docker"
+        )
+        monkeypatch.setattr("kairos_runtime.experimental.docker_worker.DockerWorker._run", daemon)
+        name = "kairos-worker-" + "b" * 32
+        if not confirmed and not present:
+            with pytest.raises(RuntimeError, match="ownership retido"):
+                await remove_recorded_worker(name, confirmed=confirmed)
+            assert operations == ["inspect"]
+        else:
+            await remove_recorded_worker(name, confirmed=confirmed)
+            assert operations == (
+                ["inspect", "rm", "container"] if present else ["inspect", "container"]
+            )
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(os.environ.get("KAIROS_EXTERNAL_SANDBOX_TEST") != "1", reason="opt-in Docker")
 def test_real_session_checkpoint_and_restore_without_credentials(tmp_path):
