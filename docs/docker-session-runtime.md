@@ -140,4 +140,63 @@ separadas; não são comprovados por esse smoke offline.
 
 O [aceite local de 2026-09-07](superpowers/specs/2026-09-07-docker-sessions-acceptance.md)
 registra separadamente o login ChatGPT concluído e um turno real via RuntimeClient
-com resposta `KAIROS_OK`. CI remota, merge e deploy desta branch continuam pendentes.
+com resposta `KAIROS_OK`. A integração remota está no
+[PR #13](https://github.com/Patricia7sp/kairos/pull/13); esse aceite local é um
+registro anterior ao merge. Deploy e habilitação em produção são etapas separadas.
+
+## Broker supervisionado no piloto
+
+Os arquivos em `docker/broker/` são unidades systemd do usuário para o checkout
+`~/projetos/kairos` e o perfil `~/.local/share/kairos-docker-lab`. Ajuste os caminhos
+se sua instalação for diferente. Instale as dependências com `uv sync --frozen`
+no checkout validado e fixe `docker_image` no ID da imagem aceita. Pare qualquer
+broker iniciado manualmente antes de habilitar a unidade; mantenha o perfil de
+autenticação dedicado existente.
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docker/broker/kairos-docker-lab* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now kairos-docker-lab.service kairos-docker-lab-disk.timer
+KAIROS_HOME=~/.local/share/kairos-docker-lab .venv/bin/kairos runtime status --json
+journalctl --user -u kairos-docker-lab.service -n 50
+```
+
+A unidade envia SIGINT ao broker para permitir cleanup antes de encerrar os
+processos restantes. Reinícios por falha são limitados a três em cinco minutos.
+`active` no systemd não substitui o status `ready` do runtime: falha de autenticação
+ou recuperação pode manter o processo vivo e a admissão fechada.
+
+O serviço inicia junto do gerenciador systemd do usuário. Sobrevivência ao logout
+e inicialização antes do login dependem de `Linger=yes` no host; consulte
+`loginctl show-user "$USER" -p Linger`. Não é necessário mudar isso para testar
+na sessão atual. Não instale estas unidades dentro dos workers sem rede.
+
+O check de disco recusa a inicialização com 2 GiB usados pelo perfil ou menos
+de 1 GiB livre no filesystem. O timer repete o check a cada cinco minutos e
+registra falhas no journal. Os limites podem ser ajustados por
+`KAIROS_MAX_HOME_KIB` e `KAIROS_MIN_FREE_KIB` nas unidades. Trata-se de monitoramento
+e bloqueio de partida, não de quota rígida: ele não interrompe um broker ativo
+nem remove checkpoints. O backup deve ficar fora do perfil monitorado.
+
+## Backup e restauração do estado
+
+Faça a manutenção sem turnos ativos e com todas as superfícies que escrevem no
+perfil paradas. Pare o broker com `systemctl --user stop kairos-docker-lab.service`
+e confirme a ausência dos workers registrados. Mantenha-o parado durante a cópia
+para preservar a relação entre `state.db`, manifest e blobs. Copie os arquivos
+SQLite auxiliares `-wal`/`-shm` caso existam. Não copie apenas o manifest.
+
+Guarde `config.yaml`, `state.db` e seus auxiliares, e o diretório completo
+`docker-sessions` em um destino novo com permissões privadas. O perfil
+`codex-runtime` contém credenciais e não faz parte desse backup de checkpoints;
+restaurar em outra instalação exige um novo login dedicado. Blobs podem conter
+conteúdo privado dos projetos. Proteja o backup como o diretório original.
+
+Para testar a cópia, abra os dois bancos SQLite em modo somente leitura e
+execute `PRAGMA integrity_check`; valide os archives referenciados usando
+`SessionRegistry.archives` em uma cópia temporária. Teste a restauração com a
+mesma versão do código e da imagem, em um novo perfil autorizado, preservando
+os caminhos e identidades dos projetos. Não sobrescreva o perfil ativo para
+testar e não faça downgrade de schema. Reinicie o broker original e confirme
+`ready` depois da manutenção.

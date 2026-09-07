@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Kairos pilot storage thresholds
+
+[Service]
+Type=oneshot
+Environment=KAIROS_HOME=%h/.local/share/kairos-docker-lab
+ExecStart=%h/projetos/kairos/scripts/check-runtime-disk.sh
+UMask=0077
+NoNewPrivileges=true
