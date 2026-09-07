@@ -1,14 +1,18 @@
 """Session ownership, policy, recovery and checkpoint publication boundary."""
 
 import asyncio
+import gc
 import io
+import json
 import tarfile
+import weakref
 from dataclasses import replace
 
 import pytest
 
 from kairos_runtime.codex_rpc import CodexSubscription
 from kairos_runtime.contracts import RuntimeSession
+from kairos_runtime.docker_backend.model_relay import ModelRelay
 from kairos_runtime.docker_backend.registry import SessionRegistry
 from kairos_runtime.docker_backend.runtime import DockerSessionRuntime
 from kairos_runtime.errors import RuntimeErrorInfo
@@ -397,6 +401,97 @@ def test_cancel_revokes_model_and_preserves_terminal_checkpoint(tmp_path):
     asyncio.run(run())
 
 
+def test_cancel_interrupts_codex_before_relay_failure_can_finish_the_turn(tmp_path, monkeypatch):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        relay = None
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            external = await runtime.start_turn(session, "turn", "hello")
+            worker = factory.workers[-1]
+            original_call = worker.rpc.call
+
+            async def call(method, params, **kwargs):
+                # Codex cannot interrupt a turn already finished by a model error.
+                if method == "turn/interrupt" and worker.rpc.turn["status"] != "inProgress":
+                    return {}
+                return await original_call(method, params, **kwargs)
+
+            monkeypatch.setattr(worker.rpc, "call", call)
+            started = asyncio.Event()
+
+            class Writer:
+                def write(self, data):
+                    frame = json.loads(data)
+                    if frame["type"] == "error" and worker.rpc.turn["status"] == "inProgress":
+                        worker.rpc.complete("failed")
+
+                async def drain(self):
+                    await asyncio.sleep(0)
+
+                def close(self):
+                    pass
+
+                async def wait_closed(self):
+                    pass
+
+            async def transport(body):
+                yield b"data: first\n\n"
+                started.set()
+                await asyncio.Event().wait()
+
+            reader = asyncio.StreamReader()
+            reader.feed_data(b'{"type":"ready","protocol":1}\n')
+            relay = worker.relay = ModelRelay(reader, Writer(), transport, "test-model")
+            await relay.start()
+            relay.allow_turn("turn")
+            reader.feed_data(
+                b'{"type":"request","id":1,"body":{"model":"test-model","stream":true}}\n'
+            )
+            async with asyncio.timeout(2):
+                await started.wait()
+                await runtime.cancel_turn(session, external)
+                events = [event async for event in runtime.observe(session, "turn")]
+            assert events[-1]["payload"]["state"] in {"interrupted", "cancelled"}
+            assert (await runtime.inspect_turn(session, external)).state == "cancelled"
+            assert not registry.list_workers()
+        finally:
+            await runtime.aclose()
+            if relay is not None:
+                await relay.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+def test_interrupt_failure_removes_worker_and_revokes_model(tmp_path, monkeypatch, failure):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            external = await runtime.start_turn(session, "turn", "hello")
+            worker = factory.workers[-1]
+            original_call = worker.rpc.call
+
+            async def call(method, params, **kwargs):
+                if method == "turn/interrupt":
+                    raise failure("interrupt unavailable")
+                return await original_call(method, params, **kwargs)
+
+            monkeypatch.setattr(worker.rpc, "call", call)
+            with pytest.raises(failure):
+                await runtime.cancel_turn(session, external)
+            assert not registry.list_workers()
+            assert worker.closed
+            assert worker.relay.turn is None
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
 def test_approvals_route_only_to_originating_worker_and_never_escalate(tmp_path):
     async def run():
         runtime, registry, factory, first = await setup(tmp_path)
@@ -486,6 +581,155 @@ def test_terminal_inspection_keeps_items_instead_of_empty_cached_snapshot(tmp_pa
             _ = [event async for event in runtime.observe(session, "turn")]
             observation = await runtime.inspect_turn(session, external)
             assert observation.items[0]["text"] == "retained"
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("history_retained", [False, True])
+def test_snapshot_cache_releases_old_outputs_and_restores_the_exact_evicted_turn(
+    tmp_path, monkeypatch, history_retained
+):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        observations = []
+        turns = []
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            for index in range(40):
+                external = await runtime.start_turn(session, f"local-{index}", "hello")
+                worker = factory.workers[-1]
+                worker.rpc.turn["items"] = [
+                    {"type": "agentMessage", "id": "answer", "text": f"answer-{index}"}
+                ]
+                turns.append(dict(worker.rpc.turn, status="completed"))
+                worker.rpc.complete()
+                _ = [event async for event in runtime.observe(session, f"local-{index}")]
+                observations.append(weakref.ref(await runtime.inspect_turn(session, external)))
+            gc.collect()
+            assert observations[0]() is None, "completed outputs must not accumulate forever"
+            assert observations[-1]() is not None
+
+            original = FakeRpc.call
+
+            async def historical(rpc, method, params, **kwargs):
+                result = await original(rpc, method, params, **kwargs)
+                if method == "thread/read":
+                    # A restored Codex history contains both old and recent turns.
+                    result["thread"]["turns"] = turns if history_retained else turns[-1:]
+                return result
+
+            monkeypatch.setattr(FakeRpc, "call", historical)
+            recovered = await runtime.inspect_turn(session, turns[0]["id"])
+            if history_retained:
+                assert recovered.external_turn_id == turns[0]["id"]
+                assert recovered.items[0]["text"] == "answer-0"
+            else:
+                assert recovered.state == "unknown"
+                assert recovered.external_turn_id is None
+                assert recovered.items == ()
+            restored = factory.workers[-1]
+            assert restored.settings["home_archive"] is not None
+            assert all(method != "turn/start" for method, _params in restored.rpc.calls)
+            assert restored.closed
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("close_runtime", [False, True])
+def test_finished_lifecycle_releases_cached_outputs(tmp_path, close_runtime):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            external = await runtime.start_turn(session, "turn", "hello")
+            factory.workers[-1].rpc.complete()
+            _ = [event async for event in runtime.observe(session, "turn")]
+            snapshot = weakref.ref(await runtime.inspect_turn(session, external))
+            assert snapshot() is not None
+            if close_runtime:
+                await runtime.aclose()
+            else:
+                await runtime.end_thread(session)
+            gc.collect()
+            assert snapshot() is None
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_missing_historical_snapshot_cannot_shadow_a_later_completed_turn(
+    tmp_path, monkeypatch, reconcile
+):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            missing = await runtime.inspect_turn(session, "absent-historical-turn")
+            assert missing.state == "unknown"
+            assert missing.external_turn_id is None
+
+            external = await runtime.start_turn(session, "new-turn", "continue")
+            worker = factory.workers[-1]
+            worker.rpc.turn["items"] = [
+                {"type": "agentMessage", "id": "answer", "text": "latest answer"}
+            ]
+            worker.rpc.complete()
+            completed = dict(worker.rpc.turn)
+            _ = [event async for event in runtime.observe(session, "new-turn")]
+            original = FakeRpc.call
+
+            async def restored_history(rpc, method, params, **kwargs):
+                result = await original(rpc, method, params, **kwargs)
+                if method == "thread/read":
+                    result["thread"]["turns"] = [completed]
+                return result
+
+            monkeypatch.setattr(FakeRpc, "call", restored_history)
+            latest = (
+                await runtime.reconcile(session, None)
+                if reconcile
+                else await runtime.inspect_turn(session, None)
+            )
+            assert latest.state == "completed"
+            assert latest.external_turn_id == external
+            assert latest.items[0]["text"] == "latest answer"
+            assert not registry.list_workers()
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_unknown_historical_snapshot_does_not_hide_later_confirmed_history(tmp_path, monkeypatch):
+    async def run():
+        runtime, registry, _factory, session = await setup(tmp_path)
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            historical = {"id": "historical", "status": "inProgress", "items": []}
+            original = FakeRpc.call
+
+            async def restored_history(rpc, method, params, **kwargs):
+                result = await original(rpc, method, params, **kwargs)
+                if method == "thread/read":
+                    result["thread"]["turns"] = [historical]
+                return result
+
+            monkeypatch.setattr(FakeRpc, "call", restored_history)
+            assert (await runtime.inspect_turn(session, "historical")).state == "unknown"
+            historical["status"] = "completed"
+            confirmed = await runtime.inspect_turn(session, "historical")
+            assert confirmed.state == "completed"
+            assert confirmed.external_turn_id == "historical"
         finally:
             await runtime.aclose()
             registry.close()
@@ -635,15 +879,73 @@ def test_terminal_snapshot_disagreement_cannot_publish_completed(tmp_path):
     asyncio.run(run())
 
 
-def test_inspection_cannot_switch_turn_while_another_turn_is_running(tmp_path):
+def test_missing_historical_turn_does_not_return_or_close_the_running_turn(tmp_path):
     async def run():
         runtime, registry, factory, session = await setup(tmp_path)
         try:
             session = replace(session, external_thread_id=await runtime.create_thread(session))
             await runtime.start_turn(session, "turn", "hello")
-            with pytest.raises(RuntimeErrorInfo, match="invalid_event"):
-                await runtime.inspect_turn(session, "another-external-turn")
+            observation = await runtime.inspect_turn(session, "another-external-turn")
+            assert observation.state == "unknown"
+            assert observation.external_turn_id is None
+            assert observation.items == ()
             assert not factory.workers[-1].closed
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("history_retained", [False, True])
+def test_evicted_historical_inspection_preserves_newer_active_worker(
+    tmp_path, monkeypatch, history_retained
+):
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        turns = []
+        try:
+            session = replace(session, external_thread_id=await runtime.create_thread(session))
+            for index in range(33):
+                await runtime.start_turn(session, f"old-{index}", "hello")
+                worker = factory.workers[-1]
+                worker.rpc.turn["items"] = [
+                    {"type": "agentMessage", "id": "answer", "text": f"answer-{index}"}
+                ]
+                worker.rpc.complete()
+                turns.append(dict(worker.rpc.turn))
+                _ = [event async for event in runtime.observe(session, f"old-{index}")]
+            current = await runtime.start_turn(session, "current", "continue")
+            worker = factory.workers[-1]
+            original_call = worker.rpc.call
+
+            async def historical(method, params, **kwargs):
+                result = await original_call(method, params, **kwargs)
+                if method == "thread/read" and history_retained:
+                    result["thread"]["turns"] = [*turns, worker.rpc.turn]
+                return result
+
+            monkeypatch.setattr(worker.rpc, "call", historical)
+            observation = await runtime.inspect_turn(session, turns[0]["id"])
+            if history_retained:
+                assert observation.state == "completed"
+                assert observation.external_turn_id == turns[0]["id"]
+                assert observation.items[0]["text"] == "answer-0"
+            else:
+                assert observation.state == "unknown"
+                assert observation.external_turn_id is None
+                assert observation.items == ()
+            assert not worker.closed
+            assert worker.relay.turn == "current"
+            assert "checkpoint" not in worker.log
+            assert registry.list_workers()[0].worker_name == worker.name
+            assert len(factory.workers) == 35  # Initial thread, 33 old turns, current turn.
+            assert (await runtime.inspect_turn(session, current)).state == "active"
+            worker.rpc.complete()
+            events = [event async for event in runtime.observe(session, "current")]
+            assert events[-1]["external_turn_id"] == current
+            assert events[-1]["payload"]["state"] == "completed"
+            assert not registry.list_workers()
         finally:
             await runtime.aclose()
             registry.close()

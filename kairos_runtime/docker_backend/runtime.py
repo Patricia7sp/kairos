@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
@@ -24,6 +25,7 @@ from ..policy import RUNTIME_V1_FEATURES
 from .registry import SessionRegistry
 
 TERMINAL_STATES = frozenset({"completed", "failed", "interrupted", "cancelled"})
+MAX_CACHED_SNAPSHOTS = 32
 
 
 def _unavailable() -> RuntimeErrorInfo:
@@ -130,7 +132,7 @@ class DockerSessionRuntime:
         self._locks: dict[str, asyncio.Lock] = {}
         self._opening: set[asyncio.Task] = set()
         self._approvals: dict[str, _Entry] = {}
-        self._snapshots: dict[tuple[str, str | None], RuntimeObservation] = {}
+        self._snapshots: OrderedDict[tuple[str, str | None], RuntimeObservation] = OrderedDict()
         self._close_lock = asyncio.Lock()
 
     @property
@@ -284,10 +286,19 @@ class DockerSessionRuntime:
                 )
                 await self._discard(entry)
                 entry.finalized = True
-                if observation is not None:
-                    self._snapshots[(entry.session.session_id, observation.external_turn_id)] = (
-                        observation
-                    )
+                # Cache only stable, identified turns. A missing historical turn
+                # must never occupy the None key used to inspect the latest turn.
+                if (
+                    observation is not None
+                    and observation.external_turn_id is not None
+                    and observation.state in TERMINAL_STATES
+                ):
+                    key = (entry.session.session_id, observation.external_turn_id)
+                    self._snapshots[key] = observation
+                    self._snapshots.move_to_end(key)
+                    # Durable Codex history serves evicted turns on inspection.
+                    while len(self._snapshots) > MAX_CACHED_SNAPSHOTS:
+                        self._snapshots.popitem(last=False)
             except BaseException:
                 await self._discard(entry)
                 raise
@@ -429,8 +440,17 @@ class DockerSessionRuntime:
 
     async def cancel_turn(self, session: RuntimeSession, external_turn_id: str) -> None:
         entry = self._active(session, external_turn_id=external_turn_id)
-        await entry.worker.relay.end_turn(entry.turn_id)
-        await entry.adapter.cancel_turn(entry.session, external_turn_id)
+        relay = entry.worker.relay
+        try:
+            # Let Codex interrupt its model stream before relay cancellation can
+            # turn the request into a synthetic upstream failure.
+            await entry.adapter.cancel_turn(entry.session, external_turn_id)
+            await relay.end_turn(entry.turn_id)
+        except BaseException:
+            # An unacknowledged interrupt cannot leave execution or model access
+            # alive; persistent cleanup retains ownership if removal is uncertain.
+            await self._discard(entry)
+            raise
 
     async def respond_approval(self, request_id: str, decision: Decision) -> None:
         entry = self._approvals.pop(request_id, None)
@@ -445,20 +465,24 @@ class DockerSessionRuntime:
             self._admit(session)
             cached = self._snapshots.get((session.session_id, external_turn_id))
             if cached is not None:
+                self._snapshots.move_to_end((session.session_id, external_turn_id))
                 return cached
             entry = self._entries.get(session.session_id)
             temporary = entry is None
             if temporary:
                 entry = await self._open(session, restore=True)
-            elif external_turn_id is not None and entry.external_turn_id != external_turn_id:
-                raise RuntimeErrorInfo("invalid_event", "correlação de turno inválida", False)
             try:
                 if temporary:
                     await entry.adapter.resume_thread(entry.session)
                 observation = await entry.adapter.inspect_turn(entry.session, external_turn_id)
                 if temporary and observation.state == "active":
                     observation = replace(observation, state="unknown")
-                if temporary or observation.state in TERMINAL_STATES:
+                # An evicted historical turn can be read through the current
+                # worker, but its terminal state cannot finalize a newer turn.
+                if temporary or (
+                    observation.external_turn_id == entry.external_turn_id
+                    and observation.state in TERMINAL_STATES
+                ):
                     await self._checkpoint(entry, observation)
                 return observation
             except BaseException:
@@ -484,6 +508,9 @@ class DockerSessionRuntime:
                 if entry.turn_id is not None:
                     raise RuntimeErrorInfo("session_busy", "sessão Docker ocupada", True)
                 await self._discard(entry)
+            for key in tuple(self._snapshots):
+                if key[0] == session.session_id:
+                    del self._snapshots[key]
 
     async def aclose(self) -> None:
         self._closed = True
@@ -498,5 +525,6 @@ class DockerSessionRuntime:
                     await self._discard(entry)
                 except BaseException as exc:  # noqa: BLE001 — try every worker; retain failed ownership.
                     errors.append(exc)
+            self._snapshots.clear()
             if errors:
                 raise _unavailable() from None

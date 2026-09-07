@@ -4,19 +4,25 @@ StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 WorkingDirectory=%h/projetos/kairos
 Environment=KAIROS_HOME=%h/.local/share/kairos-docker-lab
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStartPre=%h/projetos/kairos/scripts/check-runtime-disk.sh
-ExecStart=%h/projetos/kairos/.venv/bin/kairos runtime serve
+ExecStartPre=/usr/bin/sg docker -c 'exec /usr/bin/setpriv --no-new-privs /usr/bin/test -w /var/run/docker.sock'
+ExecStart=/usr/bin/sg docker -c 'exec /usr/bin/setpriv --no-new-privs "%h/projetos/kairos/scripts/start-runtime-broker.sh"'
+# Wait explicitly: a PID adopted from sg may not be a direct systemd child.
+ExecStop=-/usr/bin/kill -s SIGINT $MAINPID
+ExecStop=/usr/bin/timeout 85 /usr/bin/tail --pid=${MAINPID} -f /dev/null
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
 KillMode=mixed
 TimeoutStopSec=90
 UMask=0077
-NoNewPrivileges=true
+# sg selects an already-authorized group before setpriv locks the broker down.
+# Setting NoNewPrivileges here would prevent sg from selecting that group.
 StandardOutput=journal
 StandardError=journal
 
