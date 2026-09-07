@@ -188,3 +188,34 @@ def test_transport_forwards_small_sse_without_waiting_for_upstream_completion():
                 await stream.aclose()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "payload, valid", [(b'data: {"ok":true}\n\n', True), (b"<html>private</html>", False)]
+)
+def test_missing_content_type_requires_an_sse_prefix(payload, valid):
+    async def scenario():
+        class Auth:
+            async def headers(self):
+                return {}
+
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield payload[:2]
+                yield payload[2:]
+
+        async def upstream(_request):
+            return httpx.Response(200, stream=Stream())
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+            transport = ChatGPTModelTransport(Auth(), model="gpt-5.5", client=client)
+            if valid:
+                assert (
+                    b"".join([chunk async for chunk in transport({"model": "gpt-5.5"})]) == payload
+                )
+            else:
+                with pytest.raises(RuntimeErrorInfo) as caught:
+                    _ = [chunk async for chunk in transport({"model": "gpt-5.5"})]
+                assert "private" not in str(caught.value)
+
+    asyncio.run(scenario())

@@ -29,6 +29,33 @@ def _claims(token):
     return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
 
 
+async def _sse_bytes(response):
+    media_type = response.headers.get("content-type", "")
+    if media_type and not media_type.lower().startswith("text/event-stream"):
+        raise _unavailable()
+    validated = bool(media_type)
+    prefix = bytearray()
+    markers = (b"data:", b"event:", b"id:", b"retry:", b":")
+    async for chunk in response.aiter_bytes():
+        if validated:
+            yield chunk
+            continue
+        # Some ChatGPT streaming responses omit Content-Type. Check a bounded
+        # SSE preamble without buffering the complete event or forwarding HTML.
+        prefix.extend(chunk)
+        probe = bytes(prefix).lstrip(b"\xef\xbb\xbf \t\r\n")
+        if len(prefix) - len(probe) > 4096:
+            raise _unavailable()
+        if probe.startswith(markers):
+            validated = True
+            yield bytes(prefix)
+            prefix.clear()
+        elif not any(marker.startswith(probe) for marker in markers):
+            raise _unavailable()
+    if not validated:
+        raise _unavailable()
+
+
 def read_chatgpt_headers(home: Path, *, minimum_validity: int = 0) -> dict[str, str]:
     """Read only broker-owned file credentials, with bounded and private diagnostics.
 
@@ -147,9 +174,7 @@ class ChatGPTModelTransport:
             ) as response:
                 if response.status_code != 200:
                     raise _unavailable()
-                if not response.headers.get("content-type", "").startswith("text/event-stream"):
-                    raise _unavailable()
-                async for chunk in response.aiter_bytes():
+                async for chunk in _sse_bytes(response):
                     yield chunk
         except Exception:  # noqa: BLE001 - upstream error bodies may contain sensitive data
             raise _unavailable() from None
