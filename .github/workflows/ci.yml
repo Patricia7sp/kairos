@@ -116,6 +116,29 @@ jobs:
       - name: Testes de integração
         run: uv run pytest -q tests/test_container.py::RealImageTests
 
+  docker-sessions:
+    name: Sessões Docker isoladas (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - run: uv sync --python "$PYTHON_VERSION" --extra dev
+      - name: Validar e construir worker
+        run: |
+          docker build --check -f docker/external-sandbox/Dockerfile .
+          docker build -f docker/external-sandbox/Dockerfile -t kairos:external-sandbox .
+      # O Codex executa ferramentas reais, mas o modelo é simulado por SSE.
+      # Nenhuma credencial ChatGPT nem chamada paga entra neste job.
+      - name: Isolamento, checkpoint e retomada
+        env:
+          KAIROS_EXTERNAL_SANDBOX_TEST: "1"
+        run: >-
+          timeout -k 10s 240s uv run pytest -q
+          tests/test_external_sandbox_integration.py
+          tests/test_docker_session_worker.py
+          tests/test_docker_sessions_integration.py
+
   frontend:
     name: Frontends (vitest + tsc)
     runs-on: ubuntu-latest
