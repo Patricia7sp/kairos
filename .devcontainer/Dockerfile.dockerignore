@@ -3,6 +3,16 @@
 !pyproject.toml
 !uv.lock
 !README.md
+!Dockerfile
+!compose.yaml
+!.python-version
+!.gitignore
+!.dockerignore
+!.hadolint.yaml
+!.github/
+!.github/**
+!.devcontainer/
+!.devcontainer/**
 !kairos_*/
 !kairos_*/**
 !tests/

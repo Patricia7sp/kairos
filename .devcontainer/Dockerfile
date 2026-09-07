@@ -3,6 +3,8 @@ FROM node:22-bookworm-slim AS node
 FROM kairos:external-sandbox AS development
 
 USER root
+RUN apt-get update && apt-get install --no-install-recommends -y gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \

@@ -80,6 +80,11 @@ compartilhar autenticação Git: desative esse compartilhamento no editor se
 precisar de uma sessão sem credenciais. Os testes de isolamento usam somente
 o launcher dedicado, sem o editor.
 
+Dentro dele, `scripts/test-devcontainer.sh` executa a suíte Python com as
+dependências instaladas, incluindo compilação nativa. As verificações de
+`docker compose config`, `docker build --check` e imagens reais ficam no host;
+o script informa suas exclusões ao pytest, sem simular um daemon Docker.
+
 ## Integração posterior
 
 O host, o adaptador e o Compose de produção não foram alterados. Antes de usar

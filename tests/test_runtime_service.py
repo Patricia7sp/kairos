@@ -415,17 +415,25 @@ async def test_generation_change_after_dispatch_commit_prevents_wrong_process_st
 async def test_heartbeat_ownership_loss_stops_reader_and_keeps_quarantine(tmp_path, monkeypatch):
     service, store, runtime = await setup_service(tmp_path, renew_interval=0.01)
     original = service.leases.renew
+    heartbeat = service._heartbeat
     renewed = []
+
+    async def heartbeat_after_dispatch(*args):
+        # Exercise ownership loss during observation, independently of CPU quota
+        # or SQLite scheduling. Pre-dispatch failures have separate tests.
+        await runtime.started.wait()
+        await heartbeat(*args)
 
     async def lose_renewal(*args):
         renewed.append(args)
-        return await original(*args) if len(renewed) == 1 else False
+        return False if runtime.started.is_set() else await original(*args)
 
     monkeypatch.setattr(service.leases, "renew", lose_renewal)
+    monkeypatch.setattr(service, "_heartbeat", heartbeat_after_dispatch)
     try:
         turn = await service.submit("s1", "hello", "key")
         assert (await terminal(service)).payload["state"] == "interrupted"
-        assert len(renewed) == 2
+        assert len(renewed) >= 2
         assert len(runtime.starts) == 1
         assert (await store.get_turn(turn))["inactive_confirmed_at"] is None
     finally:

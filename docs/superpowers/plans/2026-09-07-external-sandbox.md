@@ -27,22 +27,22 @@ Files: `kairos_runtime/experimental/snapshot.py`, `worker_policy.py`,
 Interfaces: `snapshot_project(Path) -> bytes`; immutable `WorkerPolicy` creates
 Docker argv and validates inspect against exact image, identity and resources.
 
-- [ ] Test project copy and rejection of escaping links before implementation:
+- [x] Test project copy and rejection of escaping links before implementation:
   ```python
-  (project / 'escape').symlink_to(outside)
+  (project / "escape").symlink_to(outside)
   with pytest.raises(ValueError):
       snapshot_project(project)
   ```
-- [ ] Run `uv run pytest -q tests/test_external_sandbox.py` and observe failure.
-- [ ] Implement bounded tar from opened descriptors; fixed normalized metadata.
-- [ ] Add inspect mutation tests, each dangerous field must fail closed:
+- [x] Run `uv run pytest -q tests/test_external_sandbox.py` and observe failure.
+- [x] Implement bounded tar from opened descriptors; fixed normalized metadata.
+- [x] Add inspect mutation tests, each dangerous field must fail closed:
   ```python
-  inspected['HostConfig']['Privileged'] = True
+  inspected["HostConfig"]["Privileged"] = True
   with pytest.raises(ValueError):
       policy.validate(inspected)
   ```
-- [ ] Implement fixed resource/security command and standalone worker image.
-- [ ] Run focused tests and commit tested unit.
+- [x] Implement fixed resource/security command and standalone worker image.
+- [x] Run focused tests and commit tested unit.
 
 ## Task 2: Owned worker lifecycle and real RPC
 
@@ -51,26 +51,26 @@ Files: `kairos_runtime/experimental/docker_worker.py`,
 Interface: async context manager `DockerWorker(project, image, writable=False)`;
 `execute(command) -> dict` is fixed to /workspace and externalSandbox restricted.
 
-- [ ] Test cancellation/failure invokes removal using name allocated before create.
-- [ ] Observe RED, implement lifecycle with bounded Docker calls and persistent cleanup.
-- [ ] Build image: `docker build -f docker/external-sandbox/Dockerfile --target worker -t kairos:external-sandbox .`.
-- [ ] Add and run opt-in integration assertions:
+- [x] Test cancellation/failure invokes removal using name allocated before create.
+- [x] Observe RED, implement lifecycle with bounded Docker calls and persistent cleanup.
+- [x] Build image: `docker build -f docker/external-sandbox/Dockerfile --target worker -t kairos:external-sandbox .`.
+- [x] Add and run opt-in integration assertions:
   ```python
-  result = await worker.execute(['python', '-c', 'print(40 + 2)'])
-  assert result['stdout'].strip() == '42'
+  result = await worker.execute(["python", "-c", "print(40 + 2)"])
+  assert result["stdout"].strip() == "42"
   ```
   Verify write success only in RW, rootfs/host/network denials, second worker
   cannot see first workspace and Docker inspect cannot find worker after close.
-- [ ] Verify cancellation also kills a background process in the worker namespace.
-- [ ] Commit lifecycle and meaningful regression coverage.
+- [x] Verify cancellation also kills a background process in the worker namespace.
+- [x] Commit lifecycle and meaningful regression coverage.
 
 ## Task 3: Development environment and acceptance
 
 Files: `.devcontainer/devcontainer.json`, `.devcontainer/Dockerfile`,
 `docker/external-sandbox/README.md`, acceptance document beside this plan.
 
-- [ ] Create development image with Python/Node tooling and isolated repository volume.
-- [ ] Validate JSON, image build and Python baseline inside container.
-- [ ] Run runtime regression tests, lint/format and real worker isolation suite.
-- [ ] Request independent review; fix material findings and rerun affected tests.
-- [ ] Record actual evidence and explicit pending production integration; commit.
+- [x] Create development image with Python/Node tooling and isolated repository volume.
+- [x] Validate JSON, image build and Python baseline inside container.
+- [x] Run runtime regression tests, lint/format and real worker isolation suite.
+- [x] Request independent review; fix material findings and rerun affected tests.
+- [x] Record actual evidence and explicit pending production integration; commit.
