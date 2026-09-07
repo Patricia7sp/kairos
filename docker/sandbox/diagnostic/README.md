@@ -169,7 +169,7 @@ sudo apparmor_parser -r -W /tmp/kairos-runtime-candidate.apparmor
 
 Cópia versionada: `docker/sandbox/diagnostic/apparmor-candidate`.
 SHA-256 do AppArmor candidato:
-`9a659ba16709de46c988d916d55cf03c299b0963f03a4da7612a08214d51e4c6`.
+`61f5cb192e494e10cdaf50a6fac5d652c4ba7001aa89c75eace00113d9497d8c`.
 SHA-256 do seccomp candidato:
 `c4e2537ba74df4a282b7e2b0c1ea38de36b8f3ed39514412ba6b4fb13df9f6df`.
 
@@ -186,3 +186,38 @@ Ao terminar, encerrar os containers de teste e remover apenas este perfil:
 ```bash
 sudo apparmor_parser -R /tmp/kairos-runtime-candidate.apparmor
 ```
+
+### Primeiro teste do candidato carregado
+
+Após a carga pelo operador, o probe passou pelas quatro primeiras operações:
+propagação slave, tmpfs em `/tmp`, bind inicial e primeiro pivot_root. Falhou
+ao montar a raiz de destino: tmpfs em `/newroot/` e, na tentativa de fallback
+do Codex, bind de `/oldroot/` para `/newroot/`. O journal confirmou as negações
+no perfil candidato; nenhum desses probes chegou a executar `/bin/true`.
+
+O dump `apparmor_parser -Q -T -D rule-exprs` identificou a causa: nesta versão
+do parser, `/newroot/**` expande para um padrão que exige ao menos um caractere
+depois de `/newroot/`. A raiz em si não era coberta; o mesmo ocorria com a
+origem `/oldroot/**`. As regras foram corrigidas para `/newroot/{,**}` e
+`/oldroot/{,**}`, incluindo explicitamente as raízes, sem adicionar caminhos
+fora da área de construção.
+
+O kernel apresenta binds com apenas MS_BIND e MS_REC; isso foi confirmado no
+[aa_bind_mount do Linux 7.0](https://github.com/torvalds/linux/blob/v7.0/security/apparmor/mount.c).
+O compilador do AppArmor já normaliza esses flags ao gerar as expressões.
+As regras de flags não precisaram ser ampliadas para corrigir essa falha.
+
+`check-apparmor-expressions.py` consulta o compilador, sem carregar perfil no
+kernel. O teste reproduziu a falha antes da mudança e passou após a correção:
+138 requisições permitidas (incluindo raiz, descendants e combinações de
+remount) e sete requisições negadas. Ele verifica as expressões antes da
+aplicação da DFA final, não substitui teste de isolamento no kernel e não
+comprova a sequência completa de pivot_root/umount.
+
+```bash
+python3 docker/sandbox/diagnostic/check-apparmor-expressions.py
+```
+
+Ruff lint/format e diff-check passaram. A cópia atualizada em
+`/tmp/kairos-runtime-candidate.apparmor` está pronta para recarga administrativa.
+Não houve alteração de seccomp nesta correção nem modificação da produção.
