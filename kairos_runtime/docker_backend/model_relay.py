@@ -79,6 +79,10 @@ def _local_input(items: object) -> bool:
         extra = item.get("additional_tools", [])
         if not isinstance(extra, list) or not all(_local_tool(tool) for tool in extra):
             return False
+        if item.get("type") == "additional_tools":
+            tools = item.get("tools")
+            if not isinstance(tools, list) or not all(_local_tool(tool) for tool in tools):
+                return False
     return True
 
 

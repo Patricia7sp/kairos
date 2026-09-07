@@ -391,7 +391,8 @@ def test_hosted_tools_cannot_enable_network_services():
 
 
 @pytest.mark.parametrize("extra", [[{"type": "web_search"}], [{"type": "mcp"}], "invalid"])
-def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra):
+@pytest.mark.parametrize("shape", ["field", "item"])
+def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra, shape):
     async def run():
         seen = []
 
@@ -402,7 +403,12 @@ def test_responses_lite_cannot_smuggle_hosted_tools_in_input(extra):
         relay, reader, writer = await setup_relay(transport)
         try:
             relay.allow_turn("turn")
-            feed(reader, request(input=[{"role": "developer", "additional_tools": extra}]))
+            item = (
+                {"role": "developer", "additional_tools": extra}
+                if shape == "field"
+                else {"type": "additional_tools", "role": "developer", "tools": extra}
+            )
+            feed(reader, request(input=[item]))
             await eventually(lambda: bool(writer.frames))
             assert writer.frames[0]["type"] == "error"
             assert writer.frames[0]["status"] == 400
