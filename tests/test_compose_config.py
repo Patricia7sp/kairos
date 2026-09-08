@@ -40,7 +40,8 @@ def test_broker_externo_e_opt_in_e_compartilha_estado_sem_expor_socket_na_web():
     assert mounts["/var/run/docker.sock"]["source"] == "/var/run/docker.sock"
     assert mounts["/opt/data"]["source"] == "kairos-data"
     assert mounts["/projects/current"]["read_only"] is True
-    assert mounts["/projects/current"]["bind"]["create_host_path"] is False
+    # Algumas versões do Compose omitem valores false no YAML normalizado.
+    assert mounts["/projects/current"].get("bind", {}).get("create_host_path", False) is False
 
 
 def test_compose_configura_fallback_criptografado_com_segredo_somente_leitura():
