@@ -41,6 +41,9 @@ services:
       # UID/GID do dono do volume. O stage2 roda como root só para ajustá-los
       # e então cada serviço derruba privilégio no próprio `run`.
       KAIROS_UID: "10000"
+      # Ativar junto com COMPOSE_PROFILES=agent-runtime; evita dois hosts
+      # disputando o mesmo banco/socket. O padrão mantém o runtime interno.
+      KAIROS_RUNTIME_EXTERNAL: "${KAIROS_RUNTIME_EXTERNAL:-0}"
       # KAIROS_WEB_TOKEN foi DELIBERADAMENTE removida daqui.
       #
       # Um token em variável de ambiente aparece em `docker inspect`, no dump
@@ -70,6 +73,59 @@ services:
 
     stop_grace_period: 30s
 
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  runtime-broker:
+    profiles: [agent-runtime]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime-broker
+    image: kairos:runtime-broker
+    platform: linux/amd64
+    container_name: kairos-runtime-broker
+    restart: unless-stopped
+    init: true
+    user: "10000:10000"
+    group_add:
+      - "${KAIROS_DOCKER_GID:-983}"
+    depends_on:
+      kairos:
+        condition: service_healthy
+    environment:
+      KAIROS_HOME: /opt/data
+      HOME: /opt/data
+    volumes:
+      - kairos-data:/opt/data
+      # O broker é confiável e administra workers. A aplicação e os workers
+      # NÃO recebem este socket; :ro não restringiria a API do daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: "${KAIROS_RUNTIME_PROJECT:-/srv/kairos-runtime-project}"
+        target: /projects/current
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    stop_signal: SIGINT
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "/opt/kairos/.venv/bin/python", "/opt/kairos/docker/broker/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     logging:
       driver: json-file
       options:

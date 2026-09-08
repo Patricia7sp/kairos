@@ -2,4 +2,4 @@
 with-contenv
 importas -D kairos KAIROS_USER KAIROS_USER
 s6-setuidgid ${KAIROS_USER}
-/opt/kairos/.venv/bin/kairos runtime serve
+/bin/bash /opt/kairos/docker/runtime-service.sh

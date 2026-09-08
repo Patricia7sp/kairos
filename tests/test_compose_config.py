@@ -1,9 +1,46 @@
+import os
 import subprocess
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_broker_externo_e_opt_in_e_compartilha_estado_sem_expor_socket_na_web():
+    env = {**os.environ, "COMPOSE_PROFILES": "", "KAIROS_RUNTIME_EXTERNAL": "0"}
+    command = ["docker", "compose", "-f", str(ROOT / "compose.yaml")]
+    default = subprocess.run(
+        [*command, "config"], env=env, check=True, capture_output=True, text=True
+    )
+    services = yaml.safe_load(default.stdout)["services"]
+    assert "runtime-broker" not in services
+    assert services["kairos"]["environment"].get("KAIROS_RUNTIME_EXTERNAL") == "0"
+
+    env.update(KAIROS_RUNTIME_EXTERNAL="1", KAIROS_DOCKER_GID="983")
+    enabled = subprocess.run(
+        [*command, "--profile", "agent-runtime", "config"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    services = yaml.safe_load(enabled.stdout)["services"]
+    app, broker = services["kairos"], services["runtime-broker"]
+    assert app["environment"]["KAIROS_RUNTIME_EXTERNAL"] == "1"
+    assert broker["user"] == "10000:10000"
+    assert "983" in broker["group_add"]
+    assert not broker.get("privileged", False)
+    assert not broker.get("ports")
+    assert broker["read_only"] is True
+    assert "ALL" in broker["cap_drop"]
+    assert "no-new-privileges:true" in broker["security_opt"]
+    assert all(m["target"] != "/var/run/docker.sock" for m in app["volumes"])
+    mounts = {m["target"]: m for m in broker["volumes"]}
+    assert mounts["/var/run/docker.sock"]["source"] == "/var/run/docker.sock"
+    assert mounts["/opt/data"]["source"] == "kairos-data"
+    assert mounts["/projects/current"]["read_only"] is True
+    assert mounts["/projects/current"]["bind"]["create_host_path"] is False
 
 
 def test_compose_configura_fallback_criptografado_com_segredo_somente_leitura():

@@ -107,6 +107,10 @@ jobs:
         run: docker build --check .
       - name: Construir a imagem
         run: docker build -t kairos:test .
+      - name: Construir o broker separado
+        run: |
+          docker build --target runtime-broker -t kairos:runtime-broker-test .
+          docker run --rm --entrypoint docker kairos:runtime-broker-test --version
       - name: Imagem-stub para o ciclo de vida s6
         run: |
           printf 'FROM kairos:test\nRUN printf %s > /opt/kairos/.venv/bin/kairos && chmod +x /opt/kairos/.venv/bin/kairos\n' \
