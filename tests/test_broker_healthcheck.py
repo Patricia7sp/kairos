@@ -12,9 +12,26 @@ import pytest
 HEALTHCHECK = Path(__file__).parents[1] / "docker" / "broker" / "healthcheck.py"
 
 
-async def _run_healthcheck(home: Path) -> tuple[int, bytes, bytes]:
+async def _run_healthcheck(
+    home: Path, docker_body: str | None = "raise SystemExit(0)"
+) -> tuple[int, bytes, bytes]:
     env = os.environ.copy()
     env["KAIROS_HOME"] = str(home)
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    env["PATH"] = str(bin_dir)
+    if docker_body is not None:
+        docker = bin_dir / "docker"
+        docker.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "assert sys.argv[1:] == ['info', '--format', '{{.ServerVersion}}']\n"
+            "print('daemon-details-must-not-be-printed', flush=True)\n"
+            "print('daemon-error-must-not-be-printed', file=sys.stderr, flush=True)\n"
+            + docker_body
+            + "\n"
+        )
+        docker.chmod(0o700)
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(HEALTHCHECK),
@@ -84,6 +101,28 @@ def test_healthcheck_exit_reflects_runtime_readiness_without_output(
         assert [(request["method"], request["params"]) for request in requests] == [
             ("runtime.status", {})
         ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "docker_body", ["raise SystemExit(1)", "import time; time.sleep(30)", None]
+)
+def test_healthcheck_ready_runtime_requires_reachable_docker_without_output(
+    tmp_path: Path, docker_body: str | None
+) -> None:
+    async def run() -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        server, _ = await _serve_response(
+            run_dir / "runtime.sock", {"result": {"enabled": True, "state": "ready"}}
+        )
+        try:
+            result = await asyncio.wait_for(_run_healthcheck(tmp_path, docker_body), timeout=8)
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert result == (1, b"", b"")
 
     asyncio.run(run())
 

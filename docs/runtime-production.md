@@ -213,8 +213,10 @@ docker inspect kairos-runtime-broker --format '{{.State.Health.Status}}'
 curl -fsS http://100.87.25.101:9119/api/health
 ```
 
-O healthcheck do broker abre o socket Unix e só aceita `enabled=true` e
-`state=ready`. Valide o mesmo contrato pela CLI executada na aplicação, que deve
+O healthcheck do broker abre o socket Unix e exige `enabled=true`, `state=ready`
+e uma consulta bem-sucedida ao daemon Docker com o UID/GID do broker. Assim, um
+GID incorreto ou daemon indisponível reprova a saúde mesmo com registry vazio.
+Os diagnósticos da consulta são descartados. Valide também o runtime pela CLI executada na aplicação, que deve
 usar o socket compartilhado do broker:
 
 ```sh
