@@ -130,3 +130,14 @@ VOLUME ["/opt/data"]
 EXPOSE 9119
 
 ENTRYPOINT ["/opt/kairos/docker/entrypoint-dispatch.sh"]
+
+# Broker confiável separado: só este alvo inclui o cliente Docker.
+FROM docker:29.7.2-cli@sha256:3f4743208d2338c934d7b8bcfbe1bb54c0b2355c510ad5e0f31c0c4a54bd704e AS docker-client
+FROM base AS runtime-broker
+COPY --from=docker-client /usr/local/bin/docker /usr/local/bin/docker
+USER 10000:10000
+ENTRYPOINT ["/opt/kairos/.venv/bin/kairos"]
+CMD ["runtime", "serve"]
+
+# O build sem --target continua entregando a aplicação com supervisão s6.
+FROM base AS application

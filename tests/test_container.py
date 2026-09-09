@@ -422,6 +422,7 @@ class ShellCheckTests(unittest.TestCase):
     extensão CJK, é dependência de desenvolvimento, não de execução."""
 
     SCRIPTS: typing.ClassVar[list] = [
+        DOCKER / "runtime-service.sh",
         DOCKER / "entrypoint-dispatch.sh",
         DOCKER / "stage2-hook.sh",
         DOCKER / "main-wrapper.sh",
@@ -722,6 +723,21 @@ class RealImageTests(unittest.TestCase):
         self.assertIn("GATEWAY uid=10000", saida)
         self.assertIn("DASH uid=10000", saida)
         self.assertIn("RUNTIME uid=10000", saida)
+
+    def test_broker_externo_suprime_apenas_o_runtime_interno(self):
+        if not self._stub_available():
+            self.skipTest(f"imagem {self.STUB} não construída")
+        r = self.run_in(
+            "--version",
+            image=self.STUB,
+            entrypoint=None,
+            extra=("-e", "KAIROS_RUNTIME_EXTERNAL=1"),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        output = r.stdout + r.stderr
+        self.assertIn("GATEWAY uid=10000", output)
+        self.assertIn("DASH uid=10000", output)
+        self.assertNotIn("RUNTIME uid=", output)
 
     def test_o_cont_init_roda_na_ordem_e_todos_saem_zero(self):
         if not self._stub_available():
