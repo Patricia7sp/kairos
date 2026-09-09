@@ -1,7 +1,9 @@
 # Implantação do runtime Docker em produção
 
 Autorização: usuário solicitou a implantação após o aceite dos PRs 13/14.
-Base: main 6315a4f. Implementação em worktree isolada; produção ainda intacta.
+Base inicial: main 6315a4f. Implementação preparada em worktree isolada.
+Implantação e aceite concluídos em 2026-09-09; evidências em
+[Aceite de produção](../specs/2026-09-09-runtime-production-acceptance.md).
 
 ## Desenho de implantação
 
@@ -27,11 +29,11 @@ Tailscale existente; broker não publica portas.
 - [x] Testar o contrato de Compose opt-in e a supressão do host interno.
 - [x] Implementar imagem/perfil e documentar ativação, saúde e reversão.
 - [x] Construir imagens e validar aplicação/broker com volume temporário.
-- [ ] Revisão independente, PR, CI e merge das adaptações necessárias.
-- [ ] Registrar imagem/configuração antigas e criar backup privado consistente.
-- [ ] Atualizar stack Komodo, ativar perfil e configuração, preservar login.
-- [ ] Validar saúde, conta, Web/CLI, persistência e um turno real isolado.
-- [ ] Registrar commit, imagens, backup, CI e limites no aceite de produção.
+- [x] Revisão independente, PR, CI e merge das adaptações necessárias.
+- [x] Registrar imagem/configuração antigas e criar backup privado consistente.
+- [x] Atualizar stack Komodo, ativar perfil e configuração, preservar login.
+- [x] Validar saúde, conta, Web/CLI, persistência e um turno real isolado.
+- [x] Registrar commit, imagens, backup, CI e limites no aceite de produção.
 
 Reversão: desligar o perfil externo, restaurar configuração anterior e executar
 a imagem anterior preservada. Não apagar volumes ou substituir banco ativo
