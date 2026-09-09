@@ -630,7 +630,9 @@ export async function runtimeView(root, _route, { signal } = {}) {
       form.elements.content.value = "";
       void run(async () => {
         const accepted = await api.runtimeTurn(session.session_id, {
-          content, idempotency_key: crypto.randomUUID(),
+          // getRandomValues também funciona no HTTP privado do Tailscale.
+          content, idempotency_key: Array.from(crypto.getRandomValues(new Uint8Array(16)),
+            (byte) => byte.toString(16).padStart(2, "0")).join(""),
         });
         const queue = state.activeTurnId === accepted.turn_id || state.terminalTurns.includes(accepted.turn_id)
           ? state.queue : [...new Set([...state.queue, accepted.turn_id])];

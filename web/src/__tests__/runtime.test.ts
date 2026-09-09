@@ -565,6 +565,46 @@ describe("cliente WebSocket do runtime", () => {
   });
 });
 
+it("envia turnos em HTTP sem randomUUID com chaves distintas e preserva a instrução", async () => {
+  const getRandomValues = crypto.getRandomValues.bind(crypto);
+  vi.stubGlobal("crypto", { getRandomValues });
+  location.hash = "#/runtime?session=runtime-1";
+  vi.spyOn(api, "runtimeStatus").mockResolvedValue({ enabled: true, state: "ready" });
+  vi.spyOn(api, "runtimeAccount").mockResolvedValue({ requires_openai_auth: false });
+  vi.spyOn(api, "sessao").mockResolvedValue({ id: "runtime-1", execution_kind: "agent_runtime",
+    runtime_state: "ready", capabilities: { features: ["text"] } });
+  vi.spyOn(api, "mensagens").mockResolvedValue({ messages: [] });
+  const submitted: Array<{ content: string; idempotency_key: string }> = [];
+  vi.spyOn(api, "runtimeTurn").mockImplementation(async (_session: string, body: any) => {
+    submitted.push(body);
+    return { turn_id: `turn-${submitted.length}` };
+  });
+  vi.spyOn(RuntimeClient.prototype, "connect").mockImplementation(async function (this: any) {
+    this.socket = { readyState: 1, close() {} };
+    this.onOpen();
+  });
+  const root = document.createElement("div");
+  const cleanup = await runtimeView(root);
+  try {
+    for (const content of ["Primeira instrução HTTP", "Segunda instrução HTTP"]) {
+      const form = root.querySelector<HTMLFormElement>("[data-runtime-composer]")!;
+      form.querySelector<HTMLTextAreaElement>("textarea")!.value = content;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(root.textContent).toContain(content));
+    }
+    expect(submitted.map((body) => body.content)).toEqual([
+      "Primeira instrução HTTP", "Segunda instrução HTTP",
+    ]);
+    for (const body of submitted) expect(body.idempotency_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(submitted[0]!.idempotency_key).not.toBe(submitted[1]!.idempotency_key);
+    expect(root.querySelector(".k-error")).toBeNull();
+  } finally {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it("mantém instrução aceita online, no reload e após cancelar, mesclando journal por turno", async () => {
   location.hash = "#/runtime?session=runtime-1";
   vi.spyOn(api, "runtimeStatus").mockResolvedValue({ enabled: true, state: "ready" });
