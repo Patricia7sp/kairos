@@ -36,6 +36,7 @@ build_review(session_id: str, baseline: bytes, checkpoint: bytes,
              *, base_commit: str | None = None) -> dict
 validate_review(bundle: dict) -> dict
 workspace_fingerprint(archive: bytes) -> str
+verify_review_baseline(bundle: dict, baseline: bytes) -> None
 ```
 
 `export_project` resolves a commit safely using Git argument separation, exports
@@ -60,6 +61,9 @@ ensure_ascii=True`) without `review_id`. Limit includes final ID. Validate stric
 schema/types, duplicates, safe paths, base64/content hashes, nullable fields,
 kind consistency, hashes and approval digest. Diff uses unified text for UTF-8,
 explicit binary/mode notices otherwise. Build and validate share invariants.
+`verify_review_baseline` checks the fingerprint and each old hash/mode against
+the reconstructed baseline, regenerates the diff using approved new content and
+rejects any disagreement between readable diff and payload.
 Do not implement Git apply, CLI, registry or Web in this task.
 
 TDD: real temporary Git repos with two revisions/idempotence/tampered target;
@@ -74,8 +78,10 @@ Use Task 1 interfaces. Add optional `agent_runtime.project_catalogs` validated l
 to host config; discover versions on startup, append exact workspaces to authorized
 directories, expose `project_versions` in runtime.status. Keep existing roots and
 old sessions. Add readonly compose catalog mount configured with
-`KAIROS_RUNTIME_PROJECT_CATALOG` and conservative existing project fallback;
-document matching config and idle restart. Healthcheck must retain current behavior.
+`KAIROS_RUNTIME_PROJECT_CATALOG`, target `/projects/versions`, and conservative existing project fallback;
+document matching config and idle restart. Healthcheck must retain current behavior;
+do not hash entire catalogs on every healthcheck configuration read. Perform
+discovery at broker startup separately from cheap configuration validation.
 
 Add registry baseline table rather than changing SessionRecord positional fields:
 session_id primary key, workspace_digest, base_commit nullable. Capture initial
@@ -91,7 +97,7 @@ controlled error. Avoid blocking the asyncio loop with snapshot/hash work.
 
 Web runtime selector labels discovered versions using project name and shortcommit.
 Completed idle sessions offer `Revisar alterações`; on click show revision,
-review ID, file summary and diff via textContent, plus download of full JSON.
+review ID, file summary and diff via textContent, plus `Baixar pacote` button for download of full JSON.
 Do not introduce apply/execute/publish in Web. New turn/session change invalidates
 stale preview. API error/loading/large-artifact states are visible. Implement in
 existing vanilla runtime UI/API; preserve React Web and reconnection tests.
@@ -118,7 +124,8 @@ All outputs written without overwriting existing user files. JSON output never
 contains auth. `changes` uses IPC and validates complete bundle before saving0600.
 Apply checks bundle size before parsing, validates exact approval, requires
 non-null base commit, reconstructs source baseline using Git into disposable
-export and checks fingerprint before creating new branch/worktree. Validate new
+export and uses `verify_review_baseline` to check fingerprint, old hashes/modes
+and readable diff before creating new branch/worktree. Validate new
 branch name via Git; no force, no checkout of original repo. Reject worktree path
 inside source/export/.git and ensure safe parents/no symlinks. Apply only reviewed
 files, respecting removals/modes and preventing `.git` components, symlinks and
