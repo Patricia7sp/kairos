@@ -903,6 +903,7 @@ class RealImageTests(unittest.TestCase):
                 status,
                 {
                     "authorized_projects": [],
+                    "project_versions": [],
                     "enabled": True,
                     "sandbox_profiles": ["read_only", "workspace_write"],
                     "state": _runtime_state_for_probe(probe.returncode),
