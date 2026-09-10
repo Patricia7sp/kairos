@@ -208,3 +208,14 @@ def test_review_size_boundary_counts_final_id():
     bundle["diff"] += "x"
     with pytest.raises(ValueError, match="limit"):
         validate_review(resign(bundle))
+
+
+@pytest.mark.parametrize("existing,addition", [("file", "file/child"), ("dir/child", "dir")])
+def test_verify_rejects_conflict_with_unchanged_baseline_paths(existing, addition):
+    from kairos_runtime.reviews import verify_review_baseline
+
+    baseline = archive((existing, b"unchanged", 0o644))
+    forged = build_review("s", archive(), archive((addition, b"new", 0o644)))
+    forged["baseline_fingerprint"] = workspace_fingerprint(baseline)
+    with pytest.raises(ValueError, match="file used as directory"):
+        verify_review_baseline(resign(forged), baseline)

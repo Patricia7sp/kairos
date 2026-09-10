@@ -188,7 +188,18 @@ def _runtime_branch(parser, command, argparse) -> None:
 
 
 def _runtime_args(command: str, parser, *, session: bool) -> None:
-    if session and command == "create":
+    if command in {"project-export", "changes", "apply", "publish"}:
+        required = {
+            "project-export": ("repo", "revision", "catalog"),
+            "changes": ("session", "output"),
+            "apply": ("repo", "bundle", "approve", "branch", "worktree", "receipt"),
+            "publish": ("receipt", "title", "base"),
+        }
+        for name in required[command]:
+            parser.add_argument("--" + name, required=True)
+        if command == "apply":
+            parser.add_argument("--test", action="append", required=True)
+    elif session and command == "create":
         parser.add_argument("--cwd", required=True)
         parser.add_argument(
             "--sandbox",
