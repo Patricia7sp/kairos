@@ -177,3 +177,29 @@ def test_git_export_enforces_content_and_entry_limits(repo, tmp_path, monkeypatc
     monkeypatch.setattr(projects, limit, 1)
     with pytest.raises(ValueError, match="limit"):
         export_project(repo, "HEAD", tmp_path / "catalog")
+
+
+def test_metadata_binds_captured_archive_without_resnapshot_and_rejects_path_links(
+    repo, tmp_path, monkeypatch
+):
+    from kairos_runtime import projects
+    from kairos_runtime.experimental.snapshot import snapshot_project
+
+    version = export_project(repo, "HEAD", tmp_path / "catalog")
+    workspace = Path(version["cwd"])
+    baseline = snapshot_project(workspace)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("source must be captured once")
+
+    monkeypatch.setattr(projects, "snapshot_project", unexpected)
+    assert project_metadata(workspace, baseline=baseline) == version
+    changed = tmp_path / "changed"
+    changed.mkdir()
+    (changed / "different").write_text("different")
+    with pytest.raises(ValueError, match="fingerprint"):
+        project_metadata(workspace, baseline=snapshot_project(changed))
+    workspace.rename(workspace.with_name("moved"))
+    workspace.symlink_to(workspace.with_name("moved"), target_is_directory=True)
+    with pytest.raises(ValueError):
+        project_metadata(workspace, baseline=baseline)

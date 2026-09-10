@@ -117,6 +117,7 @@ export const api = {
   testarProvedor: (provider) =>
     request(`/api/providers/${encodeURIComponent(provider)}/test`, { method: "POST" }),
   wsTicket: () => request("/api/auth/ws-ticket", { method: "POST" }),
+  runtimeChanges: (sessionId) => request(`/api/runtime/sessions/${encodeURIComponent(sessionId)}/changes`),
   runtimeStatus:  () => request("/api/runtime/status"),
   runtimeAccount: () => request("/api/runtime/account"),
   runtimeLogin: (method, apiKey) => request("/api/runtime/login", {

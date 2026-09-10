@@ -172,10 +172,17 @@ const usageText = (usage) => {
   return typeof tokens === "number" ? `${tokens.toLocaleString("pt-BR")} tokens` : "Uso conhecido";
 };
 
+const canReview = (state, session) => !state.activeTurnId && !state.queue.length
+  && !["active", "queued", "running", "interrupted", "unavailable", "ended"].includes(session.state)
+  && (state.status === "completed" || (state.status === "idle"
+    && state.messages.some((message) => message.turnState === "completed")));
+
 export function renderRuntimeSession(root, state, session, {
   connected = false,
   runtimeReady = true,
   error = null,
+  review = null,
+  submitting = false,
 } = {}) {
   const previousComposer = root.dataset.runtimeSession === session.session_id
     ? root.querySelector("[data-runtime-composer] [name=content]")
@@ -272,6 +279,30 @@ export function renderRuntimeSession(root, state, session, {
     card.append(recovery);
   }
 
+  if (canReview(state, session) && runtimeReady && !submitting) {
+    const section = node("section", "k-runtime__review");
+    const button = node("button", "k-btn k-btn--ghost", "Revisar alterações");
+    button.type = "button";
+    button.dataset.runtimeReview = "";
+    button.disabled = Boolean(review?.loading);
+    section.append(button);
+    if (review?.loading) section.append(node("p", "", "Preparando revisão…"));
+    if (review?.error) section.append(node("p", "k-error", review.error.message || "Não foi possível preparar a revisão."));
+    if (review?.bundle) {
+      const bundle = review.bundle;
+      section.append(node("p", "", `Revisão: ${bundle.base_commit || "Projeto sem commit de origem"}`));
+      section.append(node("p", "", `ID da revisão: ${bundle.review_id}`));
+      section.append(node("p", "", `${bundle.changes.length} arquivo(s) alterado(s)`));
+      for (const change of bundle.changes) section.append(node("p", "", `${change.kind}: ${change.path}`));
+      section.append(node("pre", "k-runtime__diff", bundle.diff));
+      const download = node("button", "k-btn k-btn--primary", "Baixar pacote");
+      download.type = "button";
+      download.dataset.runtimeDownload = "";
+      section.append(download);
+    }
+    card.append(section);
+  }
+
   const composer = node("form", "k-runtime__composer");
   composer.dataset.runtimeComposer = "";
   const textarea = node("textarea");
@@ -315,7 +346,8 @@ export function renderRuntimeSetup(root, status, account, loginResult = null) {
   const project = node("select", "k-select");
   project.name = "cwd";
   for (const value of status?.authorized_projects || []) {
-    const option = node("option", "", value);
+    const version = status?.project_versions?.find((item) => item.cwd === value);
+    const option = node("option", "", version ? `${version.name} · ${version.revision.slice(0, 8)}` : value);
     option.value = value;
     project.append(option);
   }
@@ -603,12 +635,18 @@ export async function runtimeView(root, _route, { signal } = {}) {
     ? errorValue(statusResult.error)
     : messagesResult.error ? errorValue(messagesResult.error) : null;
   let reconciling = false;
+  let review = null;
+  let reviewGeneration = 0;
+  let pendingSubmissions = 0;
+  const invalidateReview = () => { review = null; reviewGeneration += 1; };
   const render = () => {
     if (disposed) return;
     renderRuntimeSession(mount, state, session, {
       connected: Boolean(client?.socket && client.socket.readyState === 1),
       runtimeReady,
       error: viewError,
+      review,
+      submitting: pendingSubmissions > 0,
     });
     bindSession();
   };
@@ -622,12 +660,38 @@ export async function runtimeView(root, _route, { signal } = {}) {
     render();
   };
   const bindSession = () => {
+    mount.querySelector("[data-runtime-review]")?.addEventListener("click", async () => {
+      const generation = ++reviewGeneration;
+      review = { loading: true };
+      render();
+      try {
+        const bundle = await api.runtimeChanges(session.session_id);
+        if (disposed || generation !== reviewGeneration || pendingSubmissions || !canReview(state, session)) return;
+        review = { bundle };
+      } catch (error) {
+        if (disposed || generation !== reviewGeneration) return;
+        review = { error: errorValue(error) };
+      }
+      render();
+    });
+    mount.querySelector("[data-runtime-download]")?.addEventListener("click", () => {
+      if (!review?.bundle || pendingSubmissions || !canReview(state, session)) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(review.bundle)], { type: "application/json" }));
+      const link = node("a");
+      link.href = url;
+      link.download = `kairos-review-${review.bundle.review_id}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    });
     mount.querySelector("[data-runtime-composer]")?.addEventListener("submit", (event) => {
       event.preventDefault();
       const form = event.currentTarget;
       const content = form.elements.content.value.trim();
       if (!content) return;
       form.elements.content.value = "";
+      invalidateReview();
+      pendingSubmissions += 1;
+      render();
       void run(async () => {
         const accepted = await api.runtimeTurn(session.session_id, {
           // getRandomValues também funciona no HTTP privado do Tailscale.
@@ -643,7 +707,7 @@ export async function runtimeView(root, _route, { signal } = {}) {
         }]);
         render();
         state = mergeMessages(state, persistedItems(await api.mensagens(session.session_id)));
-      });
+      }).finally(() => { pendingSubmissions -= 1; render(); });
     });
     mount.querySelector("[data-runtime-cancel]")?.addEventListener("click", () => {
       const turnId = state.cancellableTurnId;
@@ -683,6 +747,8 @@ export async function runtimeView(root, _route, { signal } = {}) {
     onEvent: (event) => {
       const previous = state;
       state = reduceRuntime(state, event);
+      if (state !== previous && (state.activeTurnId || state.queue.length
+        || ["turn_start", "dispatching", "turn_end", "reconciled"].includes(event.kind))) invalidateReview();
       const sequenceGap = state !== previous && state.lastSequence === previous.lastSequence
         && event.sequence > previous.lastSequence + 1;
       if (sequenceGap && !reconciling) {

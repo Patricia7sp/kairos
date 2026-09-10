@@ -110,6 +110,13 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # Catálogo opcional; sem configuração reutiliza um bind já existente.
+      - type: bind
+        source: "${KAIROS_RUNTIME_PROJECT_CATALOG:-${KAIROS_RUNTIME_PROJECT:-/srv/kairos-runtime-project}}"
+        target: /projects/versions
+        read_only: true
+        bind:
+          create_host_path: false
       # A autorização de /projects/kairos continua explícita no config.yaml.
       # Sem caminho adicional, reutiliza o projeto base e não amplia o acesso.
       - type: bind

@@ -124,5 +124,37 @@ def test_config_semeada_desabilita_runtime_com_codex_pinned():
         "codex_binary": "/usr/local/bin/codex",
         "codex_version": "0.153.4",
         "allowed_directories": [],
+        "project_catalogs": [],
         "broad_access_enabled": False,
     }
+
+
+@pytest.mark.parametrize("catalog", [None, "/srv/catalog"])
+def test_catalog_mount_is_readonly_broker_only_with_existing_project_fallback(catalog):
+    env = {**os.environ, "KAIROS_RUNTIME_PROJECT": "/srv/existing"}
+    env.pop("KAIROS_RUNTIME_PROJECT_CATALOG", None)
+    if catalog:
+        env["KAIROS_RUNTIME_PROJECT_CATALOG"] = catalog
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "compose.yaml"),
+            "--profile",
+            "agent-runtime",
+            "config",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    services = yaml.safe_load(result.stdout)["services"]
+    mount = next(
+        m for m in services["runtime-broker"]["volumes"] if m["target"] == "/projects/versions"
+    )
+    assert mount["source"] == (catalog or "/srv/existing")
+    assert mount["read_only"] is True
+    assert not mount.get("bind", {}).get("create_host_path", False)
+    assert all(m["target"] != "/projects/versions" for m in services["kairos"]["volumes"])

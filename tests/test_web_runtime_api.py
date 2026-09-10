@@ -86,6 +86,7 @@ def test_runtime_rest_roundtrip_is_authenticated_strict_and_returns_durable_turn
         "enabled": True,
         "state": "ready",
         "authorized_projects": ["/srv/project"],
+        "project_versions": [],
         "sandbox_profiles": ["read_only", "workspace_write"],
     }
     assert client.get("/api/runtime/account").json()["auth_mode"] is None
@@ -228,3 +229,61 @@ def test_existing_session_reads_join_runtime_metadata_without_changing_model_row
     assert rows["runtime"]["runtime_kind"] == "codex"
     assert detail["sandbox"] == "read_only"
     assert detail["runtime_state"] == "ready"
+
+
+def test_changes_authenticated_success_denial_and_conflict(runtime_api):
+    from test_docker_session_runtime import archive
+
+    from kairos_runtime.reviews import build_review
+
+    client, fake, project = runtime_api
+    db = connect(project.parent / "state.db")
+    with db:
+        db.execute(
+            "INSERT INTO sessions(id,source,started_at,execution_kind) VALUES ('runtime-1','web',1,'agent_runtime')"
+        )
+    db.close()
+    bundle = build_review("runtime-1", archive(), archive())
+
+    async def changes(session_id):
+        fake.calls.append(("changes", session_id))
+        return bundle
+
+    fake.changes = changes
+    assert client.get("/api/runtime/sessions/runtime-1/changes").json() == bundle
+    assert client.get("/api/runtime/sessions/model-1/changes").status_code == 409
+    assert client.get("/api/runtime/sessions/missing/changes").status_code == 404
+    assert (
+        client.get(
+            "/api/runtime/sessions/runtime-1/changes", headers={server.TOKEN_HEADER: "wrong"}
+        ).status_code
+        == 401
+    )
+
+    async def busy(session_id):
+        raise RuntimeErrorInfo("session_busy", "private detail", True)
+
+    fake.changes = busy
+    response = client.get("/api/runtime/sessions/runtime-1/changes")
+    assert response.status_code == 409
+    assert "private detail" not in response.text
+
+
+def test_status_accepts_explicit_project_version_schema(runtime_api):
+    client, fake, project = runtime_api
+    version = {
+        "schema_version": 1,
+        "revision": "a" * 40,
+        "name": "app",
+        "baseline_fingerprint": "b" * 64,
+        "cwd": str(project),
+    }
+    original = fake.status
+
+    async def status():
+        return {**await original(), "project_versions": [version]}
+
+    fake.status = status
+    response = client.get("/api/runtime/status")
+    assert response.status_code == 200
+    assert response.json()["project_versions"] == [version]

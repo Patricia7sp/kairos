@@ -148,7 +148,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def _manifest(workspace: Path) -> dict:
+def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
     with _directory(workspace.parent) as version_fd:
         if set(os.listdir(version_fd)) != {"workspace", "project.json"}:
             raise ValueError("project version layout invalid")
@@ -182,7 +182,9 @@ def _manifest(workspace: Path) -> dict:
         or not _HASH.fullmatch(manifest["baseline_fingerprint"])
     ):
         raise ValueError("project manifest schema invalid")
-    blob = snapshot_project(workspace, include_all=True)
+    with _directory(workspace):
+        pass
+    blob = baseline if baseline is not None else snapshot_project(workspace, include_all=True)
     for path in archive_files(blob):
         _source_path(path)
     if workspace_fingerprint(blob) != manifest["baseline_fingerprint"]:
@@ -190,8 +192,13 @@ def _manifest(workspace: Path) -> dict:
     return {**manifest, "cwd": str(workspace)}
 
 
-def project_metadata(workspace: Path) -> dict | None:
-    """Verify an exact catalog workspace, or return None for a legacy directory."""
+def project_metadata(workspace: Path, *, baseline: bytes | None = None) -> dict | None:
+    """Verify a catalog workspace, or return None for a legacy directory.
+
+    When baseline is supplied, verify that captured archive against the trusted
+    sibling manifest without recapturing source. Directory and manifest no-follow
+    checks remain active; callers must capture the archive from this workspace.
+    """
     workspace = Path(os.path.abspath(workspace))
     if workspace.name != "workspace":
         return None
@@ -200,7 +207,7 @@ def project_metadata(workspace: Path) -> dict | None:
             os.stat("project.json", dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
             return None
-    return _manifest(workspace)
+    return _manifest(workspace, baseline=baseline)
 
 
 def discover_projects(catalogs: tuple[str, ...]) -> list[dict]:

@@ -122,6 +122,11 @@ class SessionRegistry:
                     worker_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(worker_confirmed IN (0, 1)),
                     CHECK((workspace_digest IS NULL) = (home_digest IS NULL))
                 )""")
+                db.execute("""CREATE TABLE IF NOT EXISTS baselines (
+                    session_id TEXT PRIMARY KEY REFERENCES sessions(session_id),
+                    workspace_digest TEXT NOT NULL,
+                    base_commit TEXT
+                )""")
                 columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)")}
                 if "worker_confirmed" not in columns:
                     # An older record proves only that creation was requested.
@@ -349,6 +354,45 @@ class SessionRegistry:
                     ),
                 )
             return self._require(session_id)
+
+    def record_baseline(
+        self, session_id: str, workspace: bytes, *, base_commit: str | None = None
+    ) -> None:
+        """Persist the initial source once; retries may only supply identical values."""
+        validate_archive(workspace)
+        if base_commit is not None and (
+            not isinstance(base_commit, str)
+            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", base_commit) is None
+        ):
+            raise ValueError("invalid baseline commit")
+        with self._lock:
+            self._require(session_id)
+            existing = self.baseline(session_id)
+            if existing is not None:
+                if existing != (workspace, base_commit):
+                    raise ValueError("baseline is immutable")
+                return
+            digest = self._write_blob(workspace)
+            with self._connection() as db:
+                db.execute(
+                    "INSERT INTO baselines VALUES (?, ?, ?)", (session_id, digest, base_commit)
+                )
+
+    def baseline(self, session_id: str) -> tuple[bytes, str | None] | None:
+        """Read the immutable archive and commit; None explicitly identifies legacy sessions."""
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT * FROM baselines WHERE session_id = ?", (_identifier(session_id),)
+            ).fetchone()
+            if row is None:
+                return None
+            commit = row["base_commit"]
+            if (
+                commit is not None
+                and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None
+            ):
+                raise ValueError("corrupt baseline commit")
+            return self._read_blob(row["workspace_digest"]), commit
 
     def _write_blob(self, blob: bytes) -> str:
         digest = hashlib.sha256(blob).hexdigest()

@@ -975,3 +975,201 @@ def test_thread_read_rejects_a_response_for_another_thread(tmp_path, monkeypatch
             registry.close()
 
     asyncio.run(run())
+
+
+def test_review_uses_original_source_after_restart_and_rejects_legacy(tmp_path):
+    from pathlib import Path
+
+    from kairos_runtime.experimental.snapshot import snapshot_project
+    from kairos_runtime.reviews import workspace_fingerprint
+
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        source = Path(session.cwd) / "original.txt"
+        source.write_text("original")
+        initial = snapshot_project(Path(session.cwd))
+        try:
+            thread = await runtime.create_thread(session)
+            session = replace(session, external_thread_id=thread)
+            assert factory.workers[0].settings["workspace_archive"] == initial
+            source.write_text("host changed")
+            await runtime.aclose()
+            runtime = DockerSessionRuntime(
+                registry,
+                image="test",
+                transport=None,
+                model="test",
+                worker_factory=factory,
+                worker_remover=lambda *a, **k: None,
+            )
+            await runtime.recover()
+            review = await runtime.changes(session)
+            assert review["baseline_fingerprint"] == workspace_fingerprint(initial)
+            assert review["changes"][0]["kind"] == "delete"
+            legacy = replace(session, session_id="legacy", external_thread_id=None)
+            registry.create(legacy)
+            registry.checkpoint("legacy", archive(), archive())
+            with pytest.raises(RuntimeErrorInfo) as exc:
+                await runtime.changes(legacy)
+            assert exc.value.code == "baseline_missing"
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_review_rejects_active_worker_and_large_complete_package(tmp_path):
+    from pathlib import Path
+
+    from kairos_runtime.experimental.snapshot import snapshot_project
+
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        try:
+            thread = await runtime.create_thread(session)
+            session = replace(session, external_thread_id=thread)
+            await runtime.start_turn(session, "local-turn", "go")
+            with pytest.raises(RuntimeErrorInfo) as error:
+                await runtime.changes(session)
+            assert error.value.code == "session_busy"
+            await runtime.aclose()
+            runtime = DockerSessionRuntime(
+                registry, image="test", transport=None, model="test", worker_factory=factory
+            )
+            await runtime.recover()
+            (Path(session.cwd) / "large.txt").write_text("x" * 300_000)
+            registry.checkpoint(session.session_id, snapshot_project(Path(session.cwd)), archive())
+            with pytest.raises(RuntimeErrorInfo) as error:
+                await runtime.changes(session)
+            assert error.value.code == "review_too_large"
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_catalog_session_captures_once_off_loop_and_binds_manifest(tmp_path, monkeypatch):
+    import threading
+    from pathlib import Path
+
+    from test_runtime_projects import git
+
+    from kairos_runtime import projects
+    from kairos_runtime.docker_backend import runtime as runtime_module
+
+    async def run():
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        git(repo, "config", "user.email", "test@example.invalid")
+        git(repo, "config", "user.name", "Test")
+        (repo / "file").write_text("original")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "base")
+        version = projects.export_project(repo, "HEAD", tmp_path / "catalog")
+        runtime, registry, factory, session = await setup(tmp_path)
+        session = replace(session, cwd=version["cwd"])
+        loop_thread = threading.get_ident()
+        captures = []
+        snapshot = runtime_module.snapshot_project
+
+        def capture(path):
+            assert threading.get_ident() != loop_thread
+            captures.append(path)
+            return snapshot(path)
+
+        def no_recapture(*args, **kwargs):
+            raise AssertionError("manifest lookup must reuse captured archive")
+
+        monkeypatch.setattr(runtime_module, "snapshot_project", capture)
+        monkeypatch.setattr(projects, "snapshot_project", no_recapture)
+        try:
+            thread = await runtime.create_thread(session)
+            session = replace(session, external_thread_id=thread)
+            await runtime.resume_thread(session)
+            assert captures == [Path(version["cwd"])]
+            assert (
+                registry.baseline(session.session_id)[0]
+                == factory.workers[0].settings["workspace_archive"]
+            )
+            assert (await runtime.changes(session))["base_commit"] == version["revision"]
+        finally:
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_cancelled_checkpoint_waits_for_durable_write_before_worker_teardown(tmp_path, monkeypatch):
+    import threading
+
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        checkpoint = registry.checkpoint
+
+        def slow_checkpoint(*args, **kwargs):
+            entered.set()
+            assert release.wait(3)
+            return checkpoint(*args, **kwargs)
+
+        monkeypatch.setattr(registry, "checkpoint", slow_checkpoint)
+        creating = asyncio.create_task(runtime.create_thread(session))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            creating.cancel()
+            await asyncio.sleep(0.02)
+            assert not factory.workers[0].closed
+            release.set()
+            result = await asyncio.gather(creating, return_exceptions=True)
+            assert isinstance(result[0], asyncio.CancelledError)
+            assert factory.workers[0].closed
+            assert registry.archives(session.session_id) is not None
+        finally:
+            release.set()
+            await asyncio.gather(creating, return_exceptions=True)
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())
+
+
+def test_shutdown_waits_for_initial_baseline_persistence(tmp_path, monkeypatch):
+    import threading
+
+    async def run():
+        runtime, registry, factory, session = await setup(tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        persist = registry.record_baseline
+
+        def slow_baseline(*args, **kwargs):
+            entered.set()
+            assert release.wait(3)
+            return persist(*args, **kwargs)
+
+        monkeypatch.setattr(registry, "record_baseline", slow_baseline)
+        creating = asyncio.create_task(runtime.create_thread(session))
+        closing = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            closing = asyncio.create_task(runtime.aclose())
+            await asyncio.sleep(0.02)
+            assert not closing.done()
+            assert factory.workers == []
+            release.set()
+            await closing
+            assert isinstance(
+                (await asyncio.gather(creating, return_exceptions=True))[0], asyncio.CancelledError
+            )
+            assert registry.baseline(session.session_id) is not None
+        finally:
+            release.set()
+            await asyncio.gather(creating, *([closing] if closing else []), return_exceptions=True)
+            await runtime.aclose()
+            registry.close()
+
+    asyncio.run(run())

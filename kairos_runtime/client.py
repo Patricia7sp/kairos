@@ -46,6 +46,9 @@ class RuntimeClient:
     async def get(self, session_id: str) -> dict:
         return await self._call("session.get", {"session_id": session_id})
 
+    async def changes(self, session_id: str) -> dict:
+        return await self._call("session.changes", {"session_id": session_id})
+
     async def end(self, session_id: str) -> None:
         await self._call("session.end", {"session_id": session_id})
 

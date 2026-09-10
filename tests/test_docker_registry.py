@@ -351,3 +351,21 @@ def test_missing_sessions_and_duplicate_worker_names(registry, session):
         registry.record_worker(other.session_id, "worker-1")
     with pytest.raises(ValueError):
         registry.record_worker(session.session_id, "worker-2")
+
+
+def test_baseline_is_immutable_and_survives_checkpoint_and_reopen(registry, session):
+    registry.create(session)
+    first = archive(("a", tarfile.REGTYPE, b"original"))
+    later = archive(("a", tarfile.REGTYPE, b"changed"))
+    registry.record_baseline(session.session_id, first, base_commit="a" * 40)
+    registry.checkpoint(session.session_id, later, archive())
+    with pytest.raises(ValueError, match="immutable"):
+        registry.record_baseline(session.session_id, later, base_commit="a" * 40)
+    root = registry.root
+    registry.close()
+    reopened = SessionRegistry(root)
+    try:
+        assert reopened.baseline(session.session_id) == (first, "a" * 40)
+        assert reopened.archives(session.session_id)[0] == later
+    finally:
+        reopened.close()

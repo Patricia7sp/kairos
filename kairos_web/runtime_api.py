@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     TypeAdapter,
     ValidationError,
     field_validator,
@@ -92,10 +94,19 @@ class RuntimeApprovalRequest(_StrictModel):
     decision: Literal["accept", "decline"]
 
 
+class ProjectVersionResponse(_StrictModel):
+    schema_version: Literal[1]
+    revision: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+    name: str
+    baseline_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cwd: str
+
+
 class RuntimeStatusResponse(_StrictModel):
     enabled: bool
     state: Literal["disabled", "unavailable", "ready"]
     authorized_projects: list[str]
+    project_versions: list[ProjectVersionResponse] = Field(default_factory=list)
     sandbox_profiles: list[Literal["read_only", "workspace_write", "broad_access"]]
 
     @field_validator("authorized_projects")
@@ -292,6 +303,24 @@ async def runtime_session_create(payload: RuntimeSessionCreateRequest, request: 
             session_id=payload.session_id,
         )
     )
+
+
+@router.get("/sessions/{session_id}/changes")
+async def runtime_session_changes(session_id: str, request: Request):
+    if failure := _require_runtime_session(request, session_id):
+        return failure
+    result = await _call(request, "changes", session_id)
+    if isinstance(result, JSONResponse):
+        return result
+    from kairos_runtime.reviews import validate_review
+
+    try:
+        result = await asyncio.to_thread(validate_review, result)
+        if result["session_id"] != session_id:
+            raise ValueError("review session mismatch")
+    except (ValueError, TypeError):
+        return _runtime_error(RuntimeErrorInfo("invalid_event", "revisão inválida", False))
+    return result
 
 
 @router.post("/sessions/{session_id}/end")

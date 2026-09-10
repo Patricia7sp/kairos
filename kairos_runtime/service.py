@@ -154,6 +154,26 @@ class AgentRuntimeService:
         )
         return await self.store.get_session(session_id)
 
+    async def changes(self, session_id: str) -> dict:
+        async with self._lock(session_id):
+            session = await self._authorize(session_id)
+            if self._closed:
+                raise RuntimeErrorInfo("unavailable", "runtime indisponível", False)
+            if any(
+                turn["session_id"] == session_id for turn in await self.store.nonterminal_turns()
+            ):
+                raise RuntimeErrorInfo("session_busy", "runtime possui trabalho pendente", True)
+            for turn_id, task in tuple(self._tasks.items()):
+                if (
+                    not task.done()
+                    and (await self.store.get_turn(turn_id))["session_id"] == session_id
+                ):
+                    raise RuntimeErrorInfo("session_busy", "runtime possui trabalho pendente", True)
+            changes = getattr(self.runtime, "changes", None)
+            if changes is None:
+                raise RuntimeErrorInfo("unavailable", "revisão indisponível neste backend", False)
+            return await changes(session)
+
     async def submit(self, session_id: str, content: str, idempotency_key: str) -> str:
         if self._closed or not isinstance(content, str) or not content.strip():
             raise RuntimeErrorInfo("unavailable", "runtime indisponível", False)

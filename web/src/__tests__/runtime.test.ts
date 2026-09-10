@@ -661,3 +661,59 @@ it("mantém instrução aceita online, no reload e após cancelar, mesclando jou
   expect(root.textContent).toContain("Instrução preservada");
   cleanup();
 });
+
+
+describe("revisão de alterações", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it("identifica versões e mostra revisão como texto seguro somente quando ocioso", () => {
+    const root = document.createElement("div");
+    renderRuntimeSetup(root, { enabled: true, state: "ready", authorized_projects: ["/legacy", "/v/workspace"],
+      sandbox_profiles: ["workspace_write"], project_versions: [{ cwd: "/v/workspace", name: "app", revision: "abcdef012345" }] });
+    expect(root.querySelectorAll("option")[1]!.textContent).toBe("app · abcdef01");
+    const state = { ...initialRuntimeState("runtime-1"), status: "completed", terminalTurns: ["turn-1"] };
+    const session = { session_id: "runtime-1", sandbox: "workspace_write", state: "ready" };
+    const review = { bundle: { base_commit: "a".repeat(40), review_id: "b".repeat(64), changes: [{ path: "<img src=x onerror=alert(1)>", kind: "add" }], diff: "<script>bad()</script>" } };
+    renderRuntimeSession(root, state, session, { review });
+    expect(root.querySelector("[data-runtime-review]")).not.toBeNull();
+    expect(root.querySelector("[data-runtime-download]")).not.toBeNull();
+    expect(root.textContent).toContain("<script>bad()</script>");
+    expect(root.querySelector("script,img")).toBeNull();
+    renderRuntimeSession(root, { ...state, activeTurnId: "next" }, session, { review });
+    expect(root.querySelector("[data-runtime-review]")).toBeNull();
+    expect(root.querySelector("[data-runtime-download]")).toBeNull();
+  });
+});
+
+it("carrega e baixa JSON compacto e invalida a revisão ao iniciar um turno", async () => {
+  location.hash = "#/runtime?session=runtime-1";
+  vi.spyOn(api, "runtimeStatus").mockResolvedValue({ enabled: true, state: "ready", authorized_projects: [], sandbox_profiles: [] });
+  vi.spyOn(api, "runtimeAccount").mockResolvedValue({ requires_openai_auth: false });
+  vi.spyOn(api, "sessao").mockResolvedValue({ id: "runtime-1", execution_kind: "agent_runtime", runtime_state: "ready", capabilities: ["text"] });
+  vi.spyOn(api, "mensagens").mockResolvedValue([{ id: "m1", role: "assistant", content: "done", turn_id: "t1", turn_state: "completed" }]);
+  vi.spyOn(api, "wsTicket").mockRejectedValue({ retryable: false });
+  const bundle = { session_id: "runtime-1", base_commit: null, review_id: "id", changes: [], diff: "diff" };
+  const load = vi.spyOn(api, "runtimeChanges").mockResolvedValue(bundle);
+  let downloaded: Blob | undefined;
+  vi.stubGlobal("URL", class extends URL {
+    static createObjectURL(blob: Blob) { downloaded = blob; return "blob:review"; }
+    static revokeObjectURL = vi.fn();
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  vi.spyOn(api, "runtimeTurn").mockImplementation(() => new Promise(() => {}));
+  const root = document.createElement("div");
+  const cleanup = await runtimeView(root);
+  root.querySelector<HTMLButtonElement>("[data-runtime-review]")!.click();
+  expect(root.textContent).toContain("Preparando revisão");
+  await vi.waitFor(() => expect(root.querySelector("[data-runtime-download]")).not.toBeNull());
+  root.querySelector<HTMLButtonElement>("[data-runtime-download]")!.click();
+  expect(load).toHaveBeenCalledWith("runtime-1");
+  expect(downloaded!.size).toBe(new Blob([JSON.stringify(bundle)]).size);
+  root.querySelector<HTMLTextAreaElement>("[name=content]")!.value = "next";
+  root.querySelector("[data-runtime-composer]")!.dispatchEvent(new Event("submit", { cancelable: true }));
+  expect(root.querySelector("[data-runtime-download]")).toBeNull();
+  expect(root.querySelector("[data-runtime-review]")).toBeNull();
+  cleanup();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
