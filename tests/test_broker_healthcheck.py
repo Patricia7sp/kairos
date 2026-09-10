@@ -10,11 +10,19 @@ from pathlib import Path
 import pytest
 
 HEALTHCHECK = Path(__file__).parents[1] / "docker" / "broker" / "healthcheck.py"
+WORKER_IMAGE = "sha256:" + "a" * 64
+CONFIG = f"agent_runtime:\n  enabled: true\n  backend: docker\n  docker_image: {WORKER_IMAGE}\n"
 
 
 async def _run_healthcheck(
-    home: Path, docker_body: str | None = "raise SystemExit(0)"
+    home: Path,
+    docker_body: str | None = "raise SystemExit(0)",
+    *,
+    config: str | bytes | None = CONFIG,
+    expected_image: str = WORKER_IMAGE,
 ) -> tuple[int, bytes, bytes]:
+    if config is not None:
+        (home / "config.yaml").write_bytes(config.encode() if isinstance(config, str) else config)
     env = os.environ.copy()
     env["KAIROS_HOME"] = str(home)
     bin_dir = home / "bin"
@@ -25,7 +33,7 @@ async def _run_healthcheck(
         docker.write_text(
             f"#!{sys.executable}\n"
             "import sys\n"
-            "assert sys.argv[1:] == ['info', '--format', '{{.ServerVersion}}']\n"
+            f"assert sys.argv[1:] in [['info', '--format', '{{{{.ServerVersion}}}}'], ['image', 'inspect', '--', {expected_image!r}]]\n"
             "print('daemon-details-must-not-be-printed', flush=True)\n"
             "print('daemon-error-must-not-be-printed', file=sys.stderr, flush=True)\n"
             + docker_body
@@ -101,6 +109,81 @@ def test_healthcheck_exit_reflects_runtime_readiness_without_output(
         assert [(request["method"], request["params"]) for request in requests] == [
             ("runtime.status", {})
         ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("image_failure", ["raise SystemExit(1)", "import time; time.sleep(30)"])
+def test_healthcheck_rejects_missing_or_unresponsive_configured_worker_image(
+    tmp_path: Path, image_failure: str
+) -> None:
+    async def run() -> None:
+        (tmp_path / "run").mkdir()
+        server, _ = await _serve_response(
+            tmp_path / "run/runtime.sock", {"result": {"enabled": True, "state": "ready"}}
+        )
+        # The daemon is reachable, but inspection of the configured image fails.
+        body = "if sys.argv[1] == 'info': raise SystemExit(0)\n" + image_failure
+        try:
+            result = await asyncio.wait_for(_run_healthcheck(tmp_path, body), timeout=8)
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert result == (1, b"", b"")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        "[invalid",
+        "[]",
+        "agent_runtime: []",
+        "agent_runtime: {enabled: false}",
+        "agent_runtime: {enabled: true, backend: local}",
+        "agent_runtime: {enabled: true, backend: docker, docker_image: --help}",
+        "other: 2026-99-99",
+        'agent_runtime: {enabled: true, backend: docker, allowed_directories: ["\\0"]}',
+        b"\xff",
+    ],
+)
+def test_healthcheck_rejects_invalid_or_inactive_docker_config_without_output(
+    tmp_path: Path, config: str | bytes | None
+) -> None:
+    async def run() -> None:
+        (tmp_path / "run").mkdir()
+        server, _ = await _serve_response(
+            tmp_path / "run/runtime.sock", {"result": {"enabled": True, "state": "ready"}}
+        )
+        try:
+            result = await _run_healthcheck(tmp_path, config=config)
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert result == (1, b"", b"")
+
+    asyncio.run(run())
+
+
+def test_healthcheck_inspects_default_worker_when_image_is_omitted(tmp_path: Path) -> None:
+    async def run() -> None:
+        (tmp_path / "run").mkdir()
+        server, _ = await _serve_response(
+            tmp_path / "run/runtime.sock", {"result": {"enabled": True, "state": "ready"}}
+        )
+        try:
+            result = await _run_healthcheck(
+                tmp_path,
+                "raise SystemExit(0 if sys.argv[1] == 'image' else 1)",
+                config="agent_runtime: {enabled: true, backend: docker}",
+                expected_image="kairos:external-sandbox",
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert result == (0, b"", b"")
 
     asyncio.run(run())
 

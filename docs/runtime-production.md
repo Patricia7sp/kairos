@@ -151,7 +151,8 @@ docker compose --profile agent-runtime build kairos runtime-broker
 
 Antes de cada implantação ou aceite, confirme com `docker image inspect` que o
 ID configurado em `agent_runtime.docker_image` existe no daemon do broker.
-O status `ready` e o healthcheck atual não comprovam a presença dessa imagem.
+O status `ready` sozinho não comprova a presença dessa imagem; o healthcheck
+do broker também inspeciona o ID ou a tag configurada e reprova se não existir.
 Se ela tiver sido removida, reconstrua-a, valide os testes Docker, registre o
 novo ID na configuração e reinicie o broker sem turnos ativos. Preserve uma
 tag operacional para a imagem e confira o ID novamente após limpezas do Docker.
@@ -231,8 +232,10 @@ curl -fsS http://100.87.25.101:9119/api/health
 ```
 
 O healthcheck do broker abre o socket Unix e exige `enabled=true`, `state=ready`
-e uma consulta bem-sucedida ao daemon Docker com o UID/GID do broker. Assim, um
-GID incorreto ou daemon indisponível reprova a saúde mesmo com registry vazio.
+e uma inspeção bem-sucedida da imagem definida em `agent_runtime.docker_image`,
+com o UID/GID do broker. Assim, um GID incorreto, daemon indisponível ou imagem
+removida reprova a saúde mesmo com registry vazio. Configuração inválida,
+desabilitada ou com backend diferente de `docker` também reprova.
 Os diagnósticos da consulta são descartados. Valide também o runtime pela CLI executada na aplicação, que deve
 usar o socket compartilhado do broker:
 
@@ -274,6 +277,36 @@ Um turno real deve continuar limitado ao projeto sintético e ser registrado no
 aceite de produção separadamente, com commit, IDs das três imagens, referência
 do backup, resultado da CI e limites conhecidos. Os comandos acima, sozinhos,
 não comprovam acesso ao modelo nem um deploy concluído.
+
+## Autorizar o repositório real após o aceite sintético
+
+O broker oferece uma segunda montagem somente leitura em `/projects/kairos`.
+Defina `KAIROS_RUNTIME_KAIROS_PROJECT=/caminho/absoluto/do/kairos` no ambiente
+persistente do stack. Sem essa variável, a montagem reutiliza a origem de
+`/projects/current`, preservando as instalações que só têm o projeto sintético.
+A montagem sozinha não autoriza sessões: acrescente `/projects/kairos` à lista
+`agent_runtime.allowed_directories` em `config.yaml`, mantendo o projeto
+sintético se ele ainda deve estar disponível.
+
+Antes de ativar, valide o snapshot com o UID 10000 e a mesma imagem do broker.
+O código inteiro deve ser legível, sem links, arquivos especiais ou hardlinks
+nos caminhos incluídos, e caber nos limites de 64 MiB e 10 mil entradas.
+As exclusões de `.git`, `.venv`, `.worktrees`, `node_modules` e `.env*` não são
+um detector geral de segredos. Não amplie permissões de arquivos privados para
+forçar a aprovação do snapshot.
+
+Se o workspace tiver metadados locais privados, use uma exportação limpa dos
+arquivos versionados (`git archive COMMIT`) em diretório dedicado, registrando
+o commit e os hashes. Aponte a montagem para essa exportação e preserve-a
+durante o aceite. Isso torna explícita a versão disponível para o runtime;
+novos commits exigem uma nova exportação e atualização do caminho do stack.
+
+Com backup validado e sem turnos ativos, recrie o broker pelo Compose para
+aplicar o mount e carregar a configuração. Confirme a origem somente leitura
+em `docker inspect`, a lista de projetos pela CLI e o healthcheck. Faça o aceite
+pela Web primeiro em `read_only`, depois em `workspace_write`. Neste último,
+a escrita ocorre na cópia isolada; abra o checkpoint, revise o diff e confira
+que o repositório original ficou intacto antes de aplicar qualquer alteração.
 
 ## Reversão sem perda de dados
 
