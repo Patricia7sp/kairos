@@ -470,7 +470,7 @@ describe("cliente WebSocket do runtime", () => {
     expect(ticket).toHaveBeenCalledOnce();
   });
 
-  it("a view reconecta a cada salto usando somente o último cursor aplicado", async () => {
+  it("a view reconecta com código aceito pelo navegador e o último cursor aplicado", async () => {
     vi.useFakeTimers();
     location.hash = "#/runtime?session=runtime-1";
     vi.spyOn(api, "runtimeStatus").mockResolvedValue({
@@ -494,6 +494,10 @@ describe("cliente WebSocket do runtime", () => {
       sent: string[] = [];
       listeners = new Map<string, ((event: any) => void)[]>();
       close = vi.fn((code = 1000) => {
+        // Chromium rejeita códigos reservados quando o cliente inicia o close.
+        if (code !== 1000 && (code < 3000 || code > 4999)) {
+          throw new DOMException("Invalid client close code", "InvalidAccessError");
+        }
         this.readyState = 3;
         this.emit("close", { code });
       });
@@ -516,7 +520,7 @@ describe("cliente WebSocket do runtime", () => {
     ViewSocket.instances[0]!.emit("message", { data: JSON.stringify(event({
       event_id: "event-3", sequence: 3, cursor: "v1:runtime-1:3",
     })) });
-    expect(ViewSocket.instances[0]!.close).toHaveBeenCalledWith(1012, "reconcile");
+    expect(ViewSocket.instances[0]!.close).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(500);
     ViewSocket.instances[1]!.emit("open");
     expect(JSON.parse(ViewSocket.instances[1]!.sent[0]!)).toEqual({
@@ -529,8 +533,13 @@ describe("cliente WebSocket do runtime", () => {
       event_id: "event-4", sequence: 4, cursor: "v1:runtime-1:4",
     })) });
 
-    expect(ViewSocket.instances[1]!.close).toHaveBeenCalledWith(1012, "reconcile");
-    expect(ticket).toHaveBeenCalledTimes(2);
+    expect(ViewSocket.instances[1]!.close).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(500);
+    ViewSocket.instances[2]!.emit("open");
+    expect(JSON.parse(ViewSocket.instances[2]!.sent[0]!)).toEqual({
+      type: "subscribe", session_id: "runtime-1", cursor: "v1:runtime-1:2",
+    });
+    expect(ticket).toHaveBeenCalledTimes(3);
     cleanup();
   });
 

@@ -94,7 +94,7 @@ export class RuntimeClient {
   reconnect() {
     if (this.disposed) return;
     const socket = this.socket;
-    if (socket) socket.close(1012, "reconcile");
+    if (socket) socket.close(4000, "reconcile");
     else void this.connect(this.sessionId).catch((error) => this.onError(error));
   }
 
