@@ -1,5 +1,8 @@
 # Aceite do runtime Docker em produção
 
+Atualização posterior: [aceite da interface HTTP em 2026-09-10](2026-09-10-runtime-http-acceptance.md),
+com novas imagens da aplicação e do worker, backup restaurado e validação no Chromium.
+
 Concluído em 2026-09-09T16:26:11Z, com status `accepted`. O deploy já estava
 saudável ao retomar o trabalho; esta etapa executou o aceite real pendente,
 reiniciou o broker e confirmou a persistência na mesma sessão.

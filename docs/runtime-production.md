@@ -103,6 +103,16 @@ só é um backup aceito depois dessas verificações e de um teste de restauraç
 um volume separado, com a mesma versão de código e imagens. Nunca teste a
 restauração sobre `kairos-data`.
 
+Preserve também proprietário e permissões na cópia: `docker-sessions/` e
+`docker-sessions/blobs/` devem ser privados (`0700`), e o manifest deve ser
+`0600`, pertencentes ao UID/GID do runtime (`10000:10000` neste stack).
+Na restauração validada em 2026-09-10, `tarfile.data_filter` omitiu os modos
+dos diretórios e a extração criou `0755`; os arquivos eram idênticos, mas o
+registry recusava abri-los. Ao usar esse filtro para o backup privado, mantenha
+suas verificações e reponha o modo do diretório no `TarInfo` filtrado com
+`filtered.replace(mode=member.mode & 0o777)`. Ajuste o proprietário na cópia e
+abra os checkpoints com o UID do runtime antes de aprovar a restauração.
+
 Uma verificação mínima dos bancos da cópia extraída pode ser feita com a
 biblioteca SQLite do Python:
 
@@ -138,6 +148,13 @@ docker build -f docker/external-sandbox/Dockerfile -t kairos:external-sandbox .
 docker image inspect kairos:external-sandbox --format '{{.Id}}'
 docker compose --profile agent-runtime build kairos runtime-broker
 ```
+
+Antes de cada implantação ou aceite, confirme com `docker image inspect` que o
+ID configurado em `agent_runtime.docker_image` existe no daemon do broker.
+O status `ready` e o healthcheck atual não comprovam a presença dessa imagem.
+Se ela tiver sido removida, reconstrua-a, valide os testes Docker, registre o
+novo ID na configuração e reinicie o broker sem turnos ativos. Preserve uma
+tag operacional para a imagem e confira o ID novamente após limpezas do Docker.
 
 Edite `/opt/data/config.yaml` pelo procedimento administrativo do volume,
 preservando as demais chaves. Use o caminho visto pelo broker, e fixe
