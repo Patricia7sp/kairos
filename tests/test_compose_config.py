@@ -2,9 +2,40 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("repository", [None, "/srv/projects/kairos"])
+def test_broker_mounts_real_repository_readonly_without_expanding_web_access(repository):
+    env = {**os.environ, "KAIROS_RUNTIME_PROJECT": "/srv/projects/synthetic"}
+    env.pop("KAIROS_RUNTIME_KAIROS_PROJECT", None)
+    if repository is not None:
+        env["KAIROS_RUNTIME_KAIROS_PROJECT"] = repository
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "compose.yaml"),
+            "--profile",
+            "agent-runtime",
+            "config",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    services = yaml.safe_load(result.stdout)["services"]
+    mounts = {m["target"]: m for m in services["runtime-broker"]["volumes"]}
+    assert mounts["/projects/current"]["source"] == "/srv/projects/synthetic"
+    assert mounts["/projects/kairos"]["source"] == (repository or "/srv/projects/synthetic")
+    assert mounts["/projects/kairos"]["read_only"] is True
+    assert mounts["/projects/kairos"].get("bind", {}).get("create_host_path", False) is False
+    assert all(m["target"] != "/projects/kairos" for m in services["kairos"]["volumes"])
 
 
 def test_broker_externo_e_opt_in_e_compartilha_estado_sem_expor_socket_na_web():

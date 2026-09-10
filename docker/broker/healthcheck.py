@@ -8,10 +8,12 @@ from pathlib import Path
 
 from kairos_runtime.client import RuntimeClient
 from kairos_runtime.errors import RuntimeErrorInfo
+from kairos_runtime.host import _load_config
 
 
 async def main() -> int:
-    client = RuntimeClient(Path(os.environ["KAIROS_HOME"]) / "run" / "runtime.sock")
+    home = Path(os.environ["KAIROS_HOME"])
+    client = RuntimeClient(home / "run" / "runtime.sock")
     try:
         try:
             status = await asyncio.wait_for(client.status(), timeout=5)
@@ -19,14 +21,21 @@ async def main() -> int:
             return 1
         if not status.get("enabled") or status.get("state") != "ready":
             return 1
+        try:
+            config = _load_config(home)
+        except (RuntimeErrorInfo, ValueError):
+            return 1
+        if not config.enabled or config.backend != "docker":
+            return 1
         docker = shutil.which("docker")
         if docker is None:
             return 1
-        # Um registry vazio pode estar ready sem ter consultado o daemon.
+        # Inspecionar a imagem exige daemon acessível e detecta sua remoção
+        # mesmo quando o registry vazio ainda informa ready.
         # A soma dos dois limites fica abaixo do timeout de 10s do Compose.
         try:
             subprocess.run(  # noqa: S603 — executável do PATH da imagem e argumentos fixos
-                [docker, "info", "--format", "{{.ServerVersion}}"],
+                [docker, "image", "inspect", "--", config.docker_image],
                 check=True,
                 timeout=3,
                 stdout=subprocess.DEVNULL,
