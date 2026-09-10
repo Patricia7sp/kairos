@@ -1,5 +1,9 @@
 # Aceite da interface HTTP do runtime
 
+Atualização posterior: [aceite do repositório real](2026-09-10-real-project-acceptance.md),
+com healthcheck da imagem do worker, correção da reconexão WebSocket e validação
+de leitura, escrita isolada e retomada pelo Chromium.
+
 Concluído em 2026-09-10, com evidência local `status=accepted`. A correção do
 envio em HTTP foi implantada pelo stack Komodo e validada no Chromium pelo
 endereço Tailscale `http://100.87.25.101:9119`.
