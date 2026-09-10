@@ -122,7 +122,7 @@ kairos runtime publish --receipt FILE --title TITLE --base main [--json]
 
 All outputs written without overwriting existing user files. JSON output never
 contains auth. `changes` uses IPC and validates complete bundle before saving0600.
-Apply checks bundle size before parsing, validates exact approval, requires
+Apply checks bundle size before parsing, rejects duplicate JSON keys, validates exact approval, requires
 non-null base commit, reconstructs source baseline using Git into disposable
 export and uses `verify_review_baseline` to check fingerprint, old hashes/modes
 and readable diff before creating new branch/worktree. Validate new
@@ -148,9 +148,10 @@ No live publication from implementer tests: use local bare remote and fake gh.
 
 TDD temporary real Git: apply add/edit/delete/binary/modes and correctcommit;
 wrong approval/base, malicious paths, dirty/colliding worktree/branch, failed tests,
-extra modifications, altered receipt and publish HEAD drift rejected; positive
+extra modifications, unchanged-baseline file/directory collisions (Task1 minor
+review gap), altered receipt and publish HEAD drift rejected; positive
 push/draft behavior with stub gh and exact argv/body evidence. Existing CLI help
-and parser tests remain valid. Add operator runbook with concrete commands and
+and parser tests remain valid. Add `docs/runtime-delivery.md` operator runbook with concrete commands and
 review boundaries, limits and failure recovery. Run relevant CLI/core tests, ruff.
 Commit.
 
