@@ -169,15 +169,19 @@ Preserve também uma cópia privada fora do armazenamento de imagens do Docker:
 ```sh
 umask 077
 mkdir -p /home/operator/kairos-image-backups
-docker image save --output /home/operator/kairos-image-backups/worker.tar kairos:external-sandbox
+# Copie o ID completo de agent_runtime.docker_image, também usado na stack.
+worker_image_id='sha256:SUBSTITUA_PELO_ID_CONFIGURADO'
+docker image inspect "$worker_image_id" --format '{{.Id}}'
+docker image save --output /home/operator/kairos-image-backups/worker.tar "$worker_image_id"
 sha256sum /home/operator/kairos-image-backups/worker.tar
 # Recuperação: confira o SHA-256 registrado antes de carregar.
 docker image load --input /home/operator/kairos-image-backups/worker.tar
-docker image inspect kairos:external-sandbox --format '{{.Id}}'
+docker image inspect "$worker_image_id" --format '{{.Id}}'
 ```
 
 Use um nome novo por backup e registre seu hash e o ID da imagem. Carregar a cópia
-preserva o ID; uma reconstrução pode produzir outro. Atualize configuração e
+preserva o ID. Salve e verifique pelo ID configurado: a tag de build pode apontar
+para outra imagem. Uma reconstrução pode produzir outro ID. Atualize configuração e
 ambiente juntos, sem turnos ativos, caso precise usar um novo ID.
 
 Edite `/opt/data/config.yaml` pelo procedimento administrativo do volume,

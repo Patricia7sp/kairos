@@ -186,6 +186,7 @@ def test_runtime_retains_configured_worker_image_without_exposing_host_resources
     holder = services["runtime-worker-image"]
     assert holder["image"] == (image or "kairos:external-sandbox")
     assert holder["pull_policy"] == "never"
+    assert holder["platform"] == "linux/amd64"
     assert not holder.get("build")
     assert holder["container_name"] == "kairos-runtime-worker-image"
     assert holder["entrypoint"] == ["/bin/sleep"]
