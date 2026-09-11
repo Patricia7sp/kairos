@@ -46,6 +46,7 @@ def test_broker_externo_e_opt_in_e_compartilha_estado_sem_expor_socket_na_web():
     )
     services = yaml.safe_load(default.stdout)["services"]
     assert "runtime-broker" not in services
+    assert "runtime-worker-image" not in services
     assert services["kairos"]["environment"].get("KAIROS_RUNTIME_EXTERNAL") == "0"
 
     env.update(KAIROS_RUNTIME_EXTERNAL="1", KAIROS_DOCKER_GID="983")
@@ -158,3 +159,50 @@ def test_catalog_mount_is_readonly_broker_only_with_existing_project_fallback(ca
     assert mount["read_only"] is True
     assert not mount.get("bind", {}).get("create_host_path", False)
     assert all(m["target"] != "/projects/versions" for m in services["kairos"]["volumes"])
+
+
+@pytest.mark.parametrize("image", [None, "sha256:" + "a" * 64])
+def test_runtime_retains_configured_worker_image_without_exposing_host_resources(image):
+    env = {**os.environ, "COMPOSE_PROFILES": ""}
+    env.pop("KAIROS_RUNTIME_WORKER_IMAGE", None)
+    if image is not None:
+        env["KAIROS_RUNTIME_WORKER_IMAGE"] = image
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "compose.yaml"),
+            "--profile",
+            "agent-runtime",
+            "config",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    services = yaml.safe_load(result.stdout)["services"]
+    holder = services["runtime-worker-image"]
+    assert holder["image"] == (image or "kairos:external-sandbox")
+    assert holder["pull_policy"] == "never"
+    assert not holder.get("build")
+    assert holder["container_name"] == "kairos-runtime-worker-image"
+    assert holder["entrypoint"] == ["/bin/sleep"]
+    assert holder["command"] == ["infinity"]
+    assert holder["restart"] == "unless-stopped"
+    assert holder["user"] == "10000:10000"
+    assert holder["network_mode"] == "none"
+    assert holder["read_only"] is True
+    assert holder["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in holder["security_opt"]
+    assert not holder.get("privileged", False)
+    assert not any(
+        holder.get(key) for key in ("ports", "volumes", "secrets", "environment", "cap_add")
+    )
+    assert holder["pids_limit"] == 8
+    assert int(holder["mem_limit"]) == 16 * 1024 * 1024
+    assert float(holder["cpus"]) == 0.05
+    dependencies = services["runtime-broker"]["depends_on"]
+    assert dependencies["runtime-worker-image"]["condition"] == "service_started"
+    assert dependencies["kairos"]["condition"] == "service_healthy"

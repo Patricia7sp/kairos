@@ -33,6 +33,22 @@ selector or with `kairos runtime session create --cwd ... --sandbox workspace_wr
 Authorization covers each discovered workspace exactly; catalog descendants do
 not become arbitrary authorized session roots.
 
+## Keep the worker image available
+
+Before enabling the Docker profile, build or load the worker image on the broker's
+Docker daemon. Pin `KAIROS_RUNTIME_WORKER_IMAGE` in the stack environment to the
+same immutable image ID as `agent_runtime.docker_image`. The profile starts
+`runtime-worker-image` before the broker. This idle container retains the image
+between sessions, with no network, volumes, ports, credentials or Docker socket;
+it does not build or pull images. Keep it running while the runtime is enabled.
+
+Retention protects against unused-image cleanup, but cannot prevent forced
+administrator removal. Save a private `docker image save --output ...` archive,
+record its SHA-256 and image ID, and verify the hash before `docker image load
+--input ...`. Confirm the restored ID exists before starting the broker. See
+[production image recovery](runtime-production.md#imagens-e-configuração) for
+commands. A rebuild may change the ID: update both settings together while idle.
+
 ## Inspect and save the complete review
 
 Wait until the session is idle with a completed checkpoint. The Web's
