@@ -56,3 +56,14 @@ ferramenta, reinicia com o mesmo estado, comprova checkpoint anterior preservado
 um único terminal interrompido, nenhum replay, limpeza de worker e retomada
 explícita na mesma thread. A produção recebe backup com restauração verificada,
 imagens validadas e um aceite real de tarefa até PR usando os novos comandos.
+
+## Dependência de imagem do worker
+
+Durante a execução, a imagem local do worker foi removida novamente enquanto não
+havia workers ativos. O broker detectou a ausência e ficou indisponível. A entrega
+inclui uma referência mínima em execução à mesma imagem do worker, sem rede,
+volumes, credenciais ou privilégios adicionais, e um arquivo de imagem preservado
+para restauração. Essa referência protege a dependência contra limpeza de imagens
+sem uso; não promete resistir a remoção forçada pelo administrador. A causa externa
+da remoção ainda não foi confirmada. A configuração do broker e a referência de
+retenção devem apontar para o mesmo identificador imutável.

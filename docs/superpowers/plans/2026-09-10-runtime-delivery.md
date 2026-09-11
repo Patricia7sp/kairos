@@ -172,3 +172,39 @@ focused non-Docker recovery tests and ruff. Document actual failure guarantees.
 Commit; controller then handles final review/CI, image builds, backup/restore,
 production deployment and real version→task→review→apply→tests→draft PR acceptance,
 recording evidence in a dated acceptance document without private artifacts.
+
+
+### Task 5: Retain the production worker image dependency
+
+Repeated removal of unused worker images was observed during this delivery; root
+restored the validated worker and started temporary `kairos-worker-image-retention`.
+Add permanent Compose service `runtime-worker-image` in profile `agent-runtime`,
+container_name `kairos-runtime-worker-image`, with this behavior:
+
+```yaml
+    image: "${KAIROS_RUNTIME_WORKER_IMAGE:-kairos:external-sandbox}"
+    pull_policy: never
+    platform: linux/amd64
+    restart: unless-stopped
+    user: "10000:10000"
+    entrypoint: ["/bin/sleep"]
+    command: ["infinity"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 8
+    mem_limit: 16m
+    cpus: 0.05
+```
+
+No ports, volumes, Docker socket, secrets, model calls, worker session, or extra
+build/pull behavior. Broker depends_on this service with condition service_started,
+retaining existing healthy-app dependency. Operator builds/loads worker first and
+sets `KAIROS_RUNTIME_WORKER_IMAGE` to the same immutable digest as config docker_image.
+Do not change or disable global cleanup jobs. Document purpose and limitation
+against forced administrator removal, private docker image save/load recovery,
+and matching config/environment IDs in docs/runtime-delivery.md and production
+runbook. Add meaningful Compose tests for dependency/image/security/profile and
+preserve Web isolation; run Compose/health tests and lint/diff checks. Commit.
+Controller deploys permanent holder before removing its own temporary holder.
