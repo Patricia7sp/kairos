@@ -646,3 +646,28 @@ async def test_generation_change_during_resume_never_dispatches_and_releases_lea
             db.close()
     finally:
         await service.aclose()
+
+
+@async_test
+async def test_changes_authorizes_and_rejects_pending_work_or_local_backend(tmp_path):
+    service, _store, runtime = await setup_service(tmp_path)
+    try:
+        with pytest.raises(RuntimeErrorInfo) as error:
+            await service.changes("s1")
+        assert error.value.code == "unavailable"
+
+        async def changes(session):
+            return {"session_id": session.session_id}
+
+        runtime.changes = changes
+        assert await service.changes("s1") == {"session_id": "s1"}
+        await service.submit("s1", "pending", "pending")
+        with pytest.raises(RuntimeErrorInfo) as error:
+            await service.changes("s1")
+        assert error.value.code == "session_busy"
+        service._roots = lambda: ()
+        with pytest.raises(RuntimeErrorInfo) as error:
+            await service.changes("s1")
+        assert error.value.code == "invalid_directory"
+    finally:
+        await service.aclose()

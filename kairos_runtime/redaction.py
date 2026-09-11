@@ -12,6 +12,8 @@ __all__ = ["public_error", "sanitize_payload"]
 
 
 _PUBLIC_ERRORS: dict[str, tuple[str, bool]] = {
+    "baseline_missing": ("sessão antiga sem baseline de revisão", False),
+    "review_too_large": ("pacote de revisão excede 512 KiB; nenhuma parte foi truncada", False),
     "unavailable": ("runtime indisponível", True),
     "incompatible": ("runtime incompatível", False),
     "thread_missing": ("thread de runtime ausente", False),

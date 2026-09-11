@@ -79,6 +79,25 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Mantém a imagem referenciada mesmo quando nenhuma sessão tem worker ativo.
+  runtime-worker-image:
+    profiles: [agent-runtime]
+    image: "${KAIROS_RUNTIME_WORKER_IMAGE:-kairos:external-sandbox}"
+    pull_policy: never
+    platform: linux/amd64
+    container_name: kairos-runtime-worker-image
+    restart: unless-stopped
+    user: "10000:10000"
+    entrypoint: ["/bin/sleep"]
+    command: ["infinity"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 8
+    mem_limit: 16m
+    cpus: 0.05
+
   runtime-broker:
     profiles: [agent-runtime]
     build:
@@ -96,6 +115,8 @@ services:
     depends_on:
       kairos:
         condition: service_healthy
+      runtime-worker-image:
+        condition: service_started
     environment:
       KAIROS_HOME: /opt/data
       HOME: /opt/data
@@ -107,6 +128,13 @@ services:
       - type: bind
         source: "${KAIROS_RUNTIME_PROJECT:-/srv/kairos-runtime-project}"
         target: /projects/current
+        read_only: true
+        bind:
+          create_host_path: false
+      # Catálogo opcional; sem configuração reutiliza um bind já existente.
+      - type: bind
+        source: "${KAIROS_RUNTIME_PROJECT_CATALOG:-${KAIROS_RUNTIME_PROJECT:-/srv/kairos-runtime-project}}"
+        target: /projects/versions
         read_only: true
         bind:
           create_host_path: false

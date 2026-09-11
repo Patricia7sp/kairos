@@ -88,6 +88,7 @@ class RuntimeRepository:
             "append",
             "dispatch",
             "confirm_dispatch",
+            "uncertain",
             "save_approval",
             "finish",
             "transition",

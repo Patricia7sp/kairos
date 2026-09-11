@@ -157,6 +157,33 @@ Se ela tiver sido removida, reconstrua-a, valide os testes Docker, registre o
 novo ID na configuração e reinicie o broker sem turnos ativos. Preserve uma
 tag operacional para a imagem e confira o ID novamente após limpezas do Docker.
 
+O serviço `runtime-worker-image` mantém uma referência em execução à imagem mesmo
+sem sessões ativas, protegendo-a de limpeza de imagens sem uso. Ele executa apenas
+`sleep infinity`, sem rede, volumes, portas, segredos ou socket Docker. O broker
+aguarda esse serviço iniciar. Isso não protege contra remoção forçada por um
+administrador. Configure `KAIROS_RUNTIME_WORKER_IMAGE` com o **mesmo ID imutável**
+de `agent_runtime.docker_image`; o serviço não constrói nem baixa imagens.
+
+Preserve também uma cópia privada fora do armazenamento de imagens do Docker:
+
+```sh
+umask 077
+mkdir -p /home/operator/kairos-image-backups
+# Copie o ID completo de agent_runtime.docker_image, também usado na stack.
+worker_image_id='sha256:SUBSTITUA_PELO_ID_CONFIGURADO'
+docker image inspect "$worker_image_id" --format '{{.Id}}'
+docker image save --output /home/operator/kairos-image-backups/worker.tar "$worker_image_id"
+sha256sum /home/operator/kairos-image-backups/worker.tar
+# Recuperação: confira o SHA-256 registrado antes de carregar.
+docker image load --input /home/operator/kairos-image-backups/worker.tar
+docker image inspect "$worker_image_id" --format '{{.Id}}'
+```
+
+Use um nome novo por backup e registre seu hash e o ID da imagem. Carregar a cópia
+preserva o ID. Salve e verifique pelo ID configurado: a tag de build pode apontar
+para outra imagem. Uma reconstrução pode produzir outro ID. Atualize configuração e
+ambiente juntos, sem turnos ativos, caso precise usar um novo ID.
+
 Edite `/opt/data/config.yaml` pelo procedimento administrativo do volume,
 preservando as demais chaves. Use o caminho visto pelo broker, e fixe
 `docker_image` no ID que acabou de ser validado:
@@ -192,6 +219,7 @@ COMPOSE_PROFILES=agent-runtime
 KAIROS_RUNTIME_EXTERNAL=1
 KAIROS_DOCKER_GID=GID_NUMERICO_DO_SOCKET
 KAIROS_RUNTIME_PROJECT=/srv/kairos-runtime-project
+KAIROS_RUNTIME_WORKER_IMAGE=sha256:ID_IMUTAVEL_DA_IMAGEM_DO_WORKER
 ```
 
 As duas primeiras variáveis formam uma única mudança. `COMPOSE_PROFILES` cria o
@@ -216,7 +244,8 @@ Suba a aplicação e o broker com as imagens já construídas:
 docker compose up -d --no-build kairos runtime-broker
 ```
 
-O broker não publica portas. Sua dependência aguarda o healthcheck da aplicação;
+O broker não publica portas. Suas dependências aguardam o healthcheck da aplicação
+e a inicialização de `runtime-worker-image`;
 a única porta externa continua sendo a porta do dashboard já declarada no
 serviço `kairos`.
 

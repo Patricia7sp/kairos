@@ -7,6 +7,8 @@ __all__ = ["RUNTIME_ERROR_CODES", "RuntimeErrorInfo"]
 
 RUNTIME_ERROR_CODES = frozenset(
     {
+        "baseline_missing",
+        "review_too_large",
         "unavailable",
         "incompatible",
         "thread_missing",

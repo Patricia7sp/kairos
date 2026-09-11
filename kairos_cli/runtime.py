@@ -114,9 +114,13 @@ async def run_runtime(*, home: Path, args) -> int:  # noqa: PLR0912 - mirrors CL
         except RuntimeErrorInfo as exc:
             return _report_error(exc, as_json=as_json)
 
+    from kairos_cli.runtime_delivery import COMMANDS, run_delivery
+
     client = RuntimeClient(home / "run" / "runtime.sock")
     try:
-        if command == "status":
+        if command in COMMANDS:
+            result = await run_delivery(command=command, args=args, client=client)
+        elif command == "status":
             result = await client.status()
         elif command == "login":
             method = args.method
@@ -163,6 +167,16 @@ async def run_runtime(*, home: Path, args) -> int:  # noqa: PLR0912 - mirrors CL
         return 0
     except RuntimeErrorInfo as exc:
         return _report_error(exc, as_json=as_json)
+    except (ValueError, OSError) as exc:
+        if command not in COMMANDS:
+            raise
+        message = (
+            str(exc)
+            if isinstance(exc, ValueError)
+            else "delivery filesystem operation failed; inspect paths and permissions"
+        )
+        _emit({"error": "delivery_failed", "message": message}, as_json=as_json)
+        return 1
     finally:
         await client.aclose()
 

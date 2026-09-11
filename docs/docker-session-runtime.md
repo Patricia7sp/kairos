@@ -217,3 +217,50 @@ mesma versão do código e da imagem, em um novo perfil autorizado, preservando
 os caminhos e identidades dos projetos. Não sobrescreva o perfil ativo para
 testar e não faça downgrade de schema. Reinicie o broker original e confirme
 `ready` depois da manutenção.
+
+### Catálogo de versões e revisão de alterações
+
+O broker descobre versões imutáveis em `agent_runtime.project_catalogs` somente
+na inicialização, fora da leitura leve de configuração usada pelo healthcheck.
+Cada versão usa `<catálogo>/<commit completo>/workspace` e um `project.json`
+irmão verificado. Apenas esses workspaces exatos entram na autorização; o
+catálogo e os subdiretórios não viram raízes autorizadas. As raízes existentes
+em `allowed_directories` continuam válidas.
+
+No Compose, defina `KAIROS_RUNTIME_PROJECT_CATALOG=/srv/kairos-project-versions`
+para montar o catálogo somente leitura em `/projects/versions` no broker. Sem
+essa variável, o mount reutiliza `KAIROS_RUNTIME_PROJECT` (ou o fallback
+`/srv/kairos-runtime-project`); deixe `project_catalogs: []` até fornecer um
+catálogo real. A aplicação Web não recebe esse mount nem o socket Docker.
+Configuração correspondente no `config.yaml` do broker:
+
+```yaml
+agent_runtime:
+  enabled: true
+  backend: docker
+  allowed_directories: [/projects/current, /projects/kairos]
+  project_catalogs: [/projects/versions]
+  broad_access_enabled: false
+```
+
+Após exportar uma versão ou alterar essa configuração, espere a fila e todos os
+turnos ficarem ociosos e reinicie explicitamente apenas o broker. A nova versão
+aparece no seletor Web como nome do projeto e commit curto. Sessões existentes
+mantêm seu diretório, checkpoint e baseline originais; nenhuma tarefa interrompida
+é repetida automaticamente.
+
+Uma sessão concluída e ociosa oferece **Revisar alterações**. O broker compara o
+último checkpoint confirmado com o arquivo inicial capturado antes de criar o
+primeiro worker; alterações posteriores no diretório de origem não mudam essa
+baseline. A tela apresenta commit de origem, ID da revisão, arquivos e diff como
+texto. **Baixar pacote** salva o JSON completo e compacto. Iniciar outro turno ou
+mudar de sessão invalida a prévia. Esse fluxo não aplica, executa ou publica código.
+
+A mesma revisão está em `session.changes` no IPC e em
+`GET /api/runtime/sessions/{session_id}/changes` na API autenticada. Trabalho
+pendente retorna conflito; backend local retorna indisponível. Sessões antigas
+sem baseline retornam `baseline_missing`, sem inferir sua origem a partir do
+estado atual. Projetos sem manifesto têm `base_commit: null`. Pacotes maiores
+que 512 KiB retornam `review_too_large`, sem truncamento; a mensagem IPC continua
+limitada a 1 MiB. O pacote contém apenas arquivos do workspace, nunca o home ou
+a autenticação do worker.

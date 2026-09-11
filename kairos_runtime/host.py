@@ -9,7 +9,7 @@ import logging
 import os
 import socket
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from kairos_container import CONTAINER_MODE_FILENAME
 from .auth import RuntimeAuth
 from .codex_adapter import CodexAppServerAdapter
 from .errors import RuntimeErrorInfo
+from .projects import discover_projects
 from .redaction import public_error
 from .service import AgentRuntimeService
 from .store import RuntimeStore
@@ -32,6 +33,7 @@ _METHODS = frozenset(
     {
         "session.create",
         "session.get",
+        "session.changes",
         "session.end",
         "turn.submit",
         "turn.cancel",
@@ -63,6 +65,8 @@ class _Config:
     docker_image: str = "kairos:external-sandbox"
     model: str = "gpt-5.5"
     max_workers: int = 2
+    project_catalogs: tuple[str, ...] = ()
+    project_versions: tuple[dict, ...] = ()
 
 
 class _Host:
@@ -139,9 +143,11 @@ class _Host:
                     "enabled": False,
                     "state": "disabled",
                     "authorized_projects": [],
+                    "project_versions": [],
                     "sandbox_profiles": [],
                 }
             choices = {
+                "project_versions": list(self.config.project_versions) if self.config else [],
                 "authorized_projects": list(self.config.allowed_directories)
                 if self.config is not None
                 else [],
@@ -177,6 +183,8 @@ class _Host:
                 )
             if method == "session.get":
                 return await service.get(**_exact(params, {"session_id"}))
+            if method == "session.changes":
+                return await service.changes(**_exact(params, {"session_id"}))
             if method == "session.end":
                 await service.end(**_exact(params, {"session_id"}))
                 return None
@@ -302,6 +310,8 @@ async def serve_runtime(home: Path) -> None:  # noqa: PLR0912, PLR0915
     try:
         try:
             config = _load_config(canonical_home)
+            if config.enabled:
+                config = await _discover_config(config)
             startup_phase = "runtime"
             if config.enabled:
                 codex_home = _secure_directory(canonical_home / "codex-runtime")
@@ -579,6 +589,7 @@ def _load_config(home: Path) -> _Config:
     broad = section.get("broad_access_enabled", False)
     binary = section.get("codex_binary", "codex")
     roots = section.get("allowed_directories", [])
+    catalogs = section.get("project_catalogs", [])
     backend = section.get("backend", "local")
     image = section.get("docker_image", "kairos:external-sandbox")
     model = section.get("model", "gpt-5.5")
@@ -590,6 +601,16 @@ def _load_config(home: Path) -> _Config:
         or not binary.strip()
         or not isinstance(roots, list)
         or any(not isinstance(root, str) or not root.strip() for root in roots)
+        or not isinstance(catalogs, list)
+        or any(
+            not isinstance(path, str)
+            or not path.strip()
+            or "\x00" in path
+            or not Path(path).is_absolute()
+            or str(Path(path)) != path
+            or ".." in Path(path).parts
+            for path in catalogs
+        )
         or backend not in ("local", "docker")
         or not isinstance(image, str)
         or not image
@@ -603,13 +624,22 @@ def _load_config(home: Path) -> _Config:
         raise RuntimeErrorInfo("invalid_policy", "configuração de runtime inválida", False)
     if backend == "docker":
         broker = home.resolve()
-        for root in roots:
+        for root in [*roots, *catalogs]:
             project = Path(root).expanduser().resolve()
             if project.is_relative_to(broker) or broker.is_relative_to(project):
                 raise RuntimeErrorInfo(
                     "invalid_policy", "projeto sobrepõe diretório privado do broker", False
                 )
-    return _Config(enabled, binary, tuple(roots), broad, backend, image, model, max_workers)
+    return _Config(
+        enabled, binary, tuple(roots), broad, backend, image, model, max_workers, tuple(catalogs)
+    )
+
+
+async def _discover_config(config: _Config) -> _Config:
+    """Hash catalogs once at broker startup, never during healthcheck config reads."""
+    versions = await asyncio.to_thread(discover_projects, config.project_catalogs)
+    roots = tuple(dict.fromkeys((*config.allowed_directories, *(v["cwd"] for v in versions))))
+    return replace(config, allowed_directories=roots, project_versions=tuple(versions))
 
 
 def _attests_inactive(lock_fd: int, runtime: CodexAppServerAdapter, generation: str) -> bool:

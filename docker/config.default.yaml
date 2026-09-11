@@ -9,4 +9,5 @@ agent_runtime:
   codex_binary: /usr/local/bin/codex
   codex_version: 0.153.4
   allowed_directories: []
+  project_catalogs: []
   broad_access_enabled: false

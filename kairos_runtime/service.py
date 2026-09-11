@@ -154,6 +154,26 @@ class AgentRuntimeService:
         )
         return await self.store.get_session(session_id)
 
+    async def changes(self, session_id: str) -> dict:
+        async with self._lock(session_id):
+            session = await self._authorize(session_id)
+            if self._closed:
+                raise RuntimeErrorInfo("unavailable", "runtime indisponível", False)
+            if any(
+                turn["session_id"] == session_id for turn in await self.store.nonterminal_turns()
+            ):
+                raise RuntimeErrorInfo("session_busy", "runtime possui trabalho pendente", True)
+            for turn_id, task in tuple(self._tasks.items()):
+                if (
+                    not task.done()
+                    and (await self.store.get_turn(turn_id))["session_id"] == session_id
+                ):
+                    raise RuntimeErrorInfo("session_busy", "runtime possui trabalho pendente", True)
+            changes = getattr(self.runtime, "changes", None)
+            if changes is None:
+                raise RuntimeErrorInfo("unavailable", "revisão indisponível neste backend", False)
+            return await changes(session)
+
     async def submit(self, session_id: str, content: str, idempotency_key: str) -> str:
         if self._closed or not isinstance(content, str) or not content.strip():
             raise RuntimeErrorInfo("unavailable", "runtime indisponível", False)
@@ -460,6 +480,7 @@ class AgentRuntimeService:
             if (
                 turn["external_turn_id"] is None
                 or snapshot.external_turn_id != turn["external_turn_id"]
+                or snapshot.state == "unknown"
             ):
                 return
             event_id, payload = reconciliation(
@@ -707,7 +728,7 @@ class AgentRuntimeService:
                     turn["external_turn_id"] is not None
                     and snapshot.external_turn_id == turn["external_turn_id"]
                 )
-                if same_turn:
+                if same_turn and snapshot.state != "unknown":
                     event_id, payload = reconciliation(
                         session.external_thread_id, snapshot, "observation_lost"
                     )
@@ -747,11 +768,13 @@ class AgentRuntimeService:
                         )
                     else:
                         await self._lost(turn["id"])
-                elif (
-                    same_turn
-                    and inactive
-                    and snapshot.state in {"completed", "failed", "cancelled", "interrupted"}
-                ):
+                elif inactive and snapshot.state in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "interrupted",
+                    "unknown",
+                }:
                     generation = await self.leases.adopt(
                         turn["id"],
                         turn["holder"],
@@ -760,12 +783,21 @@ class AgentRuntimeService:
                         confirmed_inactive=True,
                     )
                     if generation is not None:
+                        # A restored checkpoint may predate this turn. Owner inactivity
+                        # permits release, but cannot establish an unobserved outcome.
+                        state = (
+                            snapshot.state
+                            if same_turn and snapshot.state != "unknown"
+                            else "interrupted"
+                        )
+                        if state == "interrupted" and turn["send_state"] == "dispatching":
+                            await self._owned(turn["id"], generation, "uncertain", turn["id"])
                         await self._owned(
                             turn["id"],
                             generation,
                             "finish",
                             turn["id"],
-                            snapshot.state,
+                            state,
                             projection.content,
                             projection.usage,
                         )

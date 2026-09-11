@@ -9,6 +9,140 @@ from test_runtime_service import FakeRuntime, setup_service, terminal
 from kairos_runtime.contracts import RuntimeObservation
 from kairos_runtime.errors import RuntimeErrorInfo
 from kairos_runtime.service import AgentRuntimeService
+from kairos_runtime.store import RuntimeStore
+
+
+@pytest.mark.parametrize(
+    ("observed_state", "observed_turn"),
+    [("unknown", None), ("completed", "unrelated-turn")],
+)
+@async_test
+async def test_recovery_after_crash_at_durable_dispatch_boundary(
+    tmp_path, observed_state, observed_turn
+):
+    service, store, runtime = await setup_service(tmp_path)
+    # Persist the real pre-send boundary without running graceful loss handling.
+    turn = await store.admit("s1", "old", "old request")
+    await service.leases.enqueue(turn)
+    generation = await service.leases.claim(turn, "dead-broker")
+    assert await store.owned(turn, "dead-broker", generation, "dispatch", turn, runtime.generation)
+    before = await store.get_turn(turn)
+    assert before["send_state"] == "dispatching"
+    assert before["external_turn_id"] is None
+    journal = await store.events_after("s1", None)
+    recovered = FakeRuntime()
+    recovered.generation = "process-2"
+    recovered.snapshot = RuntimeObservation(observed_state, observed_turn, (), ())
+    next_service = AgentRuntimeService(
+        RuntimeStore(tmp_path / "state.db"),
+        recovered,
+        allowed_directories=(str(tmp_path),),
+        inactivity_confirmed=lambda previous: previous == runtime.generation,
+    )
+    try:
+        await next_service.recover()
+        await next_service.recover()
+        old = await store.get_turn(turn)
+        assert old["state"] == "interrupted"
+        assert old["send_state"] == "uncertain"
+        assert old["inactive_confirmed_at"] is not None
+        events = await store.events_after("s1", None)
+        assert events[: len(journal)] == journal
+        ends = [event for event in events if event.kind == "turn_end"]
+        assert len(ends) == 1 and ends[0].payload["state"] == "interrupted"
+        assert runtime.starts == recovered.starts == []
+        assert await next_service.submit("s1", "old request", "old") == turn
+        resumed = await next_service.submit("s1", "new request", "new")
+        await asyncio.wait_for(recovered.started.wait(), 3)
+        assert resumed != turn
+        assert len(recovered.starts) == 1
+        assert recovered.starts[0][0].external_thread_id == "thread-s1"
+        assert recovered.starts[0][1:] == (resumed, "new request")
+        await recovered.events.put({"kind": "turn", "payload": {"state": "completed"}})
+        async with asyncio.timeout(3):
+            async for event in next_service.subscribe("s1"):
+                if event.turn_id == resumed and event.kind == "turn_end":
+                    assert event.payload["state"] == "completed"
+                    break
+    finally:
+        await next_service.aclose()
+        await service.aclose()
+
+
+@pytest.mark.parametrize("confirmed_inactive", [False, True])
+@pytest.mark.parametrize(
+    ("send_confirmed", "observed_state", "observed_turn"),
+    [
+        (True, "unknown", None),
+        (True, "unknown", "external-1"),
+        (True, "completed", "unrelated-turn"),
+        (False, "unknown", None),
+        (False, "completed", "unrelated-turn"),
+    ],
+)
+@async_test
+async def test_recovery_of_absent_turn_requires_dead_owner_before_explicit_resume(
+    tmp_path, confirmed_inactive, send_confirmed, observed_state, observed_turn
+):
+    service, store, runtime = await setup_service(tmp_path)
+    if not send_confirmed:
+        runtime.failure = RuntimeErrorInfo("transport", "unavailable", True)
+    turn = await service.submit("s1", "old request", "old")
+    await runtime.started.wait()
+    if send_confirmed:
+        await runtime.events.put(
+            {"kind": "text", "payload": {"itemId": "partial", "delta": "saved partial"}}
+        )
+        async with asyncio.timeout(3):
+            async for event in service.subscribe("s1"):
+                if event.kind == "text":
+                    break
+    else:
+        await terminal(service)
+    await service.aclose()
+    journal = await store.events_after("s1", None)
+    recovered = FakeRuntime()
+    recovered.generation = "process-2"
+    recovered.snapshot = RuntimeObservation(
+        observed_state,
+        observed_turn,
+        ({"id": "unrelated", "type": "agentMessage", "text": "not our partial"},),
+        (),
+    )
+    next_service = AgentRuntimeService(
+        store,
+        recovered,
+        allowed_directories=(str(tmp_path),),
+        inactivity_confirmed=lambda generation: confirmed_inactive and generation == "process-1",
+    )
+    try:
+        await next_service.recover()
+        await next_service.recover()
+        old = await store.get_turn(turn)
+        assert old["state"] == "interrupted"
+        assert old["send_state"] == ("confirmed" if send_confirmed else "uncertain")
+        assert (old["inactive_confirmed_at"] is not None) == confirmed_inactive
+        assert recovered.starts == []
+        events = await store.events_after("s1", None)
+        assert events[: len(journal)] == journal
+        assert not any(event.kind == "reconciled" for event in events)
+        ends = [event for event in events if event.kind == "turn_end"]
+        assert len(ends) == 1
+        assert ends[0].payload["content"] == ("saved partial" if send_confirmed else "")
+        assert await next_service.submit("s1", "old request", "old") == turn
+        if not confirmed_inactive:
+            with pytest.raises(RuntimeErrorInfo, match="session_busy"):
+                await next_service.submit("s1", "new request", "new")
+            return
+        assert (await next_service.get("s1"))["state"] == "ready"
+        resumed = await next_service.submit("s1", "new request", "new")
+        await asyncio.wait_for(recovered.started.wait(), 3)
+        assert resumed != turn
+        assert len(recovered.starts) == 1
+        assert recovered.starts[0][0].external_thread_id == "thread-s1"
+        assert recovered.starts[0][1:] == (resumed, "new request")
+    finally:
+        await next_service.aclose()
 
 
 @async_test
@@ -192,6 +326,10 @@ async def test_takeover_rejects_changed_owner_and_old_owner_cannot_write(tmp_pat
         turn, before["holder"], before["lease_generation"], "next", confirmed_inactive=True
     )
     assert generation == before["lease_generation"] + 1
+    journal = await store.events_after("s1", None)
+    with pytest.raises(RuntimeErrorInfo, match="lease_lost"):
+        await store.owned(turn, before["holder"], before["lease_generation"], "uncertain", turn)
+    assert await store.events_after("s1", None) == journal
     with pytest.raises(RuntimeErrorInfo, match="lease_lost"):
         await store.owned(
             turn,

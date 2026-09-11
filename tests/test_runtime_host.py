@@ -116,6 +116,7 @@ async def test_container_sandbox_failure_keeps_status_unavailable_without_app_se
             "enabled": True,
             "state": "unavailable",
             "authorized_projects": [],
+            "project_versions": [],
             "sandbox_profiles": ["read_only", "workspace_write"],
         }
         assert not started.exists()
@@ -210,6 +211,7 @@ async def test_disabled_host_is_status_only_and_never_autostarts(tmp_path: Path)
             "enabled": False,
             "state": "disabled",
             "authorized_projects": [],
+            "project_versions": [],
             "sandbox_profiles": [],
         }
         with pytest.raises(Exception) as raised:
@@ -239,6 +241,7 @@ async def test_status_exposes_only_host_configured_runtime_choices() -> None:
         "enabled": True,
         "state": "ready",
         "authorized_projects": ["/srv/project-a", "/srv/project-b"],
+        "project_versions": [],
         "sandbox_profiles": ["read_only", "workspace_write"],
     }
 
@@ -473,6 +476,7 @@ async def test_child_exit_blocks_admission_until_restart_recovery_finishes() -> 
             "enabled": True,
             "state": "unavailable",
             "authorized_projects": [],
+            "project_versions": [],
             "sandbox_profiles": ["read_only", "workspace_write"],
         }
         with pytest.raises(Exception) as raised:
@@ -582,6 +586,7 @@ async def test_second_host_is_refused_without_disturbing_first(tmp_path: Path) -
             "enabled": False,
             "state": "disabled",
             "authorized_projects": [],
+            "project_versions": [],
             "sandbox_profiles": [],
         }
         await client.aclose()
@@ -658,6 +663,7 @@ async def test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death(
             "enabled": True,
             "state": "ready",
             "authorized_projects": [],
+            "project_versions": [],
             "sandbox_profiles": ["read_only", "workspace_write"],
         }
         await client.aclose()
@@ -714,3 +720,74 @@ async def test_startup_logs_static_diagnosis_without_private_details(
         await client.aclose()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("catalogs", ["/catalog", [None], [""], ["relative"], ["/tmp/../etc"]])
+def test_catalog_config_rejects_invalid_lists(tmp_path, catalogs):
+    import yaml
+
+    from kairos_runtime.errors import RuntimeErrorInfo
+    from kairos_runtime.host import _load_config
+
+    (tmp_path / "config.yaml").write_text(
+        yaml.safe_dump({"agent_runtime": {"project_catalogs": catalogs}})
+    )
+    with pytest.raises(RuntimeErrorInfo):
+        _load_config(tmp_path)
+
+
+@async_test
+async def test_catalog_discovery_is_separate_from_cheap_config_and_keeps_exact_roots(
+    tmp_path, monkeypatch
+):
+    from kairos_runtime import host
+
+    (tmp_path / "config.yaml").write_text(
+        "agent_runtime:\n  enabled: true\n  allowed_directories: [/legacy]\n  project_catalogs: [/catalog]\n"
+    )
+    calls = []
+    version = {"cwd": "/catalog/commit/workspace", "revision": "a" * 40, "name": "app"}
+
+    def discover(catalogs):
+        calls.append(catalogs)
+        return [version]
+
+    monkeypatch.setattr(host, "discover_projects", discover, raising=False)
+    config = host._load_config(tmp_path)
+    assert calls == []
+    config = await host._discover_config(config)
+    assert calls == [("/catalog",)]
+    status = await _Host(config=config, service=object())._dispatch("runtime.status", {})
+    assert status["project_versions"] == [version]
+    assert status["authorized_projects"] == ["/legacy", version["cwd"]]
+
+
+@async_test
+async def test_changes_ipc_roundtrip_waits_for_host_mutation_fence(tmp_path):
+    called = asyncio.Event()
+
+    class Service:
+        async def changes(self, session_id):
+            called.set()
+            return {"session_id": session_id, "review_id": "review"}
+
+    host = _Host(config=_Config(True, "codex", (), False), service=Service())
+    socket_path = tmp_path / "changes.sock"
+    server = await asyncio.start_unix_server(host.handle, path=str(socket_path))
+    client = RuntimeClient(socket_path)
+    try:
+        await host.mutations.acquire()
+        pending = asyncio.create_task(client.changes("session-1"))
+        await asyncio.sleep(0.02)
+        assert not called.is_set()
+        host.mutations.release()
+        assert await asyncio.wait_for(pending, 2) == {
+            "session_id": "session-1",
+            "review_id": "review",
+        }
+    finally:
+        if host.mutations.locked():
+            host.mutations.release()
+        await client.aclose()
+        server.close()
+        await server.wait_closed()

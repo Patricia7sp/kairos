@@ -21,7 +21,10 @@ from kairos_providers._async_cleanup import run_persistent_cleanup
 from ..codex_adapter import CodexAppServerAdapter
 from ..contracts import Decision, RuntimeCapabilities, RuntimeObservation, RuntimeSession
 from ..errors import RuntimeErrorInfo
+from ..experimental.snapshot import snapshot_project
 from ..policy import RUNTIME_V1_FEATURES
+from ..projects import project_metadata
+from ..reviews import build_review
 from .registry import SessionRegistry
 
 TERMINAL_STATES = frozenset({"completed", "failed", "interrupted", "cancelled"})
@@ -199,7 +202,14 @@ class DockerSessionRuntime:
             await self._slots.acquire()
             reserved = True
             self._admit(session)
-            archives = self.registry.archives(session.session_id) if restore else None
+            archives = (
+                await asyncio.to_thread(self.registry.archives, session.session_id)
+                if restore
+                else None
+            )
+            initial = None
+            if not restore:
+                initial = await self._capture_initial_source(session)
             if restore and archives is None:
                 raise RuntimeErrorInfo("thread_missing", "checkpoint de thread ausente", False)
             if self._factory is None:
@@ -212,7 +222,7 @@ class DockerSessionRuntime:
                 writable=session.sandbox == "workspace_write",
                 transport=self.transport,
                 model=self.model,
-                workspace_archive=archives[0] if archives else None,
+                workspace_archive=archives[0] if archives else initial,
                 home_archive=archives[1] if archives else None,
             )
             entry = _Entry(replace(session, cwd="/workspace"), worker, _SandboxAdapter(worker))
@@ -239,6 +249,63 @@ class DockerSessionRuntime:
             raise
         finally:
             self._opening.discard(current)
+
+    async def _capture_initial_source(self, session: RuntimeSession) -> bytes:
+        archive = None
+
+        async def capture():
+            nonlocal archive
+            archive = await asyncio.to_thread(self._initial_source, session)
+
+        # _opening stays owned until snapshot/registry work has settled, including
+        # cancellation, so host shutdown can safely close registry descriptors.
+        outcome = await run_persistent_cleanup(capture, task_name="docker-baseline-persistence")
+        if outcome.error is not None:
+            raise outcome.error
+        if outcome.cancellation is not None:
+            raise outcome.cancellation
+        return archive
+
+    def _initial_source(self, session: RuntimeSession) -> bytes:
+        baseline = self.registry.baseline(session.session_id)
+        if baseline is not None:
+            return baseline[0]
+        archive = snapshot_project(Path(session.cwd))
+        metadata = project_metadata(Path(session.cwd), baseline=archive)
+        self.registry.record_baseline(
+            session.session_id,
+            archive,
+            base_commit=metadata["revision"] if metadata else None,
+        )
+        return archive
+
+    async def changes(self, session: RuntimeSession) -> dict:
+        """Review only the last durable checkpoint against the immutable source."""
+        async with self._lock(session):
+            self._admit(session)
+            if session.session_id in self._entries:
+                raise RuntimeErrorInfo("session_busy", "sessão Docker ocupada", True)
+            return await asyncio.to_thread(self._changes, session.session_id)
+
+    def _changes(self, session_id: str) -> dict:
+        baseline = self.registry.baseline(session_id)
+        if baseline is None:
+            raise RuntimeErrorInfo(
+                "baseline_missing", "sessão antiga sem baseline de revisão", False
+            )
+        archives = self.registry.archives(session_id)
+        if archives is None:
+            raise RuntimeErrorInfo("thread_missing", "checkpoint de thread ausente", False)
+        try:
+            return build_review(session_id, baseline[0], archives[0], base_commit=baseline[1])
+        except ValueError as exc:
+            if str(exc) == "review size limit exceeded":
+                raise RuntimeErrorInfo(
+                    "review_too_large", "pacote de revisão excede 512 KiB", False
+                ) from None
+            raise RuntimeErrorInfo(
+                "invalid_event", "checkpoint de revisão inválido", False
+            ) from None
 
     async def _discard(self, entry: _Entry) -> None:
         outcome = await run_persistent_cleanup(
@@ -278,12 +345,23 @@ class DockerSessionRuntime:
                 if entry.turn_id is not None:
                     await entry.worker.relay.end_turn(entry.turn_id)
                 workspace, home = await entry.worker.checkpoint()
-                self.registry.checkpoint(
-                    entry.session.session_id,
-                    workspace,
-                    home,
-                    thread_id=entry.session.external_thread_id,
-                )
+                # Off-loop persistence retains the previous synchronous barrier:
+                # cancellation/close cannot outlive an in-flight registry write.
+                async with entry.close_lock:
+                    outcome = await run_persistent_cleanup(
+                        lambda: asyncio.to_thread(
+                            self.registry.checkpoint,
+                            entry.session.session_id,
+                            workspace,
+                            home,
+                            thread_id=entry.session.external_thread_id,
+                        ),
+                        task_name="docker-checkpoint-persistence",
+                    )
+                    if outcome.error is not None:
+                        raise outcome.error
+                    if outcome.cancellation is not None:
+                        raise outcome.cancellation
                 await self._discard(entry)
                 entry.finalized = True
                 # Cache only stable, identified turns. A missing historical turn

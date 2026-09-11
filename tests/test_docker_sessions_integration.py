@@ -10,11 +10,15 @@ import asyncio
 import io
 import json
 import os
+import signal
+import sys
 import tarfile
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
+from kairos_runtime.client import RuntimeClient
 from kairos_runtime.contracts import RuntimeSession
 from kairos_runtime.docker_backend.registry import SessionRegistry
 from kairos_runtime.docker_backend.runtime import DockerSessionRuntime, _SandboxAdapter
@@ -309,3 +313,148 @@ def test_real_codex_turn_uses_bridge_and_executes_local_tool(tmp_path):
             assert not (tmp_path / "marker").exists()
 
     asyncio.run(run())
+
+
+async def docker_result(*args):
+    process = await asyncio.create_subprocess_exec(
+        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), 15)
+        return process.returncode, stdout.decode(), stderr.decode()
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+def test_sigkill_broker_discards_uncommitted_turn_and_allows_explicit_same_thread_resume(tmp_path):  # noqa: PLR0915
+    async def run():  # noqa: PLR0915 — one disposable crash/recovery lifecycle.
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "original.txt").write_text("host original")
+        home = tmp_path / "broker"
+        home.mkdir(mode=0o700)
+        store = RuntimeStore(home / "state.sqlite")
+        registry = SessionRegistry(home / "sandbox-state")
+        client = RuntimeClient(home / "runtime.sock")
+        processes = []
+        logs = []
+
+        async def start(mode):
+            (home / "ready").unlink(missing_ok=True)
+            log = (home / f"{len(processes)}.log").open("w+")
+            logs.append(log)
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(Path(__file__).parent / "fixtures" / "docker_recovery_broker.py"),
+                str(home),
+                str(project),
+                mode,
+                stdout=log,
+                stderr=log,
+            )
+            processes.append(process)
+            async with asyncio.timeout(90):
+                while not (home / "ready").exists():
+                    if process.returncode is not None:
+                        log.seek(0)
+                        pytest.fail(log.read())
+                    await asyncio.sleep(0.05)
+            assert (await client.status())["state"] == "ready"
+            return process
+
+        async def completed(turn_id):
+            async with asyncio.timeout(90):
+                while True:
+                    turn = await store.get_turn(turn_id)
+                    if turn["state"] in {"completed", "failed", "interrupted", "cancelled"}:
+                        assert turn["state"] == "completed", turn
+                        return
+                    await asyncio.sleep(0.05)
+
+        try:
+            broker = await start("first")
+            details = await client.create(str(project), "workspace_write", session_id="crash")
+            thread = details["external_thread_id"]
+            first = await client.submit("crash", "Write the marker file.", "first")
+            await completed(first)
+            workspace, _ = registry.archives("crash")
+            baseline = registry.baseline("crash")
+            assert tar_text(workspace, "marker") == "sandbox-persisted"
+            old = await client.submit("crash", "Start the long tool.", "long")
+            async with asyncio.timeout(60):
+                while True:
+                    record = registry.get("crash")
+                    if record.worker_confirmed:
+                        result = await docker_result(
+                            "exec",
+                            record.worker_name,
+                            "python3",
+                            "-c",
+                            "from pathlib import Path; "
+                            "assert Path('/workspace/uncommitted').read_text() == 'uncommitted'; "
+                            "assert any(p.read_bytes() == b'sleep\\x00300\\x00' "
+                            "for p in Path('/proc').glob('[0-9]*/cmdline'))",
+                        )
+                        if result[0] == 0:
+                            break
+                    await asyncio.sleep(0.05)
+            old_worker = record.worker_name
+            before = await store.get_turn(old)
+            assert before["state"] == "running" and before["external_turn_id"]
+            journal = await store.events_after("crash", None)
+            assert any(event.kind == "tool" and event.turn_id == old for event in journal)
+            broker.send_signal(signal.SIGKILL)
+            assert await asyncio.wait_for(broker.wait(), 10) == -signal.SIGKILL
+            calls = (home / "model-calls.jsonl").read_text()
+            assert len(calls.splitlines()) >= 3
+            assert (await docker_result("inspect", old_worker))[0] == 0
+            await start("restore")
+            interrupted = await store.get_turn(old)
+            assert interrupted["state"] == "interrupted"
+            events = await store.events_after("crash", None)
+            ends = [e for e in events if e.turn_id == old and e.kind == "turn_end"]
+            assert len(ends) == 1 and ends[0].payload["state"] == "interrupted"
+            assert events[: len(journal)] == journal
+            assert (home / "model-calls.jsonl").read_text() == calls
+            assert (await docker_result("inspect", old_worker))[0] != 0
+            assert registry.archives("crash")[0] == workspace
+            assert registry.baseline("crash") == baseline
+            assert not registry.list_workers()
+            assert (await client.get("crash"))["external_thread_id"] == thread
+            assert interrupted["inactive_confirmed_at"] is not None
+            resumed = await client.submit("crash", "Read marker and write resumed.", "resume")
+            await completed(resumed)
+            restored, _ = registry.archives("crash")
+            assert tar_text(restored, "marker") == "sandbox-persisted"
+            assert tar_text(restored, "resumed") == "restored"
+            with tarfile.open(fileobj=io.BytesIO(restored), mode="r:") as archive:
+                assert "uncommitted" not in archive.getnames()
+            assert registry.get("crash").external_thread_id == thread
+            assert registry.baseline("crash") == baseline
+            assert not registry.list_workers()
+            assert (project / "original.txt").read_text() == "host original"
+            assert sorted(p.name for p in project.iterdir()) == ["original.txt"]
+        finally:
+            await client.aclose()
+            for process in processes:
+                if process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), 15)
+                    except TimeoutError:
+                        process.kill()
+                        await process.wait()
+            for log in logs:
+                log.close()
+            try:
+                for record in registry.list_workers():
+                    await remove_recorded_worker(
+                        record.worker_name, confirmed=record.worker_confirmed
+                    )
+            finally:
+                registry.close()
+
+    # Includes IPC calls as well as the individually bounded readiness polls.
+    asyncio.run(asyncio.wait_for(run(), 300))
