@@ -480,6 +480,7 @@ class AgentRuntimeService:
             if (
                 turn["external_turn_id"] is None
                 or snapshot.external_turn_id != turn["external_turn_id"]
+                or snapshot.state == "unknown"
             ):
                 return
             event_id, payload = reconciliation(
@@ -727,7 +728,7 @@ class AgentRuntimeService:
                     turn["external_turn_id"] is not None
                     and snapshot.external_turn_id == turn["external_turn_id"]
                 )
-                if same_turn:
+                if same_turn and snapshot.state != "unknown":
                     event_id, payload = reconciliation(
                         session.external_thread_id, snapshot, "observation_lost"
                     )
@@ -767,11 +768,13 @@ class AgentRuntimeService:
                         )
                     else:
                         await self._lost(turn["id"])
-                elif (
-                    same_turn
-                    and inactive
-                    and snapshot.state in {"completed", "failed", "cancelled", "interrupted"}
-                ):
+                elif inactive and snapshot.state in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "interrupted",
+                    "unknown",
+                }:
                     generation = await self.leases.adopt(
                         turn["id"],
                         turn["holder"],
@@ -780,12 +783,21 @@ class AgentRuntimeService:
                         confirmed_inactive=True,
                     )
                     if generation is not None:
+                        # A restored checkpoint may predate this turn. Owner inactivity
+                        # permits release, but cannot establish an unobserved outcome.
+                        state = (
+                            snapshot.state
+                            if same_turn and snapshot.state != "unknown"
+                            else "interrupted"
+                        )
+                        if state == "interrupted" and turn["send_state"] == "dispatching":
+                            await self._owned(turn["id"], generation, "uncertain", turn["id"])
                         await self._owned(
                             turn["id"],
                             generation,
                             "finish",
                             turn["id"],
-                            snapshot.state,
+                            state,
                             projection.content,
                             projection.usage,
                         )

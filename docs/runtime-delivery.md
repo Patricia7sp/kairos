@@ -148,6 +148,15 @@ reviews, receipts or PR bodies. Git and gh diagnostics are sanitized.
 
 ## Failure and retry boundaries
 
+- After an abrupt Docker broker exit, restart removes its recorded workers
+  before admitting new work. Recovery retains the last confirmed checkpoint,
+  discards uncheckpointed workspace changes, and records one durable interrupted
+  terminal for an unobserved turn. The journal's saved partial response remains;
+  an unrelated or unknown checkpoint cannot supply that turn's outcome.
+  Recovery does not call the model or replay the interrupted request. A new,
+  explicit submit can resume the same external thread only after the old owner
+  is confirmed inactive; without that proof, the session remains busy. This is
+  checkpoint recovery, not rollback of external side effects from tools.
 - Invalid approval, baseline, paths, existing output/branch, or missing tests
   fail before creating the worktree. Existing files are preserved.
 - A failed test or unexpected mutation leaves the worktree for inspection and
