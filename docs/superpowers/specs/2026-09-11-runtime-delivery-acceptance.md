@@ -52,6 +52,15 @@ As imagens da aplicação, broker e worker foram arquivadas por ID imutável.
 Backups, recibo, pacote e capturas permanecem em armazenamento privado; não há
 credenciais ou conteúdo do home do worker neste documento.
 
+As evidências complementares foram preservadas junto ao pacote privado em
+`delivery-acceptance-pr19/validation/`: logs Python, Docker e frontends;
+`backup-check.json`; metadados das imagens e da implantação; e os relatórios da
+implementação e revisão da recuperação. O log local inicial registra duas falhas
+por atualização do Codex do host; `python-pinned.log` registra a execução final
+aprovada com a versão fixada. A
+[CI do PR #19](https://github.com/Patricia7sp/kairos/actions/runs/34611423211)
+preserva os resultados remotos correspondentes.
+
 ## Ajuste visual encontrado no aceite
 
 O caminho completo da revisão imutável ultrapassava sua célula nos metadados da
