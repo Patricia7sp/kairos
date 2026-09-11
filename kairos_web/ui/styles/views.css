@@ -329,6 +329,8 @@
 .k-runtime__consent { color: var(--k-warn); font-size: var(--k-size-sm); }
 .k-runtime__head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--k-space-4); }
 .k-runtime__session-id { color: var(--k-text-3); font-family: var(--k-mono); overflow-wrap: anywhere; }
+.k-runtime .k-det__meta > div { min-width: 0; }
+.k-runtime .k-det__meta dd { overflow-wrap: anywhere; }
 .k-runtime__notice { margin-bottom: var(--k-space-3); padding: var(--k-space-3); background: var(--k-warn-soft); color: var(--k-warn); border-radius: var(--k-radius); }
 .k-runtime__queue, .k-runtime__usage { color: var(--k-text-2); font-size: var(--k-size-sm); }
 .k-runtime__items { min-height: 12rem; max-height: 48dvh; overflow-y: auto; display: grid; gap: var(--k-space-3); padding: var(--k-space-3) 0; }
