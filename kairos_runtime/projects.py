@@ -38,6 +38,25 @@ _COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _MANIFEST_FIELDS = {"schema_version", "revision", "name", "baseline_fingerprint"}
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+# Git's repository-local environment (git rev-parse --local-env-vars), plus
+# namespace/discovery overrides. Authentication variables remain available.
+_GIT_ENV_OVERRIDES = {
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+}
 
 
 @contextmanager
@@ -66,7 +85,13 @@ def _directory(path: Path, *, create: bool = False):
 
 
 def _git(repo: Path, *args: str, limit: int) -> bytes:
-    """Bound stdout in memory and terminate on output overflow or timeout."""
+    """Reject inherited repository overrides; bound output and execution time."""
+    if _GIT_ENV_OVERRIDES.intersection(os.environ) or any(
+        name.startswith("GIT_CONFIG") for name in os.environ
+    ):
+        raise ValueError(
+            "Git environment overrides are unsupported; unset repository/config overrides before delivery"
+        )
     try:
         with (
             subprocess.Popen(  # noqa: S603 -- argv only, revision separated by caller

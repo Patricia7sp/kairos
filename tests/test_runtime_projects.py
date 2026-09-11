@@ -203,3 +203,18 @@ def test_metadata_binds_captured_archive_without_resnapshot_and_rejects_path_lin
     workspace.symlink_to(workspace.with_name("moved"), target_is_directory=True)
     with pytest.raises(ValueError):
         project_metadata(workspace, baseline=baseline)
+
+
+@pytest.mark.parametrize("override", ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"])
+def test_export_rejects_git_environment_before_creating_catalog(
+    repo, tmp_path, monkeypatch, override
+):
+    value = {
+        "GIT_DIR": repo / ".git",
+        "GIT_WORK_TREE": repo,
+        "GIT_INDEX_FILE": repo / ".git/index",
+    }[override]
+    monkeypatch.setenv(override, str(value))
+    with pytest.raises(ValueError, match="Git environment"):
+        export_project(repo, "HEAD", tmp_path / "catalog")
+    assert not (tmp_path / "catalog").exists()

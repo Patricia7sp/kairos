@@ -4,7 +4,12 @@ The Web and runtime session produce a review package. A trusted operator exports
 source, approves the exact review ID, runs tests in a new Git worktree, and then
 explicitly publishes the tested commit as a draft PR. None of these commands
 merge a PR or deploy a service. Run them on the operator host with its Git
-identity; GitHub authentication is needed only for publication.
+identity; GitHub authentication is needed only for publication. Inherited Git
+repository/index/object/discovery overrides (such as `GIT_DIR`, `GIT_WORK_TREE`
+and `GIT_INDEX_FILE`) and `GIT_CONFIG*` overrides are rejected before Git runs.
+Unset these variables for delivery; normal SSH and askpass authentication remain
+available. This prevents an operator shell's Git environment from redirecting
+export or worktree operations to another repository or the original index.
 
 ## Export and select an immutable source version
 
@@ -139,7 +144,9 @@ reviews, receipts or PR bodies. Git and gh diagnostics are sanitized.
   with new paths and a new branch after resolving the cause.
 - If push succeeds but gh fails, rerun the same publish command. A remote branch
   already at the receipt commit is accepted. An existing matching open draft PR
-  is returned; a different commit, base, or nondraft PR is rejected.
+  is returned only when its head belongs to the same repository; a fork PR,
+  missing repository-identity evidence, different commit/base, or nondraft PR
+  is rejected.
 - Commit/branch/tree drift or an edited receipt is rejected. Do not edit a
   receipt to accommodate new work; obtain and approve a new review and rerun the
   application/tests workflow. Ignored generated outputs do not require cleanup.

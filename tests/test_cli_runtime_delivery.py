@@ -364,6 +364,7 @@ def test_publish_safe_retry_after_push_and_matching_existing_draft(published, tm
             [
                 dict(
                     isDraft=True,
+                    isCrossRepository=False,
                     headRefOid=result["commit"],
                     headRefName="review/task",
                     baseRefName="main",
@@ -375,6 +376,8 @@ def test_publish_safe_retry_after_push_and_matching_existing_draft(published, tm
     assert publish(options)["url"] == "https://github.com/example/project/pull/17"
     calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
     assert len([c for c in calls if c[:2] == ["pr", "create"]]) == 1
+    listing = calls[-1]
+    assert "isCrossRepository" in listing[listing.index("--json") + 1].split(",")
 
 
 @pytest.mark.parametrize("match", [False, True])
@@ -385,6 +388,7 @@ def test_publish_rejects_existing_nondraft_or_different_commit(published, tmp_pa
             [
                 dict(
                     isDraft=match,
+                    isCrossRepository=False,
                     headRefOid="0" * 40 if match else result["commit"],
                     headRefName="review/task",
                     baseRefName="main",
@@ -508,6 +512,7 @@ def test_publish_checks_other_base_pr_before_creating_another(published, tmp_pat
             [
                 dict(
                     isDraft=True,
+                    isCrossRepository=False,
                     headRefOid=result["commit"],
                     headRefName="review/task",
                     baseRefName="develop",
@@ -572,3 +577,99 @@ def test_cli_export_dispatch_and_sanitized_apply_error(delivery, tmp_path, capsy
     assert error["error"] == "delivery_failed"
     assert "approval" in error["message"]
     assert not delivery["worktree"].exists()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        "GIT_INDEX_FILE",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_CONFIG_COUNT",
+    ],
+)
+def test_apply_rejects_git_overrides_without_touching_source_index(delivery, monkeypatch, override):
+    repo = delivery["repo"]
+    (repo / "operator-staged").write_text("unrelated staged work")
+    git(repo, "add", "operator-staged")
+    staged_tree = git(repo, "write-tree")
+    original_index = (repo / ".git/index").read_bytes()
+    overrides = {
+        "GIT_INDEX_FILE": str(repo / ".git/index"),
+        "GIT_DIR": str(repo / ".git"),
+        "GIT_WORK_TREE": str(repo),
+        "GIT_COMMON_DIR": str(repo / ".git"),
+        "GIT_OBJECT_DIRECTORY": str(repo / ".git/objects"),
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(repo / ".git/objects"),
+        "GIT_NAMESPACE": "foreign",
+        "GIT_CONFIG_COUNT": "1",
+    }
+    with monkeypatch.context() as environment:
+        environment.setenv(override, overrides[override])
+        if override == "GIT_CONFIG_COUNT":
+            environment.setenv("GIT_CONFIG_KEY_0", "core.worktree")
+            environment.setenv("GIT_CONFIG_VALUE_0", str(repo))
+        with pytest.raises(ValueError, match="Git environment"):
+            apply(delivery)
+    assert (repo / ".git/index").read_bytes() == original_index
+    assert git(repo, "write-tree") == staged_tree
+    assert git(repo, "diff", "--cached", "--name-only") == "operator-staged"
+    assert not delivery["worktree"].exists()
+    assert not delivery["receipt"].exists()
+    assert git(repo, "branch", "--list", delivery["branch"]) == ""
+
+
+@pytest.mark.parametrize("cross_repository", [True, None, 0])
+def test_publish_rejects_matching_fork_or_unproven_head_repository(
+    published, tmp_path, cross_repository
+):
+    options, result, remote = published
+    pr = dict(
+        isDraft=True,
+        headRefOid=result["commit"],
+        headRefName="review/task",
+        baseRefName="main",
+        url="https://github.com/example/project/pull/99",
+    )
+    if cross_repository is not None:
+        pr["isCrossRepository"] = cross_repository
+    (tmp_path / "existing").write_text(json.dumps([pr]))
+    with pytest.raises(ValueError, match="existing PR"):
+        publish(options)
+    assert git(remote, "rev-parse", "refs/heads/review/task") == result["commit"]
+    assert not (tmp_path / "body").exists()
+
+
+def test_cli_export_reports_git_environment_without_disclosing_values(
+    delivery, tmp_path, monkeypatch, capsys
+):
+    from kairos_cli.main import main
+
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "private-environment-value"))
+    catalog = tmp_path / "catalog"
+    assert (
+        main(
+            [
+                "runtime",
+                "project-export",
+                "--repo",
+                str(delivery["repo"]),
+                "--revision",
+                "main",
+                "--catalog",
+                str(catalog),
+                "--json",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert "private-environment-value" not in output
+    error = json.loads(output)
+    assert error["error"] == "delivery_failed"
+    assert "Git environment" in error["message"]
+    assert not catalog.exists()

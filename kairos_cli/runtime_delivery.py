@@ -335,7 +335,7 @@ def publish_review(*, receipt: Path, title: str, base: str) -> dict:
         "--repo",
         target,
         "--json",
-        "isDraft,headRefOid,headRefName,baseRefName,url",
+        "isDraft,isCrossRepository,headRefOid,headRefName,baseRefName,url",
     )
     try:
         existing = json.loads(raw, object_pairs_hook=_unique_object)
@@ -351,6 +351,7 @@ def publish_review(*, receipt: Path, title: str, base: str) -> dict:
         pr = existing[0]
         if (
             pr.get("isDraft") is not True
+            or pr.get("isCrossRepository") is not False
             or pr.get("headRefOid") != value["commit"]
             or pr.get("headRefName") != branch
             or pr.get("baseRefName") != base
