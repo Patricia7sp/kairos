@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from kairos_providers.contracts import ResolvedModelSelection
@@ -66,14 +67,19 @@ class MessageRepository:
         *,
         api_content: str | None = None,
         timestamp: float | None = None,
+        display_metadata: Mapping[str, Any] | None = None,
         **columns: Any,
     ) -> int:
-        metadata = json.dumps(
+        metadata = dict(display_metadata or {})
+        metadata.update(
             {
                 "model": selection.ref.model,
                 "provider": selection.ref.provider,
                 "reason": selection.reason.value,
-            },
+            }
+        )
+        metadata = json.dumps(
+            metadata,
             sort_keys=True,
         )
         return self.append(

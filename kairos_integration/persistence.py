@@ -58,6 +58,10 @@ class SQLiteAsyncInteractionPersistence:
         assert self._messages is not None
         return await self._call(self._messages.append_turn_message, *args, **kwargs)
 
+    async def initialize_selection(self, *args: Any, **kwargs: Any) -> None:
+        assert self._sessions is not None
+        await self._call(self._sessions.initialize_selection, *args, **kwargs)
+
     async def append_message(self, *args: Any, **kwargs: Any) -> int:
         assert self._messages is not None
         return await self._call(self._messages.append, *args, **kwargs)

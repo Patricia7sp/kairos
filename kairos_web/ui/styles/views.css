@@ -233,19 +233,23 @@
 @media (max-width: 560px) {
   .k-ses__acoes { justify-content: flex-start; margin-top: var(--k-space-2); }
 }
+.k-app > div { min-width: 0; }
+.k-modelo-padrao { flex-wrap: wrap; }
+.k-modelo-padrao strong { overflow-wrap: anywhere; }
 .k-provider-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: var(--k-space-4);
 }
 
-.k-provider { display: grid; gap: var(--k-space-4); align-content: start; }
+.k-provider { display: grid; gap: var(--k-space-4); align-content: start; min-width: 0; }
 .k-provider__head, .k-provider__actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--k-space-3);
 }
+.k-provider__actions { flex-wrap: wrap; }
 .k-provider__head h2 { margin: 0; }
 .k-provider__head p, .k-provider__local { margin: var(--k-space-1) 0 0; color: var(--k-text-2); }
 .k-provider__credential { display: grid; gap: var(--k-space-2); }
@@ -254,6 +258,16 @@
 .k-provider__status { min-height: 1.5em; color: var(--k-text-2); }
 .k-provider__status--ok { color: var(--k-ok); }
 .k-provider__status--error { color: var(--k-danger); }
+[data-provider-settings-form] { min-width: 0; padding-top: var(--k-space-3); border-top: 1px solid var(--k-border); }
+[data-provider-settings-form] fieldset { display: grid; gap: var(--k-space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+[data-provider-settings-form] legend { margin-bottom: var(--k-space-3); font-weight: var(--k-weight-bold); }
+[data-provider-settings-form] input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+[data-provider-settings-form] label { font-size: var(--k-size-sm); overflow-wrap: anywhere; }
+[data-provider-settings-form] label:has(input[type="checkbox"]) { margin-block: var(--k-space-2); line-height: 1.5; }
+[data-provider-settings-form] input[type="checkbox"] { vertical-align: middle; margin-right: var(--k-space-2); }
+[data-provider-settings-form] small, [data-settings-status] { color: var(--k-text-2); font-size: var(--k-size-sm); overflow-wrap: anywhere; }
+[data-transfer-consent] { padding: var(--k-space-3); border-radius: var(--k-radius); background: var(--k-warn-soft); }
+[data-provider-settings-form] button[type="submit"] { justify-self: start; margin-top: var(--k-space-2); }
 
 .k-model-filters {
   display: flex;
@@ -265,12 +279,22 @@
 .k-model-filters label { display: grid; gap: var(--k-space-1); }
 .k-model-filters label:has(input[type="checkbox"]) { display: flex; align-items: center; }
 .k-model-dialog {
-  max-width: 34rem;
+  width: min(34rem, calc(100% - 2rem));
+  max-width: calc(100% - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  margin: auto;
   color: var(--k-text);
   background: var(--k-surface);
   border: 1px solid var(--k-border);
   border-radius: var(--k-radius-lg);
 }
+.k-model-dialog [data-selection-fields] { display: grid; gap: var(--k-space-3); min-width: 0; margin: var(--k-space-3) 0; padding: 0; border: 0; }
+.k-model-dialog [data-selection-fields] > label { display: grid; gap: var(--k-space-1); }
+.k-model-dialog [data-selection-fields] input:not([type="checkbox"]),
+.k-model-dialog [data-selection-fields] select { min-width: 0; max-width: 100%; }
+.k-model-dialog [data-selection-fields] details label { display: block; margin-top: var(--k-space-3); }
+.k-model-dialog [data-selection-fields] input[type="checkbox"] { vertical-align: middle; margin-right: var(--k-space-1); }
 .k-model-dialog::backdrop { background: rgb(15 23 42 / .55); }
 .k-model-dialog__close { float: right; }
 .k-model-dialog__actions { display: flex; flex-wrap: wrap; gap: var(--k-space-3); }
@@ -315,7 +339,7 @@
   .k-chat__context { grid-column: 1 / -1; border-top: 1px solid var(--k-border); border-left: 0; }
 }
 @media (max-width: 700px) {
-  .k-chat { grid-template-columns: 1fr; }
+  .k-chat { grid-template-columns: minmax(0, 1fr); }
   .k-chat__sessions { border-right: 0; border-bottom: 1px solid var(--k-border); }
   .k-chat__sessions nav { display: flex; overflow-x: auto; }
   .k-chat__session { flex: 0 0 min(15rem, 82vw); }

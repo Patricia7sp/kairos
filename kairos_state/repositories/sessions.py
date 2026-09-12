@@ -71,6 +71,7 @@ class PersistedSelection:
     ref: ProviderModelRef
     parameters: dict[str, Any]
     reason: SelectionReason
+    profile: str | None = None
 
 
 class SessionRepository:
@@ -189,7 +190,20 @@ class SessionRepository:
             ref=ProviderModelRef(provider, model),
             parameters=dict(parameters),
             reason=reason,
+            profile=config.get("profile") if isinstance(config.get("profile"), str) else None,
         )
+
+    def initialize_selection(
+        self,
+        session_id: str,
+        ref: ProviderModelRef,
+        parameters: dict[str, Any],
+        *,
+        profile: str | None = None,
+    ) -> None:
+        """Seed a new conversation once; per-message overrides remain temporary."""
+        if self.selection(session_id) is None:
+            self.set_selection(session_id, ref, parameters, profile=profile)
 
     def set_selection(
         self,
@@ -198,6 +212,7 @@ class SessionRepository:
         parameters: dict[str, Any],
         *,
         reason: SelectionReason = SelectionReason.CONVERSATION_OVERRIDE,
+        profile: str | None = None,
     ) -> None:
         row = self.get(session_id)
         config = _load_json_object(row["model_config"] if row is not None else None)
@@ -208,6 +223,8 @@ class SessionRepository:
                 "reason": reason.value,
             }
         )
+        if profile is not None:
+            config["profile"] = profile
         payload = json.dumps(config, sort_keys=True)
 
         def op():

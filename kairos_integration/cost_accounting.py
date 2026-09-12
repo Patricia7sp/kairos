@@ -14,6 +14,12 @@ def estimate_interaction_cost(
     attempts: int,
     source: str | None,
 ) -> InteractionCost:
+    if (
+        usage is None
+        and price.request in (None, Decimal(0))
+        and (price.prompt != Decimal(0) or price.completion != Decimal(0))
+    ):
+        return InteractionCost(status="unknown", source=source)
     quantities = (
         (usage.input_tokens if usage is not None else 0, price.prompt),
         (usage.output_tokens if usage is not None else 0, price.completion),
