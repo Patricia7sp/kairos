@@ -191,6 +191,19 @@ class ProviderGateway:
         except VaultError:
             return "locked"
 
+    def credential_management_state(self, provider: str) -> dict[str, str | bool]:
+        """Nonsecret origin and whether the primary credential is locally removable."""
+        try:
+            entries = self._credentials.list(provider)
+        except VaultError:
+            return {"credential_source": "unavailable", "can_remove_credential": False}
+        primary = next((entry for entry in entries if entry.ref.credential_id == "primary"), None)
+        external = bool(entries) and all(entry.origin == "external" for entry in entries)
+        return {
+            "credential_source": "external" if external else "vault" if entries else "none",
+            "can_remove_credential": primary is not None and primary.origin != "external",
+        }
+
     async def _test_connection(
         self, provider: str, *, credential_values: Mapping[str, Any] | None = None
     ) -> ConnectionStatus:

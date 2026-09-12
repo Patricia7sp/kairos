@@ -81,3 +81,28 @@ política enviada ao modelo, atualização entre turnos, isolamento de turnos em
 andamento, custos no histórico, rejeição de campos inválidos e fluxos reais do DOM.
 O aceite no navegador usa uma instalação temporária com respostas de provedores
 simuladas, sem credenciais de produção.
+
+## Preferências de geração e CLI
+
+**Ajustes** permite definir temperatura e limite de tokens para as próximas
+respostas. Campos vazios removem a preferência global; opções de perfil/conversa
+continuam tendo precedência. As alterações preservam as demais configurações.
+
+A CLI compartilha o mesmo catálogo e seleção global:
+
+```bash
+kairos model show --json
+kairos model list --provider openrouter --free --json
+kairos model refresh openrouter --json
+kairos model set openrouter ID_EXATO_DO_MODELO
+kairos model test openrouter --json
+```
+
+A seleção rejeita modelos não disponíveis para Chat. `refresh` retorna código 1
+quando a consulta externa falha e os dados vêm do cache. `test` verifica conexão,
+não gera uma resposta. Bloqueio pela política de privacidade do OpenRouter é
+mostrado explicitamente; o Kairos não muda essa política automaticamente.
+
+**Provedores** também permite remover a credencial principal armazenada no cofre,
+com confirmação na interface. Outras credenciais e configurações são preservadas;
+credenciais administradas externamente precisam ser removidas na origem.

@@ -7,6 +7,7 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
 
 const stateLabel = (provider) => {
   if (!provider.requires_credential) return "Sem credencial necessária";
+  if (provider.credential_source === "external") return "Credencial externa · somente leitura";
   if (provider.credential_state === "locked") return "Cofre bloqueado";
   return provider.configured ? "Credencial configurada" : "Não configurado";
 };
@@ -65,6 +66,8 @@ export function providerCardMarkup(provider) {
         <button class="k-btn k-btn--primary" type="submit">${configured ? "Substituir" : "Salvar"}</button>
       </div>
       <small id="credential-help-${id}">A chave vai diretamente para o cofre e não volta para esta tela.</small>
+      <button type="button" class="k-btn k-btn--ghost" data-remove-credential
+        ${provider.can_remove_credential === true ? "" : "hidden"}>Remover credencial do cofre</button>
     </form>` : `<p class="k-provider__local">Sem credencial necessária</p>`}
     <div class="k-provider__actions">
       <button class="k-btn k-btn--ghost" type="button" data-test-provider>Testar conexão</button>
@@ -96,45 +99,74 @@ function bindProviderCard(card, provider, isActive) {
   const testButton = card.querySelector("[data-test-provider]");
   const refreshButton = card.querySelector("[data-refresh-provider]");
   const form = card.querySelector("[data-credential-form]");
-  form?.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  const removeButton = card.querySelector("[data-remove-credential]");
+
+  async function mutateCredential(remove = false) {
     if (savingCredential || savingSettings || !isActive()) return;
     const input = form.elements.secret;
     const secret = input.value;
-    if (provider.configured && !window.confirm("Substituir a credencial armazenada?")) return;
+    if (remove) {
+      if (!provider.can_remove_credential || !window.confirm(
+        "Remover a credencial principal do cofre? Outras credenciais e fontes externas serão preservadas."
+      )) return;
+    } else if (provider.configured && !window.confirm("Substituir a credencial armazenada?")) return;
     const saveButton = form.querySelector('button[type="submit"]');
     savingCredential = true;
     input.value = "";
     input.disabled = true;
     saveButton.disabled = true;
+    if (removeButton) removeButton.disabled = true;
     credentialRevision += 1;
     probeRevision += 1;
     refreshRevision += 1;
     const revision = credentialRevision;
     testButton.disabled = true;
+    refreshButton.disabled = true;
     connectionStatus(card, "Conexão não testada");
-    status(card, "Salvando…");
+    status(card, remove ? "Removendo credencial…" : "Salvando…");
+    let mutated = false;
     try {
-      await api.salvarCredencial(provider.id, secret);
+      if (remove) await api.removerCredencial(provider.id);
+      else await api.salvarCredencial(provider.id, secret);
+      mutated = true;
       if (!isActive() || revision !== credentialRevision) return;
-      provider.configured = true;
-      provider.credential_state = "configured";
-      card.querySelector("[data-provider-credential-state]").textContent = "Credencial configurada";
-      form.querySelector('button[type="submit"]').textContent = "Substituir";
-      connectionStatus(card, "Conexão não testada");
-      status(card, "Credencial salva no cofre.", "ok");
+      const result = await api.provedores();
+      if (!isActive() || revision !== credentialRevision) return;
+      const current = result.providers.find((item) => item.id === provider.id);
+      if (!current) throw new Error("Provedor ausente na atualização do estado.");
+      Object.assign(provider, current);
+      card.querySelector("[data-provider-credential-state]").textContent = stateLabel(provider);
+      saveButton.textContent = provider.configured ? "Substituir" : "Salvar";
+      if (removeButton) removeButton.hidden = provider.can_remove_credential !== true;
+      connectionStatus(card, initialConnectionLabel(provider));
+      status(card, remove ? "Credencial removida do cofre. Outras credenciais e fontes externas foram preservadas."
+        : "Credencial salva no cofre.", "ok");
     } catch (error) {
       if (!isActive() || revision !== credentialRevision) return;
-      status(card, error.message || "Falha ao salvar a credencial.", "error");
+      if (mutated) {
+        provider.can_remove_credential = false;
+        if (removeButton) removeButton.hidden = true;
+        card.querySelector("[data-provider-credential-state]").textContent = "Estado não atualizado";
+        status(card, "Alteração concluída, mas o estado não pôde ser atualizado. Reabra Provedores para consultar.", "error");
+      } else {
+        status(card, error.body?.detail || error.message || "Falha ao alterar a credencial.", "error");
+      }
     } finally {
       if (isActive() && revision === credentialRevision) {
         savingCredential = false;
         input.disabled = false;
         saveButton.disabled = false;
+        if (removeButton) removeButton.disabled = false;
         testButton.disabled = false;
+        refreshButton.disabled = false;
       }
     }
+  }
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    mutateCredential();
   });
+  removeButton?.addEventListener("click", () => mutateCredential(true));
 
   testButton.addEventListener("click", async () => {
     if (savingCredential || savingSettings || !isActive()) return;

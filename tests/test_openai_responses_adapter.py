@@ -73,6 +73,25 @@ async def collect(stream):
 
 
 class OpenAIResponsesAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_canonical_token_limit_is_sent_as_responses_output_limit(self):
+        from dataclasses import replace
+
+        def handler(request):
+            payload = json.loads(request.content)
+            self.assertEqual(payload["max_output_tokens"], 128)
+            self.assertNotIn("max_tokens", payload)
+            return httpx.Response(
+                200,
+                content=sse({"type": "response.completed", "response": {"status": "completed"}}),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            await collect(
+                OpenAIResponsesAdapter(client, "test").stream(
+                    replace(simple_request(), parameters={"max_tokens": 128})
+                )
+            )
+
     async def test_responses_stream_normaliza_texto_tool_usage_e_requisicao(self):
         """Remover a conversão Responses/SSE quebraria texto, tools ou uso do gateway."""
         secret = "sk-openai-responses-sentinel"  # noqa: S105 - sentinela sintética de vazamento

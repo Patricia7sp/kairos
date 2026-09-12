@@ -25,13 +25,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from kairos_cli.auth import AuthStore
-from kairos_cli.config import load_config
 from kairos_integration import build_interaction_router as build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
 from kairos_providers.adapters.openrouter import OpenRouterRoutingPolicy
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
+from kairos_providers.provider_registry import UnknownProviderError
 from kairos_providers.settings import load_config_document, update_config_document
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_security.credentials import (
@@ -47,6 +47,7 @@ from kairos_web.chat_transport import (
     interaction_event_to_json,
 )
 from kairos_web.message_metadata import public_message_accounting
+from kairos_web.observability_api import router as observability_router
 from kairos_web.provider_api import (
     list_models_payload,
     list_providers_payload,
@@ -54,9 +55,12 @@ from kairos_web.provider_api import (
     public_profiles,
     serialize_model,
 )
+from kairos_web.provider_credentials_api import router as provider_credentials_router
 from kairos_web.provider_settings_api import router as provider_settings_router
 from kairos_web.runtime_api import router as runtime_api_router
 from kairos_web.runtime_transport import runtime_event_to_json, runtime_websocket_session
+from kairos_web.settings_api import router as settings_router
+from kairos_web.tools_api import router as tools_router
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +104,10 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)
 app.include_router(runtime_api_router)
 app.include_router(provider_settings_router)
+app.include_router(observability_router)
+app.include_router(provider_credentials_router)
+app.include_router(tools_router)
+app.include_router(settings_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -234,7 +242,7 @@ async def require_session_token(request, call_next):
 
 
 def _get_auth_store() -> AuthStore:
-    kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
+    kairos_home = _application_home(app)
     auth_path = kairos_home / "auth.json"
     data: dict[str, Any] = {}
     if auth_path.exists():
@@ -486,7 +494,7 @@ async def save_provider_credential(provider: str, req: SaveCredentialRequest):
     try:
         try:
             descriptor = gateway.registry.describe(provider)
-        except KeyError as exc:
+        except UnknownProviderError as exc:
             raise HTTPException(status_code=404, detail="provider desconhecido") from exc
         if req.auth_method not in descriptor.auth_methods:
             raise HTTPException(status_code=422, detail="método de autenticação inválido")
@@ -499,6 +507,12 @@ async def save_provider_credential(provider: str, req: SaveCredentialRequest):
     ref = CredentialRef(provider, "primary")
     with credential_file_lock(auth_path):
         store = _get_auth_store()
+        previous_profile = store.profile.get(provider)
+        if previous_profile is not None and (
+            not isinstance(previous_profile, list)
+            or not all(isinstance(entry, dict) for entry in previous_profile)
+        ):
+            raise HTTPException(503, "metadados de credenciais indisponíveis")
         try:
             try:
                 previous = store.vault.get(ref)
@@ -513,9 +527,13 @@ async def save_provider_credential(provider: str, req: SaveCredentialRequest):
             raise HTTPException(
                 status_code=503, detail="cofre de credenciais indisponível"
             ) from exc
-        previous_profile = store.profile.get(provider)
         store.profile[provider] = [
-            {"credential_id": ref.credential_id, "auth_method": metadata.auth_method}
+            {"credential_id": ref.credential_id, "auth_method": metadata.auth_method},
+            *(
+                entry
+                for entry in (previous_profile or [])
+                if entry.get("credential_id") != ref.credential_id
+            ),
         ]
         try:
             store.write_atomically(auth_path)
@@ -839,7 +857,7 @@ async def update_session(session_id: str, payload: dict[str, Any], request: Requ
         return JSONResponse({"error": "session_flags_must_be_boolean"}, status_code=400)
     tags_payload = payload.get("tags")
     tags: list[str] | None = None
-    if tags_payload is not None:
+    if "tags" in payload:
         if not isinstance(tags_payload, list) or any(not isinstance(v, str) for v in tags_payload):
             return JSONResponse(
                 {"error": "session_tags_must_be_a_list_of_strings"}, status_code=400
@@ -891,7 +909,7 @@ async def get_session_messages(session_id: str, request: Request):
         ) or "model"
         if execution_kind == "agent_runtime":
             rows = conn.execute(
-                "SELECT m.id,m.role,m.content,m.timestamp,"
+                "SELECT m.id,m.role,m.content,m.timestamp,m.tool_name,"
                 "COALESCE(u.id,a.id) AS runtime_turn_id,"
                 "COALESCE(u.state,a.state) AS runtime_turn_state "
                 "FROM messages m LEFT JOIN runtime_turns u ON u.user_message_id=m.id "
@@ -901,7 +919,7 @@ async def get_session_messages(session_id: str, request: Request):
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, role, content, timestamp, display_metadata FROM messages "
+                "SELECT id, role, content, timestamp, display_metadata, tool_name FROM messages "
                 "WHERE session_id = ? ORDER BY timestamp, id",
                 (session_id,),
             ).fetchall()
@@ -913,6 +931,8 @@ async def get_session_messages(session_id: str, request: Request):
                 "content": row["content"],
                 "created_at": row["timestamp"],
             }
+            if row["tool_name"] is not None:
+                payload["tool_name"] = row["tool_name"]
             if execution_kind == "agent_runtime":
                 payload.update(
                     {
@@ -1031,21 +1051,6 @@ async def _chat_session(websocket: WebSocket) -> None:
 # --- FRONTEND DASHBOARD REST ENDPOINTS ---
 
 
-@app.get("/api/status")
-async def get_status():
-    config = load_config()
-    return {
-        "status": "healthy",
-        "gateway": "running",
-        "version": "0.1.0",
-        "app": "kairos",
-        "authenticated": True,
-        "active_profile": "default",
-        "model": config.get("model", "claude-3-7-sonnet-20250219"),
-        "provider": config.get("provider", "anthropic"),
-    }
-
-
 class LoginRequest(BaseModel):
     token: str
 
@@ -1093,41 +1098,6 @@ async def logout(request: Request, response: Response):
 @app.post("/api/auth/ws-ticket")
 async def get_ws_ticket():
     return {"ticket": _issue_ws_ticket(), "expires_in": WS_TICKET_TTL_SECONDS}
-
-
-@app.get("/api/profiles")
-async def list_profiles():
-    return {
-        "profiles": [
-            {
-                "name": "default",
-                "description": "Perfil Principal do Kairos",
-                "is_active": True,
-            }
-        ]
-    }
-
-
-@app.get("/api/profiles/active")
-async def get_active_profile():
-    return {"name": "default", "description": "Perfil Principal"}
-
-
-@app.get("/api/model/info")
-async def get_model_info():
-    config = load_config()
-    model = config.get("model", "claude-3-7-sonnet-20250219")
-    provider = config.get("provider", "anthropic")
-    return {
-        "model": model,
-        "provider": provider,
-        "capabilities": {
-            "supports_tools": True,
-            "supports_vision": True,
-            "supports_streaming": True,
-            "supports_reasoning": True,
-        },
-    }
 
 
 @app.get("/api/model/options")
@@ -1316,19 +1286,6 @@ async def toggle_skill(req: SkillToggleRequest):
     return {"name": req.name, "enabled": req.enabled}
 
 
-@app.get("/api/tools/toolsets")
-async def list_toolsets():
-    return {
-        "toolsets": [
-            {
-                "name": "core",
-                "enabled": True,
-                "tools": ["bash", "read_file", "write_file", "edit_file", "list_dir", "web_search"],
-            }
-        ]
-    }
-
-
 @app.get("/api/env")
 async def get_env_vars():
     return {"env": {}}
@@ -1337,11 +1294,6 @@ async def get_env_vars():
 @app.get("/api/cron/jobs")
 async def get_cron_jobs():
     return {"jobs": []}
-
-
-@app.get("/api/analytics/usage")
-async def get_analytics_usage():
-    return {"daily": [], "totals": {"requests": 0, "tokens": 0}}
 
 
 @app.get("/api/logs")

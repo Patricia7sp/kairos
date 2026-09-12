@@ -34,6 +34,7 @@ class ProviderErrorKind(StrEnum):
     RATE_LIMIT = "rate_limit"
     NETWORK = "network"
     INCOMPATIBLE = "incompatible"
+    POLICY = "policy"
     INTERNAL = "internal"
 
 
@@ -44,6 +45,7 @@ _DEFAULT_ERROR_MESSAGES: Mapping[ProviderErrorKind, str] = {
     ProviderErrorKind.RATE_LIMIT: "limite de requisições atingido",
     ProviderErrorKind.NETWORK: "falha de rede ao acessar o provedor",
     ProviderErrorKind.INCOMPATIBLE: "requisição incompatível com o provedor",
+    ProviderErrorKind.POLICY: "a política de privacidade ou roteamento do provedor impede este modelo; revise as configurações do provedor",
     ProviderErrorKind.INTERNAL: "falha interna do provedor",
 }
 

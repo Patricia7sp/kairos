@@ -12,9 +12,10 @@ import { dashboardView } from "./views/dashboard.js";
 import { chatView } from "./views/chat.js";
 import { skillsView } from "./views/skills.js";
 import { sessoesView } from "./views/sessoes.js";
+import { ferramentasView } from "./views/ferramentas.js";
 import { modelosView } from "./views/modelos.js";
 import { provedoresView } from "./views/provedores.js";
-import { emBreveView } from "./views/em-breve.js";
+import { ajustesView } from "./views/ajustes.js";
 import { loginView } from "./views/login.js";
 import { runtimeView } from "./views/runtime.js";
 import { api } from "./api.js";
@@ -27,8 +28,8 @@ const ROTAS = [
   { id: "runtime",     titulo: "Agent Runtime", icone: "tools",     grupo: "Agente", view: runtimeView },
   { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
   { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: provedoresView },
-  { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: emBreveView },
-  { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: emBreveView },
+  { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: ferramentasView },
+  { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: ajustesView },
 ];
 
 const PADRAO = "visao-geral";

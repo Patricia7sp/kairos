@@ -70,11 +70,24 @@ def build_parser():
                     default=argparse.SUPPRESS,
                     help=argparse.SUPPRESS,
                 )
-                _extra_args(cmd.name, scmd.name, sp)
+                if cmd.name == "model":
+                    _model_args(scmd.name, sp)
+                else:
+                    _extra_args(cmd.name, scmd.name, sp)
         else:
             _extra_args(cmd.name, None, p)
 
     return parser
+
+
+def _model_args(subcommand: str, parser) -> None:
+    if subcommand == "list":
+        parser.add_argument("--provider", help="Filtra pelo provedor")
+        parser.add_argument("--free", action="store_true", help="Somente modelos gratuitos")
+    elif subcommand in ("refresh", "test", "set"):
+        parser.add_argument("provider", help="Identificador do provedor")
+        if subcommand == "set":
+            parser.add_argument("model", help="Identificador exato do modelo")
 
 
 def _extra_args(command: str, subcommand: str | None, parser) -> None:

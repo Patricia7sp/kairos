@@ -32,7 +32,7 @@ export async function dashboardView(raiz) {
          v(saude, (d) => `versão ${d.version}`, "sem resposta de /api/health")),
     stat("Skills ativas", v(skills, (d) => `${d.skills.filter((s) => s.enabled).length}/${d.skills.length}`),
          v(skills, (d) => `${d.skills.filter((s) => s.source === "user").length} suas`)),
-    stat("Sessões", v(sessoes, (d) => (d.sessions || []).length)),
+    stat("Sessões", v(sessoes, (d) => d.total ?? "—")),
     stat("Modelos", v(modelos, (d) => (d.models || []).length),
          v(modelos, (d) => `padrão: ${d.default_model || "—"}`)),
   ].join("");

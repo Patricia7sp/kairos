@@ -18,6 +18,7 @@ from kairos_providers.adapter_contract import (
     ProviderErrorKind,
     ProviderEvent,
 )
+from kairos_providers.adapters._json import wire_json
 from kairos_providers.base import ConnectionStatus, TokenUsage
 from kairos_providers.contracts import (
     CatalogModel,
@@ -102,7 +103,9 @@ class OllamaNativeAdapter:
         pending_calls: dict[str, CanonicalToolCall] = {}
         finished = False
         try:
-            async with self._http.stream("POST", self._url("/api/chat"), json=payload) as response:
+            async with self._http.stream(
+                "POST", self._url("/api/chat"), json=wire_json(payload)
+            ) as response:
                 _raise_for_status(response)
                 async for document in _ndjson_documents(response):
                     if document.get("error") is not None:
