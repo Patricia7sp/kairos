@@ -650,7 +650,14 @@ def cmd_logs(args) -> int:
     return run_logs(_home(), args)
 
 
+def cmd_insights(args) -> int:
+    from kairos_cli.insights import run_insights
+
+    return run_insights(_home(), args)
+
+
 HANDLERS = {
+    "insights": cmd_insights,
     "logs": cmd_logs,
     "model": cmd_model,
     "run": cmd_run,
