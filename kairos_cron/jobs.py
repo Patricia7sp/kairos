@@ -47,6 +47,16 @@ def validate_schedule(schedule: dict, now: datetime) -> dict:
     raise ValueError("agenda inválida ou croniter indisponível")
 
 
+def _repeat_limit(kind: str, times: int | None) -> int | None:
+    if times is not None and (type(times) is not int or not 1 <= times <= 1_000_000):
+        raise ValueError("limite de ocorrências deve ser inteiro entre 1 e 1000000")
+    if kind == "once":
+        if times not in (None, 1):
+            raise ValueError("agendamento único permite somente uma ocorrência")
+        return 1
+    return times
+
+
 class JobStore:
     def __init__(self, home: Path):
         self.home = Path(home)
@@ -94,13 +104,11 @@ class JobStore:
             or repeat["completed"] < 0
         ):
             raise ValueError("invalid repeat counter")
-        expected_times = 1 if job["schedule"]["kind"] == "once" else None
         if (
             "times" not in repeat
-            or repeat["times"] != expected_times
-            or (repeat["times"] is not None and type(repeat["times"]) is not int)
+            or _repeat_limit(job["schedule"]["kind"], repeat["times"]) != repeat["times"]
         ):
-            raise ValueError("unsupported repeat budget")
+            raise ValueError("invalid repeat budget")
 
     def _write(self, document: dict) -> None:
         secure_atomic_write_text(self.path, json.dumps(document, ensure_ascii=False, indent=2))
@@ -109,7 +117,13 @@ class JobStore:
         return self._read()["jobs"]
 
     def create(
-        self, *, name: str, prompt: str, schedule: dict, now: datetime | None = None
+        self,
+        *,
+        name: str,
+        prompt: str,
+        schedule: dict,
+        now: datetime | None = None,
+        times: int | None = None,
     ) -> dict:
         now = now or datetime.now(UTC)
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
@@ -118,6 +132,7 @@ class JobStore:
             raise ValueError("instrução deve conter de 1 a 32000 caracteres")
         reject_gateway_restart_job(prompt)
         schedule = validate_schedule(schedule, now)
+        times = _repeat_limit(schedule["kind"], times)
         next_run = (
             schedule["run_at"]
             if schedule["kind"] == "once"
@@ -130,7 +145,7 @@ class JobStore:
             "schedule": schedule,
             "enabled": True,
             "paused": False,
-            "repeat": {"times": 1 if schedule["kind"] == "once" else None, "completed": 0},
+            "repeat": {"times": times, "completed": 0},
             "next_run_at": next_run,
             "created_at": now.isoformat(),
             "last_run_at": None,
@@ -147,6 +162,8 @@ class JobStore:
         with credential_file_lock(self.path):
             document = self._read()
             job = self._find(document, job_id)
+            with closing(self._db()) as db:
+                self._reconcile_repeat(job, db)
             job.update(paused=paused, enabled=not paused)
             self._write(document)
             return job
@@ -198,6 +215,18 @@ class JobStore:
             )
             return cursor.rowcount
 
+    @staticmethod
+    def _reconcile_repeat(job: dict, db) -> bool:
+        repeat = job["repeat"]
+        before = (repeat["completed"], job["next_run_at"])
+        reserved = db.execute(
+            "SELECT COUNT(*) FROM executions WHERE job_id=?", (job["id"],)
+        ).fetchone()[0]
+        repeat["completed"] = max(repeat["completed"], reserved)
+        if repeat["times"] is not None and repeat["completed"] >= repeat["times"]:
+            job["next_run_at"] = None
+        return before != (repeat["completed"], job["next_run_at"])
+
     def claim(self, job_id: str, now: datetime) -> tuple[dict, str] | None:
         # Caller holds the tick lock for the entire effect. JSON and SQLite cannot
         # commit together: the unique occurrence ledger is written FIRST. A crash
@@ -208,14 +237,14 @@ class JobStore:
                 job = self._find(document, job_id)
             except KeyError:
                 return None
-            due = job["next_run_at"]
-            if not job["enabled"] or job["paused"] or due is None or timestamp(due) > now:
-                return None
-            repeat = job["repeat"]
-            if repeat["times"] is not None and repeat["completed"] >= repeat["times"]:
-                return None
-            execution_id = str(uuid4())
             with closing(self._db()) as db, db:
+                changed = self._reconcile_repeat(job, db)
+                due = job["next_run_at"]
+                if not job["enabled"] or job["paused"] or due is None or timestamp(due) > now:
+                    if changed:
+                        self._write(document)
+                    return None
+                execution_id = str(uuid4())
                 cursor = db.execute(
                     """INSERT OR IGNORE INTO executions
                     (id,job_id,source,process_id,pid,status,scheduled_at,claimed_at,conversation_id)
@@ -232,10 +261,15 @@ class JobStore:
                     ),
                 )
                 created = cursor.rowcount == 1
+            repeat = job["repeat"]
+            if created:
+                repeat["completed"] += 1
             job["last_run_at"] = now.isoformat()
-            job["next_run_at"] = compute_next_run(job["schedule"], now.isoformat())
-            if job["schedule"]["kind"] == "once":
-                job["repeat"]["completed"] = 1
+            job["next_run_at"] = (
+                None
+                if repeat["times"] is not None and repeat["completed"] >= repeat["times"]
+                else compute_next_run(job["schedule"], now.isoformat())
+            )
             self._write(document)
             return (job, execution_id) if created else None
 

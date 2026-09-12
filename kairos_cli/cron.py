@@ -20,7 +20,9 @@ def command(args, home):
             schedule = {"kind": "interval", "minutes": args.every}
         else:
             schedule = {"kind": "cron", "expr": args.expr}
-        result = store.create(name=args.name, prompt=args.prompt, schedule=schedule)
+        result = store.create(
+            name=args.name, prompt=args.prompt, schedule=schedule, times=args.times
+        )
     elif sub == "list":
         result = {"jobs": store.list()}
     elif sub in ("pause", "resume"):

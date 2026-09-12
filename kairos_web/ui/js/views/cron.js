@@ -6,6 +6,11 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) =>
 const states = { claimed: "Reivindicada", running: "Executando", completed: "Concluída", failed: "Falhou", unknown: "Resultado desconhecido" };
 const date = (value) => value ? new Date(value).toLocaleString("pt-BR") : "—";
 const scheduleText = (schedule) => schedule.kind === "once" ? `Uma vez: ${date(schedule.run_at)}` : schedule.kind === "interval" ? `A cada ${schedule.minutes} minutos` : `Cron (UTC): ${schedule.expr}`;
+const occurrenceLimit = (job) => job.schedule.kind === "once" ? 1 : job.repeat?.times;
+const exhausted = (job) => occurrenceLimit(job) != null
+  && (job.repeat?.completed ?? 0) >= occurrenceLimit(job);
+const occurrenceText = (job) => `Ocorrências reservadas: ${(job.repeat?.completed ?? 0).toLocaleString("pt-BR")}`
+  + (occurrenceLimit(job) == null ? " · Sem limite" : ` de ${occurrenceLimit(job).toLocaleString("pt-BR")}`);
 
 export async function cronView(root, _route, { signal } = {}) {
   const listeners = new AbortController();
@@ -26,6 +31,11 @@ export async function cronView(root, _route, { signal } = {}) {
         <label class="k-field" data-timing="once">Data e hora local<input class="k-input" name="run_at" type="datetime-local" required></label>
         <label class="k-field" data-timing="interval" hidden>Intervalo em minutos<input class="k-input" name="minutes" type="number" min="1" max="525600" step="1" value="60" disabled></label>
         <label class="k-field" data-timing="cron" hidden>Expressão de cinco campos<input class="k-input" name="expr" placeholder="0 9 * * *" disabled></label>
+        <label class="k-field" data-timing="recurring" hidden>Limite de ocorrências (opcional)
+          <input class="k-input" name="times" type="number" min="1" max="1000000" step="1"
+            placeholder="Sem limite" aria-describedby="cron-limit-help" disabled>
+          <small id="cron-limit-help">Deixe vazio para continuar sem limite. Falhas e resultados desconhecidos também consomem uma ocorrência.</small>
+        </label>
         <button class="k-btn k-btn--primary" type="submit">Criar agendamento</button>
       </form>
     </section>
@@ -43,19 +53,21 @@ export async function cronView(root, _route, { signal } = {}) {
   const timing = () => {
     const kind = form.elements.namedItem("kind").value;
     root.querySelectorAll("[data-timing]").forEach(label => {
-      label.hidden = label.dataset.timing !== kind;
+      const recurring = label.dataset.timing === "recurring";
+      label.hidden = recurring ? kind === "once" : label.dataset.timing !== kind;
       const field = label.querySelector("input");
-      field.disabled = label.hidden; field.required = !label.hidden;
+      field.disabled = label.hidden; field.required = !label.hidden && !recurring;
     });
   };
   const render = () => {
     content.innerHTML = jobs.length ? jobs.map(job => `
       <article class="k-card" data-job="${esc(job.id)}">
         <h3>${esc(job.name)}</h3><p>${esc(scheduleText(job.schedule))}</p>
-        <p>${job.paused || !job.enabled ? "Pausado" : job.next_run_at ? `Próxima execução: ${esc(date(job.next_run_at))}` : "Agenda encerrada"}</p>
+        <p>${esc(occurrenceText(job))}</p>
+        <p>${exhausted(job) ? "Limite de ocorrências atingido." : job.paused || !job.enabled ? "Pausado" : job.next_run_at ? `Próxima execução: ${esc(date(job.next_run_at))}` : "Agenda encerrada"}</p>
         <details><summary>Instrução</summary><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(job.prompt)}</p></details>
         <div class="k-actions">
-          ${job.next_run_at ? `<button class="k-btn k-btn--ghost" data-pause="${esc(job.id)}">${job.paused ? "Retomar" : "Pausar"}</button>` : ""}
+          ${job.next_run_at && !exhausted(job) ? `<button class="k-btn k-btn--ghost" data-pause="${esc(job.id)}">${job.paused ? "Retomar" : "Pausar"}</button>` : ""}
           <button class="k-btn k-btn--ghost" data-history="${esc(job.id)}">Histórico</button>
           <button class="k-btn k-btn--ghost" data-remove="${esc(job.id)}">Excluir</button>
         </div>
@@ -87,8 +99,9 @@ export async function cronView(root, _route, { signal } = {}) {
     if (!form.reportValidity()) return;
     const data = new FormData(form);
     const kind = data.get("kind");
+    const limit = kind !== "once" && data.get("times") ? { times: Number(data.get("times")) } : {};
     const schedule = kind === "once" ? { kind, run_at: new Date(String(data.get("run_at"))).toISOString() } : kind === "interval" ? { kind, minutes: Number(data.get("minutes")) } : { kind, expr: data.get("expr") };
-    operation(() => api.criarAgendamento({ name: data.get("name"), prompt: data.get("prompt"), schedule }), "Agendamento criado.");
+    operation(() => api.criarAgendamento({ name: data.get("name"), prompt: data.get("prompt"), schedule, ...limit }), "Agendamento criado.");
   }, { signal: listeners.signal });
   root.querySelector("[data-refresh]").addEventListener("click", () => operation(async () => {}, "Atualizado."), { signal: listeners.signal });
   content.addEventListener("click", event => {
