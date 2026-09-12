@@ -3,7 +3,8 @@
 Continuação autorizada do inventário funcional: permitir intervalo/cron finitos,
 mantendo recorrência ilimitada como padrão atual. Não alterar jobs existentes nem
 criar trabalhos na produção para aceite. Base inicial PR #26; atualizar após
-integrar os registros operacionais antes da validação final.
+integrar os registros operacionais antes da validação final. O código final já
+incorpora PR #27, `5889fbe`, sem alterações nas fontes após o aceite.
 
 ## Contrato
 
