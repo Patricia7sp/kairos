@@ -15,6 +15,8 @@ def _decimal(value: Decimal | None) -> str | None:
 
 def serialize_model(model: CatalogModel) -> dict[str, Any]:
     capabilities = model.capabilities
+    reasoning_parameters = {"reasoning", "include_reasoning", "reasoning_effort"}
+    reasoning = True if reasoning_parameters.intersection(model.supported_parameters) else None
     return {
         "id": model.ref.model,
         "name": model.display_name,
@@ -31,6 +33,7 @@ def serialize_model(model: CatalogModel) -> dict[str, Any]:
             "chat": capabilities.chat,
             "tools": capabilities.tools,
             "vision": capabilities.vision,
+            "reasoning": reasoning,
             "streaming": capabilities.streaming,
             "context_length": capabilities.context_length,
             "max_output_tokens": capabilities.max_output_tokens,
