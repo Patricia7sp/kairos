@@ -112,7 +112,7 @@ class ComposedInteractionService(InteractionService):
         kwargs["context_loader"] = _TurnScopedDependency(
             kwargs["context_loader"], current, "context_loader"
         )
-        super().__init__(admission=admission, **kwargs)
+        super().__init__(admission=admission, event_home=home, **kwargs)
         self.home = home
         self.gateway = gateway
         self._turn_composition = current

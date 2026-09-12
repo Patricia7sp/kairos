@@ -1,7 +1,7 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Branch de trabalho atual: `feat/chat-search-privacy`.
-Base anterior: PR #23, `40a0626`. A conclusão integral não está declarada.
+Atualizado em 12/09/2026. Branch de trabalho atual: `feat/service-events`.
+Base atual: PR #26, `10d2482`. A conclusão integral não está declarada.
 
 ## Mandato e critérios
 
@@ -74,11 +74,11 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
   ferramentas não estão habilitadas pelo Chat.
 - Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
   notepad, blueprints, limites finitos recorrentes e entrega externa seguem pendentes.
-- APIs legadas `/api/env` e `/api/logs` ainda retornam dados fixos; `/api/cron/jobs`
-  foi substituída por administração persistida no lote de cron.
-- A CLI declara **50 comandos**. Após implementar `model`, **28** ainda não têm handler:
+- `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
+  de registros abaixo; publicação ainda pendente. `/api/cron/jobs` usa armazenamento real.
+- A CLI declara **50 comandos**. Após implementar `model` e `logs`, **27** ainda não têm handler:
   acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import, insights,
-  login, logout, logs, memory, monitoring, pairing, pause, peer, prompt-size, setup,
+  login, logout, memory, monitoring, pairing, pause, peer, prompt-size, setup,
   skin, slack, uninstall, update, verify, webhook, whatsapp. Há também subcomandos
   pendentes dentro dos grupos com handler. Esses comandos retornam 69.
 - Registry canônico possui oito provedores: anthropic, custom, deepseek, gemini, groq,
@@ -90,10 +90,10 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 
 ## Próxima sequência
 
-1. Finalizar verificação da CLI, pacote Docker e integração desta branch.
-2. Registrar PR/CI remota/implantação apenas quando executados e conferidos.
-3. Retomar cron operacional, depois demais comandos e conectores, com um aceite
-   reproduzível por fluxo. Manter distinção entre falta de código e bloqueio externo.
+1. Finalizar o lote de registros operacionais e publicar após validação.
+2. Avançar nas pendências de cron, comandos e conectores com aceite por fluxo.
+3. Registrar PR/CI remota/implantação apenas quando conferidos, mantendo distinção
+   entre falta de código e bloqueio externo.
 
 ## Verificação final do lote — PR #24
 
@@ -323,3 +323,78 @@ editor de segredos. Auditoria local: `/tmp/kairos-next-env-logs-audit.md`.
 - Navegador final passou com o código congelado; fixture encerrada e porta 9137 livre.
 - Artefatos: `/tmp/kairos-chat-search-{ci-frozen,build-frozen,container-final,browser-final}.log`,
   `/tmp/kairos-chat-search-final-review.md` e JSON do navegador/busca externa.
+
+
+### Publicação do lote de busca — PR #26
+
+- PR #26 integrado: `10d248294a3cd1c778c21efcb04ce80f6a79e008`; código revisado
+  `66e6789c8a790f09d510711319a70237533d1679`. Nove checks remotos passaram.
+- Imagem publicada: `sha256:4e664bf5963a04c4e220fbd62f07a33d99b87d6a8327187913085f96818e617b`.
+  Aplicação e broker saudáveis; imagem/contêiner do keeper preservados.
+- Backup privado restaurado/conferido antes do deploy: `20260912T155959Z`, 4.261
+  arquivos, integridade SQLite e digests de checkpoints/baselines validados.
+- Aceite publicado em Chromium: nove APIs 200, runtime ready, scheduler ativo,
+  compositor pronto, busca desligada por padrão e explicação de treinamento visível;
+  390/900/1400 px sem erro JS ou overflow. Nenhuma geração nem mutação de dados nesse
+  aceite de produção.
+- Cinco arquivos protegidos permaneceram idênticos; 18 sessões, 56 mensagens,
+  16 turnos de runtime, 10 checkpoints e duas baselines preservados.
+- Relatórios `/tmp/kairos-chat-search-{deployment,preservation,production-browser}.json`;
+  evidência da implantação também salva no diretório privado do backup.
+- Notas locais anteriores, já incorporadas ao PR, foram preservadas adicionalmente
+  no stash `Kairos prior delivery notes preserved before PR26; incorporated in 66e6789`.
+
+## Continuação em curso — eventos operacionais
+
+Worktree `.worktrees/service-events`, branch `feat/service-events`, base `10d2482`.
+Plano `docs/superpowers/plans/2026-09-12-service-events.md`. Módulo de diário passou
+65 testes e revisão independente; Web/API/CLI e produtores de Chat/busca/cron
+estão implementados. Aceite inicial em Chromium passou, incluindo ticker cron real,
+igualdade API/CLI, filtros, refresh/reload e três larguras sem erros JS/overflow.
+Revisão de integração exigiu distinguir chamada de turno, falha de cancelamento e
+retirar escrita síncrona do event loop. Correções e validação final em curso;
+publicação deste lote ainda pendente. Manual: [Registros](registros.md).
+O escopo funcional integral permanece aberto; a proteção `data_collection: deny`
+permanece vigente.
+
+
+### Verificação do lote de registros operacionais
+
+- Diário durável e limitado, catálogo fixo sem conteúdo sensível, rotação e leitura
+  segura compartilhada por API autenticada, CLI `logs` e tela Registros. `/api/env`
+  foi aposentado com HTTP 410 e indicação do fluxo existente de provedores.
+- Eventos reais de lifecycle Web, chamadas ao modelo, buscas e término de cron.
+  Chat registra cada chamada, não sucesso do turno completo. Falha interna, erro
+  de provedor e cancelamento têm classificação distinta.
+- Escrita em thread não bloqueia o event loop; cancelamento aguarda o fim da
+  escrita reservada. Cancelar após estado terminal do cron não gera unknown falso.
+  Revisão final independente sem bloqueadores.
+- CI local final: **2.027 testes Python + 5.579 subtestes**, **156 Web**, **17 TUI**,
+  **18 desktop**; lint, formatação, tipos, shellcheck, recall e lock passaram.
+  Codex dos testes permanece fixado em 0.153.4.
+- Artefatos: `/tmp/kairos-service-events-ci.log`,
+  `/tmp/kairos-service-events-integration-review.md`. Imagem construída; aceite
+  final de navegador/Docker e publicação serão registrados após confirmação.
+- Diário best effort, duas partes de 512 KiB, sem recuperação automática de
+  corrupção nem garantia de auditoria completa. Falha de I/O pode perder eventos;
+  o journal não substitui os ledgers de conversas/uso/execuções.
+
+Próxima pendência iniciada em worktree isolado: limites finitos de ocorrências
+recorrentes, plano `docs/superpowers/plans/2026-09-12-cron-limits.md` na branch
+`feat/cron-limits`. Implementação ainda em curso, não incluída neste lote.
+
+
+Correção de empacotamento encontrada pelo teste Docker: o novo pacote era
+descoberto pelo setuptools local, mas faltava na lista COPY do Dockerfile.
+COPY acrescentado e regressão de importação da Web + escrita/leitura do diário
+na imagem real adicionada; RED confirmou ModuleNotFoundError na imagem anterior.
+Aceite final do navegador já passou com ticker real de 57,89 s, filtros/reload,
+API/CLI iguais, erro/recuperação seguros e três larguras sem overflow/erros JS.
+Rebuild e repetição dos testes da imagem em andamento.
+
+
+Imagem corrigida validada: 22 testes existentes e 24 subtestes passaram; o teste
+novo de importação também passou após usar a API pública OpenAPI para consultar
+rotas (a versão atual do FastAPI usa routers lazy sem atributo path). Total:
+**23 testes da imagem aprovados**, sem skips. A alteração final foi apenas no
+teste; não exigiu reconstrução do código da aplicação.

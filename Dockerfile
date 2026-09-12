@@ -89,6 +89,7 @@ COPY kairos_cli/ ./kairos_cli/
 COPY kairos_tui_host/ ./kairos_tui_host/
 COPY kairos_acp/ ./kairos_acp/
 COPY kairos_integration/ ./kairos_integration/
+COPY kairos_observability/ ./kairos_observability/
 COPY kairos_runtime/ ./kairos_runtime/
 COPY kairos_evals/ ./kairos_evals/
 COPY kairos_web/ ./kairos_web/

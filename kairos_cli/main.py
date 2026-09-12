@@ -57,6 +57,8 @@ def build_parser():
 
         if cmd.name == "runtime":
             _runtime_branch(p, cmd, argparse)
+        elif cmd.name == "logs":
+            _logs_args(p)
         elif cmd.subcommands:
             # `dest` nomeado por comando: é o que permite ao handler saber
             # qual subcomando veio sem inspecionar o parser.
@@ -259,6 +261,24 @@ def _runtime_args(command: str, parser, *, session: bool) -> None:
     elif command == "watch":
         parser.add_argument("--session", required=True, type=_nonblank_session)
         parser.add_argument("--cursor")
+
+
+def _logs_args(parser) -> None:
+    parser.add_argument("--limit", type=_logs_limit, default=50, help="Máximo de eventos (1–200)")
+    parser.add_argument("--service", choices=("web", "chat", "search", "cron"))
+    parser.add_argument("--level", choices=("info", "warning", "error"))
+
+
+def _logs_limit(value: str) -> int:
+    import argparse
+
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--limit deve ser um inteiro entre 1 e 200") from exc
+    if not 1 <= limit <= 200:
+        raise argparse.ArgumentTypeError("--limit deve estar entre 1 e 200")
+    return limit
 
 
 def _nonblank_session(value: str) -> str:

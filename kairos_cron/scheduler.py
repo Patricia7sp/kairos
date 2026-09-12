@@ -11,6 +11,7 @@ from pathlib import Path
 
 from kairos_cron.jobs import JobStore
 from kairos_integration.interaction_contract import InteractionEnvelope
+from kairos_observability.service_events import record_service_event_async
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,10 @@ class Scheduler:
             if not acquired:
                 return {**report, "busy": True}
             report["recovered"] = self.store.recover()
+            if report["recovered"]:
+                await record_service_event_async(
+                    self.home, "cron.unknown", results=report["recovered"]
+                )
             for candidate in self.store.list():
                 claimed = self.store.claim(candidate["id"], now)
                 if claimed is None:
@@ -72,6 +77,7 @@ class Scheduler:
                                 success = True
                     if success and not failed:
                         self.store.finish(execution_id, "completed")
+                        event_code = "cron.completed"
                     else:
                         self.store.finish(
                             execution_id,
@@ -79,6 +85,7 @@ class Scheduler:
                             "O turno não terminou com sucesso; consulte a conversa.",
                         )
                         report["failed"] += 1
+                        event_code = "cron.failed"
                 except asyncio.CancelledError:
                     try:
                         self.store.finish(
@@ -86,6 +93,7 @@ class Scheduler:
                             "unknown",
                             "Execução interrompida; efeitos anteriores desconhecidos.",
                         )
+                        await record_service_event_async(self.home, "cron.unknown")
                     except Exception:  # noqa: BLE001 - preserve cancellation; next tick recovers the durable row
                         logger.error("could not persist interrupted scheduler execution")
                     raise
@@ -96,6 +104,8 @@ class Scheduler:
                         "Não foi possível concluir o turno; consulte a conversa.",
                     )
                     report["failed"] += 1
+                    event_code = "cron.failed"
+                await record_service_event_async(self.home, event_code)
                 report["executed"] += 1
             self.last_tick = now.isoformat()
             self.last_error = None

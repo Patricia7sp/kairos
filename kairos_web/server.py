@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from kairos_cli.auth import AuthStore
 from kairos_integration import build_interaction_router as build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
+from kairos_observability.service_events import record_service_event_async
 from kairos_providers.adapters.openrouter import OpenRouterRoutingPolicy
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
@@ -47,6 +48,7 @@ from kairos_web.chat_transport import (
     interaction_event_to_json,
 )
 from kairos_web.cron_api import router as cron_router
+from kairos_web.logs_api import router as logs_router
 from kairos_web.message_metadata import public_message_accounting
 from kairos_web.observability_api import router as observability_router
 from kairos_web.provider_api import (
@@ -93,6 +95,7 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.cron_scheduler = scheduler
     application.state.cron_task = cron_task
     try:
+        await record_service_event_async(_application_home(application), "web.started")
         yield
     finally:
         try:
@@ -115,12 +118,14 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
                 and getattr(application.state, "runtime_client", None) is runtime_client
             ):
                 del application.state.runtime_client
+            await record_service_event_async(_application_home(application), "web.stopped")
 
 
 app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)
 app.include_router(runtime_api_router)
 app.include_router(provider_settings_router)
 app.include_router(observability_router)
+app.include_router(logs_router)
 app.include_router(provider_credentials_router)
 app.include_router(tools_router)
 app.include_router(settings_router)
@@ -1317,12 +1322,7 @@ async def toggle_skill(req: SkillToggleRequest):
 
 @app.get("/api/env")
 async def get_env_vars():
-    return {"env": {}}
-
-
-@app.get("/api/logs")
-async def get_logs():
-    return {"logs": []}
+    return JSONResponse({"error": "retired", "replacement": "/api/providers"}, status_code=410)
 
 
 # --- WEBSOCKET ALIASES ---
