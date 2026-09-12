@@ -1,7 +1,7 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Branch de trabalho atual: `feat/usage-insights`.
-Base publicada: PR #28, `880936d`. A conclusão integral não está declarada.
+Atualizado em 12/09/2026. Código publicado na `main`: PR #29, `901e1bd`.
+Este documento inclui o checkpoint de continuidade após a implantação. A conclusão integral não está declarada.
 
 ## Mandato e critérios
 
@@ -91,10 +91,10 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 
 ## Próxima sequência
 
-1. Finalizar aceite e publicação de insights.
-2. Avançar nas pendências de cron, comandos e conectores com aceite por fluxo.
-3. Registrar PR/CI remota/implantação apenas quando conferidos, mantendo distinção
-   entre falta de código e bloqueio externo.
+1. Retomar um recorte explícito das pendências de CLI ou cron descritas no checkpoint.
+2. Implementar e validar o fluxo real, incluindo persistência e recuperação de falha.
+3. Registrar entrega e aceites separados dos bloqueios externos, mantendo a proteção
+   de privacidade e a preservação de dados.
 
 ## Verificação final do lote — PR #24
 
@@ -502,3 +502,57 @@ Manual: [Métricas](metricas.md).
   nove tokens, custo desconhecido preservado. Docker completo ainda em finalização.
 - Artefatos `/tmp/kairos-usage-insights-{ci-final.log,acceptance.json,review.md,image-cli.json}`.
   Publicação ainda pendente dos checks remotos e conferência da instalação.
+
+
+### Publicação de insights — PR #29
+
+- PR #29 integrada em `901e1bd39f26928c2061bef6f16e854da14ca6f3`; os nove checks
+  remotos passaram. Código final `93de4481191daa0385e26f4ec38a6843394bd5eb`.
+- Imagem `sha256:e68a6d4e6bcd78f92b08cab00720ed5c253fea0eafab50be4b59021fa95a5a02`
+  publicada e saudável. Broker e keeper preservados. **23 testes Docker +24
+  subtestes** passaram sem skips, além do smoke da CLI na imagem real.
+- Backup `20260912T164836Z`: 4.268 arquivos restaurados e conferidos; SQLite
+  íntegro, checkpoints e baselines com todos os digests válidos.
+- Aceite publicado passou: API e CLI idênticas; sete chamadas e 901 tokens já
+  existentes na contabilidade, custo desconhecido preservado. `days=7` mantém
+  all_time e informa janela indisponível. Anônimo recebe 401; sem erros JS.
+- Nenhuma geração ou mutação de conteúdo no aceite publicado. Cinco arquivos
+  protegidos inalterados; 18 sessões, 56 mensagens, 16 turnos de runtime,
+  10 checkpoints e duas baselines preservados.
+- Ambiente Python do checkout principal atualizado para descobrir o novo pacote
+  observability; imports de registros e métricas conferidos.
+- Evidências `/tmp/kairos-usage-insights-{deployment,preservation,production}.json`,
+  `/tmp/kairos-usage-insights-{ci-final,container}.log`; implantação também salva
+  no diretório privado do backup.
+
+## Checkpoint de continuidade após PR #29
+
+Os lotes de modelos/configurações/sessões, cron operacional, busca no Chat,
+registros, limites recorrentes e insights estão integrados e publicados conforme
+os aceites acima. Os servidores descartáveis dos testes foram encerrados.
+
+O escopo integral permanece aberto. Não converter testes de adaptador com HTTP
+controlado em promessa de geração externa. O modelo gratuito OpenRouter testado
+continua sem geração bem-sucedida validada com `data_collection: deny`, conforme
+a decisão de privacidade; isso não significa bloqueio genérico da conta.
+
+Pendências que exigem implementação ou aceite próprio:
+
+- 26 comandos CLI ainda sem handler, listados no inventário. Subcomandos e paridade
+  completa de grupos existentes também precisam de conferência.
+- Monitores de fonte, notepad, blueprints, schedulers externos e entrega a canais.
+- Provedores além dos oito canônicos e as integrações de plataforma previstas;
+  credenciais e contratos específicos serão necessários para seus aceites reais.
+- TUI/desktop, MCP, plugins, perfis isolados e skills ainda precisam de aceite
+  operacional específico. Ollama operacional permanece adiado pela decisão anterior.
+
+Próximo recorte recomendado pela auditoria: definir o diagnóstico local de CLI a
+partir das fontes reais existentes, sem herdar upload automático do debug legado.
+`verify` depende de um executor de receitas ainda ausente; `memory` também não tem
+um executor nativo equivalente pronto para simplesmente ligar ao comando.
+Auditoria `/tmp/kairos-next-cli-audit.md`. Não marcar esses comandos como prontos
+apenas por adicionar um handler ou uma interface.
+
+As notas locais de entrega anteriores foram incorporadas aos PRs seguintes e
+preservadas adicionalmente em stashes identificados. Não reaplicar esses stashes
+sem comparar o conteúdo: já está documentado aqui.
