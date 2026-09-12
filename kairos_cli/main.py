@@ -70,7 +70,9 @@ def build_parser():
                     default=argparse.SUPPRESS,
                     help=argparse.SUPPRESS,
                 )
-                if cmd.name == "model":
+                if cmd.name == "cron":
+                    _cron_args(scmd.name, sp)
+                elif cmd.name == "model":
                     _model_args(scmd.name, sp)
                 else:
                     _extra_args(cmd.name, scmd.name, sp)
@@ -78,6 +80,20 @@ def build_parser():
             _extra_args(cmd.name, None, p)
 
     return parser
+
+
+def _cron_args(subcommand: str, parser) -> None:
+    if subcommand == "create":
+        parser.add_argument("--name", required=True)
+        parser.add_argument("--prompt", required=True)
+        timing = parser.add_mutually_exclusive_group(required=True)
+        timing.add_argument("--at", help="Data ISO com fuso horário")
+        timing.add_argument("--every", type=int, help="Intervalo em minutos")
+        timing.add_argument("--expr", help="Expressão cron de cinco campos, em UTC")
+    elif subcommand in ("pause", "resume", "remove"):
+        parser.add_argument("job_id")
+    elif subcommand == "history":
+        parser.add_argument("job_id", nargs="?")
 
 
 def _model_args(subcommand: str, parser) -> None:

@@ -397,32 +397,15 @@ def cmd_auth(args) -> int:  # noqa: PLR0912 - subcomandos independentes mantidos
 
 
 def cmd_cron(args) -> int:
-    from kairos_cron.schedule import croniter_available
-    from kairos_domain.scheduling import ExecutionStatus
+    from kairos_cli.cron import command
 
-    if args.cron_command in ("status", None):
-        _emit(
-            {
-                "croniter": "disponível"
-                if croniter_available()
-                else "ausente (jobs 'cron' ficam inertes)",
-                "estados de execução": [s.value for s in ExecutionStatus],
-            },
-            as_json=args.json,
-        )
-        return ExitCode.OK
-    if args.cron_command == "list":
-        _emit(["nenhum job agendado"], as_json=args.json)
-        return ExitCode.OK
-    return ExitCode.NOT_IMPLEMENTED
+    return command(args, _home())
 
 
 def cmd_tick(args) -> int:
-    from kairos_cron.dispatch import DispatchClaimer
+    from kairos_cli.cron import command
 
-    DispatchClaimer()
-    print("tick executado: nenhum job devido")
-    return ExitCode.OK
+    return command(args, _home())
 
 
 def cmd_sync(args) -> int:

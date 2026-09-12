@@ -69,6 +69,12 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  agendamentos: () => request("/api/cron/jobs"),
+  statusAgendamentos: () => request("/api/cron/status"),
+  criarAgendamento: (body) => request("/api/cron/jobs", {method:"POST", body}),
+  pausarAgendamento: (id, paused) => request(`/api/cron/jobs/${encodeURIComponent(id)}`, {method:"PATCH", body:{paused}}),
+  excluirAgendamento: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}`, {method:"DELETE"}),
+  historicoAgendamento: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/history`),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 

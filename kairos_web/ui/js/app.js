@@ -15,12 +15,14 @@ import { sessoesView } from "./views/sessoes.js";
 import { ferramentasView } from "./views/ferramentas.js";
 import { modelosView } from "./views/modelos.js";
 import { provedoresView } from "./views/provedores.js";
+import { cronView } from "./views/cron.js";
 import { ajustesView } from "./views/ajustes.js";
 import { loginView } from "./views/login.js";
 import { runtimeView } from "./views/runtime.js";
 import { api } from "./api.js";
 
 const ROTAS = [
+  { id: "agendamentos", titulo: "Agendamentos", icone: "sessions", grupo: "Agente", view: cronView },
   { id: "visao-geral", titulo: "Visão geral", icone: "dashboard", grupo: "Agente", view: dashboardView },
   { id: "chat",        titulo: "Chat",        icone: "sessions",  grupo: "Agente", view: chatView },
   { id: "skills",      titulo: "Skills",      icone: "skills",    grupo: "Agente", view: skillsView },

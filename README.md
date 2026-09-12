@@ -59,6 +59,11 @@ kairos approvals test "rm -rf build" --deny "rm *" --yolo   # sai 3: deny vence 
 São **50 comandos** declarados na superfície. Os implementados usam as units reconstruídas; os demais
 saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
 
+## Agendamentos
+
+A tela Agendamentos e `kairos cron` administram jobs persistidos com execução real
+e histórico. Consulte [uso e limites](docs/agendamentos.md).
+
 ## Chat, modelos e providers
 
 A SPA principal em `/` oferece Chat, catálogo de modelos e configuração de

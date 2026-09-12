@@ -46,6 +46,7 @@ from kairos_web.chat_transport import (
     interaction_envelope_from_json,
     interaction_event_to_json,
 )
+from kairos_web.cron_api import router as cron_router
 from kairos_web.message_metadata import public_message_accounting
 from kairos_web.observability_api import router as observability_router
 from kairos_web.provider_api import (
@@ -85,13 +86,28 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
         runtime_client = service.runtime_client
         application.state.runtime_client = runtime_client
         installed_runtime_client = True
+    from kairos_cron.scheduler import Scheduler
+
+    scheduler = Scheduler(_application_home(application), service)
+    cron_task = asyncio.create_task(scheduler.run(), name="kairos-cron-ticker")
+    application.state.cron_scheduler = scheduler
+    application.state.cron_task = cron_task
     try:
         yield
     finally:
         try:
-            if owns_service:
-                await service.aclose()
+            try:
+                cron_task.cancel()
+                try:
+                    await cron_task
+                except asyncio.CancelledError:
+                    pass
+            finally:
+                if owns_service:
+                    await service.aclose()
         finally:
+            del application.state.cron_task
+            del application.state.cron_scheduler
             if owns_service and getattr(application.state, "interaction_service", None) is service:
                 del application.state.interaction_service
             if (
@@ -108,10 +124,13 @@ app.include_router(observability_router)
 app.include_router(provider_credentials_router)
 app.include_router(tools_router)
 app.include_router(settings_router)
+app.include_router(cron_router)
 
 
 @app.exception_handler(RequestValidationError)
 async def _safe_runtime_validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/cron/"):
+        return JSONResponse({"detail": "requisição de agendamento inválida"}, status_code=422)
     if request.url.path.startswith("/api/runtime/"):
         return JSONResponse({"detail": "requisição de runtime inválida"}, status_code=422)
     return await request_validation_exception_handler(request, exc)
@@ -1289,11 +1308,6 @@ async def toggle_skill(req: SkillToggleRequest):
 @app.get("/api/env")
 async def get_env_vars():
     return {"env": {}}
-
-
-@app.get("/api/cron/jobs")
-async def get_cron_jobs():
-    return {"jobs": []}
 
 
 @app.get("/api/logs")
