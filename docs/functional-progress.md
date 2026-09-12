@@ -94,3 +94,23 @@ privado; os originais foram montados somente para leitura.
 2. Registrar PR/CI remota/implantação apenas quando executados e conferidos.
 3. Retomar cron operacional, depois demais comandos e conectores, com um aceite
    reproduzível por fluxo. Manter distinção entre falta de código e bloqueio externo.
+
+## Verificação final do lote — PR #24
+
+- Commit funcional: `76bb36b`. CI local final: **1.846 testes Python e 5.573
+  subtestes**, **134 Web**, **17 TUI**, **18 desktop**; todos os checks de
+  `scripts/ci.sh --fast` passaram. Imagem Docker: **22 testes de integração
+  passaram**, incluindo o ciclo de vida s6 com imagem auxiliar, sem skips.
+- Aceite externo com aplicação candidata, HTTP e WebSocket reais em armazenamento
+  descartável: autenticação e catálogo passaram; a recusa de privacidade chegou
+  como `turn_error`/`policy`, sem queda de socket. API de histórico retornou 200;
+  seleção preservada e mensagens persistidas. Isso valida o caminho de erro,
+  **não** geração bem-sucedida.
+- A primeira CI remota aprovou oito jobs e reprovou o teste de prazo de cancelamento:
+  o limite de 280 ms incluía persistência SQLite posterior ao prazo de RPC de 200 ms.
+  Reproduzido introduzindo 120 ms de latência na gravação. O teste agora observa os
+  orçamentos reais das duas esperas, mantém persistência real lenta e usa somente
+  um limite de proteção contra travamento. Mutação reiniciando o prazo foi detectada;
+  os 29 testes do serviço de runtime passaram. Nenhuma mudança no código de runtime.
+- PR: https://github.com/Patricia7sp/kairos/pull/24. Não registrar merge ou deploy
+  como concluídos até conferir os respectivos resultados.
