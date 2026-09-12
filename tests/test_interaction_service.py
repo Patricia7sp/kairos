@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
@@ -551,17 +552,16 @@ class InteractionServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_proximo_turno_reidrata_tool_calls_e_resultado_vinculado(self) -> None:
         """Descartar IDs de tools faria o próximo provider rejeitar o histórico do turno."""
-        first_service, _resolver, _adapter, _usage = service_with_fake_adapter(
-            self.db,
-            events=[
-                ProviderEvent(
-                    kind="tool_call",
-                    tool_call=CanonicalToolCall(id="call-1", name="soma", arguments='{"a": 1}'),
-                ),
-                ProviderEvent(kind="finish", finish_reason="tool_calls"),
-            ],
+        # Seed a completed historical exchange; unsolicited tools are now denied
+        # by the service when search is off.
+        SessionRepository(self.db).ensure("s1", source="web")
+        MessageRepository(self.db).append("s1", "user", content="oi")
+        MessageRepository(self.db).append(
+            "s1",
+            "assistant",
+            content="",
+            tool_calls=json.dumps([{"id": "call-1", "name": "soma", "arguments": '{"a": 1}'}]),
         )
-        _ = [event async for event in first_service.stream(envelope())]
         MessageRepository(self.db).append(
             "s1",
             "tool",

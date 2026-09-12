@@ -10,7 +10,6 @@ import httpx
 
 from kairos_providers.adapter_contract import (
     AdapterRequest,
-    CanonicalMessage,
     CanonicalToolCall,
     ContentPart,
     ProviderError,
@@ -212,7 +211,7 @@ def _payload_for(request: AdapterRequest, provider: str) -> dict[str, Any]:  # n
         raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
     system_parts: list[dict[str, str]] = []
     contents: list[dict[str, Any]] = []
-    tool_names = _tool_names(request.messages)
+    tool_names: dict[str, str] = {}
     for message in request.messages:
         text_parts = _text_parts(message.content)
         if message.role == "system":
@@ -248,6 +247,7 @@ def _payload_for(request: AdapterRequest, provider: str) -> dict[str, Any]:  # n
             if message.role != "assistant":
                 raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
             parts.extend(_function_call_part(call) for call in message.tool_calls)
+            tool_names.update((call.id, call.name) for call in message.tool_calls)
         if parts:
             contents.append(
                 {"role": "model" if message.role == "assistant" else "user", "parts": parts}
@@ -264,16 +264,6 @@ def _payload_for(request: AdapterRequest, provider: str) -> dict[str, Any]:  # n
     return payload
 
 
-def _tool_names(messages: tuple[CanonicalMessage, ...]) -> dict[str, str]:
-    names: dict[str, str] = {}
-    for message in messages:
-        if message.tool_calls and message.role != "assistant":
-            raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
-        for call in message.tool_calls:
-            names[call.id] = call.name
-    return names
-
-
 def _text_parts(parts: tuple[ContentPart, ...]) -> list[str]:
     values: list[str] = []
     for part in parts:
@@ -284,13 +274,16 @@ def _text_parts(parts: tuple[ContentPart, ...]) -> list[str]:
 
 
 def _function_call_part(call: CanonicalToolCall) -> dict[str, Any]:
-    return {
+    part = {
         "functionCall": {
             "id": call.id,
             "name": call.name,
             "args": _arguments_object(call.arguments),
         }
     }
+    if call.thought_signature is not None:
+        part["thoughtSignature"] = call.thought_signature
+    return part
 
 
 def _arguments_object(arguments: str) -> dict[str, Any]:
@@ -351,13 +344,20 @@ def _events_from_document(
             events.append(ProviderEvent(kind="text_delta", text=text))
         function_call = part.get("functionCall")
         if function_call is not None:
-            call = _tool_call_from(function_call, len(pending_calls) + 1)
+            signature = part.get("thoughtSignature")
+            call = _tool_call_from(
+                function_call,
+                len(pending_calls) + 1,
+                thought_signature=signature if isinstance(signature, str) else None,
+            )
             pending_calls[call.id] = call
     reason = candidate.get("finishReason")
     return tuple(events), _finish_reason(reason)
 
 
-def _tool_call_from(value: object, ordinal: int) -> CanonicalToolCall:
+def _tool_call_from(
+    value: object, ordinal: int, *, thought_signature: str | None = None
+) -> CanonicalToolCall:
     if not isinstance(value, dict):
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
     name = value.get("name")
@@ -370,7 +370,10 @@ def _tool_call_from(value: object, ordinal: int) -> CanonicalToolCall:
     if not isinstance(arguments, dict):
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=False)
     return CanonicalToolCall(
-        call_id, name, json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+        call_id,
+        name,
+        json.dumps(arguments, ensure_ascii=False, separators=(",", ":")),
+        thought_signature=thought_signature,
     )
 
 

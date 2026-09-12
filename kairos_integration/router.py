@@ -77,6 +77,7 @@ class InteractionRouter:
             not isinstance(envelope.idempotency_key, str)
             or not envelope.idempotency_key.strip()
             or envelope.override is not None
+            or envelope.web_search
             or any(key in envelope.parameters for key in _IDENTITY_PARAMETERS)
         ):
             raise RuntimeErrorInfo("invalid_event", "envelope de runtime inválido", False)

@@ -117,6 +117,14 @@ def test_cli_maps_only_complete_provider_model_override(monkeypatch, tmp_path, c
     assert capsys.readouterr().err == ""
 
 
+def test_cli_search_flag_reaches_canonical_envelope(monkeypatch, tmp_path):
+    fake = FakeInteractionService((turn_end(),))
+    install_service(monkeypatch, tmp_path, fake)
+    assert main(["chat", "--session", "s1", "--web-search", "pesquise"]) == ExitCode.OK
+    assert fake.envelopes[0].web_search is True
+    assert "web_search" not in fake.envelopes[0].parameters
+
+
 @pytest.mark.parametrize(
     ("flag", "value"),
     [("--provider", "openrouter"), ("--model", "acme/chat")],

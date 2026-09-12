@@ -189,6 +189,7 @@ describe("fluxos reais do Chat", () => {
     submit(root, "Olá");
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
+      web_search: false,
       type: "message", protocol: 1,
       session_id: "00000000-0000-4000-8000-000000000000",
       content: "Olá", provider: "openai", model: "gpt-test",
@@ -287,6 +288,7 @@ describe("fluxos reais do Chat", () => {
     submit(root, "continue");
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
+      web_search: false,
       type: "message", protocol: 1, session_id: "existing-session", content: "continue",
       provider: "openrouter", model: "vendor/model:free", parameters: { temperature: 0.25 },
     });
@@ -502,6 +504,7 @@ describe("fluxos reais do Chat", () => {
     submit(root, "usar o override persistido");
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
+      web_search: false,
       type: "message", protocol: 1, session_id: "existing-session",
       content: "usar o override persistido", provider: "openrouter",
       model: "vendor/model:free", parameters: { temperature: 0.3 },

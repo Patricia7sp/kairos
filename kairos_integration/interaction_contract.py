@@ -112,8 +112,11 @@ class InteractionEnvelope:
     override: ProviderModelRef | None = None
     parameters: Mapping[str, Any] = field(default_factory=dict)
     idempotency_key: str | None = None
+    web_search: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.web_search) is not bool:
+            raise TypeError("web_search deve ser booleano")
         if not isinstance(self.conversation_id, str) or not self.conversation_id.strip():
             raise ValueError("conversation_id é obrigatório")
         if not isinstance(self.source, str) or not self.source.strip():

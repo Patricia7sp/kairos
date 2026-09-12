@@ -45,7 +45,7 @@ _DEFAULT_ERROR_MESSAGES: Mapping[ProviderErrorKind, str] = {
     ProviderErrorKind.RATE_LIMIT: "limite de requisições atingido",
     ProviderErrorKind.NETWORK: "falha de rede ao acessar o provedor",
     ProviderErrorKind.INCOMPATIBLE: "requisição incompatível com o provedor",
-    ProviderErrorKind.POLICY: "a política de privacidade ou roteamento do provedor impede este modelo; revise as configurações do provedor",
+    ProviderErrorKind.POLICY: "não há endpoints deste modelo compatíveis com a política de privacidade ou roteamento da requisição ou da conta",
     ProviderErrorKind.INTERNAL: "falha interna do provedor",
 }
 
@@ -97,6 +97,7 @@ class CanonicalToolCall:
     id: str
     name: str
     arguments: str = ""
+    thought_signature: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

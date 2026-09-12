@@ -1,6 +1,6 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Branch de trabalho: `feat/functional-completion`.
+Atualizado em 12/09/2026. Branch de trabalho atual: `feat/chat-search-privacy`.
 Base anterior: PR #23, `40a0626`. A conclusão integral não está declarada.
 
 ## Mandato e critérios
@@ -54,25 +54,24 @@ operacional continua adiado conforme decisões anteriores.
   `/tmp/kairos-functional-browser.json`. São artefatos temporários, não a única fonte
   de continuidade; este arquivo registra os resultados relevantes.
 
-## Bloqueio externo confirmado
+## Privacidade OpenRouter: diagnóstico corrigido e decisão vigente
 
-Autenticação real OpenRouter e descoberta do modelo configurado passaram. A geração
-com `nvidia/nemotron-3-ultra-550b-a55b:free` retornou HTTP 404: a política da conta
-não permite o treinamento exigido pelo endpoint gratuito. Não é chave inválida nem
-modelo ausente do catálogo. O endpoint consta no catálogo e aceita `max_tokens`.
+O Kairos envia `data_collection: "deny"` por padrão. A usuária confirmou que quer
+manter essa proteção contra provedores que possam usar conversas para treinamento.
+Autenticação e catálogo do modelo `nvidia/nemotron-3-ultra-550b-a55b:free` funcionam,
+mas o endpoint testado retorna 404 quando essa restrição está presente.
 
-A geração bem-sucedida com esse modelo permanece **não validada**. Alterar a política
-de privacidade da conta depende de decisão da usuária, ou de fornecer outro modelo
-compatível. Não mudamos política nem recorremos a outro ID silenciosamente. O teste
-usou uma instalação descartável, com configuração e cofre copiados em armazenamento
-privado; os originais foram montados somente para leitura.
+A comparação direta registrada abaixo confirmou geração HTTP 200 ao omitir somente
+a restrição; portanto, atribuir o problema genericamente à conta estava incorreto.
+O teste não autoriza relaxar a proteção. O fluxo protegido desse modelo continua
+sem geração bem-sucedida validada. Não alterar conta, padrão ou modelo silenciosamente.
+Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independentes.
 
 ## Inventário restante, sem herdar conclusões do README antigo
 
-- Chat de modelos transmite eventos de ferramentas, mas não oferece o catálogo nem
-  executa ferramentas. Agent Runtime é a superfície existente para execução isolada.
-  Um laço de ferramentas no Chat exigiria integração de permissões, execução e retorno
-  ao modelo; não marcar essa capacidade como pronta por exibir um cartão.
+- Chat: busca web opcional e ciclo real de ferramentas implementados no novo lote,
+  validado conforme aceite abaixo. Arquivos/terminal continuam no Agent Runtime isolado. Outras
+  ferramentas não estão habilitadas pelo Chat.
 - Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
   notepad, blueprints, limites finitos recorrentes e entrega externa seguem pendentes.
 - APIs legadas `/api/env` e `/api/logs` ainda retornam dados fixos; `/api/cron/jobs`
@@ -179,3 +178,148 @@ administração e histórico. Sem criar jobs na instalação da usuária durante
 - Revisão independente final: sem bloqueador no escopo documentado.
 - Evidências locais: `/tmp/kairos-cron-{final-ci,image-tests,browser-final}.log` e
   `/tmp/kairos-cron-browser.json`. Entrega remota ainda depende de seus checks.
+
+## Entrega confirmada do cron — 2026-09-12, 15:03 UTC
+
+- PR #25 integrada em `1b5e317`, após **nove checks remotos aprovados**:
+  https://github.com/Patricia7sp/kairos/pull/25. Revisão de implementação `d5bf5c2`.
+- Imagem publicada `sha256:2a06c5e4ec3e9b21365ab7d39f6ebffa2f512ce4399fc0d7419336c1df49e0e3`.
+  Conteúdo dos arquivos alterados conferido contra o código integrado.
+- Migração v2→v3 ensaiada sobre cópia do backup real: nove tabelas canônicas com
+  conteúdo idêntico, SQLite íntegro, migração idempotente e zero execuções criadas.
+- Backup final `20260912T150222Z` restaurado em volume descartável: **4.260 arquivos**
+  comparados, 18 sessões, 56 mensagens, 16 turnos runtime, 10 checkpoints e 2 baselines.
+  Todos os digests e marcadores de continuidade conferidos.
+- Aplicação e broker saudáveis; imagem e processo do worker preservados. O verificador
+  de implantação falhou ao comparar a lista de mounts sem normalizar a ordem.
+  Destinos, fontes, permissões e porta foram conferidos independentemente contra a
+  configuração inalterada; verificador corrigido para comparar por destino.
+- Aceite publicado em Chromium, 390/900/1400 px: agendamentos, ajustes, ferramentas,
+  sessões, modelos, provedores, visão geral e compositor sem erro JS ou overflow.
+  Nove APIs retornaram 200, incluindo runtime `ready`, scheduler ativo sem erro e
+  lista de jobs vazia. Nenhuma criação/alteração de job em produção durante o aceite.
+- Comparação após implantação: cinco arquivos protegidos, incluindo cofre criptografado,
+  configuração, metadados de auth, token Web e login do runtime, permaneceram idênticos;
+  18 sessões, 56 mensagens e 16 turnos preservados. SQLite íntegro.
+- Auditoria local: `/tmp/kairos-cron-{deployment,production-browser,preservation}.json`;
+  registro de implantação também salvo junto do backup privado.
+
+## Ponto de retomada
+
+Código integrado e publicado até `1b5e317`; PRs #24 e #25 entregues. Este registro
+final foi acrescentado no arquivo local de progresso após o aceite publicado.
+
+O escopo funcional integral permanece aberto. Próximos trabalhos independentes:
+laço de ferramentas no Chat com as permissões adequadas, monitores/notepad/blueprints
+do cron, comandos CLI ainda ausentes, APIs de ambiente/logs, aceite operacional de
+MCP/plugins/skills/TUI/desktop e conectores externos. Não reutilizar os checkmarks
+históricos do README como prova de funcionamento completo.
+
+O diagnóstico de privacidade desse aceite foi corrigido pela comparação abaixo.
+A decisão vigente da usuária já foi recebida: preservar `data_collection: deny`.
+Não há confirmação pendente para continuar as tarefas independentes.
+
+## Correção do diagnóstico OpenRouter — comparação direta em 2026-09-12
+
+A atribuição anterior do bloqueio à política da conta estava incorreta/incompleta.
+Uma comparação direta, com a mesma chave e `nvidia/nemotron-3-ultra-550b-a55b:free`,
+confirmou:
+
+- Com `provider.data_collection="deny"` (padrão injetado pelo Kairos): HTTP 404,
+  mensagem `No endpoints found matching your data policy (Free model training)`.
+- Omitindo somente `data_collection`, preservando `require_parameters=true` e
+  `allow_fallbacks=true`, e respeitando os padrões da conta: **HTTP 200, com resposta**.
+
+Portanto, a conta aceita esse modelo; a restrição adicional da requisição do Kairos
+é a causa reproduzida. Não recomendar mudança na privacidade da conta nem tratar
+uma resposta da usuária sobre essa mudança como pré-requisito para corrigir a
+integração. O código atual impõe `deny` em `OpenRouterRoutingPolicy` quando a opção
+não foi definida. A proposta inicial de omitir a preferência por padrão foi substituída pela
+instrução posterior da usuária: manter `deny`.
+
+Teste com prompt sintético mínimo, volume original e passphrase montados somente
+para leitura, cofre copiado para diretório temporário privado. Nenhuma alteração de
+conta, configuração persistida ou histórico da usuária. Evidência:
+`/tmp/kairos-policy-comparison.json`. A geração direta foi bem-sucedida; o fluxo
+padrão do Kairos continua aplicando a restrição por decisão explícita da usuária.
+
+
+## Decisão vigente da usuária — proteção de privacidade preservada
+
+A usuária confirmou que considera importante a restrição contra uso das conversas
+para treinamento. **Manter `data_collection: "deny"` como padrão do Kairos.**
+Essa decisão substitui a proposta anterior de omitir a preferência por padrão.
+Recusas explícitas também permanecem obrigatórias. Não relaxar a política nem
+fazer fallback para outro modelo silenciosamente para obter uma resposta.
+
+O diagnóstico fica separado da decisão: a conta aceita a geração sem essa
+restrição, mas esse teste não autoriza removê-la do Kairos. A incompatibilidade do
+endpoint do modelo gratuito com a preferência protegida deve ser explicada na UI.
+A continuação segue nas tarefas independentes, com testes externos limitados a
+requisições que respeitem a política vigente.
+
+Novo lote: busca web opcional no Chat, ciclo de ferramenta real com histórico e
+contabilidade de todas as chamadas, e indicação clara da política OpenRouter.
+
+
+## Novo lote — Chat com busca web e proteção preservada
+
+Implementação em `feat/chat-search-privacy`, validada localmente. Integração e
+publicação registradas no próximo checkpoint. Plano: `2026-09-12-chat-web-search.md`.
+
+- Busca desligada por padrão; Web lembra a escolha por conversa nesta aba/navegador.
+  CLI `chat`/`run` aceita `--web-search`. Campo separado de parâmetros do provedor.
+- Somente `web_search` é anunciada/executada, com schema estrito, consulta até 2.000
+  caracteres, 1–5 fontes, argumentos até 16 KiB, saída JSON até 32 KiB e timeout 15 s.
+  Consulta vai ao DuckDuckGo; resultados externos são tratados como não confiáveis.
+- Ciclo persiste respostas do modelo/resultados e reutiliza modelo, credencial e
+  parâmetros congelados. Até quatro rodadas de execução/oito chamadas, depois pode
+  haver resposta final sem ferramentas. Erro explícito para recurso desligado/limite.
+- Consumo por rodada registrado sem duplicação, incluindo chamada interrompida;
+  total acumulado separado do custo de cada resposta. Cancelamento durante gravação
+  conclui transcript+contabilidade. Interrupção da busca/crash deixa resultado seguro
+  no histórico e não repete o efeito ao reabrir.
+- Identificadores locais repetidos em novas rodadas são legítimos em Gemini/Ollama;
+  não são confundidos com evento duplicado dentro da mesma resposta do provedor.
+- Web mostra fontes, resultados e erros escapados; contexto conserva custo acumulado
+  após reload e sinaliza resposta interrompida. Privacidade explica treinamento e
+  indisponibilidade de endpoints sem atribuir indevidamente a falha à conta.
+- Aceite Chromium com app/WS/SQLite/adaptador reais e HTTP externo controlado passou:
+  busca ligada/desligada/erro/política, seis chamadas preservando modelo e `deny`,
+  histórico, custo acumulado, preferências, 390/900/1400 px, sem erro JS ou overflow.
+  Relatório `/tmp/kairos-chat-search-browser.json`; repetido com código congelado.
+  Uma conversa produziu 42 tokens/duas chamadas e custo acumulado US$ 0,000108,
+  preservado após reload. Nenhuma chamada ao modelo real nesse aceite controlado.
+- Busca externa real, isolada do histórico da usuária: consulta sintética retornou
+  três fontes, incluindo docs.python.org. `/tmp/kairos-chat-search-live-search.json`.
+- CI intermediária: 1.929 Python + 5.575 subtestes, 142 Web, 17 TUI, 18 desktop,
+  lint/typecheck/shell/lock passaram. Depois foram acrescentadas correções e testes
+  de cancelamento/persistência; nova verificação integral pendente de código final.
+- Revisão independente encontrou e guiou correções de contabilidade interrompida,
+  janela de cancelamento durante gravação e IDs locais reutilizados. Preservação de
+  `thoughtSignature` do Gemini em chamadas de função foi implementada e validada.
+
+Próximo lote identificado: diário operacional real e limitado para serviços, CLI
+`logs`, API e UI nativa. `/api/env` é rota legada sem consumidor atual; não recriar
+editor de segredos. Auditoria local: `/tmp/kairos-next-env-logs-audit.md`.
+
+
+### Aceite final do lote de busca — 2026-09-12
+
+- Código congelado: **1.939 testes Python + 5.575 subtestes**, **145 Web**, **17 TUI**,
+  **18 desktop**. Ruff, formatação, typescript, shellcheck, recall e lock passaram.
+  Log `/tmp/kairos-chat-search-ci-frozen.log`, Codex de teste fixado em 0.153.4.
+- Imagem construída e testes Docker completos: **22 testes + 23 subtestes**,
+  incluindo stub s6 derivado da imagem atual. Não houve skips nessa execução Docker.
+- Revisão final independente sem bloqueadores após corrigir também perda de lease:
+  executor que perdeu ownership não grava marcador nem repara histórico; o sucessor
+  recupera chamadas pendentes ao assumir. Contabilidade da chamada anterior permanece.
+- Gemini mantém assinatura opaca por functionCall e nomes por rodada com IDs locais
+  repetidos. HTTP controlado cobre rodadas paralelas/sequenciais e SQLite reaberto;
+  serializer público e repr não expõem a assinatura. Ollama foi validado no limite
+  HTTP controlado; aceite operacional de um servidor Ollama continua adiado.
+- Assinaturas Gemini de partes de texto/imagem estão fora desse contrato. Chamadas
+  pagas/live Gemini não foram realizadas; não confundir teste de wire com aceite externo.
+- Navegador final passou com o código congelado; fixture encerrada e porta 9137 livre.
+- Artefatos: `/tmp/kairos-chat-search-{ci-frozen,build-frozen,container-final,browser-final}.log`,
+  `/tmp/kairos-chat-search-final-review.md` e JSON do navegador/busca externa.

@@ -60,6 +60,9 @@ def test_privacy_policy_rejection_is_actionable_without_echoing_upstream_secrets
             assert caught.value.kind == "policy"
             assert caught.value.retryable is False
             assert "privacidade" in str(caught.value)
+            assert "endpoints" in str(caught.value)
+            assert "requisição ou da conta" in str(caught.value)
+            assert "revise as configurações" not in str(caught.value)
             assert "private-sentinel" not in str(caught.value)
 
     asyncio.run(run())

@@ -36,6 +36,19 @@ from kairos_web.chat_transport import (
 )
 
 
+@pytest.mark.parametrize("value", [None, "true", 1, [], {}])
+def test_search_option_rejects_non_boolean(value):
+    with pytest.raises(TypeError, match="web_search"):
+        interaction_envelope_from_json({"content": "oi", "web_search": value})
+
+
+def test_search_option_is_explicit_and_separate_from_provider_parameters():
+    envelope = interaction_envelope_from_json({"content": "pesquise", "web_search": True})
+    assert envelope.web_search is True
+    assert "web_search" not in envelope.parameters
+    assert interaction_envelope_from_json({"content": "oi"}).web_search is False
+
+
 class FakeInteractionService:
     def __init__(self, events: tuple[InteractionEvent | RuntimeEvent, ...] = ()) -> None:
         self.events = events

@@ -62,6 +62,7 @@ async def run_chat(
     as_json: bool,
     quiet: bool = False,
     idempotency_key: str | None = None,
+    web_search: bool = False,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -71,6 +72,8 @@ async def run_chat(
     if idempotency_key is not None and not prompt:
         raise ChatUsageError("--idempotency-key só pode ser usado com uma mensagem")
     runtime_session = _is_runtime_session(home, session_id)
+    if runtime_session and web_search:
+        raise ChatUsageError("--web-search é uma opção do Chat por modelo, não do Agent Runtime")
     service = build_interaction_service(home)
     try:
         if prompt:
@@ -82,6 +85,7 @@ async def run_chat(
                 as_json=as_json,
                 idempotency_key=idempotency_key or (uuid.uuid4().hex if runtime_session else None),
                 runtime_session=runtime_session,
+                web_search=web_search,
             )
         return await _run_interactive(
             service,
@@ -90,6 +94,7 @@ async def run_chat(
             as_json=as_json,
             quiet=quiet,
             runtime_session=runtime_session,
+            web_search=web_search,
         )
     except InteractionServiceUnavailableError as exc:
         print(exc.message, file=sys.stderr, flush=True)
@@ -109,6 +114,7 @@ async def _run_interactive(
     as_json: bool,
     quiet: bool,
     runtime_session: bool = False,
+    web_search: bool = False,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -132,6 +138,7 @@ async def _run_interactive(
                 as_json=as_json,
                 idempotency_key=uuid.uuid4().hex if runtime_session else None,
                 runtime_session=runtime_session,
+                web_search=web_search,
             ),
         )
 
@@ -145,6 +152,7 @@ async def _run_turn(
     as_json: bool,
     idempotency_key: str | None = None,
     runtime_session: bool = False,
+    web_search: bool = False,
 ) -> int:
     envelope = InteractionEnvelope(
         conversation_id=session_id,
@@ -152,6 +160,7 @@ async def _run_turn(
         content=content,
         override=override,
         idempotency_key=idempotency_key,
+        web_search=web_search,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()

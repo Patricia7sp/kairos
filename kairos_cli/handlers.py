@@ -589,6 +589,7 @@ def cmd_run(args) -> int:
                 as_json=getattr(args, "json", False),
                 quiet=getattr(args, "quiet", False),
                 idempotency_key=getattr(args, "idempotency_key", None),
+                web_search=getattr(args, "web_search", False),
             )
         )
     except ChatUsageError as exc:

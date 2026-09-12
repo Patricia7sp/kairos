@@ -26,7 +26,16 @@ const routingLabel = (selection) => {
   const routing = selection.parameters?.routing || {};
   return `Coleta de dados: ${routing.data_collection === "allow" ? "permitida" : "negada"} · `
     + `Parâmetros obrigatórios: ${routing.require_parameters === false ? "não" : "sim"} · `
-    + `Fallbacks: ${routing.allow_fallbacks === false ? "não" : "sim"}`;
+    + `Fallbacks: ${routing.allow_fallbacks === false ? "não" : "sim"}`
+    + (routing.data_collection === "allow" ? "" : ". Exclui endpoints que coletam dados para treinamento.");
+};
+
+const searchKey = (sessionId) => `kairos.chat.web-search.${sessionId}`;
+const loadSearch = (sessionId) => {
+  try { return sessionStorage.getItem(searchKey(sessionId)) === "true"; } catch { return false; }
+};
+const storeSearch = (sessionId, enabled) => {
+  try { sessionStorage.setItem(searchKey(sessionId), String(enabled)); } catch { /* Storage may be disabled. */ }
 };
 
 const draftKey = (sessionId) => `kairos.chat.draft.${sessionId}`;
@@ -68,8 +77,9 @@ export function reduceTurn(state, event) {
   }
   if (event.type === "tool_result" && event.tool_result) {
     return { ...state, tools: state.tools.map((tool) =>
-      tool.id === event.tool_result.tool_call_id
-        ? { ...tool, status: event.tool_result.is_error ? "error" : "done" } : tool) };
+      tool.status === "running" && tool.id === event.tool_result.tool_call_id
+        ? { ...tool, status: event.tool_result.is_error ? "error" : "done",
+          content: String(event.tool_result.content ?? "") } : tool) };
   }
   if (event.type === "usage") return { ...state, usage: event.usage || null, cost: event.cost || null };
   if (event.type === "turn_error") {
@@ -122,6 +132,12 @@ export function chatShellMarkup({
         <textarea ${disabled ? "disabled" : ""} id="chat-message" name="content" rows="3"
           placeholder="Escreva uma mensagem"></textarea>
         <button class="k-btn k-btn--primary" ${disabled ? "disabled" : ""} type="submit">Enviar</button>
+        <div class="k-chat__search">
+          <label><input type="checkbox" name="web_search" ${disabled ? "disabled" : ""}
+            aria-describedby="chat-search-notice"> Buscar na web</label>
+          <small id="chat-search-notice">A consulta será enviada a um buscador externo.
+            Escolha lembrada por conversa neste navegador, nesta aba.</small>
+        </div>
       </form>
       <p class="k-chat__live" aria-live="polite" data-chat-status></p>
     </section>
@@ -139,14 +155,47 @@ export function chatShellMarkup({
   </div>`;
 }
 
-const messageMarkup = (message) => `<article class="k-chat-message k-chat-message--${esc(message.role)}">
+const searchResultMarkup = (content) => {
+  let result;
+  try { result = JSON.parse(content); } catch { /* Legacy and malformed output remains plain text. */ }
+  if (typeof result?.error === "string") return `<p>${esc(result.error)}</p>`;
+  if (!Array.isArray(result?.results) || !result.results.every((item) => item
+      && [item.title, item.url, item.snippet].every((value) => typeof value === "string"))) {
+    return `<pre>${esc(content)}</pre>`;
+  }
+  const query = typeof result.query === "string" ? `<p>Consulta: ${esc(result.query)}</p>` : "";
+  if (!result.results.length) return `${query}<p>Nenhum resultado encontrado.</p>`;
+  return `${query}<ol>${result.results.map((item) => {
+    let url;
+    try {
+      const candidate = new URL(item.url);
+      if (["http:", "https:"].includes(candidate.protocol)) url = candidate.href;
+    } catch { /* Unsupported links are displayed as text. */ }
+    return `<li>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(item.title)}</a>`
+      : `<strong>${esc(item.title)}</strong>`}<small>${esc(item.url)}</small><p>${esc(item.snippet)}</p></li>`;
+  }).join("")}</ol>`;
+};
+
+const toolMarkup = (tool) => `<details class="k-chat-tool" ${tool.content == null ? "" : "open"}>
+  <summary>${esc(tool.name === "web_search" ? "Busca web" : tool.name || "Ferramenta")} · ${
+    tool.status === "running" ? "Buscando…" : tool.status === "error" ? "Falha" : "Concluída"}</summary>
+  ${tool.content == null ? "" : searchResultMarkup(tool.content)}</details>`;
+
+const messageMarkup = (message) => message.role === "tool"
+  ? `<article class="k-chat-message k-chat-message--tool">${toolMarkup({
+    name: message.tool_name, content: message.content,
+    status: message.is_error === true ? "error" : "done",
+  })}</article>`
+  : `<article class="k-chat-message k-chat-message--${esc(message.role)}">
   <header>${message.role === "user" ? "Você" : "Kairos"}</header><p>${esc(message.content)}</p>
+  ${message.role === "assistant" && message.is_interrupted === true
+    ? '<p class="k-error" role="status">Resposta interrompida.</p>' : ""}
   ${message.role === "assistant" ? `<small data-turn-cost>${esc(costLabel(message.cost))}</small>` : ""}</article>`;
 
 export const turnMarkup = (turn) => `<article class="k-chat-message k-chat-message--assistant"${turn.status === "streaming" ? " data-active-turn" : ""}>
   <header>Kairos</header><p>${esc(turn.text)}${turn.status === "streaming" ? '<span class="k-chat__cursor" aria-hidden="true"></span>' : ""}</p>
   ${turn.reasoning ? `<details><summary>Raciocínio</summary><p>${esc(turn.reasoning)}</p></details>` : ""}
-  ${turn.tools.map((tool) => `<div class="k-chat-tool">${esc(tool.name)} · ${esc(tool.status)}</div>`).join("")}
+  ${turn.tools.map(toolMarkup).join("")}
   ${turn.error ? `<div class="k-error" role="alert">${esc(turn.error)}</div>` : ""}
   ${turn.usage ? `<small>${Number(turn.usage.total_tokens || 0).toLocaleString("pt-BR")} tokens</small>` : ""}
   <small data-turn-cost>${esc(costLabel(turn.cost))}</small>
@@ -232,6 +281,8 @@ export async function chatView(root, _route, { signal } = {}) {
     ? (route.sessionId || newConversationId())
     : (route.sessionId || firstModelSession?.id || newConversationId());
   let persisted = !route.wantsNew && Boolean(route.sessionId || firstModelSession);
+  let webSearch = loadSearch(sessionId);
+  const searchControl = form.elements.web_search;
   let turn = initialTurnState();
   let socketConnected = false;
   let ready = false;
@@ -253,6 +304,8 @@ export async function chatView(root, _route, { signal } = {}) {
   const updateComposer = () => {
     const disabled = !socketConnected || !ready || busy || sessionLoading || blockingLoadError;
     form.elements.content.disabled = disabled;
+    searchControl.disabled = disabled;
+    searchControl.checked = webSearch;
     form.querySelector('button[type="submit"]').disabled = disabled;
     updateNavigation();
   };
@@ -416,6 +469,7 @@ export async function chatView(root, _route, { signal } = {}) {
       const [detail, payload] = await Promise.all([api.sessao(id), api.mensagens(id)]);
       if (disposed || signal?.aborted || currentGeneration !== generation) return;
       sessionId = id;
+      webSearch = loadSearch(sessionId);
       persisted = true;
       selection = detail.selection || { provider: "", model: "", parameters: {} };
       const profile = (modelPayload.profiles || []).find((item) => item.name === selection.profile
@@ -428,7 +482,7 @@ export async function chatView(root, _route, { signal } = {}) {
       messages.innerHTML = (payload.messages || []).map(messageMarkup).join("");
       const latestAssistant = [...(payload.messages || [])].reverse().find((message) => message.role === "assistant");
       chat.querySelector("[data-context-cost]").textContent = latestAssistant
-        ? costLabel(latestAssistant.cost) : "Nenhum turno nesta conversa.";
+        ? costLabel(latestAssistant.turn_cost ?? latestAssistant.cost) : "Nenhum turno nesta conversa.";
       activeTurnNode = null;
       replaceHash(`#/chat?session=${encodeURIComponent(id)}`);
       syncSelection();
@@ -479,6 +533,7 @@ export async function chatView(root, _route, { signal } = {}) {
     resetTurnRendering();
     activeStream = null;
     sessionId = newConversationId();
+    webSearch = false;
     persisted = false;
     hasActiveSelection = true;
     blockingLoadError = false;
@@ -493,6 +548,14 @@ export async function chatView(root, _route, { signal } = {}) {
   });
   changeModel.addEventListener("click", (event) => {
     if (busy) event.preventDefault();
+  });
+  searchControl.addEventListener("change", () => {
+    if (searchControl.disabled) {
+      searchControl.checked = webSearch;
+      return;
+    }
+    webSearch = searchControl.checked;
+    storeSearch(sessionId, webSearch);
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -513,6 +576,7 @@ export async function chatView(root, _route, { signal } = {}) {
     try {
       client.sendMessage({
         sessionId, content, provider: selection.provider, model: selection.model,
+        webSearch,
         profile: selection.profile,
         parameters: Object.keys(selection.parameters || {}).length ? selection.parameters : undefined,
       });

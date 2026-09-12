@@ -60,13 +60,14 @@ export class ChatClient {
     return true;
   }
 
-  sendMessage({ sessionId, content, provider, model, profile, activity, parameters } = {}) {
+  sendMessage({ sessionId, content, provider, model, profile, activity, parameters, webSearch = false } = {}) {
     if (!this.socket || this.socket.readyState !== 1) throw new Error("Chat desconectado");
     const message = {
       type: "message",
       protocol: PROTOCOL,
       session_id: sessionId,
       content,
+      web_search: webSearch === true,
       ...(provider && model ? { provider, model } : {}),
       ...(profile ? { profile } : {}),
       ...(activity ? { activity } : {}),
