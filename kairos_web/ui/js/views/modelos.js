@@ -1,6 +1,8 @@
 /* Catálogo canônico de modelos, filtros e troca sem reiniciar o serviço. */
 
 import { api, ApiError } from "../api.js";
+import { newConversationId } from "./chat.js";
+import { mergeSelectionParameters } from "../selection-parameters.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -22,7 +24,7 @@ export function filterModels(models, filters = {}) {
   });
 }
 
-export function modelSelectionMarkup(model, { scope = "conversation" } = {}) {
+export function modelSelectionMarkup(model, { scope = "conversation", profiles = [] } = {}) {
   const applyLabel = scope === "global"
     ? "Definir como padrão global"
     : scope === "draft" ? "Aplicar ao próximo turno do rascunho" : "Aplicar ao próximo turno";
@@ -30,9 +32,24 @@ export function modelSelectionMarkup(model, { scope = "conversation" } = {}) {
     <form method="dialog"><button class="k-btn k-btn--ghost k-model-dialog__close" aria-label="Fechar">×</button></form>
     <h2>Usar ${esc(model.name)}</h2>
     <p><code>${esc(model.provider)}/${esc(model.id)}</code></p>
+    <fieldset data-selection-fields>
+      <label>Perfil <select name="profile"><option value="">Sem perfil</option>
+        ${profiles.map((profile) => `<option value="${esc(profile.name)}">${esc(profile.name)}</option>`).join("")}
+      </select></label>
+      ${model.provider === "openrouter" ? `<details><summary>Configurações avançadas</summary>
+        <p>Política de roteamento do OpenRouter para o próximo turno.</p>
+        <label>Coleta de dados <select name="data_collection">
+          <option value="deny">Negar</option><option value="allow">Permitir</option>
+        </select></label>
+        <label><input type="checkbox" name="require_parameters" checked> Exigir suporte a todos os parâmetros</label>
+        <label><input type="checkbox" name="allow_fallbacks" checked> Permitir fallbacks entre provedores</label>
+      </details>` : ""}
+      <label>Nome de novo perfil <input type="text" name="profile_name" autocomplete="off" placeholder="Ou selecione um perfil existente"></label>
+    </fieldset>
     <div class="k-model-dialog__actions">
       <button class="k-btn k-btn--primary" type="button" data-apply-model>${applyLabel}</button>
       <button class="k-btn k-btn--ghost" type="button" data-new-conversation>Iniciar nova conversa</button>
+      <button class="k-btn k-btn--ghost" type="button" data-save-profile>Salvar perfil</button>
     </div>
     <p class="k-model-dialog__status" aria-live="polite" data-selection-status></p>
   </dialog>`;
@@ -75,12 +92,14 @@ const modelRouteContext = () => {
     provider: params.get("provider") || "",
     model: params.get("model") || "",
     draft: params.get("new") === "1",
+    profile: params.get("profile") || "",
   };
 };
 
 export async function modelosView(root, _route, { signal } = {}) {
   let disposed = false;
-  const dispose = () => { disposed = true; };
+  let dialogGeneration = 0;
+  const dispose = () => { disposed = true; dialogGeneration += 1; };
   signal?.addEventListener("abort", dispose, { once: true });
   if (signal?.aborted) return dispose;
   const routeContext = modelRouteContext();
@@ -165,61 +184,184 @@ export async function modelosView(root, _route, { signal } = {}) {
   });
   render();
 
-  content.addEventListener("click", async (event) => {
+  content.addEventListener("click", (event) => {
     const button = event.target.closest("[data-choose-model]");
-    if (!button) return;
+    if (!button || disposed) return;
     const [provider, ...parts] = button.dataset.chooseModel.split("/");
     const id = parts.join("/");
     const model = models.find((item) => item.provider === provider && item.id === id);
     if (!model) return;
     const host = content.querySelector("[data-model-dialog-host]");
     const scope = routeContext.draft ? "draft" : routeContext.sessionId ? "conversation" : "global";
-    host.innerHTML = modelSelectionMarkup(model, { scope });
+    const currentGeneration = ++dialogGeneration;
+    const profiles = (payload.profiles || []).filter((profile) => profile.provider === provider && profile.model === id);
+    host.innerHTML = modelSelectionMarkup(model, { scope, profiles });
     const dialog = host.querySelector("dialog");
     dialog.showModal();
-    dialog.querySelector("[data-apply-model]").addEventListener("click", async (applyEvent) => {
-      if (disposed) return;
-      const applyButton = applyEvent.currentTarget;
-      const status = dialog.querySelector("[data-selection-status]");
-      if (routeContext.draft) {
-        const params = new URLSearchParams({
-          provider,
-          model: id,
-          new: "1",
-          session: routeContext.sessionId,
-        });
-        location.hash = `#/chat?${params}`;
-        dialog.close();
+    const current = () => !disposed && !signal?.aborted && currentGeneration === dialogGeneration;
+    const status = dialog.querySelector("[data-selection-status]");
+    const fields = dialog.querySelector("[data-selection-fields]");
+    const profileSelect = dialog.querySelector('[name="profile"]');
+    const profileName = dialog.querySelector('[name="profile_name"]');
+    const applyButton = dialog.querySelector("[data-apply-model]");
+    const newButton = dialog.querySelector("[data-new-conversation]");
+    const saveButton = dialog.querySelector("[data-save-profile]");
+    let loading = scope === "conversation";
+    let loadFailed = false;
+    let saving = false;
+    let baseParameters = mergeSelectionParameters(payload.default_parameters);
+    let parameters = mergeSelectionParameters(baseParameters);
+    const updateActions = () => {
+      const disabled = loading || loadFailed || saving;
+      fields.disabled = disabled;
+      applyButton.disabled = disabled;
+      newButton.disabled = disabled;
+      saveButton.disabled = disabled || !(profileName.value.trim() || profileSelect.value);
+    };
+    const populate = () => {
+      if (provider === "openrouter") {
+        const routing = parameters.routing || {};
+        dialog.querySelector('[name="data_collection"]').value = routing.data_collection === "allow" ? "allow" : "deny";
+        dialog.querySelector('[name="require_parameters"]').checked = routing.require_parameters !== false;
+        dialog.querySelector('[name="allow_fallbacks"]').checked = routing.allow_fallbacks !== false;
+      }
+      updateActions();
+    };
+    const selectedParameters = () => {
+      const result = { ...parameters };
+      if (provider === "openrouter") result.routing = {
+        data_collection: dialog.querySelector('[name="data_collection"]').value,
+        require_parameters: dialog.querySelector('[name="require_parameters"]').checked,
+        allow_fallbacks: dialog.querySelector('[name="allow_fallbacks"]').checked,
+      };
+      else delete result.routing;
+      return result;
+    };
+    const useSelection = (selection) => {
+      const profile = profiles.find((item) => item.name === selection.profile);
+      baseParameters = mergeSelectionParameters(payload.default_parameters, profile?.parameters, selection.parameters);
+      parameters = mergeSelectionParameters(baseParameters);
+      profileSelect.value = profiles.some((profile) => profile.name === selection.profile) ? selection.profile : "";
+      populate();
+    };
+    const routeProfile = profiles.find((profile) => profile.name === routeContext.profile);
+    if (routeProfile) useSelection({ ...routeProfile, profile: routeProfile.name });
+    if (scope === "draft") {
+      try {
+        const draft = JSON.parse(sessionStorage.getItem(`kairos.chat.draft.${routeContext.sessionId}`) || "null");
+        const matchesDraft = draft?.provider === routeContext.provider && draft?.model === routeContext.model;
+        const matchesChosen = draft?.provider === provider && draft?.model === id;
+        if ((matchesDraft || matchesChosen)
+            && (!routeContext.profile || draft.profile === routeContext.profile)) {
+          useSelection({ ...draft, profile: matchesChosen ? draft.profile : "" });
+        }
+      } catch { /* Ignore invalid or unavailable draft storage. */ }
+    }
+    populate();
+    profileSelect.addEventListener("change", () => {
+      const profile = profiles.find((item) => item.name === profileSelect.value);
+      parameters = mergeSelectionParameters(baseParameters, profile?.parameters);
+      populate();
+    });
+    profileName.addEventListener("input", updateActions);
+    const loadConversation = async () => {
+      if (!current() || saving) return;
+      loading = true;
+      loadFailed = false;
+      status.textContent = "Carregando seleção da conversa…";
+      updateActions();
+      try {
+        const detail = await api.sessao(routeContext.sessionId);
+        if (!current()) return;
+        if (detail.selection != null && (!detail.selection.parameters
+            || typeof detail.selection.parameters !== "object" || Array.isArray(detail.selection.parameters))) {
+          throw new Error("A seleção da conversa não está disponível.");
+        }
+        useSelection(detail.selection || { parameters: {} });
+        status.textContent = "";
+      } catch (error) {
+        if (!current()) return;
+        loadFailed = true;
+        status.textContent = error.message || "Falha ao carregar seleção da conversa.";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "k-btn k-btn--ghost";
+        retry.dataset.retrySelection = "";
+        retry.textContent = "Tentar novamente";
+        retry.addEventListener("click", () => void loadConversation());
+        status.append(" ", retry);
+      } finally {
+        if (current()) { loading = false; updateActions(); }
+      }
+    };
+    if (loading) void loadConversation();
+    const openDraft = (sessionId) => {
+      if (!current() || loading || loadFailed || saving) return;
+      const draft = { provider, model: id, parameters: selectedParameters(),
+        ...(profileSelect.value ? { profile: profileSelect.value } : {}) };
+      const params = new URLSearchParams({ provider, model: id, new: "1", session: sessionId });
+      if (draft.profile) params.set("profile", draft.profile);
+      try {
+        sessionStorage.setItem(`kairos.chat.draft.${sessionId}`, JSON.stringify(draft));
+      } catch {
+        status.textContent = "Não foi possível preservar as configurações. Habilite o armazenamento desta página e tente novamente.";
         return;
       }
-      applyButton.disabled = true;
+      location.hash = `#/chat?${params}`;
+      dialog.close();
+    };
+    const saveSelection = async (targetScope) => {
+      if (!current() || loading || loadFailed || saving) return;
+      const targetProfile = profileName.value.trim() || profileSelect.value;
+      if (targetScope === "profile" && !targetProfile) return;
+      saving = true;
+      updateActions();
       status.textContent = "Salvando seleção…";
       try {
-        const selection = routeContext.sessionId
-          ? { provider, model: id, scope: "conversation", session_id: routeContext.sessionId }
-          : { provider, model: id, scope: "global" };
+        const selection = { provider, model: id, scope: targetScope, parameters: selectedParameters(),
+          ...(targetScope === "conversation" ? { session_id: routeContext.sessionId } : {}),
+          ...(targetScope === "profile" ? { profile: targetProfile }
+            : targetScope === "conversation" ? { profile: profileSelect.value } : {}),
+        };
         await api.selecionarModelo(selection);
-        if (disposed || signal?.aborted) return;
-        if (!routeContext.sessionId) {
+        if (!current()) return;
+        parameters = selection.parameters;
+        baseParameters = { ...parameters };
+        if (targetScope === "global") {
           payload.default_provider = provider;
           payload.default_model = id;
+          payload.default_parameters = parameters;
           defaultSelection.textContent = `${provider}/${id}`;
           render();
+        } else if (targetScope === "profile") {
+          const savedProfile = { name: targetProfile, provider, model: id, parameters };
+          payload.profiles = [...(payload.profiles || []).filter((item) => item.name !== targetProfile), savedProfile];
+          const existing = profiles.findIndex((item) => item.name === targetProfile);
+          if (existing >= 0) profiles[existing] = savedProfile;
+          else {
+            profiles.push(savedProfile);
+            profileSelect.add(new Option(targetProfile, targetProfile));
+          }
+          profileSelect.value = targetProfile;
+          profileName.value = "";
         }
-        status.textContent = routeContext.sessionId
+        status.textContent = targetScope === "profile" ? "Perfil salvo. O padrão global foi preservado."
+          : targetScope === "conversation"
           ? "Seleção aplicada ao próximo turno desta conversa."
           : "Novo padrão global salvo.";
       } catch (error) {
-        if (disposed || signal?.aborted) return;
+        if (!current()) return;
         status.textContent = error.message || "Falha ao aplicar seleção.";
       } finally {
-        if (!disposed && !signal?.aborted) applyButton.disabled = false;
+        if (current()) { saving = false; updateActions(); }
       }
+    };
+    applyButton.addEventListener("click", () => {
+      if (scope === "draft") openDraft(routeContext.sessionId || newConversationId());
+      else void saveSelection(scope);
     });
-    dialog.querySelector("[data-new-conversation]").addEventListener("click", () => {
-      location.hash = `#/chat?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(id)}&new=1`;
-      dialog.close();
-    });
+    saveButton.addEventListener("click", () => void saveSelection("profile"));
+    newButton.addEventListener("click", () => openDraft(newConversationId()));
   });
   return dispose;
 }

@@ -2,13 +2,53 @@
 
 import { api } from "../api.js";
 import { ChatClient } from "../chat-client.js";
+import { mergeSelectionParameters } from "../selection-parameters.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
 export function initialTurnState() {
-  return { status: "idle", text: "", reasoning: "", tools: [], usage: null, error: null };
+  return { status: "idle", text: "", reasoning: "", tools: [], usage: null, cost: null, error: null };
 }
+
+const validCost = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const costLabel = (cost) => {
+  const actual = validCost(cost?.actual_usd);
+  const amount = actual ? cost.actual_usd : cost?.estimated_usd;
+  if (!validCost(amount)) return "Custo desconhecido";
+  const value = amount > 0 && amount < 0.00000001 ? "< US$ 0,00000001"
+    : `US$ ${amount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
+  return `Custo ${actual ? "informado" : "estimado"}: ${value}`;
+};
+
+const routingLabel = (selection) => {
+  if (selection.provider !== "openrouter") return "Não se aplica a este provedor.";
+  const routing = selection.parameters?.routing || {};
+  return `Coleta de dados: ${routing.data_collection === "allow" ? "permitida" : "negada"} · `
+    + `Parâmetros obrigatórios: ${routing.require_parameters === false ? "não" : "sim"} · `
+    + `Fallbacks: ${routing.allow_fallbacks === false ? "não" : "sim"}`;
+};
+
+const draftKey = (sessionId) => `kairos.chat.draft.${sessionId}`;
+const storeDraft = (sessionId, selection) => {
+  try { sessionStorage.setItem(draftKey(sessionId), JSON.stringify(selection)); } catch { /* Storage may be disabled. */ }
+};
+const newSelection = (route, models) => {
+  const provider = route.provider || models.default_provider;
+  const model = route.model || models.default_model;
+  let draft = null;
+  try { draft = JSON.parse(sessionStorage.getItem(draftKey(route.sessionId)) || "null"); } catch { /* Ignore invalid drafts. */ }
+  const matches = draft?.provider === provider && draft?.model === model
+    && (!route.profile || draft.profile === route.profile);
+  const profileName = route.profile || (matches ? draft.profile : "");
+  const profile = (models.profiles || []).find((item) => item.name === profileName
+    && item.provider === provider && item.model === model);
+  return {
+    provider, model,
+    parameters: mergeSelectionParameters(models.default_parameters, profile?.parameters, matches ? draft.parameters : null),
+    ...(profile || (matches && draft.profile) ? { profile: matches && draft.profile ? draft.profile : profile.name } : {}),
+  };
+};
 
 export function reduceTurn(state, event) {
   if (!event || event.protocol !== 1) return state;
@@ -89,15 +129,19 @@ export function chatShellMarkup({
       <h2>Contexto</h2>
       <dl><dt>Provider</dt><dd data-context-provider>${esc(selection.provider || "—")}</dd>
         <dt>Modelo</dt><dd data-context-model>${esc(selected?.name || selection.model || "—")}</dd>
-        <dt>Preço</dt><dd data-context-price>${selected?.is_free ? "Gratuito" : "Conforme catálogo"}</dd>
-        <dt>Capacidades</dt><dd data-context-capabilities>${selected?.capabilities?.tools ? "Ferramentas" : "Chat"}</dd></dl>
+        <dt>Preço de catálogo</dt><dd data-context-price>${selected?.is_free ? "Gratuito" : "Conforme catálogo"}</dd>
+        <dt>Capacidades</dt><dd data-context-capabilities>${selected?.capabilities?.tools ? "Ferramentas" : "Chat"}</dd>
+        <dt>Último turno</dt><dd data-context-cost>Nenhum turno nesta conversa.</dd>
+        <dt>Perfil do próximo turno</dt><dd data-context-profile>${esc(selection.profile || "Sem perfil")}</dd>
+        <dt>Roteamento do próximo turno</dt><dd data-context-routing>${esc(routingLabel(selection))}</dd></dl>
       <a class="k-btn k-btn--ghost" href="#/modelos" data-change-model>Trocar modelo</a>
     </aside>
   </div>`;
 }
 
 const messageMarkup = (message) => `<article class="k-chat-message k-chat-message--${esc(message.role)}">
-  <header>${message.role === "user" ? "Você" : "Kairos"}</header><p>${esc(message.content)}</p></article>`;
+  <header>${message.role === "user" ? "Você" : "Kairos"}</header><p>${esc(message.content)}</p>
+  ${message.role === "assistant" ? `<small data-turn-cost>${esc(costLabel(message.cost))}</small>` : ""}</article>`;
 
 export const turnMarkup = (turn) => `<article class="k-chat-message k-chat-message--assistant"${turn.status === "streaming" ? " data-active-turn" : ""}>
   <header>Kairos</header><p>${esc(turn.text)}${turn.status === "streaming" ? '<span class="k-chat__cursor" aria-hidden="true"></span>' : ""}</p>
@@ -105,6 +149,7 @@ export const turnMarkup = (turn) => `<article class="k-chat-message k-chat-messa
   ${turn.tools.map((tool) => `<div class="k-chat-tool">${esc(tool.name)} · ${esc(tool.status)}</div>`).join("")}
   ${turn.error ? `<div class="k-error" role="alert">${esc(turn.error)}</div>` : ""}
   ${turn.usage ? `<small>${Number(turn.usage.total_tokens || 0).toLocaleString("pt-BR")} tokens</small>` : ""}
+  <small data-turn-cost>${esc(costLabel(turn.cost))}</small>
   </article>`;
 
 const parsedChatRoute = () => {
@@ -114,6 +159,7 @@ const parsedChatRoute = () => {
     sessionId: params.get("session") || "",
     provider: params.get("provider") || "",
     model: params.get("model") || "",
+    profile: params.get("profile") || "",
   };
 };
 
@@ -126,6 +172,7 @@ const draftHash = (sessionId, selection) => {
     new: "1",
     session: sessionId,
   });
+  if (selection.profile) params.set("profile", selection.profile);
   return `#/chat?${params}`;
 };
 
@@ -135,6 +182,7 @@ const modelsHash = (sessionId, selection, persisted) => {
     : new URLSearchParams({
       provider: selection.provider, model: selection.model, new: "1", session: sessionId,
     });
+  if (!persisted && selection.profile) params.set("profile", selection.profile);
   return `#/modelos?${params}`;
 };
 
@@ -168,9 +216,7 @@ export async function chatView(root, _route, { signal } = {}) {
     api.provedores(), api.modelos(), api.sessoes({ status: "abertas", limit: 50 }),
   ]);
   if (disposed || signal?.aborted) return dispose;
-  let selection = route.wantsNew && route.provider && route.model
-    ? { provider: route.provider, model: route.model, parameters: {} }
-    : { provider: modelPayload.default_provider, model: modelPayload.default_model, parameters: {} };
+  let selection = newSelection(route.wantsNew ? route : {}, modelPayload);
   load.innerHTML = chatShellMarkup({
     providers: providerPayload.providers || [], sessions: sessionPayload.sessions || [],
     models: modelPayload.models || [], selection,
@@ -197,6 +243,7 @@ export async function chatView(root, _route, { signal } = {}) {
   let blockingLoadError = false;
 
   const updateNavigation = () => {
+    if (!persisted) storeDraft(sessionId, selection);
     changeModel.href = modelsHash(sessionId, selection, persisted);
     changeModel.setAttribute("aria-disabled", String(busy));
     for (const button of chat.querySelectorAll("[data-session-id], [data-new-chat]")) {
@@ -239,6 +286,7 @@ export async function chatView(root, _route, { signal } = {}) {
       activeTurnNode.innerHTML = rendered.innerHTML;
     }
     messages.scrollTop = messages.scrollHeight;
+    chat.querySelector("[data-context-cost]").textContent = costLabel(turn.cost);
   };
   const scheduleTurn = () => {
     if (!disposed && frame == null) {
@@ -291,6 +339,7 @@ export async function chatView(root, _route, { signal } = {}) {
           && pendingAdmission.generation === generation) {
         persisted = true;
         pendingAdmission = null;
+        try { sessionStorage.removeItem(draftKey(sessionId)); } catch { /* Storage may be disabled. */ }
         replaceHash(`#/chat?session=${encodeURIComponent(sessionId)}`);
         updateNavigation();
       }
@@ -317,6 +366,8 @@ export async function chatView(root, _route, { signal } = {}) {
       ? "Gratuito" : "Conforme catálogo";
     chat.querySelector("[data-context-capabilities]").textContent = selected?.capabilities?.tools
       ? "Ferramentas" : "Chat";
+    chat.querySelector("[data-context-routing]").textContent = routingLabel(selection);
+    chat.querySelector("[data-context-profile]").textContent = selection.profile || "Sem perfil";
     updateNavigation();
   };
 
@@ -367,9 +418,17 @@ export async function chatView(root, _route, { signal } = {}) {
       sessionId = id;
       persisted = true;
       selection = detail.selection || { provider: "", model: "", parameters: {} };
+      const profile = (modelPayload.profiles || []).find((item) => item.name === selection.profile
+        && item.provider === selection.provider && item.model === selection.model);
+      selection = { ...selection, parameters: mergeSelectionParameters(
+        modelPayload.default_parameters, profile?.parameters, selection.parameters,
+      ) };
       hasActiveSelection = Boolean(selection.provider && selection.model);
       blockingLoadError = false;
       messages.innerHTML = (payload.messages || []).map(messageMarkup).join("");
+      const latestAssistant = [...(payload.messages || [])].reverse().find((message) => message.role === "assistant");
+      chat.querySelector("[data-context-cost]").textContent = latestAssistant
+        ? costLabel(latestAssistant.cost) : "Nenhum turno nesta conversa.";
       activeTurnNode = null;
       replaceHash(`#/chat?session=${encodeURIComponent(id)}`);
       syncSelection();
@@ -424,12 +483,9 @@ export async function chatView(root, _route, { signal } = {}) {
     hasActiveSelection = true;
     blockingLoadError = false;
     status.textContent = socketConnected ? "Conectado." : "";
-    selection = {
-      provider: modelPayload.default_provider,
-      model: modelPayload.default_model,
-      parameters: {},
-    };
+    selection = newSelection({}, modelPayload);
     messages.innerHTML = "";
+    chat.querySelector("[data-context-cost]").textContent = "Nenhum turno nesta conversa.";
     replaceHash(draftHash(sessionId, selection));
     syncSelection();
     void probeSelectedProvider();
@@ -457,6 +513,7 @@ export async function chatView(root, _route, { signal } = {}) {
     try {
       client.sendMessage({
         sessionId, content, provider: selection.provider, model: selection.model,
+        profile: selection.profile,
         parameters: Object.keys(selection.parameters || {}).length ? selection.parameters : undefined,
       });
     } catch (error) {

@@ -22,6 +22,8 @@ kairos_cli/config.py
 kairos_cli/handlers.py
 kairos_cli/main.py
 kairos_cli/runtime.py
+kairos_cli/runtime_delivery.py
+kairos_cli/runtime_delivery_git.py
 kairos_cli/startup_fast.py
 kairos_container/__init__.py
 kairos_cron/__init__.py
@@ -83,6 +85,7 @@ kairos_providers/manager.py
 kairos_providers/provider_profiles.py
 kairos_providers/provider_registry.py
 kairos_providers/selection.py
+kairos_providers/settings.py
 kairos_providers/adapters/__init__.py
 kairos_providers/adapters/anthropic_messages.py
 kairos_providers/adapters/gemini_native.py
@@ -100,8 +103,10 @@ kairos_runtime/errors.py
 kairos_runtime/host.py
 kairos_runtime/leases.py
 kairos_runtime/policy.py
+kairos_runtime/projects.py
 kairos_runtime/recovery.py
 kairos_runtime/redaction.py
+kairos_runtime/reviews.py
 kairos_runtime/service.py
 kairos_runtime/store.py
 kairos_runtime/supervisor.py
@@ -171,7 +176,9 @@ kairos_tui_host/rpc.py
 kairos_tui_host/supervisor.py
 kairos_web/__init__.py
 kairos_web/chat_transport.py
+kairos_web/message_metadata.py
 kairos_web/provider_api.py
+kairos_web/provider_settings_api.py
 kairos_web/runtime_api.py
 kairos_web/runtime_transport.py
 kairos_web/server.py
@@ -188,6 +195,7 @@ kairos_web/ui/js/app.js
 kairos_web/ui/js/chat-client.js
 kairos_web/ui/js/icons.js
 kairos_web/ui/js/runtime-client.js
+kairos_web/ui/js/selection-parameters.js
 kairos_web/ui/js/ui.js
 kairos_web/ui/js/views/chat.js
 kairos_web/ui/js/views/dashboard.js
@@ -206,18 +214,22 @@ tests/test_acp.py
 tests/test_agent.py
 tests/test_anthropic_messages_adapter.py
 tests/test_async_cleanup.py
+tests/test_broker_healthcheck.py
 tests/test_builtin_tools.py
+tests/test_chat_metadata_api.py
 tests/test_chat_parity.py
 tests/test_cjk.py
 tests/test_cli.py
 tests/test_cli_chat.py
 tests/test_cli_runtime.py
+tests/test_cli_runtime_delivery.py
 tests/test_cli_surface.py
 tests/test_codex_adapter.py
 tests/test_codex_rpc.py
 tests/test_codex_supervisor.py
 tests/test_compose_config.py
 tests/test_container.py
+tests/test_cost_without_usage.py
 tests/test_credential_migration.py
 tests/test_credential_vault.py
 tests/test_cron.py
@@ -236,6 +248,7 @@ tests/test_gateway.py
 tests/test_gateway_service.py
 tests/test_gemini_native_adapter.py
 tests/test_i18n.py
+tests/test_initial_chat_selection.py
 tests/test_integration.py
 tests/test_interaction_admission.py
 tests/test_interaction_async_persistence.py
@@ -243,6 +256,7 @@ tests/test_interaction_composition.py
 tests/test_interaction_contract.py
 tests/test_interaction_cost_accounting.py
 tests/test_interaction_persistence.py
+tests/test_interaction_reload.py
 tests/test_interaction_retry.py
 tests/test_interaction_router.py
 tests/test_interaction_selection.py
@@ -251,6 +265,7 @@ tests/test_interaction_turn_ownership.py
 tests/test_legacy_removal.py
 tests/test_machines.py
 tests/test_mcp.py
+tests/test_model_reasoning_api.py
 tests/test_model_selection.py
 tests/test_ollama_native_adapter.py
 tests/test_openai_compatible_adapter.py
@@ -263,6 +278,9 @@ tests/test_provider_composition.py
 tests/test_provider_contract_matrix.py
 tests/test_provider_foundation.py
 tests/test_provider_gateway.py
+tests/test_provider_settings.py
+tests/test_public_provider_metadata.py
+tests/test_routing_settings.py
 tests/test_runtime_approvals.py
 tests/test_runtime_auth.py
 tests/test_runtime_contract.py
@@ -272,7 +290,9 @@ tests/test_runtime_leases.py
 tests/test_runtime_live.py
 tests/test_runtime_parity.py
 tests/test_runtime_policy.py
+tests/test_runtime_projects.py
 tests/test_runtime_recovery.py
+tests/test_runtime_reviews.py
 tests/test_runtime_security.py
 tests/test_runtime_service.py
 tests/test_runtime_storage.py
@@ -284,6 +304,7 @@ tests/test_spa_chat_contract.py
 tests/test_state.py
 tests/test_tools.py
 tests/test_tui_host.py
+tests/test_turn_cost_persistence.py
 tests/test_web.py
 tests/test_web_chat_transport.py
 tests/test_web_provider_api.py

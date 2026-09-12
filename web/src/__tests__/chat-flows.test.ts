@@ -296,12 +296,16 @@ describe("fluxos reais do Chat", () => {
 
   it("aplica uma troca à conversa atual sem alterar o padrão global", async () => {
     location.hash = "#/modelos?session=existing-session";
-    const backend = installBackend();
+    const backend = installBackend({ details: { "existing-session": { ...oldSession,
+      selection: { provider: "openai", model: "gpt-test", parameters: {} },
+    } } });
     const root = document.createElement("main");
     await modelosView(root, {}, { signal: new AbortController().signal });
     root.querySelector<HTMLButtonElement>(
       '[data-choose-model="openrouter/vendor/model:free"]',
     )!.click();
+
+    await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>("[data-apply-model]")!.disabled).toBe(false));
 
     root.querySelector<HTMLButtonElement>("[data-apply-model]")!.click();
     await flush();
@@ -310,6 +314,8 @@ describe("fluxos reais do Chat", () => {
     expect(writes).toEqual([{ path: "/api/models/selection", method: "POST", body: {
       provider: "openrouter", model: "vendor/model:free", scope: "conversation",
       session_id: "existing-session",
+      profile: "",
+      parameters: { routing: { data_collection: "deny", require_parameters: true, allow_fallbacks: true } },
     } }]);
     expect(writes[0]!.body.scope).not.toBe("global");
   });

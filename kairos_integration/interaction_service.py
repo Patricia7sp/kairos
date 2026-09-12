@@ -289,7 +289,9 @@ class InteractionService:
                     attempts,
                     prepared.cost_source,
                 )
-                await self._persist_error(envelope.conversation_id, accumulator, selection, exc)
+                await self._persist_error(
+                    envelope.conversation_id, accumulator, selection, cost, exc
+                )
                 self._record_usage(
                     envelope.conversation_id,
                     selection,
@@ -313,7 +315,7 @@ class InteractionService:
                 attempts,
                 prepared.cost_source,
             )
-            await self._persist_assistant(envelope.conversation_id, accumulator, selection)
+            await self._persist_assistant(envelope.conversation_id, accumulator, selection, cost)
             self._record_usage(
                 envelope.conversation_id,
                 selection,
@@ -342,6 +344,21 @@ class InteractionService:
         prepared = self._prepare(snapshot.ref)
         snapshot = replace(snapshot, credential_id=prepared.credential_id)
         selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
+        initial_parameters = _thaw_parameters(snapshot.parameters)
+        if self._persistence is not None:
+            await self._persistence.initialize_selection(
+                envelope.conversation_id,
+                snapshot.ref,
+                initial_parameters,
+                profile=envelope.profile,
+            )
+        else:
+            self._sessions.initialize_selection(
+                envelope.conversation_id,
+                snapshot.ref,
+                initial_parameters,
+                profile=envelope.profile,
+            )
         await self._persist_user(envelope, selection)
         return (
             snapshot,
@@ -406,6 +423,7 @@ class InteractionService:
         conversation_id: str,
         accumulator: TurnAccumulator,
         selection: ResolvedModelSelection,
+        cost: InteractionCost,
     ) -> None:
         args = (conversation_id, "assistant", accumulator.text, selection)
         kwargs = {
@@ -413,6 +431,7 @@ class InteractionService:
             "finish_reason": accumulator.finish_reason,
             "reasoning": accumulator.reasoning or None,
             "tool_calls": self._tool_calls(accumulator.tool_calls),
+            "display_metadata": self._turn_display_metadata(accumulator.usage, cost),
         }
         if self._persistence is not None:
             await self._persistence.append_turn_message(*args, **kwargs)
@@ -424,30 +443,30 @@ class InteractionService:
         conversation_id: str,
         accumulator: TurnAccumulator,
         selection: ResolvedModelSelection,
+        cost: InteractionCost,
         error: ProviderError,
     ) -> None:
-        metadata = {
-            "error": error.message,
-            "error_kind": error.kind.value,
-            "model": selection.ref.model,
-            "provider": selection.ref.provider,
-            "reason": selection.reason.value,
-            "retryable": error.retryable,
-        }
-        args = (conversation_id, "assistant")
+        metadata = self._turn_display_metadata(accumulator.usage, cost)
+        metadata.update(
+            {
+                "error": error.message,
+                "error_kind": error.kind.value,
+                "retryable": error.retryable,
+            }
+        )
+        args = (conversation_id, "assistant", accumulator.text, selection)
         kwargs = {
-            "content": accumulator.text,
             "api_content": accumulator.text,
             "finish_reason": "error",
             "reasoning": accumulator.reasoning or None,
             "tool_calls": self._tool_calls(accumulator.tool_calls),
             "display_kind": "error",
-            "display_metadata": json.dumps(metadata, sort_keys=True),
+            "display_metadata": metadata,
         }
         if self._persistence is not None:
-            await self._persistence.append_message(*args, **kwargs)
+            await self._persistence.append_turn_message(*args, **kwargs)
         else:
-            self._messages.append(*args, **kwargs)
+            self._messages.append_turn_message(*args, **kwargs)
 
     def _record_usage(
         self,
@@ -492,6 +511,32 @@ class InteractionService:
         if not tool_calls:
             return None
         return json.dumps([asdict(tool_call) for tool_call in tool_calls], sort_keys=True)
+
+    @staticmethod
+    def _turn_display_metadata(
+        usage: TokenUsage | None,
+        cost: InteractionCost,
+    ) -> dict[str, object]:
+        return {
+            "cost": {
+                "estimated_usd": cost.estimated_usd,
+                "actual_usd": cost.actual_usd,
+                "status": cost.status,
+                "source": cost.source,
+            },
+            "usage": (
+                {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "cache_read_tokens": usage.cache_read_tokens,
+                    "reasoning_tokens": usage.reasoning_tokens,
+                    "cache_write_tokens": usage.cache_write_tokens,
+                    "total_tokens": usage.total,
+                }
+                if usage is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def _rehydrate_tool_calls(raw: str | None) -> tuple[CanonicalToolCall, ...]:
@@ -544,6 +589,14 @@ def _merged_parameters(
 
 def _cost_is_present(cost: InteractionCost) -> bool:
     return cost.estimated_usd is not None or cost.actual_usd is not None
+
+
+def _thaw_parameters(value):
+    if isinstance(value, Mapping):
+        return {key: _thaw_parameters(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_thaw_parameters(item) for item in value]
+    return value
 
 
 def _merge_mapping(target: dict[str, object], layer: Mapping[str, object]) -> None:

@@ -110,6 +110,12 @@ export const api = {
     method: "POST", body: selection,
   }),
   provedores:() => request("/api/providers"),
+  configuracaoProvedor: (provider) =>
+    request(`/api/providers/${encodeURIComponent(provider)}/settings`),
+  salvarConfiguracaoProvedor: (provider, settings, confirmCredentialTransfer = false) =>
+    request(`/api/providers/${encodeURIComponent(provider)}/settings`, {
+      method: "PUT", body: { settings, confirm_credential_transfer: confirmCredentialTransfer },
+    }),
   salvarCredencial: (provider, secret, authMethod = "api_key") =>
     request(`/api/providers/${encodeURIComponent(provider)}/credentials`, {
       method: "POST", body: { secret, auth_method: authMethod },

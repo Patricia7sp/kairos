@@ -56,7 +56,7 @@ _SUPPORTED_REQUEST_PARAMETERS = frozenset(
 
 @dataclass(frozen=True)
 class OpenRouterRoutingPolicy:
-    """Política invariável: OpenRouter só pode alternar endpoints do mesmo ID."""
+    """Preferências explícitas de endpoints; nunca selecionam outro ID de modelo."""
 
     data_collection: str = "deny"
     require_parameters: bool = True
@@ -64,11 +64,24 @@ class OpenRouterRoutingPolicy:
 
     def __post_init__(self) -> None:
         if (
-            self.data_collection != "deny"
-            or self.require_parameters is not True
-            or self.allow_fallbacks is not True
+            self.data_collection not in {"deny", "allow"}
+            or type(self.require_parameters) is not bool
+            or type(self.allow_fallbacks) is not bool
         ):
-            raise ValueError("a política segura da OpenRouter é obrigatória")
+            raise ValueError("política de roteamento inválida")
+
+    @classmethod
+    def from_parameters(cls, value: object) -> OpenRouterRoutingPolicy:
+        if not isinstance(value, Mapping) or set(value) - {
+            "data_collection",
+            "require_parameters",
+            "allow_fallbacks",
+        }:
+            raise ValueError("política de roteamento inválida")
+        try:
+            return cls(**value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("política de roteamento inválida") from exc
 
     def as_payload(self) -> dict[str, str | bool]:
         return {
@@ -238,6 +251,10 @@ def _catalog_model(record: object) -> CatalogModel | None:
 def _payload_for(request: AdapterRequest) -> dict[str, Any]:
     if request.model.provider != "openrouter":
         raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
+    try:
+        policy = OpenRouterRoutingPolicy.from_parameters(request.parameters.get("routing", {}))
+    except ValueError as exc:
+        raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False) from exc
     payload = {
         name: value
         for name, value in request.parameters.items()
@@ -249,7 +266,7 @@ def _payload_for(request: AdapterRequest) -> dict[str, Any]:
             "messages": [_message_for(message) for message in request.messages],
             "stream": True,
             "stream_options": {"include_usage": True},
-            "provider": OpenRouterRoutingPolicy().as_payload(),
+            "provider": policy.as_payload(),
         }
     )
     if request.tools:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -21,15 +22,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from kairos_cli.auth import AuthStore
-from kairos_cli.config import load_config, save_config
+from kairos_cli.config import load_config
 from kairos_integration import build_interaction_router as build_interaction_service
 from kairos_integration.interaction_contract import InteractionServiceUnavailableError
+from kairos_providers.adapters.openrouter import OpenRouterRoutingPolicy
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
+from kairos_providers.settings import load_config_document, update_config_document
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_security.credentials import (
     CredentialNotFoundError,
@@ -43,7 +46,15 @@ from kairos_web.chat_transport import (
     interaction_envelope_from_json,
     interaction_event_to_json,
 )
-from kairos_web.provider_api import list_models_payload, list_providers_payload, serialize_model
+from kairos_web.message_metadata import public_message_accounting
+from kairos_web.provider_api import (
+    list_models_payload,
+    list_providers_payload,
+    public_parameters,
+    public_profiles,
+    serialize_model,
+)
+from kairos_web.provider_settings_api import router as provider_settings_router
 from kairos_web.runtime_api import router as runtime_api_router
 from kairos_web.runtime_transport import runtime_event_to_json, runtime_websocket_session
 
@@ -88,6 +99,7 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)
 app.include_router(runtime_api_router)
+app.include_router(provider_settings_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -250,7 +262,7 @@ async def health_check():
 
 @app.get("/api/config")
 async def get_config():
-    config = load_config()
+    config = load_config_document(_application_home(app))
     return config
 
 
@@ -266,10 +278,25 @@ class ConfigUpdateRequest(BaseModel):
 @app.post("/api/config")
 async def update_config(req: ConfigUpdateRequest):
     try:
-        save_config(req.config)
-        return {"status": "saved", "config": req.config}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        def mutate(document):
+            current_settings = document.get("provider_settings")
+            if (
+                "provider_settings" in req.config
+                and req.config["provider_settings"] != current_settings
+            ):
+                raise HTTPException(422, "Altere os provedores na tela Provedores.")
+            document.clear()
+            document.update(req.config)
+            if current_settings is not None:
+                document["provider_settings"] = current_settings
+
+        config = update_config_document(_application_home(app), mutate)
+        return {"status": "saved", "config": config}
+    except HTTPException:
+        raise
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="configuração inválida") from exc
 
 
 @app.get("/api/models")
@@ -279,11 +306,11 @@ async def list_models(
     include_preview: bool = False,
 ):
     gateway = build_provider_gateway(_application_home(app))
-    config = load_config()
+    config = load_config_document(_application_home(app))
     default_model = config.get("model", "claude-3-7-sonnet-20250219")
     default_provider = config.get("provider", "anthropic")
     try:
-        return list_models_payload(
+        payload = list_models_payload(
             gateway,
             provider=provider,
             free_only=free_only,
@@ -291,6 +318,9 @@ async def list_models(
             default_provider=default_provider,
             default_model=default_model,
         )
+        payload["default_parameters"] = public_parameters(config.get("parameters"))
+        payload["profiles"] = public_profiles(config)
+        return payload
     finally:
         await gateway.aclose()
 
@@ -307,11 +337,29 @@ class ModelSelectionRequest(BaseModel):
     scope: Literal["conversation", "profile", "global"]
     session_id: str | None = None
     profile: str | None = None
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] | None = None
+
+
+def _merge_parameter_patch(existing: object, incoming: dict[str, Any]) -> dict[str, Any]:
+    if not incoming:
+        return {}
+    merged = copy.deepcopy(dict(existing)) if isinstance(existing, Mapping) else {}
+    for key, value in incoming.items():
+        previous = merged.get(key)
+        if isinstance(value, Mapping):
+            merged[key] = _merge_parameter_patch(previous, dict(value))
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 @app.post("/api/models/selection")
 async def select_model(req: ModelSelectionRequest):
+    if req.parameters is not None and "routing" in req.parameters:
+        try:
+            OpenRouterRoutingPolicy.from_parameters(req.parameters["routing"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="política de roteamento inválida") from exc
     gateway = build_provider_gateway(_application_home(app))
     ref = ProviderModelRef(req.provider.strip(), req.model.strip())
     try:
@@ -332,25 +380,36 @@ async def select_model(req: ModelSelectionRequest):
                 sessions = SessionRepository(db)
                 if sessions.get(req.session_id) is None:
                     raise HTTPException(status_code=404, detail="sessão não encontrada")
+                previous = sessions.selection(req.session_id)
+                parameters = (
+                    _merge_parameter_patch(previous.parameters if previous else {}, req.parameters)
+                    if req.parameters is not None
+                    else (dict(previous.parameters) if previous else {})
+                )
                 sessions.set_selection(
                     req.session_id,
                     ref,
-                    req.parameters,
+                    parameters,
                     reason=SelectionReason.CONVERSATION_OVERRIDE,
+                    profile=req.profile,
                 )
             finally:
                 db.close()
         else:
-            config = load_config()
-            target = config
-            if req.scope == "profile":
-                if not req.profile:
-                    raise HTTPException(status_code=422, detail="profile é obrigatório")
-                target = config.setdefault("profiles", {}).setdefault(req.profile, {})
-            target.update(
-                {"provider": ref.provider, "model": ref.model, "parameters": req.parameters}
-            )
-            save_config(config)
+            if req.scope == "profile" and (not req.profile or not req.profile.strip()):
+                raise HTTPException(status_code=422, detail="profile é obrigatório")
+
+            def mutate(config):
+                target = config
+                if req.scope == "profile":
+                    target = config.setdefault("profiles", {}).setdefault(req.profile.strip(), {})
+                target.update({"provider": ref.provider, "model": ref.model})
+                if req.parameters is not None:
+                    target["parameters"] = _merge_parameter_patch(
+                        target.get("parameters"), req.parameters
+                    )
+
+            update_config_document(_application_home(app), mutate)
         return {
             "status": "updated",
             "selection": {
@@ -386,15 +445,16 @@ async def refresh_models(req: RefreshModelsRequest):
 
 @app.post("/api/models/set-default")
 async def set_default_model(req: SetDefaultModelRequest):
-    config = load_config()
-    if req.task:
-        aux = config.setdefault("auxiliary_models", {})
-        aux[req.task] = req.model
-    else:
-        config["model"] = req.model
-        if req.provider:
-            config["provider"] = req.provider
-    save_config(config)
+    def mutate(config):
+        if req.task:
+            aux = config.setdefault("auxiliary_models", {})
+            aux[req.task] = req.model
+        else:
+            config["model"] = req.model
+            if req.provider:
+                config["provider"] = req.provider
+
+    config = update_config_document(_application_home(app), mutate)
     return {"status": "updated", "config": config}
 
 
@@ -541,34 +601,15 @@ def _get_db(application: FastAPI):
 # --- SESSIONS ENDPOINTS ---
 
 
-_PUBLIC_SESSION_SELECTION_PARAMETERS = frozenset(
-    {
-        "temperature",
-        "max_tokens",
-        "top_p",
-        "presence_penalty",
-        "frequency_penalty",
-        "stop",
-        "seed",
-        "parallel_tool_calls",
-        "include_reasoning",
-        "reasoning_effort",
-    }
-)
-
-
 def _public_session_selection(selection) -> dict[str, Any] | None:
     if selection is None:
         return None
     return {
         "provider": selection.ref.provider,
         "model": selection.ref.model,
-        "parameters": {
-            key: value
-            for key, value in selection.parameters.items()
-            if key in _PUBLIC_SESSION_SELECTION_PARAMETERS
-        },
+        "parameters": public_parameters(selection.parameters),
         "reason": selection.reason.value,
+        **({"profile": selection.profile} if selection.profile else {}),
     }
 
 
@@ -860,7 +901,7 @@ async def get_session_messages(session_id: str, request: Request):
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, role, content, timestamp FROM messages "
+                "SELECT id, role, content, timestamp, display_metadata FROM messages "
                 "WHERE session_id = ? ORDER BY timestamp, id",
                 (session_id,),
             ).fetchall()
@@ -880,6 +921,8 @@ async def get_session_messages(session_id: str, request: Request):
                         "turn_state": row["runtime_turn_state"],
                     }
                 )
+            elif row["role"] == "assistant":
+                payload.update(public_message_accounting(row["display_metadata"]))
             return payload
 
         return {

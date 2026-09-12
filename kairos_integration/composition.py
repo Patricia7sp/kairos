@@ -3,23 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 import threading
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import aclosing
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from kairos_integration.admission import InteractionAdmissionGate
+from kairos_integration.interaction_contract import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.router import InteractionRouter
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
-from kairos_providers import ModelSelectionResolver
-from kairos_providers._async_cleanup import AsyncCleanupCoordinator
+from kairos_providers import ModelSelectionContext, ModelSelectionResolver, ProviderModelRef
+from kairos_providers._async_cleanup import AsyncCleanupCoordinator, run_persistent_cleanup
 from kairos_providers.composition import build_provider_gateway
+from kairos_providers.selection import ModelSelectionUnavailableError
 from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories import MessageRepository, SessionRepository
@@ -29,6 +35,34 @@ __all__ = [
     "build_interaction_router",
     "build_interaction_service",
 ]
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _TurnComposition:
+    gateway: Any
+    resolver: ModelSelectionResolver
+    context_loader: SelectionContextLoader
+
+
+class _TurnScopedDependency:
+    """Delegate to the immutable composition of the current turn."""
+
+    def __init__(
+        self,
+        fallback: Any,
+        current: ContextVar[_TurnComposition | None],
+        name: str,
+    ) -> None:
+        self._fallback = fallback
+        self._current = current
+        self._name = name
+
+    def __getattr__(self, name: str) -> Any:
+        composition = self._current.get()
+        dependency = self._fallback if composition is None else getattr(composition, self._name)
+        return getattr(dependency, name)
 
 
 def _load_config(home: Path) -> Mapping[str, Any]:
@@ -69,11 +103,91 @@ class ComposedInteractionService(InteractionService):
 
     def __init__(self, *, home: Path, connection: sqlite3.Connection, **kwargs: Any) -> None:
         admission = InteractionAdmissionGate()
+        gateway = kwargs["gateway"]
+        current: ContextVar[_TurnComposition | None] = ContextVar(
+            f"kairos-interaction-turn-composition-{id(self)}", default=None
+        )
+        kwargs["gateway"] = _TurnScopedDependency(gateway, current, "gateway")
+        kwargs["resolver"] = _TurnScopedDependency(kwargs["resolver"], current, "resolver")
+        kwargs["context_loader"] = _TurnScopedDependency(
+            kwargs["context_loader"], current, "context_loader"
+        )
         super().__init__(admission=admission, **kwargs)
         self.home = home
-        self.gateway = self._gateway
+        self.gateway = gateway
+        self._turn_composition = current
         self._connection = connection
         self._close = AsyncCleanupCoordinator(task_name="kairos-interaction-service-close")
+
+    async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        """Freeze fresh local configuration for one already-owned turn."""
+        gateway = build_provider_gateway(self.home)
+        primary: BaseException | None = None
+        try:
+            config = _load_config(self.home)
+            profile_configs = config.get("profiles", {})
+            if not isinstance(profile_configs, Mapping):
+                profile_configs = {}
+            composition = _TurnComposition(
+                gateway=gateway,
+                resolver=ModelSelectionResolver(gateway.catalog),
+                context_loader=SelectionContextLoader(
+                    self._sessions,
+                    profile_configs=profile_configs,
+                    global_config=config,
+                ),
+            )
+            await self._refresh_missing_selection(composition, envelope)
+            token = self._turn_composition.set(composition)
+            try:
+                async with aclosing(super()._stream_owned(envelope)) as stream:
+                    async for event in stream:
+                        yield event
+            finally:
+                self._turn_composition.reset(token)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            if gateway is not self.gateway:
+                outcome = await run_persistent_cleanup(
+                    gateway.aclose,
+                    task_name=f"kairos-interaction-turn-gateway-close:{envelope.conversation_id}",
+                )
+                if outcome.error is not None:
+                    if isinstance(outcome.error, (KeyboardInterrupt, SystemExit)):
+                        raise outcome.error
+                    if primary is None:
+                        raise outcome.error
+                    logger.error(
+                        "falha ao fechar gateway do turno; preservando desenrolamento primário",
+                        exc_info=(
+                            type(outcome.error),
+                            outcome.error,
+                            outcome.error.__traceback__,
+                        ),
+                    )
+                if primary is None and outcome.cancellation is not None:
+                    raise outcome.cancellation
+
+    @staticmethod
+    async def _refresh_missing_selection(
+        composition: _TurnComposition,
+        envelope: InteractionEnvelope,
+    ) -> None:
+        context = composition.context_loader.load(envelope)
+        try:
+            composition.resolver.resolve(context)
+        except ModelSelectionUnavailableError:
+            candidate = _first_selection_candidate(context)
+            if candidate is None:
+                raise
+            await composition.gateway.refresh(candidate.provider)
+            resolved = composition.resolver.resolve(context)
+            if resolved.ref != candidate:
+                raise ModelSelectionUnavailableError(
+                    f"seleção indisponível: {candidate.provider}/{candidate.model}"
+                ) from None
 
     async def aclose(self) -> None:
         """Fecha, uma única vez, somente os recursos criados por esta composição."""
@@ -114,6 +228,14 @@ class ComposedInteractionService(InteractionService):
 
     async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
         await self.aclose()
+
+
+def _first_selection_candidate(context: ModelSelectionContext) -> ProviderModelRef | None:
+    for field in ("message", "conversation", "activity", "profile", "global_default"):
+        candidate = getattr(context, field)
+        if candidate is not None:
+            return candidate
+    return None
 
 
 def build_interaction_service(home: Path) -> ComposedInteractionService:

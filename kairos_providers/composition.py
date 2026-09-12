@@ -25,7 +25,6 @@ from kairos_providers.adapters import (
 )
 from kairos_providers.adapters.openai_compatible import OpenAICompatibleAdapter
 from kairos_providers.catalog import ModelCatalog
-from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.contracts import CatalogOrigin, ProviderDescriptor
 from kairos_providers.curated_catalog import curated_models
 from kairos_providers.gateway import ProviderBillingMetadata, ProviderGateway
@@ -36,6 +35,11 @@ from kairos_providers.provider_profiles import (
     custom_profile,
 )
 from kairos_providers.provider_registry import ProviderAdapterRegistry
+from kairos_providers.settings import (
+    EndpointCatalogSnapshotStore,
+    load_config_document,
+    settings_from_document,
+)
 from kairos_security.credentials import build_credential_service
 
 __all__ = [
@@ -160,14 +164,31 @@ def build_provider_gateway(
     client_factory: Callable[[], httpx.AsyncClient] | None = None,
 ) -> ProviderGateway:
     """Monta registry, catálogo e cofre sem consultar nenhum endpoint remoto."""
-    configuration = config or ProviderCompositionConfig()
+    if config is None:
+        document = load_config_document(home)
+        custom = settings_from_document(document, "custom")
+        openrouter = settings_from_document(document, "openrouter")
+        configuration = ProviderCompositionConfig(
+            custom=custom_profile(**custom, allowed_headers=frozenset(custom["headers"])),
+            openrouter_referer=openrouter["referer"],
+            openrouter_title=openrouter["title"],
+        )
+    else:
+        configuration = config
     registry = ProviderAdapterRegistry()
     clients = _ProviderHttpClients(client_factory)
     _register_adapters(registry, clients, configuration)
 
     catalog = ModelCatalog()
     catalog.merge(curated_models(), origin=CatalogOrigin.CURATED)
-    snapshots = CatalogSnapshotStore(home / "model-catalog.json")
+    snapshots = EndpointCatalogSnapshotStore(
+        home,
+        {
+            "base_url": configuration.custom.base_url,
+            "models_url": configuration.custom.models_url,
+            "headers": dict(configuration.custom.headers),
+        },
+    )
     for descriptor in registry.list_descriptors():
         snapshot = snapshots.load(descriptor.id)
         if snapshot is not None:

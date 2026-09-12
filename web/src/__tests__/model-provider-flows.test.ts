@@ -161,6 +161,7 @@ describe("filtros reais da página Modelos", () => {
           provider: "openrouter",
           model: "unknown-large",
           scope: "global",
+          parameters: { routing: { data_collection: "deny", require_parameters: true, allow_fallbacks: true } },
         }),
       }),
     );

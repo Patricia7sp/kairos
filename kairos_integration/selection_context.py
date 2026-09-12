@@ -50,10 +50,11 @@ class SelectionContextLoader:
         self._global_config = global_config or {}
 
     def load(self, envelope: InteractionEnvelope) -> ModelSelectionContext:
-        profile_config = self._profile_configs.get(envelope.profile or "")
+        persisted = self._sessions.selection(envelope.conversation_id)
+        profile_name = envelope.profile or (persisted.profile if persisted else None)
+        profile_config = self._profile_configs.get(profile_name or "")
         if not isinstance(profile_config, Mapping):
             profile_config = {}
-        persisted = self._sessions.selection(envelope.conversation_id)
 
         return ModelSelectionContext(
             message=parse_ref(envelope.override),
