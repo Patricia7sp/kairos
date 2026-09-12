@@ -19,6 +19,7 @@ import { cronView } from "./views/cron.js";
 import { ajustesView } from "./views/ajustes.js";
 import { loginView } from "./views/login.js";
 import { runtimeView } from "./views/runtime.js";
+import { logsView } from "./views/logs.js";
 import { api } from "./api.js";
 
 const ROTAS = [
@@ -31,6 +32,7 @@ const ROTAS = [
   { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
   { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: provedoresView },
   { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: ferramentasView },
+  { id: "registros",   titulo: "Registros",   icone: "providers", grupo: "Configuração", view: logsView },
   { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: ajustesView },
 ];
 

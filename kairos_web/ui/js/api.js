@@ -26,11 +26,12 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = "GET", body } = {}) {
+async function request(path, { method = "GET", body, signal } = {}) {
   let res;
   try {
     res = await fetch(path, {
       method,
+      ...(signal ? { signal } : {}),
       // O cookie de sessão é httpOnly e o navegador o envia sozinho em
       // same-origin. O header só entra se alguém injetou um token na página —
       // o caso da interface herdada, não o desta.
@@ -79,6 +80,12 @@ export const api = {
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 
   health:      () => request("/api/health"),
+  logs: ({ limit = 50, service, level, signal } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (service) params.set("service", service);
+    if (level) params.set("level", level);
+    return request(`/api/logs?${params}`, { signal });
+  },
   status:      () => request("/api/status"),
   ajustes:     () => request("/api/settings"),
   salvarAjustes: (generation) => request("/api/settings", { method: "PUT", body: { generation } }),

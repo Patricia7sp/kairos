@@ -88,7 +88,7 @@ def db(tmp_path):
     connection.close()
 
 
-def make_service(db, gateway):
+def make_service(db, gateway, *, event_home=None):
     catalog = ModelCatalog()
     catalog.merge(
         [
@@ -101,6 +101,7 @@ def make_service(db, gateway):
         origin=CatalogOrigin.CURATED,
     )
     return InteractionService(
+        event_home=event_home,
         gateway=gateway,
         resolver=ModelSelectionResolver(catalog),
         context_loader=SimpleNamespace(

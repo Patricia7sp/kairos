@@ -197,7 +197,9 @@ COMMANDS: tuple[Command, ...] = (
     _c("insights", "Métricas de uso e custo", unit="kairos-state"),
     _c("login", "Autentica num provedor", unit="kairos-cli"),
     _c("logout", "Encerra a autenticação", unit="kairos-cli"),
-    _c("logs", "Logs do gateway e dos serviços"),
+    _c(
+        "logs", "Eventos operacionais de Web, Chat, busca e agendamentos", status=Status.IMPLEMENTED
+    ),
     _c(
         "mcp",
         "Servidores Model Context Protocol",

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
 from functools import partial
+from pathlib import Path
 
 from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.chat_tools import WEB_SEARCH_TOOLS, execute_web_search
@@ -26,6 +27,7 @@ from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
 from kairos_integration.turn_ownership import AsyncTurnLeaseBackend, SessionTurnOwnership
+from kairos_observability.service_events import record_service_event_async
 from kairos_providers import (
     AdapterRequest,
     CanonicalMessage,
@@ -152,6 +154,7 @@ class InteractionService:
         turn_lease_clock: Callable[[], float] | None = None,
         turn_lease_sleep: Callable[[float], Awaitable[None]] | None = None,
         admission: InteractionAdmissionGate | None = None,
+        event_home: Path | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -164,6 +167,7 @@ class InteractionService:
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
         self._admission = admission
+        self._event_home = event_home
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -419,6 +423,10 @@ class InteractionService:
         )
         await self._flush_usage()
 
+        await self._observe_round(
+            accumulator, "chat.failed" if accumulator.error else "chat.completed"
+        )
+
     async def _execute_search_calls(
         self,
         conversation_id: str,
@@ -434,6 +442,7 @@ class InteractionService:
                 executed_calls.append(call.id)
                 result = await execute_web_search(call)
             await self._persist_tool_result(conversation_id, call, result, selection)
+            await self._observe("search.failed" if result.is_error else "search.completed")
             yield InteractionEvent.from_tool_result(result, conversation_id)
 
     async def _stream_accountable_round(
@@ -453,10 +462,21 @@ class InteractionService:
             ) as stream:
                 async for event in stream:
                     yield event
-        except BaseException:
+        except BaseException as exc:
+            event_code = (
+                "chat.cancelled"
+                if isinstance(exc, (asyncio.CancelledError, GeneratorExit))
+                else "chat.failed"
+            )
             outcome = await run_persistent_cleanup(
                 lambda: self._record_interrupted_round(
-                    conversation_id, selection, prepared, accumulator, totals=totals, costs=costs
+                    conversation_id,
+                    selection,
+                    prepared,
+                    accumulator,
+                    totals=totals,
+                    costs=costs,
+                    event_code=event_code,
                 ),
                 task_name="kairos-interrupted-round-accounting",
             )
@@ -473,6 +493,7 @@ class InteractionService:
         *,
         totals: TurnAccumulator,
         costs: list[InteractionCost],
+        event_code: str,
     ) -> None:
         if not accumulator.attempts:
             return
@@ -507,6 +528,21 @@ class InteractionService:
             cost=cost,
         )
         await self._flush_usage()
+
+        await self._observe_round(accumulator, event_code)
+
+    async def _observe(self, code: str, **counters: int) -> None:
+        if self._event_home is not None:
+            await record_service_event_async(self._event_home, code, **counters)
+
+    async def _observe_round(self, accumulator: TurnAccumulator, code: str) -> None:
+        counters = {"api_calls": accumulator.attempts}
+        if accumulator.usage is not None:
+            counters.update(
+                input_tokens=accumulator.usage.input_tokens,
+                output_tokens=accumulator.usage.output_tokens,
+            )
+        await self._observe(code, **counters)
 
     async def _stream_provider_round(
         self,

@@ -64,6 +64,9 @@ saem com código **69** e dizem qual unit já existe — nunca com 0 em silênci
 A tela Agendamentos e `kairos cron` administram jobs persistidos com execução real
 e histórico. Consulte [uso e limites](docs/agendamentos.md).
 
+A tela Registros e `kairos logs` consultam eventos reais de Web, chamadas ao
+modelo, buscas e agendamentos. Consulte [uso e limites](docs/registros.md).
+
 ## Chat, modelos e providers
 
 A SPA principal em `/` oferece Chat, catálogo de modelos e configuração de

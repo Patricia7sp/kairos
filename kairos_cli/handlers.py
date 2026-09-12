@@ -644,7 +644,14 @@ def cmd_model(args) -> int:
     return asyncio.run(run_model_command(_home(), args))
 
 
+def cmd_logs(args) -> int:
+    from kairos_cli.logs import run_logs
+
+    return run_logs(_home(), args)
+
+
 HANDLERS = {
+    "logs": cmd_logs,
     "model": cmd_model,
     "run": cmd_run,
     "chat": cmd_run,
