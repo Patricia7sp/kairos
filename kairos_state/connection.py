@@ -124,9 +124,11 @@ def read_connection(db_path: str | os.PathLike[str] | None = None):
 
     Abre em modo ``ro`` via URI para que uma escrita acidental por este
     caminho falhe alto, em vez de disputar o lock silenciosamente.
+    O SQLite ainda pode criar arquivos auxiliares WAL/SHM para coordenar leitores;
+    não usar immutable, que ignoraria transações já confirmadas no WAL ativo.
     """
     path = Path(db_path) if db_path is not None else default_db_path()
-    uri = f"file:{path}?mode=ro"
+    uri = path.absolute().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     try:

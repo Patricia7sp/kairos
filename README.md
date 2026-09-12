@@ -67,6 +67,9 @@ e histórico. Consulte [uso e limites](docs/agendamentos.md).
 A tela Registros e `kairos logs` consultam eventos reais de Web, chamadas ao
 modelo, buscas e agendamentos. Consulte [uso e limites](docs/registros.md).
 
+`kairos insights` consulta o uso e os custos persistidos, pela mesma fonte da API.
+Consulte [métricas e limites dos dados](docs/metricas.md).
+
 ## Chat, modelos e providers
 
 A SPA principal em `/` oferece Chat, catálogo de modelos e configuração de

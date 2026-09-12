@@ -1,7 +1,7 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Branch de trabalho atual: `feat/cron-limits`.
-Base publicada: PR #27, `5889fbe`. A conclusão integral não está declarada.
+Atualizado em 12/09/2026. Branch de trabalho atual: `feat/usage-insights`.
+Base publicada: PR #28, `880936d`. A conclusão integral não está declarada.
 
 ## Mandato e critérios
 
@@ -74,11 +74,11 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
   ferramentas não estão habilitadas pelo Chat.
 - Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
   notepad, blueprints e entrega externa seguem pendentes. Limites finitos recorrentes
-  estão implementados no lote em validação abaixo.
+  estão publicados via PR #28.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
   de registros abaixo, já publicado via PR #27. `/api/cron/jobs` usa armazenamento real.
-- A CLI declara **50 comandos**. Após implementar `model` e `logs`, **27** ainda não têm handler:
-  acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import, insights,
+- A CLI declara **50 comandos**. Após implementar `model`, `logs` e `insights`, **26** ainda não têm handler:
+  acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import,
   login, logout, memory, monitoring, pairing, pause, peer, prompt-size, setup,
   skin, slack, uninstall, update, verify, webhook, whatsapp. Há também subcomandos
   pendentes dentro dos grupos com handler. Esses comandos retornam 69.
@@ -91,7 +91,7 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 
 ## Próxima sequência
 
-1. Finalizar aceite e publicação dos limites recorrentes.
+1. Finalizar aceite e publicação de insights.
 2. Avançar nas pendências de cron, comandos e conectores com aceite por fluxo.
 3. Registrar PR/CI remota/implantação apenas quando conferidos, mantendo distinção
    entre falta de código e bloqueio externo.
@@ -446,3 +446,59 @@ duplicata e pausa/retomada não permitem ultrapassar o limite.
   Servidor descartável encerrado; nenhum job criado na instalação da usuária.
 - Código de aplicação permanece o verificado após rebase sobre a main PR #27.
   Entrega remota e implantação ainda serão registradas após seus checks.
+
+
+### Publicação dos limites recorrentes — PR #28
+
+- PR #28 integrada em `880936df160b1a976203030be7ef5d0d1ec48234`; nove checks
+  remotos passaram. Código final `0daf9ea56e56a75aba2a8bf213a66190526a81d3`.
+- Imagem `sha256:daf12829c962e13ae5f0fca1fdf8338830f6d032a866488b6c18ac7595fe6382`
+  publicada; aplicação/broker saudáveis e keeper preservado.
+- Backup `20260912T163604Z`: 4.268 arquivos restaurados/conferidos, SQLite íntegro
+  e digests de checkpoints/baselines válidos.
+- Aceite publicado em Chromium: limite vazio disponível só em recorrentes,
+  campo oculto em once, dez APIs 200/env410, três larguras sem erros JS/overflow.
+  Nenhum envio de formulário nem job de teste na instalação da usuária.
+- Cinco arquivos protegidos idênticos; 18 sessões, 56 mensagens, 16 turnos,
+  10 checkpoints e duas baselines preservados.
+- Artefatos `/tmp/kairos-cron-limits-{deployment,preservation,production-browser}.json`.
+
+## Continuação — métricas reais na CLI insights
+
+Branch `feat/usage-insights`, worktree `.worktrees/usage-insights`, base PR #28.
+`kairos insights [--json]` implementado com leitor compartilhado pela API de uso.
+Preserva totais acumulados, custos conhecidos/estimados/desconhecidos e ausência
+de janela/série temporal. Leitura não executa modelo nem abre cofre.
+
+Revisão identificou duas correções necessárias no caminho herdado:
+
+- URI SQLite escapada para impedir que `?mode=rwc` em um nome de diretório
+  altere a abertura e crie banco fora do home. Testes de ?, #, %, Unicode e
+  caminhos relativos passam.
+- Valores numéricos inválidos ou soma não finita retornam indisponível com JSON
+  válido, sem declarar custo completo ou emitir Infinity.
+
+A conexão é de leitura dos dados, mas SQLite pode criar auxiliares WAL/SHM.
+Esse limite está documentado e transações confirmadas no WAL ativo são lidas.
+Não usar immutable, que esconderia dados ainda não consolidados no arquivo DB.
+Validação final/aceite externo controlado e entrega ainda em curso.
+Manual: [Métricas](metricas.md).
+
+
+### Verificação final de insights
+
+- CI local final: **2.164 testes Python + 5.581 subtestes**, **166 Web**, **17 TUI**,
+  **18 desktop**; lint/formato/tipos/shell/recall/lock passaram.
+- Revisão final sem bloqueadores após URI escapada, teste de WAL ativo e rejeição
+  de dados numéricos inválidos. Custos desconhecidos seguem None; subtotais
+  conhecidos não se tornam custo completo.
+- Aceite real em armazenamento descartável: WebSocket/HTTP/adaptadores/SQLite,
+  um turno com busca e duas chamadas, 42 tokens e US$ 0,000108 estimado. CLI em
+  processo novo e API idênticas após reabrir o banco. `days=7` declara janela não
+  suportada e preserva total acumulado. Sem dados privados no relatório.
+- Arquivos de dados/config/cofre preservados; auxiliares SQLite explicitamente
+  permitidos pelo contrato. Servidor do aceite encerrado; porta 9140 livre.
+- Imagem construída e smoke da CLI real passou: banco descartável, uma chamada,
+  nove tokens, custo desconhecido preservado. Docker completo ainda em finalização.
+- Artefatos `/tmp/kairos-usage-insights-{ci-final.log,acceptance.json,review.md,image-cli.json}`.
+  Publicação ainda pendente dos checks remotos e conferência da instalação.
