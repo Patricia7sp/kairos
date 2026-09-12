@@ -210,7 +210,17 @@ COMMANDS: tuple[Command, ...] = (
         _sub("off", "Desativa a memória"),
         _sub("status", "Estado da memória"),
     ),
-    _c("model", "Seleção e capacidades de modelo", unit="providers-gateway"),
+    _c(
+        "model",
+        "Seleção e capacidades de modelo",
+        _sub("show", "Mostra a seleção global"),
+        _sub("list", "Lista o catálogo local"),
+        _sub("refresh", "Atualiza o catálogo de um provedor"),
+        _sub("set", "Define o modelo global"),
+        _sub("test", "Testa a conexão com um provedor"),
+        status=Status.IMPLEMENTED,
+        unit="providers-gateway",
+    ),
     _c("monitoring", "Monitores e alertas", unit="cron"),
     _c(
         "pairing",

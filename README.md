@@ -43,7 +43,9 @@ em relação ao legado estão em [`docs/decisoes.md`](docs/decisoes.md).
 | 20 — Integração | ✅ concluída |
 | 21 — evals | ✅ concluída |
 
-**As 21 tarefas do plano de reconstrução estão concluídas.**
+As 21 unidades do plano histórico foram reconstruídas, mas esse quadro não
+certifica conclusão operacional de todas as funcionalidades. O inventário atual,
+as validações e os bloqueios estão em [Progresso funcional](docs/functional-progress.md).
 
 ## O executável
 
@@ -54,8 +56,7 @@ kairos doctor
 kairos approvals test "rm -rf build" --deny "rm *" --yolo   # sai 3: deny vence yolo
 ```
 
-São **48 comandos** na superfície (44 grupos do legado + `run`, `chat`,
-`tick`, `version`). Os implementados usam as units reconstruídas; os demais
+São **50 comandos** declarados na superfície. Os implementados usam as units reconstruídas; os demais
 saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
 
 ## Chat, modelos e providers

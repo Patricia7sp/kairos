@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from kairos_tools.registry import ToolRegistry, registry
+from kairos_tools.search_results import parse_search_results
 
 
 async def bash_tool(command: str, cwd: str | None = None, timeout: int = 60) -> dict[str, Any]:
@@ -119,24 +120,38 @@ async def list_dir_tool(path: str = ".") -> dict[str, Any]:
 
 
 async def web_search_tool(query: str, max_results: int = 5) -> dict[str, Any]:
-    """Realiza busca na web usando DuckDuckGo Lite API."""
+    """Busca fontes no HTML do DuckDuckGo, com resposta limitada a 1 MiB."""
+    if not isinstance(query, str) or not query.strip():
+        return {"error": "Informe um termo de busca não vazio.", "status": "invalid_arguments"}
+    if type(max_results) is not int or not 1 <= max_results <= 20:
+        return {
+            "error": "max_results deve ser um inteiro entre 1 e 20.",
+            "status": "invalid_arguments",
+        }
     url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    unavailable = {"query": query, "status": "unavailable", "results": []}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            res = await client.get(url, headers=headers)
-            if res.status_code == 200:
-                # Extrai resultados simplificados
-                text = res.text
-                return {
-                    "query": query,
-                    "status": "ok",
-                    "snippet": f"Busca realizada com sucesso para: {query}",
-                    "raw_length": len(text),
-                }
-            return {"error": f"Status HTTP {res.status_code} ao buscar", "query": query}
+        async with (
+            httpx.AsyncClient(timeout=10.0) as client,
+            client.stream("GET", url, headers=headers) as res,
+        ):
+            if res.status_code != 200:
+                return {**unavailable, "error": f"Status HTTP {res.status_code} ao buscar"}
+            body = bytearray()
+            async for chunk in res.aiter_bytes(chunk_size=16_384):
+                if len(body) + len(chunk) > 1_048_576:
+                    return {**unavailable, "error": "A resposta da busca excedeu o limite."}
+                body.extend(chunk)
+        results = parse_search_results(body.decode("utf-8", errors="replace"), max_results)
+        if results is None:
+            return {
+                **unavailable,
+                "error": "O serviço retornou uma página inesperada ou um desafio de acesso.",
+            }
+        return {"query": query, "status": "ok", "results": results}
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Falha na busca web: {exc}", "query": query}
+        return {**unavailable, "error": f"Falha na busca web: {exc}"}
 
 
 def register_builtin_tools(reg: ToolRegistry | None = None) -> None:
@@ -282,7 +297,13 @@ def register_builtin_tools(reg: ToolRegistry | None = None) -> None:
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Termo de busca"},
-                        "max_results": {"type": "integer", "description": "Máximo de resultados"},
+                        "max_results": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20,
+                            "default": 5,
+                            "description": "Máximo de resultados, entre 1 e 20 (padrão 5)",
+                        },
                     },
                     "required": ["query"],
                 },

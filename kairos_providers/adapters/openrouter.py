@@ -20,6 +20,7 @@ from kairos_providers.adapter_contract import (
     ProviderErrorKind,
     ProviderEvent,
 )
+from kairos_providers.adapters._json import wire_json
 from kairos_providers.base import ConnectionStatus, TokenUsage
 from kairos_providers.contracts import (
     CatalogModel,
@@ -137,6 +138,9 @@ class OpenRouterAdapter:
                 state="unavailable",
             )
         try:
+            # The model catalog is public; only this authenticated endpoint
+            # proves the supplied credential is accepted. Never expose its body.
+            await self._request("GET", "/key")
             models = await self.discover_models()
         except ProviderError as exc:
             return ConnectionStatus(False, self.descriptor.id, exc.message, 0)
@@ -151,9 +155,11 @@ class OpenRouterAdapter:
                 "POST",
                 f"{_OPENROUTER_API_BASE}/chat/completions",
                 headers=self._headers(streaming=True),
-                json=payload,
+                json=wire_json(payload),
                 follow_redirects=False,
             ) as response:
+                if response.status_code == 404 and await _blocked_by_policy(response):
+                    raise ProviderError(ProviderErrorKind.POLICY, retryable=False)
                 self._raise_for_status(response)
                 async for event in _events_from_sse(response):
                     yield event
@@ -207,6 +213,27 @@ class OpenRouterAdapter:
         if status in {408, 504}:
             raise ProviderError(ProviderErrorKind.NETWORK, retryable=True)
         raise ProviderError(ProviderErrorKind.INTERNAL, retryable=status >= 500)
+
+
+async def _blocked_by_policy(response: httpx.Response) -> bool:
+    """Classify a bounded error body; never expose the upstream's text."""
+    body = bytearray()
+    async for chunk in response.aiter_bytes(chunk_size=4096):
+        if len(body) + len(chunk) > 16384:
+            return False
+        body.extend(chunk)
+    try:
+        document = json.loads(body)
+    except (ValueError, UnicodeError):
+        return False
+    error = document.get("error") if isinstance(document, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    return isinstance(message, str) and message.startswith(
+        (
+            "No endpoints found matching your data policy",
+            "No endpoints found that match your data policy",
+        )
+    )
 
 
 def _catalog_model(record: object) -> CatalogModel | None:

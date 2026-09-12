@@ -652,7 +652,16 @@ def cmd_security(args) -> int:
     return ExitCode.OK
 
 
+def cmd_model(args) -> int:
+    import asyncio
+
+    from kairos_cli.model import run_model_command
+
+    return asyncio.run(run_model_command(_home(), args))
+
+
 HANDLERS = {
+    "model": cmd_model,
     "run": cmd_run,
     "chat": cmd_run,
     "runtime": cmd_runtime,

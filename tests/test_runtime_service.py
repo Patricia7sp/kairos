@@ -253,6 +253,23 @@ async def test_cancel_bounds_interrupt_delivery_and_uses_independent_terminal_ev
 async def test_cancel_shares_one_deadline_between_delivery_and_terminal_wait(tmp_path, monkeypatch):
     service, store, runtime = await setup_service(tmp_path, cancel_timeout=0.2)
 
+    # Observe actual waits, separating the RPC deadline from durable cleanup.
+    original_wait = asyncio.wait
+    wait_budgets = []
+
+    async def observed_wait(tasks, **kwargs):
+        wait_budgets.append(kwargs["timeout"])
+        return await original_wait(tasks, **kwargs)
+
+    monkeypatch.setattr(asyncio, "wait", observed_wait)
+    original_lose = store.lose_turn
+
+    async def slow_durable_loss(*args, **kwargs):
+        await asyncio.sleep(0.12)
+        return await original_lose(*args, **kwargs)
+
+    monkeypatch.setattr(store, "lose_turn", slow_durable_loss)
+
     async def delayed_interrupt(session, external_turn_id):
         await asyncio.sleep(0.12)
 
@@ -262,9 +279,12 @@ async def test_cancel_shares_one_deadline_between_delivery_and_terminal_wait(tmp
         async for event in service.subscribe("s1"):
             if event.kind == "turn_start":
                 break
-        async with asyncio.timeout(0.28):
+        async with asyncio.timeout(5):
             with pytest.raises(RuntimeErrorInfo, match="cancel_partial"):
                 await service.cancel("s1", turn)
+        assert len(wait_budgets) == 2
+        # A fresh full timeout after RPC delivery would exceed the remaining budget.
+        assert wait_budgets[1] <= max(0, wait_budgets[0] - 0.1)
         assert (await store.get_turn(turn))["state"] == "interrupted"
     finally:
         await service.aclose()

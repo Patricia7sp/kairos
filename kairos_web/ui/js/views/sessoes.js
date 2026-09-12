@@ -31,7 +31,8 @@ function erroHtml(e, titulo) {
     <code>${esc(e.path || "")} ${e.status ? "→ HTTP " + e.status : ""}</code></div>`;
 }
 
-export async function sessoesView(raiz) {
+export async function sessoesView(raiz, _rota, { signal } = {}) {
+  if (signal?.aborted) return;
   raiz.innerHTML = `
     <div class="k-page-head">
       <h1>Sessões</h1>
@@ -65,11 +66,23 @@ export async function sessoesView(raiz) {
   let timer;
   let selecionadaId = "";
   let carregamento = 0;
+  let detalheCarregamento = 0;
+  let disposed = false;
   let deslocamento = 0;
   const limite = 25;
+  const listeners = new AbortController();
+  const dispose = () => {
+    disposed = true;
+    clearTimeout(timer);
+    listeners.abort();
+    signal?.removeEventListener("abort", dispose);
+  };
+  signal?.addEventListener("abort", dispose, { once: true });
 
   const carregar = async () => {
+    if (disposed) return;
     const idCarregamento = ++carregamento;
+    ++detalheCarregamento;
     alvo.innerHTML = `<div class="k-skeleton" style="height:340px"></div>`;
     let dados;
     try {
@@ -78,11 +91,15 @@ export async function sessoesView(raiz) {
         offset: deslocamento, limit: limite,
       });
     } catch (e) {
-      if (idCarregamento !== carregamento) return;
+      if (disposed || idCarregamento !== carregamento) return;
       alvo.innerHTML = erroHtml(e, "Não foi possível carregar as sessões");
       return;
     }
-    if (idCarregamento !== carregamento) return;
+    if (disposed || idCarregamento !== carregamento) return;
+    if (deslocamento > 0 && deslocamento >= dados.total) {
+      deslocamento = Math.max(0, Math.floor((dados.total - 1) / limite) * limite);
+      return carregar();
+    }
     filtroTag.innerHTML = `<option value="">Todas as tags</option>` +
       (dados.tag_counts || []).map((item) =>
         `<option value="${esc(item.tag)}">${esc(item.tag)} (${item.count})</option>`).join("");
@@ -127,13 +144,16 @@ export async function sessoesView(raiz) {
 
     const painel = alvo.querySelector("[data-detalhe]");
     const selecionar = (tr) => {
+      if (disposed) return;
+      const idDetalhe = ++detalheCarregamento;
       selecionadaId = tr.dataset.sessao;
       for (const outro of alvo.querySelectorAll("[data-sessao]")) {
         const ativa = outro === tr;
         outro.classList.toggle("k-tabela__destaque", ativa);
         outro.setAttribute("aria-selected", String(ativa));
       }
-      void abrirSessao(selecionadaId, painel, carregar);
+      const atual = () => !disposed && idDetalhe === detalheCarregamento;
+      void abrirSessao(selecionadaId, painel, carregar, atual);
     };
     alvo.querySelector("tbody").addEventListener("click", (ev) => {
       const tr = ev.target.closest("[data-sessao]");
@@ -155,17 +175,18 @@ export async function sessoesView(raiz) {
   busca.addEventListener("input", () => {
     clearTimeout(timer);
     timer = setTimeout(() => { deslocamento = 0; void carregar(); }, 250);
-  });
-  filtro.addEventListener("change", () => { deslocamento = 0; void carregar(); });
-  filtroTag.addEventListener("change", () => { deslocamento = 0; void carregar(); });
-  atualizar.addEventListener("click", () => void carregar());
+  }, { signal: listeners.signal });
+  filtro.addEventListener("change", () => { deslocamento = 0; void carregar(); }, { signal: listeners.signal });
+  filtroTag.addEventListener("change", () => { deslocamento = 0; void carregar(); }, { signal: listeners.signal });
+  atualizar.addEventListener("click", () => void carregar(), { signal: listeners.signal });
   raiz.addEventListener("click", (ev) => {
     const anterior = ev.target.closest("[data-pagina-anterior]");
     const proxima = ev.target.closest("[data-pagina-proxima]");
     if (anterior) { deslocamento = Math.max(0, deslocamento - limite); void carregar(); }
     if (proxima) { deslocamento += limite; void carregar(); }
-  });
+  }, { signal: listeners.signal });
   void carregar();
+  return dispose;
 }
 
 function linha(s) {
@@ -195,15 +216,17 @@ function paginacao(dados) {
   </nav>`;
 }
 
-async function abrirSessao(id, painel, recarregar) {
+async function abrirSessao(id, painel, recarregar, atual) {
   painel.innerHTML = `<div class="k-skeleton" style="height:320px"></div>`;
   let sessao, mensagens;
   try {
     [sessao, mensagens] = await Promise.all([api.sessao(id), api.mensagens(id)]);
   } catch (e) {
+    if (!atual()) return;
     painel.innerHTML = erroHtml(e, "Não foi possível abrir a sessão");
     return;
   }
+  if (!atual()) return;
 
   const msgs = mensagens.messages || mensagens || [];
   painel.innerHTML = `
@@ -216,7 +239,7 @@ async function abrirSessao(id, painel, recarregar) {
         <div class="k-ses__acoes">
           ${sessao.execution_kind === "agent_runtime"
             ? `<a class="k-btn k-btn--primary" href="#/runtime?session=${encodeURIComponent(sessao.id)}">Abrir runtime</a>`
-            : ""}
+            : `<a class="k-btn k-btn--primary" href="#/chat?session=${encodeURIComponent(sessao.id)}">Abrir chat</a>`}
           <button type="button" class="k-btn k-btn--ghost" data-exportar-sessao>Exportar JSON</button>
           <button type="button" class="k-btn k-btn--ghost" data-exportar-markdown>Exportar Markdown</button>
           <button type="button" class="k-btn k-btn--ghost" data-fixar-sessao>${sessao.pinned ? "Desafixar" : "Fixar"}</button>
@@ -251,6 +274,7 @@ async function abrirSessao(id, painel, recarregar) {
       await api.atualizarSessao(id, { pinned: !sessao.pinned });
       await recarregar();
     } catch (e) {
+      if (!atual()) return;
       painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível fixar a sessão"));
       botao.disabled = false;
     }
@@ -262,6 +286,7 @@ async function abrirSessao(id, painel, recarregar) {
       await api.atualizarSessao(id, { archived: !sessao.archived });
       await recarregar();
     } catch (e) {
+      if (!atual()) return;
       painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível atualizar a sessão"));
       botao.disabled = false;
     }
@@ -273,6 +298,7 @@ async function abrirSessao(id, painel, recarregar) {
       await api.atualizarSessao(id, { hidden: !sessao.hidden });
       await recarregar();
     } catch (e) {
+      if (!atual()) return;
       painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível atualizar a visibilidade"));
       botao.disabled = false;
     }
@@ -286,6 +312,7 @@ async function abrirSessao(id, painel, recarregar) {
       await api.atualizarSessao(id, { tags });
       await recarregar();
     } catch (e) {
+      if (!atual()) return;
       painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível salvar as tags"));
       botao.disabled = false;
     }
@@ -306,8 +333,9 @@ function exportarMarkdown(sessao, msgs) {
   const linhas = [`# ${sessao.title || sessao.id}`, "", `- ID: ${sessao.id}`, `- Origem: ${sessao.source}`, ""];
   for (const m of msgs) {
     const papel = m.role || "unknown";
+    const titulo = m.tool_name ? `${papel} (${m.tool_name})` : papel;
     const texto = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "", null, 2);
-    linhas.push(`## ${papel}`, "", texto, "");
+    linhas.push(`## ${titulo}`, "", texto, "");
   }
   const url = URL.createObjectURL(new Blob([linhas.join("\n")], { type: "text/markdown;charset=utf-8" }));
   const a = document.createElement("a");
@@ -327,7 +355,7 @@ function mensagem(m) {
         ${m.tool_name ? `<span class="k-badge k-badge--accent">${esc(m.tool_name)}</span>` : ""}
         <span class="k-msg__hora">${esc(quando(m.timestamp ?? m.created_at))}</span>
       </div>
-      <div class="k-msg__corpo">${esc(texto).slice(0, 4000)}</div>
+      <div class="k-msg__corpo">${esc(texto)}</div>
     </li>`;
 }
 

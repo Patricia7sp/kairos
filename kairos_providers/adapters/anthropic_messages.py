@@ -15,6 +15,7 @@ from kairos_providers.adapter_contract import (
     ProviderErrorKind,
     ProviderEvent,
 )
+from kairos_providers.adapters._json import wire_json
 from kairos_providers.base import ConnectionStatus, TokenUsage
 from kairos_providers.contracts import (
     CatalogModel,
@@ -122,7 +123,7 @@ class AnthropicMessagesAdapter:
                 "POST",
                 f"{_ANTHROPIC_API_BASE}/messages",
                 headers=self._headers(streaming=True),
-                json=payload,
+                json=wire_json(payload),
             ) as response:
                 self._raise_for_status(response)
                 async for event in _sse_events(response):

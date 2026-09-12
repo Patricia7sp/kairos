@@ -156,6 +156,7 @@ def list_providers_payload(gateway: ProviderGateway) -> dict[str, Any]:
                 "requires_credential": bool(descriptor.auth_methods),
                 "configured": configured,
                 "credential_state": credential_state,
+                **gateway.credential_management_state(descriptor.id),
             }
         )
     return {"providers": providers}

@@ -16,6 +16,7 @@ from kairos_providers.adapter_contract import (
     ProviderErrorKind,
     ProviderEvent,
 )
+from kairos_providers.adapters._json import wire_json
 from kairos_providers.base import ConnectionStatus, TokenUsage
 from kairos_providers.contracts import (
     CatalogModel,
@@ -139,7 +140,10 @@ class OpenAIResponsesAdapter:
         finished = False
         try:
             async with self._http.stream(
-                "POST", f"{_OPENAI_API_BASE}/responses", headers=self._headers(), json=payload
+                "POST",
+                f"{_OPENAI_API_BASE}/responses",
+                headers=self._headers(),
+                json=wire_json(payload),
             ) as response:
                 self._raise_for_status(response)
                 async for event in _sse_events(response):
@@ -197,6 +201,8 @@ class OpenAIResponsesAdapter:
         if request.model.provider != self.descriptor.id:
             raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
         payload = dict(request.parameters)
+        if "max_tokens" in payload:
+            payload["max_output_tokens"] = payload.pop("max_tokens")
         payload.update(
             {
                 "model": request.model.model,

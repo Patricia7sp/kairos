@@ -130,9 +130,13 @@ class AuthStore:
         )
 
         with credential_file_lock(path):
+            document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            if not isinstance(document, dict):
+                raise ValueError("auth.json deve ser um objeto")
+            document["credential_pool"] = self.profile
             secure_atomic_write_text(
                 path,
-                json.dumps({"credential_pool": self.profile}, ensure_ascii=False, indent=2),
+                json.dumps(document, ensure_ascii=False, indent=2),
             )
 
 

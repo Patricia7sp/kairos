@@ -74,6 +74,8 @@ export const api = {
 
   health:      () => request("/api/health"),
   status:      () => request("/api/status"),
+  ajustes:     () => request("/api/settings"),
+  salvarAjustes: (generation) => request("/api/settings", { method: "PUT", body: { generation } }),
   config:      () => request("/api/config"),
   salvarConfig: (config) => request("/api/config", { method: "PUT", body: { config } }),
 
@@ -120,6 +122,8 @@ export const api = {
     request(`/api/providers/${encodeURIComponent(provider)}/credentials`, {
       method: "POST", body: { secret, auth_method: authMethod },
     }),
+  removerCredencial: (provider) =>
+    request(`/api/providers/${encodeURIComponent(provider)}/credentials`, { method: "DELETE" }),
   testarProvedor: (provider) =>
     request(`/api/providers/${encodeURIComponent(provider)}/test`, { method: "POST" }),
   wsTicket: () => request("/api/auth/ws-ticket", { method: "POST" }),

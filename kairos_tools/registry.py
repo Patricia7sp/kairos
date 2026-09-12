@@ -11,6 +11,7 @@ que a mude depois — a ausência é a garantia.
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 import os
@@ -136,6 +137,45 @@ class ToolRegistry:
 
     def get_all_tool_names(self) -> list[str]:
         return sorted(self._tools)
+
+    def inventory(self) -> dict[str, Any]:
+        """Describe current registrations without exposing or calling handlers.
+
+        Availability reflects local toolset requirements, not a live health
+        check of every remote service. Schemas are detached from registration
+        so inventory consumers cannot change the model's tool definitions.
+        """
+        entries = sorted(self._tools.values(), key=lambda entry: entry.name)
+        groups = sorted(self._toolsets.values(), key=lambda group: group.name)
+        availability = {group.name: group.available() for group in groups}
+        tools = []
+        for entry in entries:
+            schema = copy.deepcopy(entry.schema)
+            definition = schema.get("function", schema)
+            tools.append(
+                {
+                    "name": entry.name,
+                    "toolset": entry.toolset,
+                    "description": definition.get("description", ""),
+                    "schema": schema,
+                    "available": availability.get(entry.toolset, False),
+                    "plugin": entry.override_of,
+                }
+            )
+        return {
+            "tools": tools,
+            "total": len(tools),
+            "available": sum(tool["available"] for tool in tools),
+            "toolsets": [
+                {
+                    "name": group.name,
+                    "enabled": availability[group.name],
+                    "aliases": sorted(group.aliases),
+                    "tools": [entry.name for entry in entries if entry.toolset == group.name],
+                }
+                for group in groups
+            ],
+        }
 
     def is_toolset_available(self, name: str) -> bool:
         target = self._alias_targets.get(name, name)
