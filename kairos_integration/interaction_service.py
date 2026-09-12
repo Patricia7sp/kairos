@@ -8,8 +8,10 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
+from functools import partial
 
 from kairos_integration.admission import InteractionAdmissionGate
+from kairos_integration.chat_tools import WEB_SEARCH_TOOLS, execute_web_search
 from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_integration.interaction_contract import (
     InteractionCost,
@@ -17,6 +19,8 @@ from kairos_integration.interaction_contract import (
     InteractionEvent,
     InteractionPersistenceError,
     InteractionSelectionSnapshot,
+    InteractionServiceError,
+    InteractionToolResult,
 )
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
@@ -30,6 +34,7 @@ from kairos_providers import (
     ModelPrice,
     ModelSelectionResolver,
     ProviderError,
+    ProviderErrorKind,
     ProviderEvent,
     ProviderModelRef,
     ResolvedModelSelection,
@@ -88,6 +93,8 @@ class TurnAccumulator:
     tool_calls: list[CanonicalToolCall] = field(default_factory=list)
     usage: TokenUsage | None = None
     finish_reason: str | None = None
+    attempts: int = 0
+    error: ProviderError | None = None
 
     def accept(self, event: ProviderEvent) -> None:
         if event.kind in {"text_delta", "delta"}:
@@ -250,29 +257,280 @@ class InteractionService:
             return _StreamTerminal(error=exc)
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
-        """Executa um turno depois de adquirir ownership exclusivo da conversa."""
+        """Own the complete loop and close pending calls even on disconnect."""
+        await self._repair_incomplete_tools(envelope.conversation_id)
+        primary: BaseException | None = None
+        try:
+            async with aclosing(self._stream_tool_turn(envelope)) as stream:
+                async for event in stream:
+                    yield event
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            outcome = await run_persistent_cleanup(
+                lambda: self._repair_incomplete_tools(envelope.conversation_id),
+                task_name="kairos-chat-tool-history-close",
+            )
+            if outcome.error is not None:
+                if primary is None:
+                    raise outcome.error
+                logger.error("falha ao fechar resultados pendentes de ferramentas")
+            if outcome.cancellation is not None and primary is None:
+                raise outcome.cancellation
+
+    async def _stream_tool_turn(
+        self, envelope: InteractionEnvelope
+    ) -> AsyncIterator[InteractionEvent]:
         snapshot, prepared, selection, request = await self._prepare_turn(envelope)
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
-
+        totals = TurnAccumulator()
+        costs: list[InteractionCost] = []
         accumulator = TurnAccumulator()
-        attempts = 0
+        tool_rounds = 0
+        executed_calls: list[str] = []
         while True:
-            attempts += 1
-            adapter = prepared.create_adapter()
+            async with aclosing(
+                self._stream_accountable_round(
+                    envelope.conversation_id,
+                    selection,
+                    prepared,
+                    request,
+                    accumulator,
+                    totals=totals,
+                    costs=costs,
+                )
+            ) as stream:
+                async for event in stream:
+                    yield event
+            error = accumulator.error
+            cost = estimate_interaction_cost(
+                prepared.price,
+                accumulator.usage,
+                accumulator.attempts,
+                prepared.cost_source,
+            )
+            totals.add_attempt_usage(accumulator.usage)
+            costs.append(cost)
+            total_cost = _combined_cost(costs)
+            turn_accounting = {
+                f"turn_{key}": value
+                for key, value in self._turn_display_metadata(totals.usage, total_cost).items()
+            }
+            outcome = await run_persistent_cleanup(
+                partial(
+                    self._commit_provider_round,
+                    envelope.conversation_id,
+                    selection,
+                    prepared,
+                    accumulator,
+                    cost=cost,
+                    turn_accounting=turn_accounting,
+                ),
+                task_name="kairos-provider-round-commit",
+            )
+            if outcome.cancellation is not None:
+                raise outcome.cancellation from outcome.error
+            if outcome.error is not None:
+                logger.error("falha ao persistir resposta e contabilidade da chamada")
+                yield InteractionEvent.turn_error(InteractionPersistenceError())
+                return
+            if totals.usage is not None or _cost_is_present(total_cost):
+                yield InteractionEvent(kind="usage", usage=totals.usage, cost=total_cost)
+            if error is not None:
+                yield InteractionEvent.turn_error(error)
+                return
+            if not accumulator.tool_calls:
+                yield InteractionEvent.turn_end(accumulator.finish_reason)
+                return
+
+            limit_error = None
+            if not envelope.web_search:
+                limit_error = InteractionServiceError(
+                    "tools_disabled",
+                    "a busca web está desligada para este turno",
+                    retryable=False,
+                )
+            elif tool_rounds >= 4 or len(executed_calls) + len(accumulator.tool_calls) > 8:
+                limit_error = InteractionServiceError(
+                    "tool_limit",
+                    "limite de buscas deste turno atingido",
+                    retryable=False,
+                )
+            async with aclosing(
+                self._execute_search_calls(
+                    envelope.conversation_id,
+                    selection,
+                    accumulator.tool_calls,
+                    executed_calls,
+                    limit_error,
+                )
+            ) as stream:
+                async for event in stream:
+                    yield event
+            if limit_error is not None:
+                yield InteractionEvent.turn_error(limit_error)
+                return
+            tool_rounds += 1
+            request = replace(
+                request,
+                messages=self._history(envelope.conversation_id),
+                tools=WEB_SEARCH_TOOLS if tool_rounds < 4 and len(executed_calls) < 8 else (),
+            )
+            accumulator = TurnAccumulator()
+
+    async def _commit_provider_round(
+        self,
+        conversation_id: str,
+        selection: ResolvedModelSelection,
+        prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
+        accumulator: TurnAccumulator,
+        *,
+        cost: InteractionCost,
+        turn_accounting: dict[str, object],
+    ) -> None:
+        # Transcript and accounting finish as one owned operation even if the
+        # transport disappears while SQLite's ordered worker is writing.
+        if not self._turn_ownership.is_lost():
+            if accumulator.error is None:
+                await self._persist_assistant(
+                    conversation_id,
+                    accumulator,
+                    selection,
+                    cost,
+                    turn_accounting=turn_accounting,
+                )
+            else:
+                await self._persist_error(
+                    conversation_id,
+                    accumulator,
+                    selection,
+                    cost,
+                    accumulator.error,
+                    turn_accounting=turn_accounting,
+                )
+        self._record_usage(
+            conversation_id,
+            selection,
+            prepared=prepared,
+            usage=accumulator.usage,
+            attempts=accumulator.attempts,
+            cost=cost,
+        )
+        await self._flush_usage()
+
+    async def _execute_search_calls(
+        self,
+        conversation_id: str,
+        selection: ResolvedModelSelection,
+        calls: list[CanonicalToolCall],
+        executed_calls: list[str],
+        limit_error: InteractionServiceError | None,
+    ) -> AsyncIterator[InteractionEvent]:
+        for call in calls:
+            if limit_error is not None:
+                result = _tool_error(call.id, limit_error.message)
+            else:
+                executed_calls.append(call.id)
+                result = await execute_web_search(call)
+            await self._persist_tool_result(conversation_id, call, result, selection)
+            yield InteractionEvent.from_tool_result(result, conversation_id)
+
+    async def _stream_accountable_round(
+        self,
+        conversation_id: str,
+        selection: ResolvedModelSelection,
+        prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
+        request: AdapterRequest,
+        accumulator: TurnAccumulator,
+        *,
+        totals: TurnAccumulator,
+        costs: list[InteractionCost],
+    ) -> AsyncIterator[InteractionEvent]:
+        try:
+            async with aclosing(
+                self._stream_provider_round(prepared, request, accumulator)
+            ) as stream:
+                async for event in stream:
+                    yield event
+        except BaseException:
+            outcome = await run_persistent_cleanup(
+                lambda: self._record_interrupted_round(
+                    conversation_id, selection, prepared, accumulator, totals=totals, costs=costs
+                ),
+                task_name="kairos-interrupted-round-accounting",
+            )
+            if outcome.error is not None:
+                logger.error("falha ao persistir contabilidade da chamada interrompida")
+            raise
+
+    async def _record_interrupted_round(
+        self,
+        conversation_id: str,
+        selection: ResolvedModelSelection,
+        prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
+        accumulator: TurnAccumulator,
+        *,
+        totals: TurnAccumulator,
+        costs: list[InteractionCost],
+    ) -> None:
+        if not accumulator.attempts:
+            return
+        cost = estimate_interaction_cost(
+            prepared.price,
+            accumulator.usage,
+            accumulator.attempts,
+            prepared.cost_source,
+        )
+        totals.add_attempt_usage(accumulator.usage)
+        costs.append(cost)
+        if not self._turn_ownership.is_lost():
+            await self._persist_error(
+                conversation_id,
+                accumulator,
+                selection,
+                cost,
+                InteractionServiceError("cancelled", "Resposta interrompida.", retryable=False),
+                turn_accounting={
+                    f"turn_{key}": value
+                    for key, value in self._turn_display_metadata(
+                        totals.usage, _combined_cost(costs)
+                    ).items()
+                },
+            )
+        self._record_usage(
+            conversation_id,
+            selection,
+            prepared=prepared,
+            usage=accumulator.usage,
+            attempts=accumulator.attempts,
+            cost=cost,
+        )
+        await self._flush_usage()
+
+    async def _stream_provider_round(
+        self,
+        prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
+        request: AdapterRequest,
+        accumulator: TurnAccumulator,
+    ) -> AsyncIterator[InteractionEvent]:
+        while True:
+            accumulator.attempts += 1
             attempt_usage: TokenUsage | None = None
             try:
-                provider_stream = adapter.stream(request)
+                provider_stream = prepared.create_adapter().stream(request)
                 primary: BaseException | None = None
                 try:
                     async for provider_event in provider_stream:
                         if provider_event.kind == "usage":
                             attempt_usage = provider_event.usage
                             continue
+                        self._validate_tool_event(provider_event, accumulator)
                         accumulator.accept(provider_event)
                         event = InteractionEvent.from_provider(provider_event)
                         if event is not None:
                             yield event
-                except BaseException as exc:  # noqa: BLE001 - captures the primary unwind
+                except BaseException as exc:  # noqa: BLE001 - preserves primary unwind
                     primary = exc
                 finally:
                     await _finish_provider_stream(provider_stream, primary)
@@ -280,57 +538,79 @@ class InteractionService:
                 accumulator.add_attempt_usage(attempt_usage)
                 if self._retry_policy.can_retry(
                     exc, accumulator
-                ) and self._retry_policy.has_attempts_remaining(attempts):
-                    await self._retry_policy.backoff(attempts)
+                ) and self._retry_policy.has_attempts_remaining(accumulator.attempts):
+                    await self._retry_policy.backoff(accumulator.attempts)
                     continue
-                cost = estimate_interaction_cost(
-                    prepared.price,
-                    accumulator.usage,
-                    attempts,
-                    prepared.cost_source,
-                )
-                await self._persist_error(
-                    envelope.conversation_id, accumulator, selection, cost, exc
-                )
-                self._record_usage(
-                    envelope.conversation_id,
-                    selection,
-                    prepared=prepared,
-                    usage=accumulator.usage,
-                    attempts=attempts,
-                    cost=cost,
-                )
-                if persistence_error := await self._flush_terminal_usage():
-                    yield persistence_error
-                    return
-                if accumulator.usage is not None or _cost_is_present(cost):
-                    yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
-                yield InteractionEvent.turn_error(exc)
-                return
-
-            accumulator.add_attempt_usage(attempt_usage)
-            cost = estimate_interaction_cost(
-                prepared.price,
-                accumulator.usage,
-                attempts,
-                prepared.cost_source,
-            )
-            await self._persist_assistant(envelope.conversation_id, accumulator, selection, cost)
-            self._record_usage(
-                envelope.conversation_id,
-                selection,
-                prepared=prepared,
-                usage=accumulator.usage,
-                attempts=attempts,
-                cost=cost,
-            )
-            if persistence_error := await self._flush_terminal_usage():
-                yield persistence_error
-                return
-            if accumulator.usage is not None or _cost_is_present(cost):
-                yield InteractionEvent(kind="usage", usage=accumulator.usage, cost=cost)
-            yield InteractionEvent.turn_end(accumulator.finish_reason)
+                accumulator.error = exc
+            except BaseException:
+                accumulator.add_attempt_usage(attempt_usage)
+                raise
+            else:
+                accumulator.add_attempt_usage(attempt_usage)
             return
+
+    @staticmethod
+    def _validate_tool_event(event: ProviderEvent, accumulator: TurnAccumulator) -> None:
+        if event.kind != "tool_call" or event.tool_call is None:
+            return
+        call = event.tool_call
+        if (
+            not isinstance(call.name, str)
+            or not call.name.strip()
+            or len(call.name) > 256
+            or not isinstance(call.arguments, str)
+            or not isinstance(call.id, str)
+            or not call.id.strip()
+            or len(call.id) > 256
+            or any(previous.id == call.id for previous in accumulator.tool_calls)
+            or len(accumulator.tool_calls) >= 32
+        ):
+            raise ProviderError(ProviderErrorKind.INCOMPATIBLE, retryable=False)
+
+    async def _persist_tool_result(
+        self,
+        conversation_id: str,
+        call: CanonicalToolCall,
+        result: InteractionToolResult,
+        selection: ResolvedModelSelection,
+    ) -> None:
+        args = (conversation_id, "tool", result.content, selection)
+        kwargs = {
+            "api_content": result.content,
+            "tool_call_id": call.id,
+            "tool_name": call.name,
+            "display_metadata": {"is_error": result.is_error},
+        }
+        if self._persistence is not None:
+            await self._persistence.append_turn_message(*args, **kwargs)
+        else:
+            self._messages.append_turn_message(*args, **kwargs)
+
+    async def _repair_incomplete_tools(self, conversation_id: str) -> None:
+        # Also repairs a process crash before accepting a new user message. Never
+        # re-execute an unacknowledged tool: its external outcome is unknown.
+        if self._turn_ownership.is_lost():
+            return
+        pending: dict[str, CanonicalToolCall] = {}
+        for message in self._history(conversation_id):
+            for call in message.tool_calls:
+                pending[call.id] = call
+            if message.role == "tool":
+                pending.pop(message.tool_call_id, None)
+        for call in pending.values():
+            result = _tool_error(call.id, "busca interrompida; resultado não disponível")
+            args = (conversation_id, "tool")
+            kwargs = {
+                "content": result.content,
+                "api_content": result.content,
+                "tool_call_id": call.id,
+                "tool_name": call.name,
+                "display_metadata": json.dumps({"is_error": True}),
+            }
+            if self._persistence is not None:
+                await self._persistence.append_message(*args, **kwargs)
+            else:
+                self._messages.append(*args, **kwargs)
 
     async def _prepare_turn(
         self, envelope: InteractionEnvelope
@@ -368,6 +648,7 @@ class InteractionService:
                 model=snapshot.ref,
                 messages=self._history(envelope.conversation_id),
                 parameters=snapshot.parameters,
+                tools=WEB_SEARCH_TOOLS if envelope.web_search else (),
             ),
         )
 
@@ -424,6 +705,8 @@ class InteractionService:
         accumulator: TurnAccumulator,
         selection: ResolvedModelSelection,
         cost: InteractionCost,
+        *,
+        turn_accounting: dict[str, object] | None = None,
     ) -> None:
         args = (conversation_id, "assistant", accumulator.text, selection)
         kwargs = {
@@ -431,7 +714,8 @@ class InteractionService:
             "finish_reason": accumulator.finish_reason,
             "reasoning": accumulator.reasoning or None,
             "tool_calls": self._tool_calls(accumulator.tool_calls),
-            "display_metadata": self._turn_display_metadata(accumulator.usage, cost),
+            "display_metadata": self._turn_display_metadata(accumulator.usage, cost)
+            | (turn_accounting or {}),
         }
         if self._persistence is not None:
             await self._persistence.append_turn_message(*args, **kwargs)
@@ -444,14 +728,17 @@ class InteractionService:
         accumulator: TurnAccumulator,
         selection: ResolvedModelSelection,
         cost: InteractionCost,
-        error: ProviderError,
+        error: ProviderError | InteractionServiceError,
+        *,
+        turn_accounting: dict[str, object] | None = None,
     ) -> None:
-        metadata = self._turn_display_metadata(accumulator.usage, cost)
+        event = InteractionEvent.turn_error(error)
+        metadata = self._turn_display_metadata(accumulator.usage, cost) | (turn_accounting or {})
         metadata.update(
             {
-                "error": error.message,
-                "error_kind": error.kind.value,
-                "retryable": error.retryable,
+                "error": event.error,
+                "error_kind": event.error_kind,
+                "retryable": event.retryable,
             }
         )
         args = (conversation_id, "assistant", accumulator.text, selection)
@@ -561,8 +848,31 @@ class InteractionService:
                 or not isinstance(arguments, str)
             ):
                 continue
-            calls.append(CanonicalToolCall(id=call_id, name=name, arguments=arguments))
+            signature = record.get("thought_signature")
+            calls.append(
+                CanonicalToolCall(
+                    id=call_id,
+                    name=name,
+                    arguments=arguments,
+                    thought_signature=signature if isinstance(signature, str) else None,
+                )
+            )
         return tuple(calls)
+
+
+def _tool_error(call_id: str, message: str) -> InteractionToolResult:
+    return InteractionToolResult(call_id, json.dumps({"error": message}, ensure_ascii=False), True)
+
+
+def _combined_cost(costs: list[InteractionCost]) -> InteractionCost:
+    # Never present the known subset as the total when a round lacks pricing.
+    if any(cost.estimated_usd is None for cost in costs):
+        return InteractionCost(status="unknown", source=costs[-1].source)
+    return InteractionCost(
+        estimated_usd=sum(cost.estimated_usd for cost in costs),
+        status="estimated",
+        source=costs[-1].source,
+    )
 
 
 def _merged_parameters(

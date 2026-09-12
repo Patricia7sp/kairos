@@ -143,6 +143,11 @@ def _extra_args(command: str, subcommand: str | None, parser) -> None:
         parser.add_argument("--provider", help="provider do override deste turno")
         parser.add_argument("--model", help="modelo do override deste turno")
         parser.add_argument(
+            "--web-search",
+            action="store_true",
+            help="habilita busca web no Chat; consultas são enviadas ao DuckDuckGo",
+        )
+        parser.add_argument(
             "--idempotency-key",
             help="chave durável para repetir manualmente o mesmo turno de runtime",
         )

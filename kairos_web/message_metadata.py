@@ -7,19 +7,21 @@ import math
 from typing import Any
 
 
-def public_message_accounting(raw: str | None) -> dict[str, Any]:
-    result: dict[str, Any] = {"cost": None, "usage": None}
+def public_message_accounting(raw: str | None, *, prefix: str = "") -> dict[str, Any]:
+    result: dict[str, Any] = {prefix + "cost": None, prefix + "usage": None}
     try:
         metadata = json.loads(raw or "{}")
     except (TypeError, ValueError):
         return result
     if not isinstance(metadata, dict):
         return result
-    cost = metadata.get("cost")
+    if prefix == "" and metadata.get("error_kind") == "cancelled":
+        result["is_interrupted"] = True
+    cost = metadata.get(prefix + "cost")
     if isinstance(cost, dict):
         status = cost.get("status")
         source = cost.get("source")
-        result["cost"] = {
+        result[prefix + "cost"] = {
             "estimated_usd": _amount(cost.get("estimated_usd")),
             "actual_usd": _amount(cost.get("actual_usd")),
             "status": status
@@ -30,9 +32,9 @@ def public_message_accounting(raw: str | None) -> dict[str, Any]:
             if isinstance(source, str) and source in {"catalog", "provider", "mixed"}
             else None,
         }
-    usage = metadata.get("usage")
+    usage = metadata.get(prefix + "usage")
     if isinstance(usage, dict):
-        result["usage"] = {
+        result[prefix + "usage"] = {
             key: value
             for key, value in usage.items()
             if key

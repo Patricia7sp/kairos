@@ -19,7 +19,7 @@ A identidade e a SPA nativa do Kairos continuam como superfícies públicas.
 - [x] API autenticada e tela nativa de agendamentos com criação, estados e histórico.
 - [x] Testes reais de persistência/concorrência, turno com transporte controlado,
   CLI, API e navegador; revisão independente e CI local concluídas.
-- [ ] CI remota, integração e entrega da imagem após backup verificado.
+- [x] CI remota, integração e entrega da imagem após backup verificado. PR #25, merge `1b5e317`; aceite publicado registrado em `docs/functional-progress.md`.
 
 Primeiro implementar o fluxo de prompts com saída no histórico do Kairos. Monitores,
 notepad, blueprints e destinos externos terão aceite próprio antes de constar como

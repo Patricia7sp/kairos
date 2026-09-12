@@ -8,6 +8,7 @@ import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -278,6 +279,15 @@ class SessionTurnOwnership:
         self._sleep = sleep
         self._entries: dict[str, _TurnQueueEntry] = {}
         self._entries_guard = asyncio.Lock()
+        self._lease_loss: ContextVar[asyncio.Event | None] = ContextVar(
+            f"kairos-turn-lease-loss-{id(self)}",
+            default=None,
+        )
+
+    def is_lost(self) -> bool:
+        """Whether this context must stop writing the conversation transcript."""
+        loss = self._lease_loss.get()
+        return loss is not None and loss.is_set()
 
     @asynccontextmanager
     async def acquire(self, conversation_id: str, source: str) -> AsyncIterator[None]:
@@ -307,6 +317,7 @@ class SessionTurnOwnership:
                     ),
                     name=f"kairos-turn-lease-heartbeat:{conversation_id}",
                 )
+            loss_token = self._lease_loss.set(lease_lost)
             try:
                 yield
             except asyncio.CancelledError as exc:
@@ -315,6 +326,8 @@ class SessionTurnOwnership:
                         f"ownership do turno {conversation_id!r} foi perdido"
                     ) from exc
                 raise
+            finally:
+                self._lease_loss.reset(loss_token)
         finally:
             if heartbeat is not None:
                 heartbeat.cancel()

@@ -19,7 +19,15 @@ def history_client(tmp_path, monkeypatch):
     for kind in ("model", "agent_runtime"):
         sessions.create(kind, source="web", execution_kind=kind)
         messages.append(kind, "user", content="Run the check", timestamp=1)
-        messages.append(kind, "tool", content="Check passed", tool_name="shell", timestamp=2)
+        messages.append(
+            kind,
+            "tool",
+            content="Check passed",
+            tool_name="shell",
+            timestamp=2,
+            tool_call_id="call-1",
+            display_metadata='{"is_error":true,"secret":"private"}',
+        )
         messages.append(
             kind, "assistant", content="Earlier history", active=0, compacted=1, timestamp=3
         )
@@ -46,6 +54,11 @@ def test_history_keeps_tool_identity_and_compacted_content(history_client, kind)
     assert response.status_code == 200
     messages = response.json()["messages"]
     assert messages[1].get("tool_name") == "shell"
+    if kind == "model":
+        assert messages[1]["is_error"] is True
+        assert messages[1]["tool_call_id"] == "call-1"
+        assert "display_metadata" not in messages[1]
+        assert "private" not in response.text
     assert [message["content"] for message in messages] == [
         "Run the check",
         "Check passed",

@@ -938,7 +938,7 @@ async def get_session_messages(session_id: str, request: Request):
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, role, content, timestamp, display_metadata, tool_name FROM messages "
+                "SELECT id, role, content, timestamp, display_metadata, tool_name, tool_call_id FROM messages "
                 "WHERE session_id = ? ORDER BY timestamp, id",
                 (session_id,),
             ).fetchall()
@@ -962,6 +962,16 @@ async def get_session_messages(session_id: str, request: Request):
                 )
             elif row["role"] == "assistant":
                 payload.update(public_message_accounting(row["display_metadata"]))
+                payload.update(public_message_accounting(row["display_metadata"], prefix="turn_"))
+            elif row["role"] == "tool":
+                payload["tool_call_id"] = row["tool_call_id"]
+                try:
+                    metadata = json.loads(row["display_metadata"] or "{}")
+                except (TypeError, ValueError):
+                    metadata = {}
+                payload["is_error"] = (
+                    isinstance(metadata, dict) and metadata.get("is_error") is True
+                )
             return payload
 
         return {

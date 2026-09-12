@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error The shipped SPA uses native JavaScript modules.
 import { chatView, initialTurnState, reduceTurn, turnMarkup } from "../../../kairos_web/ui/js/views/chat.js";
+// @ts-expect-error The shipped SPA uses native JavaScript modules.
+import { ChatClient } from "../../../kairos_web/ui/js/chat-client.js";
 
 type RecordValue = Record<string, any>;
 const routing = { data_collection: "allow", require_parameters: false, allow_fallbacks: false };
@@ -68,7 +70,138 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup?.(); cleanup = undefined; vi.unstubAllGlobals(); });
 
+describe("Chat optional web search", () => {
+  it("sends an explicit boolean outside provider parameters, defaulting to off", () => {
+    const client = new ChatClient();
+    client.connect({ token: "test", WebSocketImpl: Socket });
+    Socket.current.emit("open");
+    client.sendMessage({ sessionId: "saved", content: "Olá" });
+    client.sendMessage({ sessionId: "saved", content: "Pesquise", webSearch: true });
+    expect(Socket.current.sent[0]).toMatchObject({ web_search: false });
+    expect(Socket.current.sent[1]).toMatchObject({ web_search: true });
+    expect(Socket.current.sent[1]).not.toHaveProperty("parameters.web_search");
+    client.close();
+  });
+
+  it("keeps the search choice for each conversation and disables it while busy", async () => {
+    location.hash = "#/chat?session=saved";
+    backend({ persisted: true, currentSelection: { ...selection, parameters: {} } });
+    const root = await mount();
+    const checkbox = root.querySelector<HTMLInputElement>('[name="web_search"]');
+    expect(checkbox).not.toBeNull();
+    expect(checkbox!.checked).toBe(false);
+    expect(root.textContent).toContain("buscador externo");
+    expect(root.textContent).toContain("neste navegador");
+    expect(root.querySelector("[data-context-routing]")!.textContent).toContain("treinamento");
+    checkbox!.click();
+    submit(root);
+    expect(Socket.current.sent[0]?.web_search).toBe(true);
+    expect(checkbox!.disabled).toBe(true);
+    Socket.current.event({ type: "turn_end", session_id: "saved" });
+    expect(checkbox!.disabled).toBe(false);
+    root.querySelector<HTMLButtonElement>("[data-new-chat]")!.click();
+    expect(checkbox!.checked).toBe(false);
+    root.querySelector<HTMLButtonElement>('[data-session-id="saved"]')!.click();
+    await vi.waitFor(() => expect(location.hash).toBe("#/chat?session=saved"));
+    expect(checkbox!.checked).toBe(true);
+    cleanup?.();
+    const reopened = await mount();
+    expect(reopened.querySelector<HTMLInputElement>('[name="web_search"]')!.checked).toBe(true);
+  });
+
+  it.each([false, true])("escapes live results and localizes their status, is_error=%s", (isError) => {
+    const content = JSON.stringify({ query: "informação", status: "ok", untrusted: true,
+      results: [{ title: '<img src=x onerror="alert(1)">',
+        url: "javascript:alert(1)", snippet: "Resultado & detalhe" },
+      { title: "Fonte segura", url: "https://example.org/source", snippet: "Informação pública" }] });
+    let state = reduceTurn(initialTurnState(), { protocol: 1, type: "tool_call",
+      tool_call: { id: "search-1", name: "web_search", arguments: '{}' } });
+    const root = document.createElement("div");
+    root.innerHTML = turnMarkup(state);
+    expect(root.textContent).toContain("Buscando");
+    state = reduceTurn(state, { protocol: 1, type: "tool_result", tool_result: {
+      tool_call_id: "search-1", name: "web_search", content, is_error: isError,
+    } });
+    root.innerHTML = turnMarkup(state);
+    expect(root.textContent).toContain(isError ? "Falha" : "Concluída");
+    expect(root.textContent).toContain("Resultado & detalhe");
+    expect(root.querySelector("img, script, a[href^='javascript:']")).toBeNull();
+    expect(root.querySelector<HTMLAnchorElement>('a')?.href).toBe("https://example.org/source");
+    expect(root.querySelector('a')?.rel).toContain("noreferrer");
+  });
+
+  it("renders persisted tool results as escaped search output with their error status", async () => {
+    location.hash = "#/chat?session=saved";
+    backend({ persisted: true, messages: [{ role: "tool", tool_name: "web_search",
+      content: '<script>alert(1)</script> busca indisponível', is_error: true }] });
+    const root = await mount();
+    const tool = root.querySelector(".k-chat-message--tool")!;
+    expect(tool.textContent).toContain("Busca web");
+    expect(tool.textContent).toContain("Falha");
+    expect(tool.textContent).toContain("busca indisponível");
+    expect(tool.querySelector("script")).toBeNull();
+  });
+
+  it("retains completed search results when another round reuses a tool call ID", () => {
+    let state = initialTurnState();
+    for (const content of ["Primeira fonte preservada", "Segunda fonte distinta"]) {
+      state = reduceTurn(state, { protocol: 1, type: "tool_call", tool_call: {
+        id: "generated-search-0", name: "web_search", arguments: '{}',
+      } });
+      state = reduceTurn(state, { protocol: 1, type: "tool_result", tool_result: {
+        tool_call_id: "generated-search-0", content, is_error: false,
+      } });
+    }
+    const root = document.createElement("div");
+    root.innerHTML = turnMarkup(state);
+    const results = root.querySelectorAll(".k-chat-tool");
+    expect(results).toHaveLength(2);
+    expect(results[0]!.textContent).toContain("Primeira fonte preservada");
+    expect(results[0]!.textContent).not.toContain("Segunda fonte distinta");
+    expect(results[1]!.textContent).toContain("Segunda fonte distinta");
+  });
+
+  it("shows search errors in readable text and handles empty results", () => {
+    for (const [content, expected] of [
+      ['{"status":"unavailable","error":"Busca indispon\\u00edvel","results":[]}', "Busca indisponível"],
+      ['{"query":"teste","status":"ok","results":[],"untrusted":true}', "Nenhum resultado encontrado"],
+    ]) {
+      const root = document.createElement("div");
+      root.innerHTML = turnMarkup({ ...initialTurnState(), tools: [{ name: "web_search", status: "done", content }] });
+      expect(root.textContent).toContain(expected);
+    }
+  });
+});
+
 describe("Chat cost accounting", () => {
+  it("identifies a persisted interrupted response without exposing provider error details", async () => {
+    location.hash = "#/chat?session=saved";
+    backend({ persisted: true, messages: [{ role: "assistant", content: "Resposta parcial",
+      is_interrupted: true, error: '<script>private upstream details</script>' }] });
+    const root = await mount();
+    const response = root.querySelector(".k-chat-message--assistant")!;
+    expect(response.textContent).toContain("Resposta interrompida.");
+    expect(response.textContent).toContain("Resposta parcial");
+    expect(response.textContent).not.toContain("private upstream details");
+    expect(response.querySelector("script")).toBeNull();
+  });
+
+  it("restores total turn cost in context while retaining each round's own cost", async () => {
+    location.hash = "#/chat?session=saved";
+    backend({ persisted: true, messages: [
+      { role: "assistant", content: "Vou pesquisar", cost: { estimated_usd: 0.01 },
+        turn_cost: { estimated_usd: 0.01 } },
+      { role: "tool", tool_name: "web_search", content: '{"results":[]}', is_error: false },
+      { role: "assistant", content: "Resposta", cost: { estimated_usd: 0.02 },
+        turn_cost: { estimated_usd: 0.03 } },
+    ] });
+    const root = await mount();
+    expect(root.querySelector("[data-context-cost]")!.textContent).toContain("US$ 0,03");
+    const responses = root.querySelectorAll(".k-chat-message--assistant");
+    expect(responses[0]!.textContent).toContain("US$ 0,01");
+    expect(responses[1]!.textContent).toContain("US$ 0,02");
+  });
+
   it.each([
     [{ actual_usd: 0, estimated_usd: 0.9, status: "actual" }, "informado", "US$ 0,00"],
     [{ estimated_usd: 0.000007, status: "estimated" }, "estimado", "US$ 0,000007"],
