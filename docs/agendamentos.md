@@ -10,7 +10,7 @@ processos apontando para o mesmo `KAIROS_HOME` não executam o mesmo tick em par
 Não há jobs criados automaticamente pela instalação ou migração.
 
 ```bash
-kairos cron create --name 'Resumo periódico' --prompt 'Escreva um resumo breve' --every 60
+kairos cron create --name 'Resumo periódico' --prompt 'Escreva um resumo breve' --every 60 --times 3
 kairos cron list --json
 kairos cron pause ID
 kairos cron resume ID
@@ -26,8 +26,15 @@ Na criação, use apenas uma opção de agenda:
 
 A interface recebe uma data/hora local e envia o instante com fuso. As expressões
 cron são sempre UTC. `croniter`, antes opcional, agora é instalado junto do Kairos.
-Os trabalhos recorrentes repetem até serem pausados/excluídos; `once` dispara no
-máximo uma vez. Orçamentos finitos para recorrentes não são aceitos neste lote.
+Sem limite, trabalhos recorrentes repetem até serem pausados/excluídos. Para limitar,
+use `--times N` na CLI ou o campo opcional **Limite de ocorrências (opcional)** na tela, com um
+inteiro de 1 a 1.000.000. `once` continua com no máximo uma ocorrência.
+
+O limite conta ocorrências reservadas antes do envio ao modelo: sucesso, falha e
+resultado desconhecido consomem uma ocorrência cada. Ao atingir o limite, a agenda
+encerra; pausar/retomar não renova o limite. Repetições HTTP internas do turno não
+criam outra ocorrência. Isso limita disparos, não gastos financeiros ou tokens.
+A tela mostra o consumo e a recorrência ilimitada quando aplicável.
 
 As execuções usam as preferências globais vigentes no início de cada turno e podem
 consumir créditos. Este fluxo gera respostas de modelo; execução de ferramentas
@@ -45,7 +52,14 @@ As definições ficam em `cron/jobs.json`; execuções na tabela `executions` de
 avançar o JSON e antes de enviar ao provedor. A unicidade `(job_id, scheduled_at)`
 impede repetição se o processo morrer entre as duas gravações. Esse caso pode
 consumir uma ocorrência sem gerar resposta; será registrado como resultado
-desconhecido, sem tentar novamente automaticamente.
+desconhecido, sem tentar novamente automaticamente. O consumo é reconciliado com
+o ledger antes de novas reservas, inclusive após reiniciar o serviço; JSON atrasado
+não permite ultrapassar o limite. Ocorrência duplicada não consome duas vezes.
+
+A API de criação aceita `times` inteiro opcional (null ou ausente para recorrentes
+ilimitados). Jobs existentes permanecem como foram criados; não há edição de limite
+de um job existente. `repeat.completed` no formato persistido é o contador de
+ocorrências consumidas, apesar do nome histórico; não é contagem de sucessos.
 
 A posse exclusiva do arquivo `cron/tick.lock` dura até o encerramento do stream.
 Ela também permite reconciliar execuções abandonadas sem confundir PIDs entre

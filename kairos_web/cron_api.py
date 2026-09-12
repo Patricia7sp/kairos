@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from kairos_cron.jobs import JobStore
 
@@ -17,6 +17,7 @@ class CreateJob(BaseModel):
     name: StrictStr
     prompt: StrictStr
     schedule: dict
+    times: StrictInt | None = Field(default=None, ge=1, le=1_000_000)
 
 
 class PauseJob(BaseModel):

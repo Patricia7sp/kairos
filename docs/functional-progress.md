@@ -1,7 +1,7 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Branch de trabalho atual: `feat/service-events`.
-Base atual: PR #26, `10d2482`. A conclusão integral não está declarada.
+Atualizado em 12/09/2026. Branch de trabalho atual: `feat/cron-limits`.
+Base publicada: PR #27, `5889fbe`. A conclusão integral não está declarada.
 
 ## Mandato e critérios
 
@@ -73,9 +73,10 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
   validado conforme aceite abaixo. Arquivos/terminal continuam no Agent Runtime isolado. Outras
   ferramentas não estão habilitadas pelo Chat.
 - Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
-  notepad, blueprints, limites finitos recorrentes e entrega externa seguem pendentes.
+  notepad, blueprints e entrega externa seguem pendentes. Limites finitos recorrentes
+  estão implementados no lote em validação abaixo.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
-  de registros abaixo; publicação ainda pendente. `/api/cron/jobs` usa armazenamento real.
+  de registros abaixo, já publicado via PR #27. `/api/cron/jobs` usa armazenamento real.
 - A CLI declara **50 comandos**. Após implementar `model` e `logs`, **27** ainda não têm handler:
   acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import, insights,
   login, logout, memory, monitoring, pairing, pause, peer, prompt-size, setup,
@@ -90,7 +91,7 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 
 ## Próxima sequência
 
-1. Finalizar o lote de registros operacionais e publicar após validação.
+1. Finalizar aceite e publicação dos limites recorrentes.
 2. Avançar nas pendências de cron, comandos e conectores com aceite por fluxo.
 3. Registrar PR/CI remota/implantação apenas quando conferidos, mantendo distinção
    entre falta de código e bloqueio externo.
@@ -398,3 +399,50 @@ novo de importação também passou após usar a API pública OpenAPI para consu
 rotas (a versão atual do FastAPI usa routers lazy sem atributo path). Total:
 **23 testes da imagem aprovados**, sem skips. A alteração final foi apenas no
 teste; não exigiu reconstrução do código da aplicação.
+
+
+### Publicação dos registros — PR #27
+
+- PR #27 integrada em `5889fbe7e79072fb4c98fec3b596b17b9dd3b4f5`; nove checks
+  remotos passaram. Código final `294fcb4c109d3f2b2b06b41ac51c8c7b52c363b2`.
+- Imagem `sha256:95f6d5e7edfff0a676419d3e7a332893ab4a12208896082118d0aff532aa2e25`
+  publicada; aplicação e broker saudáveis, keeper preservado.
+- Backup `20260912T162609Z` restaurado/conferido: 4.261 arquivos, SQLite íntegro,
+  todos os digests de checkpoints/baselines válidos.
+- Aceite publicado: Registros e oito outras rotas, dez APIs 200 e env 410, três
+  larguras sem erro JS/overflow. CLI no contêiner leu o evento web.started real.
+  Nenhuma geração ou mutação de dados de produção durante o aceite.
+- Cinco arquivos protegidos inalterados; 18 sessões, 56 mensagens, 16 turnos de
+  runtime, 10 checkpoints e duas baselines preservados.
+- Artefatos `/tmp/kairos-service-events-{deployment,preservation,production-browser}.json`;
+  implantação também registrada no diretório privado do backup.
+
+## Continuação — limites de ocorrências recorrentes
+
+Branch `feat/cron-limits`, worktree `.worktrees/cron-limits`, incorpora o código de
+registros. Limites implementados em armazenamento, CLI/API e tela Agendamentos;
+reserva durável consome orçamento mesmo com falha/unknown. Crash entre SQLite/JSON,
+duplicata e pausa/retomada não permitem ultrapassar o limite.
+
+- 53 novos casos backend e 11 API/CLI; revisão independente sem bloqueadores.
+- CI completa: **2.091 Python + 5.579 subtestes**, **166 Web**, **17 TUI**,
+  **18 desktop**; lint, formato, tipos, shell, recall e lock passaram.
+- Imagem construída e **23 testes Docker + 24 subtestes** passaram, sem skips.
+- Aceite final do navegador com ticker real em andamento; publicação pendente.
+- Não há edição de limite existente. Leitura pode mostrar o JSON anterior após
+  crash até a próxima reserva/pausa reconciliar o ledger; novo efeito sempre
+  verifica o consumo antes de executar. Não é limite financeiro.
+
+
+### Aceite final dos limites recorrentes
+
+- Chromium com aplicação, scheduler, SQLite e upstream HTTP controlado reais:
+  UI criou intervalo de um minuto e limite dois; duas execuções concluíram e o
+  tick seguinte não gerou uma terceira chamada.
+- Histórico e reload preservaram 2/2, next_run_at nulo e estado esgotado.
+  Pausa/retomada não renovou o limite; padrão ilimitado e once com campo oculto
+  verificados. 390/900/1400 px sem overflow ou erros JS; capturas inspecionadas.
+- Artefatos `/tmp/kairos-cron-limits-{browser.json,ci.log,container.log,review.md}`.
+  Servidor descartável encerrado; nenhum job criado na instalação da usuária.
+- Código de aplicação permanece o verificado após rebase sobre a main PR #27.
+  Entrega remota e implantação ainda serão registradas após seus checks.

@@ -92,6 +92,11 @@ def _cron_args(subcommand: str, parser) -> None:
         timing.add_argument("--at", help="Data ISO com fuso horário")
         timing.add_argument("--every", type=int, help="Intervalo em minutos")
         timing.add_argument("--expr", help="Expressão cron de cinco campos, em UTC")
+        parser.add_argument(
+            "--times",
+            type=int,
+            help="Limite de ocorrências (1–1000000); falhas também contam. Sem opção: ilimitado em recorrentes",
+        )
     elif subcommand in ("pause", "resume", "remove"):
         parser.add_argument("job_id")
     elif subcommand == "history":
