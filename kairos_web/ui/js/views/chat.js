@@ -193,6 +193,8 @@ export async function chatView(root, _route, { signal } = {}) {
   let sessionLoading = false;
   let pendingAdmission = null;
   let activeStream = null;
+  let hasActiveSelection = !persisted;
+  let blockingLoadError = false;
 
   const updateNavigation = () => {
     changeModel.href = modelsHash(sessionId, selection, persisted);
@@ -202,12 +204,12 @@ export async function chatView(root, _route, { signal } = {}) {
     }
   };
   const updateComposer = () => {
-    const disabled = !socketConnected || !ready || busy || sessionLoading;
+    const disabled = !socketConnected || !ready || busy || sessionLoading || blockingLoadError;
     form.elements.content.disabled = disabled;
     form.querySelector('button[type="submit"]').disabled = disabled;
     updateNavigation();
   };
-  const showReadiness = (message, { retry = false } = {}) => {
+  const showReadiness = (message, { retry = false, onRetry = null } = {}) => {
     readiness.replaceChildren();
     readiness.append(document.createTextNode(message));
     if (retry) {
@@ -217,7 +219,7 @@ export async function chatView(root, _route, { signal } = {}) {
       button.dataset.chatRetry = "";
       button.textContent = "Tentar novamente";
       readiness.append(" ", button);
-      button.addEventListener("click", () => void probeSelectedProvider());
+      button.addEventListener("click", () => void (onRetry || probeSelectedProvider)());
     }
   };
 
@@ -268,7 +270,7 @@ export async function chatView(root, _route, { signal } = {}) {
       if (disposed) return;
       socketConnected = true;
       updateComposer();
-      status.textContent = "Conectado.";
+      if (!blockingLoadError) status.textContent = "Conectado.";
     },
     onAuthLost: () => { if (!disposed) location.reload(); },
     onClose: ({ reconnectable }) => {
@@ -352,6 +354,7 @@ export async function chatView(root, _route, { signal } = {}) {
   const loadSession = async (id) => {
     if (disposed || busy) return;
     const currentGeneration = ++generation;
+    const canRestoreActiveSelection = hasActiveSelection;
     resetTurnRendering();
     activeStream = null;
     probeGeneration += 1;
@@ -364,6 +367,8 @@ export async function chatView(root, _route, { signal } = {}) {
       sessionId = id;
       persisted = true;
       selection = detail.selection || { provider: "", model: "", parameters: {} };
+      hasActiveSelection = Boolean(selection.provider && selection.model);
+      blockingLoadError = false;
       messages.innerHTML = (payload.messages || []).map(messageMarkup).join("");
       activeTurnNode = null;
       replaceHash(`#/chat?session=${encodeURIComponent(id)}`);
@@ -371,12 +376,21 @@ export async function chatView(root, _route, { signal } = {}) {
       await probeSelectedProvider();
       if (disposed || signal?.aborted || currentGeneration !== generation) return;
       sessionLoading = false;
+      status.textContent = socketConnected ? "Conectado." : "";
       updateComposer();
     } catch (error) {
       if (disposed || signal?.aborted || currentGeneration !== generation) return;
       sessionLoading = false;
       status.textContent = error.message || "Falha ao carregar a conversa.";
-      await probeSelectedProvider();
+      if (canRestoreActiveSelection) {
+        blockingLoadError = false;
+        await probeSelectedProvider();
+      } else {
+        blockingLoadError = true;
+        ready = false;
+        showReadiness(status.textContent, { retry: true, onRetry: () => loadSession(id) });
+        updateComposer();
+      }
     }
   };
 
@@ -407,6 +421,9 @@ export async function chatView(root, _route, { signal } = {}) {
     activeStream = null;
     sessionId = newConversationId();
     persisted = false;
+    hasActiveSelection = true;
+    blockingLoadError = false;
+    status.textContent = socketConnected ? "Conectado." : "";
     selection = {
       provider: modelPayload.default_provider,
       model: modelPayload.default_model,

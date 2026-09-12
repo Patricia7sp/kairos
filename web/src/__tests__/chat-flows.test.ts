@@ -458,6 +458,51 @@ describe("fluxos reais do Chat", () => {
     cleanup();
   });
 
+  it("bloqueia envio após falha inicial e recarrega a seleção persistida no retry", async () => {
+    location.hash = "#/chat?session=existing-session";
+    let detailAttempts = 0;
+    installBackend({
+      sessions: [oldSession],
+      details: { "existing-session": { ...oldSession, selection: {
+        provider: "openrouter", model: "vendor/model:free",
+        parameters: { temperature: 0.3 }, reason: "conversation_override",
+      } } },
+      messages: { "existing-session": [
+        { id: "persisted", role: "assistant", content: "histórico recuperado", created_at: 1 },
+      ] },
+      overrides: (path) => {
+        if (path === "/api/sessions/existing-session" && detailAttempts++ === 0) {
+          return jsonResponse({ error: "falha ao carregar seleção persistida" }, 500);
+        }
+        return undefined;
+      },
+    });
+    const root = document.createElement("main");
+    const cleanup = await chatView(root, {}, { signal: new AbortController().signal });
+    const socket = FakeSocket.instances[0]!;
+    socket.emit("open");
+
+    expect(root.querySelector("[data-chat-status]")!.textContent)
+      .toContain("falha ao carregar seleção persistida");
+    expect(root.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(true);
+    submit(root, "não usar o padrão global");
+    expect(socket.sent).toHaveLength(0);
+
+    root.querySelector<HTMLButtonElement>("[data-chat-retry]")!.click();
+    await vi.waitFor(() => {
+      expect(root.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(false);
+      expect(root.querySelector("[data-chat-messages]")!.textContent).toContain("histórico recuperado");
+    });
+    submit(root, "usar o override persistido");
+
+    expect(JSON.parse(socket.sent[0]!)).toEqual({
+      type: "message", protocol: 1, session_id: "existing-session",
+      content: "usar o override persistido", provider: "openrouter",
+      model: "vendor/model:free", parameters: { temperature: 0.3 },
+    });
+    cleanup();
+  });
+
   it("atualiza preço e capacidades junto com a seleção da conversa", async () => {
     location.hash = "#/chat?provider=openai&model=gpt-test&new=1";
     const routerSession = { ...oldSession, id: "router-session", title: "OpenRouter" };
