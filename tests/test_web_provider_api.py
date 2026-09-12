@@ -9,7 +9,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from kairos_providers.contracts import ProviderModelRef, SelectionReason
 from kairos_security.credentials import CredentialRef, CredentialSecret, build_credential_service
+from kairos_state import connect, default_db_path, initialize_schema
+from kairos_state.repositories.sessions import SessionRepository
 from kairos_web.server import SESSION_TOKEN, TOKEN_HEADER, app
 
 
@@ -99,6 +102,39 @@ class WebProviderApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"], "modelo indisponível para o provider")
+
+    def test_detalhe_da_sessao_expoe_somente_a_selecao_persistida_segura(self) -> None:
+        conn = connect(default_db_path())
+        initialize_schema(conn)
+        sessions = SessionRepository(conn)
+        sessions.create("sessao-com-override", source="web")
+        sessions.set_selection(
+            "sessao-com-override",
+            ProviderModelRef("openrouter", "openrouter/free"),
+            {
+                "temperature": 0.2,
+                "max_tokens": 512,
+                "api_key": "segredo-nao-expor",
+                "routing": {"credential_id": "identificador-nao-expor"},
+            },
+            reason=SelectionReason.CONVERSATION_OVERRIDE,
+        )
+        conn.close()
+
+        response = self.client.get("/api/sessions/sessao-com-override")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["selection"],
+            {
+                "provider": "openrouter",
+                "model": "openrouter/free",
+                "parameters": {"temperature": 0.2, "max_tokens": 512},
+                "reason": "conversation_override",
+            },
+        )
+        self.assertNotIn("segredo-nao-expor", response.text)
+        self.assertNotIn("identificador-nao-expor", response.text)
 
     def test_salvar_credencial_canonica_retorna_somente_metadados_nao_sensiveis(self) -> None:
         secret = "sk-canonica-nao-retornar"  # noqa: S105 - fixture de redação

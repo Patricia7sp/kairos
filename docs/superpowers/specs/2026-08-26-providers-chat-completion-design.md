@@ -296,6 +296,26 @@ frontends e imagem. Saúde, credenciais e chamadas reais do ambiente implantado
 continuam sendo verificadas como rotina operacional, não como implementação
 pendente desta especificação.
 
+### Correções de aceite de 2026-09-12
+
+As correções posteriores tornam explícita a intenção de nova conversa e
+preservam a seleção persistida ao reabrir uma sessão. Trabalho assíncrono da
+SPA é cercado pelo ciclo de vida da rota para que histórico, sondas e eventos
+atrasados não alterem outra conversa ou tela.
+
+Modelos oferece filtros funcionais de raciocínio e contexto mínimo. A
+capacidade de raciocínio deriva somente de parâmetros suportados declarados
+pelo catálogo; quando não há declaração explícita, a API devolve `null` e o
+modelo não passa pelo filtro. Previews são buscados com `include_preview=true`
+quando o controle correspondente é ativado.
+
+Provedores mantém duas dimensões independentes: configuração da credencial e
+resultado da conexão. Uma credencial configurada permanece **não testada** até
+uma descoberta explícita; sucesso vira **Conexão verificada**, falha vira
+**Falha na conexão**, e salvar ou substituir a credencial invalida qualquer
+resultado anterior. A sonda comprova acesso à descoberta naquele instante,
+sem prometer geração, saldo, limite ou disponibilidade futura do modelo.
+
 ## Migração e rollback
 
 Sessões e mensagens existentes são preservadas. Campos atuais são preenchidos

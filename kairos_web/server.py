@@ -541,6 +541,37 @@ def _get_db(application: FastAPI):
 # --- SESSIONS ENDPOINTS ---
 
 
+_PUBLIC_SESSION_SELECTION_PARAMETERS = frozenset(
+    {
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "presence_penalty",
+        "frequency_penalty",
+        "stop",
+        "seed",
+        "parallel_tool_calls",
+        "include_reasoning",
+        "reasoning_effort",
+    }
+)
+
+
+def _public_session_selection(selection) -> dict[str, Any] | None:
+    if selection is None:
+        return None
+    return {
+        "provider": selection.ref.provider,
+        "model": selection.ref.model,
+        "parameters": {
+            key: value
+            for key, value in selection.parameters.items()
+            if key in _PUBLIC_SESSION_SELECTION_PARAMETERS
+        },
+        "reason": selection.reason.value,
+    }
+
+
 def _linha_sessao(s) -> dict:
     """A tabela já guarda contagens e custo — devolvê-los evita que a interface
     peça as mensagens de cada sessão só para saber quantas são."""
@@ -744,6 +775,9 @@ async def get_session(session_id: str, request: Request):
             session_id, linha["message_count"]
         )
         linha["tags"] = _tags_para_sessoes(conn, [session_id]).get(session_id, [])
+        linha["selection"] = _public_session_selection(
+            SessionRepository(conn).selection(session_id)
+        )
         return linha
     finally:
         conn.close()

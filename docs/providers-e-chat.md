@@ -16,6 +16,14 @@ Na SPA, abra **Provedores**, informe a chave e use **Testar conexão**. A chave
 vai direto ao keyring ou ao cofre criptografado, o campo é limpo após o envio e
 as APIs nunca devolvem o segredo nem um fragmento dele.
 
+O cartão separa o estado da credencial do estado da conexão. **Credencial
+configurada** confirma somente que o cofre recebeu a chave; **Conexão não
+testada**, **Conexão verificada** e **Falha na conexão** registram o resultado
+da descoberta solicitada pelo usuário. Substituir uma credencial invalida o
+teste anterior. Mesmo uma conexão verificada não garante que uma geração terá
+sucesso, pois saldo, limites e disponibilidade do modelo podem mudar depois da
+descoberta.
+
 Ollama não exige credencial. Ele fica utilizável quando o daemon local responde
 no endpoint configurado. O Kairos não habilita silenciosamente outro provider
 quando a seleção falha.
@@ -26,6 +34,13 @@ A página **Modelos** mostra provider, capacidades, contexto, estabilidade,
 origem do catálogo e preço conhecido. Previews ficam ocultos por padrão.
 OpenRouter oferece o filtro **Somente gratuitos**; gratuidade é atributo do
 catálogo, não promessa de disponibilidade ou limite da conta.
+
+Os filtros **Raciocínio** e **Contexto mínimo** usam os metadados devolvidos
+pelo catálogo. Um modelo só passa pelo filtro de raciocínio quando declara um
+parâmetro compatível (`reasoning`, `include_reasoning` ou
+`reasoning_effort`); capacidade desconhecida não é inferida pelo nome do
+modelo. Ao marcar **Incluir previews**, a página solicita ao servidor um
+catálogo que inclui esses registros antes de filtrá-los.
 
 O routing padrão do OpenRouter nega coleta de dados, exige parâmetros
 compatíveis e permite fallback apenas entre endpoints do mesmo modelo. O
