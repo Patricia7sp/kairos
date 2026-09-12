@@ -312,11 +312,13 @@
 
 @media (max-width: 1050px) {
   .k-chat { grid-template-columns: minmax(170px, 220px) minmax(0, 1fr); }
-  .k-chat__context { display: none; }
+  .k-chat__context { grid-column: 1 / -1; border-top: 1px solid var(--k-border); border-left: 0; }
 }
 @media (max-width: 700px) {
   .k-chat { grid-template-columns: 1fr; }
-  .k-chat__sessions { display: none; }
+  .k-chat__sessions { border-right: 0; border-bottom: 1px solid var(--k-border); }
+  .k-chat__sessions nav { display: flex; overflow-x: auto; }
+  .k-chat__session { flex: 0 0 min(15rem, 82vw); }
   .k-chat-message { max-width: 92%; }
 }
 @media (prefers-reduced-motion: reduce) { .k-chat__cursor { animation: none; } }
