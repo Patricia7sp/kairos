@@ -22,13 +22,16 @@ export function filterModels(models, filters = {}) {
   });
 }
 
-export function modelSelectionMarkup(model) {
+export function modelSelectionMarkup(model, { scope = "conversation" } = {}) {
+  const applyLabel = scope === "global"
+    ? "Definir como padrão global"
+    : scope === "draft" ? "Aplicar ao próximo turno do rascunho" : "Aplicar ao próximo turno";
   return `<dialog class="k-model-dialog" data-model-dialog>
     <form method="dialog"><button class="k-btn k-btn--ghost k-model-dialog__close" aria-label="Fechar">×</button></form>
     <h2>Usar ${esc(model.name)}</h2>
     <p><code>${esc(model.provider)}/${esc(model.id)}</code></p>
     <div class="k-model-dialog__actions">
-      <button class="k-btn k-btn--primary" type="button" data-apply-model>Aplicar ao próximo turno</button>
+      <button class="k-btn k-btn--primary" type="button" data-apply-model>${applyLabel}</button>
       <button class="k-btn k-btn--ghost" type="button" data-new-conversation>Iniciar nova conversa</button>
     </div>
     <p class="k-model-dialog__status" aria-live="polite" data-selection-status></p>
@@ -65,19 +68,35 @@ function modelRows(models, defaultProvider, defaultModel) {
   }).join("");
 }
 
-export async function modelosView(root) {
+const modelRouteContext = () => {
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  return {
+    sessionId: params.get("session") || "",
+    provider: params.get("provider") || "",
+    model: params.get("model") || "",
+    draft: params.get("new") === "1",
+  };
+};
+
+export async function modelosView(root, _route, { signal } = {}) {
+  let disposed = false;
+  const dispose = () => { disposed = true; };
+  signal?.addEventListener("abort", dispose, { once: true });
+  if (signal?.aborted) return dispose;
+  const routeContext = modelRouteContext();
   root.innerHTML = `<div class="k-page-head"><h1>Modelos</h1>
       <p>Catálogo disponível, capacidades, preço conhecido e seleção ativa.</p></div>
     <div data-content><div class="k-skeleton" style="height:260px"></div></div>`;
   const content = root.querySelector("[data-content]");
   const [modelResult, providerResult] = await Promise.allSettled([api.modelos(), api.provedores()]);
+  if (disposed || signal?.aborted) return dispose;
   if (modelResult.status === "rejected") {
     const error = modelResult.reason;
     const hint = error instanceof ApiError && error.naoImplementado
       ? "Esta rota ainda não existe no servidor." : "Verifique o estado do serviço.";
     content.innerHTML = `<div class="k-error" role="alert"><h2>Não foi possível carregar os modelos</h2>
       <p>${esc(error.message)}</p><p>${hint}</p></div>`;
-    return;
+    return dispose;
   }
 
   const payload = modelResult.value;
@@ -122,16 +141,36 @@ export async function modelosView(root) {
     const model = models.find((item) => item.provider === provider && item.id === id);
     if (!model) return;
     const host = content.querySelector("[data-model-dialog-host]");
-    host.innerHTML = modelSelectionMarkup(model);
+    const scope = routeContext.draft ? "draft" : routeContext.sessionId ? "conversation" : "global";
+    host.innerHTML = modelSelectionMarkup(model, { scope });
     const dialog = host.querySelector("dialog");
     dialog.showModal();
     dialog.querySelector("[data-apply-model]").addEventListener("click", async () => {
+      if (disposed) return;
       const status = dialog.querySelector("[data-selection-status]");
+      if (routeContext.draft) {
+        const params = new URLSearchParams({
+          provider,
+          model: id,
+          new: "1",
+          session: routeContext.sessionId,
+        });
+        location.hash = `#/chat?${params}`;
+        dialog.close();
+        return;
+      }
       status.textContent = "Salvando seleção…";
       try {
-        await api.selecionarModelo({ provider, model: id, scope: "global" });
-        status.textContent = "Seleção aplicada ao próximo turno.";
+        const selection = routeContext.sessionId
+          ? { provider, model: id, scope: "conversation", session_id: routeContext.sessionId }
+          : { provider, model: id, scope: "global" };
+        await api.selecionarModelo(selection);
+        if (disposed || signal?.aborted) return;
+        status.textContent = routeContext.sessionId
+          ? "Seleção aplicada ao próximo turno desta conversa."
+          : "Novo padrão global salvo.";
       } catch (error) {
+        if (disposed || signal?.aborted) return;
         status.textContent = error.message || "Falha ao aplicar seleção.";
       }
     });
@@ -140,4 +179,5 @@ export async function modelosView(root) {
       dialog.close();
     });
   });
+  return dispose;
 }
