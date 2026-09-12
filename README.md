@@ -222,3 +222,10 @@ apagar o transcript.
 No detalhe, a conversa pode ser exportada como JSON ou Markdown. Sessões
 ocultas continuam recuperáveis pelo filtro **Ocultas**; nenhuma ação da
 interface remove fisicamente dados.
+
+## Entrega de alterações do runtime
+
+O runtime trabalha sobre uma versão fixa do projeto. Revise o diff do checkpoint
+antes de aplicar o pacote em uma branch isolada; os testes precisam passar antes
+da abertura do PR. Consulte o [guia de entrega do runtime](docs/runtime-delivery.md)
+para exportar versões, revisar, aplicar e publicar alterações.
