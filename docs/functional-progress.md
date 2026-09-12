@@ -382,3 +382,12 @@ permanece vigente.
 Próxima pendência iniciada em worktree isolado: limites finitos de ocorrências
 recorrentes, plano `docs/superpowers/plans/2026-09-12-cron-limits.md` na branch
 `feat/cron-limits`. Implementação ainda em curso, não incluída neste lote.
+
+
+Correção de empacotamento encontrada pelo teste Docker: o novo pacote era
+descoberto pelo setuptools local, mas faltava na lista COPY do Dockerfile.
+COPY acrescentado e regressão de importação da Web + escrita/leitura do diário
+na imagem real adicionada; RED confirmou ModuleNotFoundError na imagem anterior.
+Aceite final do navegador já passou com ticker real de 57,89 s, filtros/reload,
+API/CLI iguais, erro/recuperação seguros e três larguras sem overflow/erros JS.
+Rebuild e repetição dos testes da imagem em andamento.

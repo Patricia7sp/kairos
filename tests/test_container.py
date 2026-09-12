@@ -606,6 +606,20 @@ class RealImageTests(unittest.TestCase):
             with self.subTest(package=package_root):
                 self.assertIn(package_root, copied_roots)
 
+    def test_web_and_operational_journal_load_in_the_real_image(self):
+        result = self.run_in(
+            "-c",
+            "from pathlib import Path; import tempfile; "
+            "from kairos_web.server import app; "
+            "from kairos_observability import record_service_event, read_service_events; "
+            "home = Path(tempfile.mkdtemp()); "
+            "assert record_service_event(home, 'web.started'); "
+            "assert read_service_events(home)['events'][0]['code'] == 'web.started'; "
+            "assert any(route.path == '/api/logs' for route in app.routes)",
+            entrypoint="/opt/kairos/.venv/bin/python",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     # -- o bug do gateway em dobro ----------------------------------------
 
     def test_o_gateway_sobe_UMA_vez_so(self):
