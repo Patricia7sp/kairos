@@ -62,18 +62,25 @@ function connectionStatus(card, message, kind = "warn") {
 function bindProviderCard(card, provider, isActive) {
   let credentialRevision = 0;
   let probeRevision = 0;
+  let savingCredential = false;
+  const testButton = card.querySelector("[data-test-provider]");
   const form = card.querySelector("[data-credential-form]");
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (savingCredential || !isActive()) return;
     const input = form.elements.secret;
     const secret = input.value;
     if (provider.configured && !window.confirm("Substituir a credencial armazenada?")) return;
+    const saveButton = form.querySelector('button[type="submit"]');
+    savingCredential = true;
     input.value = "";
+    input.disabled = true;
+    saveButton.disabled = true;
     credentialRevision += 1;
     probeRevision += 1;
     const revision = credentialRevision;
-    const testButton = card.querySelector("[data-test-provider]");
     testButton.disabled = true;
+    connectionStatus(card, "Conexão não testada");
     status(card, "Salvando…");
     try {
       await api.salvarCredencial(provider.id, secret);
@@ -88,11 +95,17 @@ function bindProviderCard(card, provider, isActive) {
       if (!isActive() || revision !== credentialRevision) return;
       status(card, error.message || "Falha ao salvar a credencial.", "error");
     } finally {
-      if (isActive() && revision === credentialRevision) testButton.disabled = false;
+      if (isActive() && revision === credentialRevision) {
+        savingCredential = false;
+        input.disabled = false;
+        saveButton.disabled = false;
+        testButton.disabled = false;
+      }
     }
   });
 
-  card.querySelector("[data-test-provider]").addEventListener("click", async () => {
+  testButton.addEventListener("click", async () => {
+    if (savingCredential) return;
     const testedCredentialRevision = credentialRevision;
     const revision = ++probeRevision;
     status(card, "Testando conexão…");

@@ -209,34 +209,87 @@ describe("estado verdadeiro da página Provedores", () => {
 
   it("uma credencial substituída invalida teste anterior e ignora sua resposta atrasada", async () => {
     const probe = deferred<JsonRecord>();
+    const save = deferred<JsonRecord>();
+    let probeCount = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/providers") return jsonResponse({ providers: [configuredProvider] });
-      if (path === "/api/providers/openai/test") return jsonResponse(await probe.promise);
+      if (path === "/api/providers/openai/test") {
+        probeCount += 1;
+        if (probeCount === 1) {
+          return jsonResponse({ connected: true, state: "available", message: "ok", models_count: 3 });
+        }
+        return jsonResponse(await probe.promise);
+      }
       if (path === "/api/providers/openai/credentials") {
         expect(JSON.parse(String(init?.body))).toEqual({ secret: "nova-chave", auth_method: "api_key" });
-        return jsonResponse({ provider: "openai", state: "configured" });
+        return jsonResponse(await save.promise);
       }
       throw new Error(`Request inesperado: ${path}`);
     }));
     const root = document.createElement("main");
     const cleanup = await provedoresView(root, {}, { signal: new AbortController().signal });
-    root.querySelector<HTMLButtonElement>("[data-test-provider]")!.click();
+    const testButton = root.querySelector<HTMLButtonElement>("[data-test-provider]")!;
+    testButton.click();
+    await flush();
+    expect(root.querySelector("[data-provider-connection]")!.textContent)
+      .toContain("Conexão verificada");
+    testButton.click();
     const form = root.querySelector<HTMLFormElement>("[data-credential-form]")!;
     const input = form.elements.namedItem("secret") as HTMLInputElement;
     input.value = "nova-chave";
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await flush();
 
-    expect(root.querySelector("[data-provider-credential-state]")!.textContent)
-      .toContain("Credencial configurada");
     expect(root.querySelector("[data-provider-connection]")!.textContent)
       .toContain("Conexão não testada");
+    expect(testButton.disabled).toBe(true);
     probe.resolve({ connected: true, state: "available", message: "ok", models_count: 3 });
     await flush();
     expect(root.querySelector("[data-provider-connection]")!.textContent)
       .toContain("Conexão não testada");
+    expect(testButton.disabled).toBe(true);
+    save.resolve({ provider: "openai", state: "configured" });
+    await flush();
+    expect(testButton.disabled).toBe(false);
     expect(root.innerHTML).not.toContain("nova-chave");
+    cleanup();
+  });
+
+  it("serializa substituições de credencial enquanto a primeira gravação está pendente", async () => {
+    const save = deferred<JsonRecord>();
+    const savedBodies: JsonRecord[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/providers") return jsonResponse({ providers: [configuredProvider] });
+      if (path === "/api/providers/openai/credentials") {
+        savedBodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse(await save.promise);
+      }
+      throw new Error(`Request inesperado: ${path}`);
+    }));
+    const root = document.createElement("main");
+    const cleanup = await provedoresView(root, {}, { signal: new AbortController().signal });
+    const form = root.querySelector<HTMLFormElement>("[data-credential-form]")!;
+    const input = form.elements.namedItem("secret") as HTMLInputElement;
+    const saveButton = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    const testButton = root.querySelector<HTMLButtonElement>("[data-test-provider]")!;
+
+    input.value = "chave-a";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    input.value = "chave-b";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flush();
+
+    expect(savedBodies).toEqual([{ secret: "chave-a", auth_method: "api_key" }]);
+    expect(input.disabled).toBe(true);
+    expect(saveButton.disabled).toBe(true);
+    expect(testButton.disabled).toBe(true);
+    save.resolve({ provider: "openai", state: "configured" });
+    await flush();
+    expect(input.disabled).toBe(false);
+    expect(saveButton.disabled).toBe(false);
+    expect(testButton.disabled).toBe(false);
     cleanup();
   });
 
