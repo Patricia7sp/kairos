@@ -32,3 +32,18 @@ Não executar modelo, abrir cofre, exportar diagnósticos, nem inicializar/migra
    aparece no relatório após reabrir o banco.
 3. Revisão independente, CI, imagem e consulta somente leitura na produção após
    entrega. Sem inventar séries ou declarar conclusão dos demais comandos.
+
+## Correções exigidas pela revisão
+
+O helper compartilhado de leitura usava URI sem escape do caminho, permitindo
+que `?mode=rwc` em nome de diretório alterasse o modo de abertura. Corrigir com
+URI de arquivo absoluto escapada e testar nomes `?`, `#`, `%`, relativos e Unicode.
+
+Somente leitura se refere ao banco e seus dados, configuração e cofre. SQLite
+pode criar auxiliares WAL/SHM; não prometer ausência absoluta de arquivos. Não usar
+immutable para evitar esses auxiliares, pois perderia transações confirmadas no
+WAL ativo. Testar leitura concorrente com escritor real aberto.
+
+Dados numéricos inválidos/não finitos ou soma de custos que ultrapassa a faixa
+finita devem produzir disponibilidade falsa e JSON válido, nunca custo completo
+fictício, Infinity ou erro de serialização da API. Sem reparo/mutação dos dados.

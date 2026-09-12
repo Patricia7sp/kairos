@@ -13,11 +13,17 @@ sem abrir o cofre, chamar modelos ou inicializar/migrar dados. Retorno 0 indica
 leitura válida, inclusive banco vazio com schema existente; retorno 1 indica
 contabilidade indisponível, como arquivo ausente, ilegível ou incompatível.
 
+A conexão é somente leitura dos dados. O SQLite pode criar os arquivos auxiliares
+`state.db-wal` e `state.db-shm` para coordenar o acesso ao banco. Transações
+confirmadas que ainda estão no WAL entram no relatório, inclusive com a aplicação
+em execução. Nenhum banco ausente é criado pela consulta.
+
 O relatório mostra chamadas e tokens acumulados, incluindo os contadores
 persistidos de cache e raciocínio. Custos informados e estimados são separados.
 Quando há rotas sem custo conhecido, os valores disponíveis são subtotais
 incompletos; custo desconhecido não vira zero. Uma quantia zero registrada
-continua sendo zero conhecido.
+continua sendo zero conhecido. Valores numéricos inválidos ou somas não finitas
+tornam a contabilidade indisponível, sem reparar ou alterar o banco.
 
 A fonte agrega uso por rota de faturamento ao longo do tempo. Não há filtro por
 dia nem série diária disponível nesse armazenamento. Por isso, o JSON informa

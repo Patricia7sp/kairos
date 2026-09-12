@@ -179,3 +179,91 @@ def test_reading_preserves_database_configuration_and_vault(tmp_path):
 
     assert read_usage_summary(tmp_path)["totals"]["tokens"] == 7
     assert {name: (tmp_path / name).read_bytes() for name in before} == before
+
+
+@pytest.mark.parametrize("field", ["actual_cost_usd", "estimated_cost_usd"])
+@pytest.mark.parametrize(
+    "value", [float("inf"), -float("inf"), -0.1, "private-invalid", b"private"]
+)
+def test_invalid_persisted_cost_discards_the_entire_summary(tmp_path, field, value):
+    _persist(
+        tmp_path,
+        [
+            TokenDelta(api_call_count=1, input_tokens=5, actual_cost_usd=0.3, cost_status="actual"),
+            TokenDelta(api_call_count=1, input_tokens=7, actual_cost_usd=0.2, cost_status="actual"),
+        ],
+    )
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute(
+            f"UPDATE session_model_usage SET {field} = ? WHERE billing_provider = '1'",  # noqa: S608 - fixed test fields
+            (value,),
+        )
+    from kairos_state.usage_summary import read_usage_summary
+
+    report = read_usage_summary(tmp_path)
+    assert report["availability"] == "unavailable"
+    assert report["totals"]["tokens"] == 0
+    assert report["totals"]["requests"] == 0
+    assert report["totals"]["actual_cost_usd"] is None
+    assert report["totals"]["estimated_cost_usd"] is None
+    assert report["totals"]["cost_totals_complete"] is False
+    assert "private" not in json.dumps(report, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "api_call_count",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+    ],
+)
+@pytest.mark.parametrize("value", [-1, 1.5, float("inf"), "private-invalid", b"private"])
+def test_invalid_persisted_counter_is_unavailable(tmp_path, field, value):
+    _persist(tmp_path, [TokenDelta(api_call_count=1, actual_cost_usd=0.3, cost_status="actual")])
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute(f"UPDATE session_model_usage SET {field} = ?", (value,))  # noqa: S608 - fixed test fields
+    from kairos_state.usage_summary import read_usage_summary
+
+    report = read_usage_summary(tmp_path)
+    assert report["availability"] == "unavailable"
+    assert report["totals"]["actual_cost_usd"] is None
+    assert report["totals"]["cost_totals_complete"] is False
+    assert "private" not in json.dumps(report, allow_nan=False)
+
+
+@pytest.mark.parametrize("field", ["actual_cost_usd", "estimated_cost_usd"])
+def test_finite_costs_with_overflowing_sum_are_unavailable(tmp_path, field):
+    _persist(tmp_path, [TokenDelta(api_call_count=1), TokenDelta(api_call_count=1)])
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute(f"UPDATE session_model_usage SET {field} = ?", (1e308,))  # noqa: S608 - fixed test fields
+    from kairos_state.usage_summary import read_usage_summary
+
+    report = read_usage_summary(tmp_path)
+    assert report["availability"] == "unavailable"
+    assert report["totals"]["requests"] == 0
+    assert report["totals"]["actual_cost_usd"] is None
+    assert report["totals"]["estimated_cost_usd"] is None
+    json.dumps(report, allow_nan=False)
+
+
+def test_nullable_persisted_counters_still_count_as_zero(tmp_path):
+    _persist(tmp_path, [TokenDelta(api_call_count=1, actual_cost_usd=0.0, cost_status="actual")])
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute(
+            "UPDATE session_model_usage SET api_call_count = NULL, input_tokens = NULL, "
+            "output_tokens = NULL, cache_read_tokens = NULL, cache_write_tokens = NULL, "
+            "reasoning_tokens = NULL"
+        )
+    from kairos_state.usage_summary import read_usage_summary
+
+    report = read_usage_summary(tmp_path)
+    assert report["availability"] == "available"
+    assert report["totals"]["tokens"] == 0
+    assert report["totals"]["requests"] == 0
+    assert report["totals"]["actual_cost_usd"] == 0.0
+    assert report["totals"]["cost_totals_complete"] is True
+    json.dumps(report, allow_nan=False)
