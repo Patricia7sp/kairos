@@ -391,3 +391,10 @@ na imagem real adicionada; RED confirmou ModuleNotFoundError na imagem anterior.
 Aceite final do navegador já passou com ticker real de 57,89 s, filtros/reload,
 API/CLI iguais, erro/recuperação seguros e três larguras sem overflow/erros JS.
 Rebuild e repetição dos testes da imagem em andamento.
+
+
+Imagem corrigida validada: 22 testes existentes e 24 subtestes passaram; o teste
+novo de importação também passou após usar a API pública OpenAPI para consultar
+rotas (a versão atual do FastAPI usa routers lazy sem atributo path). Total:
+**23 testes da imagem aprovados**, sem skips. A alteração final foi apenas no
+teste; não exigiu reconstrução do código da aplicação.

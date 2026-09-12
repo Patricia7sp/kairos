@@ -615,7 +615,7 @@ class RealImageTests(unittest.TestCase):
             "home = Path(tempfile.mkdtemp()); "
             "assert record_service_event(home, 'web.started'); "
             "assert read_service_events(home)['events'][0]['code'] == 'web.started'; "
-            "assert any(route.path == '/api/logs' for route in app.routes)",
+            "assert '/api/logs' in app.openapi()['paths']",
             entrypoint="/opt/kairos/.venv/bin/python",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
