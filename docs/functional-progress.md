@@ -73,9 +73,10 @@ privado; os originais foram montados somente para leitura.
   executa ferramentas. Agent Runtime é a superfície existente para execução isolada.
   Um laço de ferramentas no Chat exigiria integração de permissões, execução e retorno
   ao modelo; não marcar essa capacidade como pronta por exibir um cartão.
-- Cron tem regras unitárias de agenda/claim, mas `cron list` e `tick` ainda usam saída
-  fixa. Faltam armazenamento operacional, execução, administração Web e histórico.
-- APIs legadas `/api/env`, `/api/cron/jobs` e `/api/logs` ainda retornam dados fixos.
+- Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
+  notepad, blueprints, limites finitos recorrentes e entrega externa seguem pendentes.
+- APIs legadas `/api/env` e `/api/logs` ainda retornam dados fixos; `/api/cron/jobs`
+  foi substituída por administração persistida no lote de cron.
 - A CLI declara **50 comandos**. Após implementar `model`, **28** ainda não têm handler:
   acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import, insights,
   login, logout, logs, memory, monitoring, pairing, pause, peer, prompt-size, setup,
@@ -114,3 +115,67 @@ privado; os originais foram montados somente para leitura.
   os 29 testes do serviço de runtime passaram. Nenhuma mudança no código de runtime.
 - PR: https://github.com/Patricia7sp/kairos/pull/24. Não registrar merge ou deploy
   como concluídos até conferir os respectivos resultados.
+
+## Entrega confirmada — 2026-09-12
+
+- PR #24 integrada em `74c3f31`, após os **nove jobs da CI remota passarem**.
+- Implantada a imagem `kairos:functional-validation` da revisão `dc4554c`;
+  comparação dos arquivos de aplicação alterados conferiu o conteúdo publicado.
+- Backup privado `20260912T143602Z` restaurado em volume descartável: **4.258
+  arquivos comparados**, SQLite íntegro, **18 sessões, 56 mensagens, 16 turnos
+  runtime, 10 checkpoints e 2 baselines**. Digests e marcadores restaurados.
+- Aplicação e broker saudáveis após manutenção; imagens do broker/worker preservadas.
+  Reinicialização para backup precedeu a implantação exclusiva da aplicação.
+- Aceite publicado em Chromium, 390/900/1400 px: ajustes, ferramentas, sessões,
+  modelos, provedores, visão geral e compositor carregam; filtro de ferramentas
+  funciona; sem erro JS ou overflow. Seis APIs autenticadas retornaram 200.
+- Comparação pós-implantação: configuração, metadados de autenticação, token Web e
+  login dedicado do runtime inalterados; contagens de sessões/mensagens/turnos iguais
+  ao backup. Aceite no navegador foi somente leitura, sem alterar preferências.
+- Evidências: `/tmp/kairos-functional-{deployment,production-browser,preservation}.json`;
+  registro de implantação também no diretório privado do backup.
+- O bloqueio OpenRouter descrito acima permanece; não houve nova geração bem-sucedida.
+
+## Continuidade — cron operacional
+
+Iniciado o próximo lote em `feat/operational-cron`, a partir da main integrada.
+Objetivo: substituir listagem e tick fixos por armazenamento durável, execução real,
+administração e histórico. Sem criar jobs na instalação da usuária durante testes.
+
+
+## Cron operacional — implementação e validação local
+
+- Jobs JSON validados antes de leitura/escrita, criação once/interval/cron,
+  pausa/retomada/exclusão e histórico persistido. Migração v3 adiciona `executions`
+  ao banco canônico, com restrição de estados e trigger de imutabilidade terminal.
+- Claim com ocorrência única no ledger antes de avançar JSON e executar o turno.
+  Lock por volume mantido durante todo o tick; backlog colapsado e `once` esgotado
+  não repetido. Interrupção sem conclusão observada é `unknown`, nunca sucesso.
+- Integração com serviço canônico de interação, ticker Web de 60 segundos, limite
+  de 300 segundos por turno; desligamento fecha stream e serviço mesmo se o journal
+  falhar. CLI e API autenticada usam o mesmo armazenamento. Nova tela nativa.
+- Revisão independente encontrou e permitiu corrigir cancelamento engolido,
+  agenda inválida aceita, orçamento esgotado ignorado e campo repeat incompleto.
+  Regressões incluem kill de processo real, concorrência, crash entre JSON/SQLite,
+  timeout, cleanup com erro de persistência e histórico terminal imutável.
+- Primeiro aceite em Chromium: ticker real disparou um turno com upstream controlado,
+  resposta salva e recuperada após reload, exclusão preservou histórico. Inspeção
+  visual encontrou controles ocultos exibidos por CSS; corrigidos para o aceite final.
+- A primeira CI local apontou apenas duas expectativas desatualizadas da árvore CLI,
+  ajustadas para os três novos subcomandos. As 57 regressões e 165 subtestes passaram.
+  Verificação completa final e entrega serão registradas após confirmação.
+- Manual e limites: [Agendamentos](agendamentos.md). Nenhum job foi criado na
+  instalação de produção da usuária durante os testes.
+
+## Verificação final do lote de cron
+
+- CI local completa: **1.876 testes Python + 5.575 subtestes**, **136 Web**,
+  **17 TUI**, **18 desktop**, tipos, Ruff, shellcheck e lock passaram. Codex 0.153.4.
+- **22 testes de integração da imagem passaram**, sem skips.
+- Aceite final em Chromium: ticker real de um minuto executou exatamente um request
+  ao upstream controlado, com modelo correto e transcript persistido após reload;
+  exclusão preservou o histórico. 390/900/1400 px, campos inativos ocultos, sem erros
+  JS e sem overflow; capturas inspecionadas após terminar a transição de layout.
+- Revisão independente final: sem bloqueador no escopo documentado.
+- Evidências locais: `/tmp/kairos-cron-{final-ci,image-tests,browser-final}.log` e
+  `/tmp/kairos-cron-browser.json`. Entrega remota ainda depende de seus checks.

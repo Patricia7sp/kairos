@@ -100,7 +100,7 @@ class ArvoreTests(unittest.TestCase):
         # Extraídos de `add_parser("...")` em cada módulo do legado.
         esperado = {
             "config": {"check", "edit", "env-path", "migrate", "path", "set", "show"},
-            "cron": {"list", "pause", "resume", "status", "tick"},
+            "cron": {"list", "create", "remove", "history", "pause", "resume", "status", "tick"},
             "skills": {"add", "install", "list", "remove", "tap"},
             "sync": {"disable", "enable", "now", "push", "status"},
             "pairing": {"clear-pending", "list", "revoke"},

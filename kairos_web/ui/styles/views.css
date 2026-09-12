@@ -375,3 +375,6 @@
 @media (max-width: 700px) {
   .k-runtime__composer { align-items: stretch; flex-direction: column; }
 }
+
+/* Os controles de agenda inativos devem ficar fora do layout e da navegação. */
+[data-timing][hidden], [data-job-history][hidden] { display: none; }
