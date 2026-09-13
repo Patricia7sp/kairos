@@ -141,6 +141,106 @@ def test_bad_json_and_invalid_job_never_replace_existing_file(tmp_path):
     assert path.read_text() == "{broken"
 
 
+def test_lifecycle_command_is_rejected_at_create_without_writing(tmp_path):
+    store = JobStore(tmp_path)
+    once(store)
+    path = tmp_path / "cron/jobs.json"
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        store.create(
+            name="Footgun",
+            prompt="hermes gateway restart",
+            schedule={"kind": "interval", "minutes": 5},
+        )
+    assert path.read_bytes() == before
+    assert len(store.list()) == 1
+
+
+def test_lifecycle_prose_and_diagnostics_are_accepted(tmp_path):
+    store = JobStore(tmp_path)
+    store.create(
+        name="Estudo",
+        prompt="Kong API gateway double-click and restart behavior in production",
+        schedule={"kind": "interval", "minutes": 5},
+    )
+    store.create(
+        name="Diagnóstico",
+        prompt="grep -c 'systemctl restart kairos' /var/log/syslog",
+        schedule={"kind": "interval", "minutes": 5},
+    )
+    assert len(store.list()) == 2
+
+
+def test_lifecycle_command_in_monitor_script_is_rejected_at_create(tmp_path):
+    store = JobStore(tmp_path)
+    once(store)
+    path = tmp_path / "cron/jobs.json"
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        store.create(
+            name="Footgun",
+            prompt="rotina saudável",
+            schedule={"kind": "interval", "minutes": 5},
+            monitor={"type": "script", "script": "pkill -f kairos"},
+        )
+    assert path.read_bytes() == before
+    assert JobStore(tmp_path).list()[0]["prompt"] == "Escreva o relatório"
+
+
+def test_set_monitor_scans_the_script_and_never_writes_on_rejection(tmp_path):
+    store = JobStore(tmp_path)
+    job = store.create(
+        name="Vigiado",
+        prompt="Escreva o relatório",
+        schedule={"kind": "interval", "minutes": 5},
+    )
+    path = tmp_path / "cron/jobs.json"
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        store.set_monitor(job["id"], "systemctl restart kairos")
+    assert path.read_bytes() == before
+    assert JobStore(tmp_path).get(job["id"])["monitor"] is None
+    store.set_monitor(job["id"], "df -h")
+    assert JobStore(tmp_path).get(job["id"])["monitor"] == {
+        "type": "script",
+        "script": "df -h",
+    }
+
+
+def test_guarded_prompt_stored_before_upgrade_still_reads(tmp_path):
+    """O guard é política de entrada: um job salvo antes de um endurecimento
+    do padrão (ex.: `launchctl kickstart … ai.hermes.gateway`) não pode
+    tornar o documento inteiro ilegível no boot seguinte."""
+    path = tmp_path / "cron/jobs.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "legado",
+                        "name": "Legado",
+                        "prompt": "launchctl kickstart gui/501 ai.hermes.gateway",
+                        "schedule": {"kind": "interval", "minutes": 5},
+                        "enabled": True,
+                        "paused": False,
+                        "repeat": {"times": None, "completed": 0},
+                        "next_run_at": None,
+                        "created_at": "2026-09-12T12:00:00+00:00",
+                        "last_run_at": None,
+                        "monitor": None,
+                        "monitor_state": None,
+                    }
+                ],
+            }
+        )
+    )
+    store = JobStore(tmp_path)
+    assert [job["id"] for job in store.list()] == ["legado"]
+    assert store.get("legado")["prompt"] == "launchctl kickstart gui/501 ai.hermes.gateway"
+
+
 @pytest.mark.parametrize(
     "schedule",
     [

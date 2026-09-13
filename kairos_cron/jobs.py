@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from kairos_cron.dispatch import reject_gateway_restart_job
+from kairos_cron.lifecycle_guard import check_gateway_lifecycle
 from kairos_cron.monitor import default_monitor_state, validate_monitor, validate_monitor_state
 from kairos_cron.schedule import compute_next_run
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
@@ -100,7 +100,6 @@ class JobStore:
         validate_schedule(job["schedule"], datetime.now(UTC))
         if job["schedule"]["kind"] == "once" and job.get("monitor") is not None:
             raise ValueError("monitor exige agendamento recorrente")
-        reject_gateway_restart_job(job["prompt"])
         if job["next_run_at"] is not None:
             timestamp(job["next_run_at"])
         repeat = job["repeat"]
@@ -146,12 +145,12 @@ class JobStore:
             raise ValueError("nome deve conter de 1 a 120 caracteres")
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 32000:
             raise ValueError("instrução deve conter de 1 a 32000 caracteres")
-        reject_gateway_restart_job(prompt)
         schedule = validate_schedule(schedule, now)
         if monitor is not None:
             if schedule["kind"] == "once":
                 raise ValueError("monitor exige agendamento recorrente")
             monitor = validate_monitor(monitor)
+        check_gateway_lifecycle(prompt, monitor["script"] if monitor is not None else None)
         times = _repeat_limit(schedule["kind"], times)
         next_run = (
             schedule["run_at"]
@@ -179,6 +178,7 @@ class JobStore:
         return job
 
     def set_monitor(self, job_id: str, script: str) -> dict:
+        check_gateway_lifecycle(script)
         monitor = validate_monitor({"type": "script", "script": script})
         with credential_file_lock(self.path):
             document = self._read()

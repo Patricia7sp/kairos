@@ -202,6 +202,63 @@ def test_api_rejects_monitor_on_once_schedule(home):
     assert JobStore(home).list() == []
 
 
+def test_lifecycle_command_is_rejected_on_both_surfaces(home, capsys):
+    """TT-07: agendar o foot-gun canônico do ciclo de vida é rejeitado na CLI
+    E na API, na criação — nunca na execução."""
+    assert (
+        main(
+            [
+                "cron",
+                "create",
+                "--name",
+                "Footgun",
+                "--prompt",
+                "hermes gateway restart",
+                "--every",
+                "5",
+                "--json",
+            ]
+        )
+        != 0
+    )
+    capsys.readouterr()
+    assert JobStore(home).list() == []
+
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    api = client.post(
+        "/api/cron/jobs",
+        json={
+            "name": "Footgun",
+            "prompt": "hermes gateway restart",
+            "schedule": {"kind": "interval", "minutes": 5},
+        },
+    )
+    assert api.status_code == 422
+    assert "laço de reinício" in api.json()["detail"]
+    assert JobStore(home).list() == []
+
+
+def test_lifecycle_prose_passes_and_monitor_script_is_scanned(home):
+    """Prossa citando gateway/restart é aceita; o monitor é executado no host,
+    então a forma de comando nele é bloqueada."""
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    created = client.post(
+        "/api/cron/jobs",
+        json={
+            "name": "Estudo",
+            "prompt": "Kong API gateway double-click and restart behavior in production",
+            "schedule": {"kind": "interval", "minutes": 5},
+        },
+    )
+    assert created.status_code == 201
+
+    base = "/api/cron/jobs/" + created.json()["id"]
+    blocked = client.put(base + "/monitor", json={"script": "pkill -f kairos"})
+    assert blocked.status_code == 422
+    assert "laço de reinício" in blocked.json()["detail"]
+    assert JobStore(home).get(created.json()["id"]) is not None
+
+
 def test_web_lifespan_stops_ticker_and_closes_service_even_if_journal_write_fails(
     home, monkeypatch
 ):

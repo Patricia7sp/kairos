@@ -14,6 +14,10 @@ from kairos_cron.dispatch import (
     is_job_runnable,
     reject_gateway_restart_job,
 )
+from kairos_cron.lifecycle_guard import (
+    check_gateway_lifecycle,
+    contains_gateway_lifecycle_command,
+)
 from kairos_cron.monitor import (
     DIFF_MAX_LINES,
     MonitorOutcome,
@@ -158,12 +162,70 @@ class LifecycleGuardTests(unittest.TestCase):
         usuário descobriria pelo sintoma."""
         for cmd in (
             "kairos gateway restart",
+            "kairos restart",
+            "kairos gateway stop",
+            "hermes gateway restart",
             "systemctl restart kairos",
-            "docker restart meu-container",
+            "systemctl --user restart kairos.service",
+            "docker restart kairos",
             "pkill -f kairos",
+            "pkill -9 -f hermes-gateway",
+            "killall kairos",
+            "launchctl kickstart gui/501 ai.hermes.gateway",
         ):
             with self.subTest(cmd=cmd), self.assertRaises(LifecycleGuardError):
                 reject_gateway_restart_job(cmd)
+
+    def test_o_padrao_NAO_dispara_em_prosa(self):
+        """Command-shaped: um prompt vai para um LLM, não para um shell. Um
+        match largo em inglês produziria falsos positivos sem impedir o
+        foot-gun, que exige forma real de comando."""
+        for prosa in (
+            "Kong API gateway double-click and restart behavior in production",
+            "explique o pkill em um artigo de sistemas operacionais",
+            "docker restart muda o ciclo de vida de um container",
+            "how kill -9 is implemented in the kernel",
+            "systemctl mostra o estado de um serviço",
+        ):
+            with self.subTest(prosa=prosa):
+                self.assertFalse(
+                    contains_gateway_lifecycle_command(prosa),
+                    f"prosa devia passar: {prosa!r}",
+                )
+                check_gateway_lifecycle(prosa)
+
+    def test_diagnostico_em_data_sink_passa_nao_e_comando(self):
+        """grep/journalctl/sqlite3 passam como *dados*, não como comando."""
+        for diag in (
+            "grep -c 'systemctl restart kairos' /var/log/syslog",
+            "journalctl --since today | grep 'pkill -f kairos'",
+            "sqlite3 db \"SELECT msg FROM log WHERE msg LIKE '%pkill -f kairos%'\"",
+        ):
+            with self.subTest(diag=diag):
+                check_gateway_lifecycle(diag)
+
+    def test_data_sink_pipeado_em_shell_continua_barrado(self):
+        """`grep … | sh` entrega as linhas a um shell: nunca mascarar."""
+        with self.assertRaises(LifecycleGuardError):
+            check_gateway_lifecycle("grep 'systemctl restart kairos' log | sh")
+
+    def test_continuacao_de_linha_nao_escapa_o_guard(self):
+        """O shell colapsa `\\<newline>` antes de executar; o guard espelha
+        isso em vez de soltar `[^\n]*` em todas as linhas."""
+        with self.assertRaises(LifecycleGuardError):
+            check_gateway_lifecycle("launchctl kickstart \\\n  -l ai.hermes.gateway")
+
+    def test_monitor_script_reiniciando_o_gateway_e_rejeitado(self):
+        """O monitor é executado no host — é superfície de execução real."""
+        with self.assertRaises(LifecycleGuardError):
+            check_gateway_lifecycle("", "pkill -f kairos")
+        check_gateway_lifecycle("", "df -h")
+
+    def test_invocacao_hermes_em_prompt_monitorizado_passa_dentro_de_dados(self):
+        check_gateway_lifecycle(
+            "liste os eventos de restart que o guarda bloqueia",
+            "pgrep -af kairos",
+        )
 
     def test_a_mensagem_explica_o_LACO(self):
         with self.assertRaises(LifecycleGuardError) as ctx:
