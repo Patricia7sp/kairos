@@ -236,6 +236,10 @@ def _extra_args(  # noqa: PLR0912 - dispatcher de argumentos por comando; cascat
         )
     elif command == "gateway" and subcommand == "stop":
         parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
+    elif command == "import" and subcommand is None:
+        parser.add_argument("--data", help="Dados JSON a importar")
+    elif command == "import-agent" and subcommand is None:
+        parser.add_argument("--data", help="Dados JSON do agente a importar")
     elif command == "token" and subcommand in ("show", None):
         parser.add_argument(
             "--reveal", action="store_true", help="Imprime o token inteiro (pense antes)"

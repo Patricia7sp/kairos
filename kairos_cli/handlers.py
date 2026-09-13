@@ -670,8 +670,51 @@ def cmd_debug(args) -> int:
     return asyncio.run(run_debug(_home(), args))
 
 
+def cmd_dump(args) -> int:
+    import asyncio
+
+    from kairos_cli.dump import run_dump
+
+    return asyncio.run(run_dump(_home(), args))
+
+
+def cmd_setup(args) -> int:
+    import asyncio
+
+    from kairos_cli.setup import run_setup
+
+    return asyncio.run(run_setup(_home(), args))
+
+
+def cmd_backup(args) -> int:
+    import asyncio
+
+    from kairos_cli.backup import run_backup
+
+    return asyncio.run(run_backup(_home(), args))
+
+
+def cmd_import_agent(args) -> int:
+    import asyncio
+
+    from kairos_cli.import_agent_data import run_import_agent
+
+    return asyncio.run(run_import_agent(_home(), args))
+
+
+def cmd_import(args) -> int:
+    import asyncio
+
+    from kairos_cli.import_data import run_import
+
+    return asyncio.run(run_import(_home(), args))
+
+
 HANDLERS = {
+    "backup": cmd_backup,
     "debug": cmd_debug,
+    "dump": cmd_dump,
+    "setup": cmd_setup,
     "insights": cmd_insights,
     "logs": cmd_logs,
     "model": cmd_model,
@@ -697,4 +740,6 @@ HANDLERS = {
     "gateway": cmd_gateway,
     "security": cmd_security,
     "token": cmd_token,
+    "import": cmd_import,
+    "import-agent": cmd_import_agent,
 }

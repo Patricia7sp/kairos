@@ -131,7 +131,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="kairos-cli",
     ),
-    _c("backup", "Backup e restauração do estado"),
+    _c("backup", "Backup e restauração do estado", status=Status.IMPLEMENTED, unit="kairos-cli"),
     _c("claw", "Automação de browser"),
     _c(
         "config",
@@ -184,7 +184,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="kairos-state",
     ),
-    _c("dump", "Exporta estado para inspeção"),
+    _c("dump", "Exporta estado para inspeção", status=Status.IMPLEMENTED, unit="observability"),
     _c(
         "gateway",
         "Gateway de mensageria",
@@ -207,8 +207,8 @@ COMMANDS: tuple[Command, ...] = (
     ),
     _c("gui", "Aplicativo desktop"),
     _c("hooks", "Hooks de plugin", unit="plugins"),
-    _c("import-agent", "Importa configuração de outro agente"),
-    _c("import", "Importa sessões e dados"),
+    _c("import-agent", "Importa configuração de outro agente", status=Status.IMPLEMENTED, unit="plugins"),
+    _c("import", "Importa sessões e dados", status=Status.IMPLEMENTED),
     _c("insights", "Métricas de uso e custo", status=Status.IMPLEMENTED, unit="kairos-state"),
     _c("login", "Autentica num provedor", unit="kairos-cli"),
     _c("logout", "Encerra a autenticação", unit="kairos-cli"),
@@ -292,7 +292,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="security",
     ),
-    _c("setup", "Assistente de configuração inicial"),
+    _c("setup", "Assistente de configuração inicial", status=Status.IMPLEMENTED, unit="kairos-cli"),
     _c(
         "skills",
         "Skills do agente",

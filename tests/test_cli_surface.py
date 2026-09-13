@@ -225,9 +225,57 @@ class ExecucaoTests(unittest.TestCase):
     def test_comando_declarado_SEM_implementacao_sai_com_codigo_proprio(self):
         """A regra do projeto: reportar sucesso sem efeito é pior que
         ausência. Script precisa distinguir 'falhou' de 'ainda não existe'."""
-        self.assertEqual(main(["backup"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertEqual(main(["claw"]), ExitCode.NOT_IMPLEMENTED)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.OK)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.ERROR)
+
+    def test_dump_emite_json_valido_com_fontes_locais(self):
+        import json
+        import io
+        import contextlib
+
+        from kairos_cli.startup_fast import resolve_kairos_home
+        home = Path(resolve_kairos_home())
+        home.mkdir(parents=True, exist_ok=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            r = main(["dump", "--json"])
+        self.assertIn(r, (0, 1))
+        data = json.loads(buf.getvalue())
+        self.assertIn("scope", data)
+        self.assertIn("state", data)
+        self.assertIn("sources", data)
+        self.assertIn("home", data["sources"])
+
+    def test_setup_cria_home_e_token_idempotentemente(self):
+        home = Path(self._tmp.name)
+        self.assertEqual(main(["setup", "--json"]), 0)
+        self.assertTrue((home / "web-token").exists())
+        self.assertEqual(main(["setup", "--json"]), 0)
+
+    def test_import_com_credenciais_json(self):
+        import json
+        import io
+        import contextlib
+
+        # Formato esperado: {"credentials": {"api_key": "...", "provider": "..."}}
+        creds = {"credentials": {"api_key": "sk-test-import", "provider": "openai"}}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["import", "--data", json.dumps(creds)])
+        self.assertIn("Credenciais importadas com sucesso", buf.getvalue())
+
+    def test_import_agent_com_config_json(self):
+        import json
+        import io
+        import contextlib
+
+        # Formato esperado: {"agent": {"name": "...", "capabilities": [...]}}
+        agent_cfg = {"agent": {"name": "test-agent", "capabilities": ["chat"]}}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["import-agent", "--data", json.dumps(agent_cfg)])
+        self.assertIn("Configuração do agente importada com sucesso", buf.getvalue())
 
     def test_approvals_test_devolve_codigo_por_veredito(self):
         self.assertEqual(main(["approvals", "test", "ls -la"]), 0)
@@ -251,11 +299,13 @@ class ExecucaoTests(unittest.TestCase):
             ["skills", "list"],
             ["config", "path"],
             ["config", "check"],
-            ["tick"],
-            ["version"],
-        ):
-            with self.subTest(argv=argv):
-                self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))
+              ["tick"],
+              ["version"],
+              ["setup", "--json"],
+              ["backup", "--json"],
+         ):
+             with self.subTest(argv=argv):
+                 self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))
 
     def test_saida_JSON_e_valida(self):
         import contextlib
