@@ -8,7 +8,9 @@ from kairos_cron.jobs import JobStore
 from kairos_cron.scheduler import Scheduler
 
 
-def command(args, home):
+def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; mantidos num handler
+    args, home
+):
     from kairos_cli.handlers import _emit
 
     store = JobStore(home)
@@ -20,8 +22,11 @@ def command(args, home):
             schedule = {"kind": "interval", "minutes": args.every}
         else:
             schedule = {"kind": "cron", "expr": args.expr}
+        monitor = (
+            {"type": "script", "script": args.monitor} if getattr(args, "monitor", None) else None
+        )
         result = store.create(
-            name=args.name, prompt=args.prompt, schedule=schedule, times=args.times
+            name=args.name, prompt=args.prompt, schedule=schedule, times=args.times, monitor=monitor
         )
     elif sub == "list":
         result = {"jobs": store.list()}
@@ -32,6 +37,14 @@ def command(args, home):
         result = {"removed": True}
     elif sub == "history":
         result = {"executions": store.history(args.job_id)}
+    elif sub == "monitor-set":
+        result = store.set_monitor(args.job_id, args.script)
+    elif sub == "monitor-clear":
+        result = store.clear_monitor(args.job_id)
+    elif sub == "monitor-show":
+        result = show_monitor(store, args.job_id)
+    elif sub == "monitor-run":
+        result = run_monitor_now(store, args.job_id, home)
     elif sub == "tick":
 
         async def run():
@@ -48,8 +61,54 @@ def command(args, home):
         result = {
             "jobs": len(jobs),
             "enabled": sum(j["enabled"] and not j["paused"] for j in jobs),
+            "monitored": sum("monitor" in j for j in jobs),
             "croniter": croniter_available(),
             "ticker": "observado pela API Web; CLI executa um tick por chamada",
         }
     _emit(result, as_json=args.json)
     return 1 if sub == "tick" and (result["failed"] or result["busy"]) else 0
+
+
+def show_monitor(store, job_id: str) -> dict:
+    job = store.get(job_id)
+    if "monitor" not in job:
+        raise KeyError("agendamento não monitorado")
+    monitor = dict(job["monitor"])
+    state = job.get("monitor_state") or {}
+    monitor.update(
+        {
+            "ultima_verificacao": state.get("last_checked_at"),
+            "ultima_mudanca": state.get("last_changed_at"),
+            "agenda_proxima": job.get("next_run_at"),
+        }
+    )
+    return monitor
+
+
+def run_monitor_now(store, job_id: str, home):
+    """Executa a fonte de um monitor uma vez, sem tocar em agenda nem estado.
+
+    Usa `JobStore` apenas para ler o comando; a execução é isolada (ver
+    `kairos_cron.source`). Resultado conta como teste da fonte, não como tick.
+    """
+    from kairos_cron.monitor import decide_for_source, monitor_state_from_job
+
+    job = store.get(job_id)
+    if "monitor" not in job:
+        raise KeyError("agendamento não monitorado")
+    import asyncio
+
+    from kairos_cron.source import run_script
+
+    def source_result():
+        return run_script(job["monitor"]["script"], home=home)
+
+    result = asyncio.run(asyncio.to_thread(source_result))
+    decision = decide_for_source(monitor_state_from_job(job), result)
+    return {
+        "ok": result.ok,
+        "erro": result.error,
+        "detalhe": result.detail,
+        "bytes_saida": len(result.output or ""),
+        "decisao": decision.outcome.value,
+    }

@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from kairos_cron.dispatch import reject_gateway_restart_job
+from kairos_cron.monitor import default_monitor_state, validate_monitor, validate_monitor_state
 from kairos_cron.schedule import compute_next_run
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 from kairos_state import connect, migrate
@@ -94,6 +95,8 @@ class JobStore:
         if type(job["enabled"]) is not bool or type(job["paused"]) is not bool:
             raise ValueError("invalid state")
         validate_schedule(job["schedule"], datetime.now(UTC))
+        if job["schedule"]["kind"] == "once" and job.get("monitor") is not None:
+            raise ValueError("monitor exige agendamento recorrente")
         reject_gateway_restart_job(job["prompt"])
         if job["next_run_at"] is not None:
             timestamp(job["next_run_at"])
@@ -109,12 +112,21 @@ class JobStore:
             or _repeat_limit(job["schedule"]["kind"], repeat["times"]) != repeat["times"]
         ):
             raise ValueError("invalid repeat budget")
+        if job.get("monitor") is not None:
+            validate_monitor(job["monitor"])
+        if job.get("monitor_state") is not None:
+            validate_monitor_state(job["monitor_state"])
 
     def _write(self, document: dict) -> None:
         secure_atomic_write_text(self.path, json.dumps(document, ensure_ascii=False, indent=2))
 
     def list(self) -> list[dict]:
         return self._read()["jobs"]
+
+    def get(self, job_id: str) -> dict:
+        """Um job, ou KeyError imediato — melhor erro para o operador na hora."""
+        with credential_file_lock(self.path):
+            return self._find(self._read(), job_id)
 
     def create(
         self,
@@ -124,6 +136,7 @@ class JobStore:
         schedule: dict,
         now: datetime | None = None,
         times: int | None = None,
+        monitor: dict | None = None,
     ) -> dict:
         now = now or datetime.now(UTC)
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
@@ -132,6 +145,10 @@ class JobStore:
             raise ValueError("instrução deve conter de 1 a 32000 caracteres")
         reject_gateway_restart_job(prompt)
         schedule = validate_schedule(schedule, now)
+        if monitor is not None:
+            if schedule["kind"] == "once":
+                raise ValueError("monitor exige agendamento recorrente")
+            monitor = validate_monitor(monitor)
         times = _repeat_limit(schedule["kind"], times)
         next_run = (
             schedule["run_at"]
@@ -149,12 +166,37 @@ class JobStore:
             "next_run_at": next_run,
             "created_at": now.isoformat(),
             "last_run_at": None,
+            "monitor": monitor,
+            "monitor_state": default_monitor_state() if monitor is not None else None,
         }
         with credential_file_lock(self.path):
             document = self._read()
             document["jobs"].append(job)
             self._write(document)
         return job
+
+    def set_monitor(self, job_id: str, script: str) -> dict:
+        monitor = validate_monitor({"type": "script", "script": script})
+        with credential_file_lock(self.path):
+            document = self._read()
+            job = self._find(document, job_id)
+            if job["schedule"]["kind"] == "once":
+                raise ValueError("monitor exige agendamento recorrente")
+            job["monitor"] = monitor
+            job["monitor_state"] = default_monitor_state()
+            self._write(document)
+            return job
+
+    def clear_monitor(self, job_id: str) -> dict:
+        with credential_file_lock(self.path):
+            document = self._read()
+            job = self._find(document, job_id)
+            if "monitor" not in job:
+                raise KeyError("agendamento não monitorado")
+            job.pop("monitor", None)
+            job["monitor_state"] = None
+            self._write(document)
+            return job
 
     def set_paused(self, job_id: str, paused: bool) -> dict:
         if type(paused) is not bool:
@@ -227,7 +269,32 @@ class JobStore:
             job["next_run_at"] = None
         return before != (repeat["completed"], job["next_run_at"])
 
-    def claim(self, job_id: str, now: datetime) -> tuple[dict, str] | None:
+    def record_suppressed_tick(self, job_id: str, *, now: datetime) -> dict:
+        """Tick de monitor que **não** executou o agente.
+
+        A agenda avança pelo próximo horário da cadência sem consumir o
+        orçamento e sem criar linha no ledger: o tick vira ``no_change`` ou
+        erro de fonte, nunca uma ocorrência reivindicada. A última verificação
+        fica registrada para a UI e o CLI.
+        """
+        with credential_file_lock(self.path):
+            document = self._read()
+            job = self._find(document, job_id)
+            if "monitor" not in job:
+                raise KeyError("agendamento não monitorado")
+            if job.get("monitor_state") is None:
+                job["monitor_state"] = default_monitor_state()
+            state = validate_monitor_state(job["monitor_state"])
+            state["last_checked_at"] = now.isoformat()
+            job["monitor_state"] = state
+            if job["enabled"] and not job["paused"] and job["next_run_at"] is not None:
+                job["next_run_at"] = compute_next_run(job["schedule"], now.isoformat())
+            self._write(document)
+            return job
+
+    def claim(
+        self, job_id: str, now: datetime, *, monitor_state: dict | None = None
+    ) -> tuple[dict, str] | None:
         # Caller holds the tick lock for the entire effect. JSON and SQLite cannot
         # commit together: the unique occurrence ledger is written FIRST. A crash
         # between stores can consume an occurrence, but never execute it twice.
@@ -270,6 +337,8 @@ class JobStore:
                 if repeat["times"] is not None and repeat["completed"] >= repeat["times"]
                 else compute_next_run(job["schedule"], now.isoformat())
             )
+            if created and monitor_state is not None:
+                job["monitor_state"] = validate_monitor_state(monitor_state)
             self._write(document)
             return (job, execution_id) if created else None
 

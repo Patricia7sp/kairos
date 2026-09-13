@@ -21,6 +21,7 @@ A identidade e a SPA nativa do Kairos continuam como superfícies públicas.
   CLI, API e navegador; revisão independente e CI local concluídas.
 - [x] CI remota, integração e entrega da imagem após backup verificado. PR #25, merge `1b5e317`; aceite publicado registrado em `docs/functional-progress.md`.
 
-Primeiro implementar o fluxo de prompts com saída no histórico do Kairos. Monitores,
-notepad, blueprints e destinos externos terão aceite próprio antes de constar como
-funcionais; o contrato não aceitará opções sem execução correspondente.
+Primeiro implementar o fluxo de prompts com saída no histórico do Kairos. Monitores
+de fonte foram implementados no lote seguinte (`feat/source-monitors`) com aceite
+próprio; notepad, blueprints e destinos externos terão aceite próprio antes de
+constar como funcionais; o contrato não aceitará opções sem execução correspondente.

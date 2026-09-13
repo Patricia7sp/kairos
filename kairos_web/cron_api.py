@@ -18,11 +18,17 @@ class CreateJob(BaseModel):
     prompt: StrictStr
     schedule: dict
     times: StrictInt | None = Field(default=None, ge=1, le=1_000_000)
+    monitor: dict | None = None
 
 
 class PauseJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paused: StrictBool
+
+
+class MonitorJob(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    script: StrictStr
 
 
 def store(request):
@@ -66,6 +72,53 @@ def remove_job(job_id: str, request: Request):
 @router.get("/jobs/{job_id}/history")
 def history(job_id: str, request: Request):
     return {"executions": operate(lambda: store(request).history(job_id))}
+
+
+@router.get("/jobs/{job_id}/monitor")
+def get_monitor(job_id: str, request: Request):
+    """Fonte configurada e último estado de verificação do job."""
+    job = operate(lambda: store(request).get(job_id))
+    if "monitor" not in job:
+        raise HTTPException(404, "agendamento não monitorado")
+    return {"monitor": job["monitor"], "monitor_state": job.get("monitor_state")}
+
+
+@router.put("/jobs/{job_id}/monitor")
+def set_monitor(job_id: str, payload: MonitorJob, request: Request):
+    return operate(lambda: store(request).set_monitor(job_id, payload.script))
+
+
+@router.delete("/jobs/{job_id}/monitor")
+def clear_monitor(job_id: str, request: Request):
+    operate(lambda: store(request).clear_monitor(job_id))
+    return {"cleared": True}
+
+
+@router.post("/jobs/{job_id}/monitor/run")
+async def run_monitor_source(job_id: str, request: Request):
+    """Executa a fonte uma vez, sem tocar em agenda nem estado — teste do operador."""
+
+    async def execute():
+        import asyncio
+
+        from kairos_cron.monitor import decide_for_source, monitor_state_from_job
+        from kairos_cron.source import run_script
+
+        jobs = store(request)
+        job = jobs.get(job_id)
+        if "monitor" not in job:
+            raise KeyError(job_id)
+        result = await asyncio.to_thread(run_script, job["monitor"]["script"], home=jobs.home)
+        decision = decide_for_source(monitor_state_from_job(job), result)
+        return {
+            "ok": result.ok,
+            "error": result.error or "",
+            "detail": result.detail or "",
+            "output_chars": len(result.output) if result.output else 0,
+            "decision": decision.outcome.value,
+        }
+
+    return await operate(execute)
 
 
 @router.get("/status")

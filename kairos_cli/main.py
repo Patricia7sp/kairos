@@ -97,7 +97,21 @@ def _cron_args(subcommand: str, parser) -> None:
             type=int,
             help="Limite de ocorrências (1–1000000); falhas também contam. Sem opção: ilimitado em recorrentes",
         )
-    elif subcommand in ("pause", "resume", "remove"):
+        parser.add_argument(
+            "--monitor",
+            help="Comando da fonte que decide se o agente roda (exige agendamento recorrente)",
+        )
+    elif subcommand == "monitor-set":
+        parser.add_argument("job_id")
+        parser.add_argument("script", help="Comando da fonte, sem shell")
+    elif subcommand in (
+        "pause",
+        "resume",
+        "remove",
+        "monitor-clear",
+        "monitor-show",
+        "monitor-run",
+    ):
         parser.add_argument("job_id")
     elif subcommand == "history":
         parser.add_argument("job_id", nargs="?")
@@ -113,13 +127,17 @@ def _model_args(subcommand: str, parser) -> None:
             parser.add_argument("model", help="Identificador exato do modelo")
 
 
-def _extra_args(command: str, subcommand: str | None, parser) -> None:
+def _extra_args(  # noqa: PLR0912 - dispatcher de argumentos por comando; cascata objetiva
+    command: str, subcommand: str | None, parser
+) -> None:
     """Argumentos específicos, onde o comando os exige."""
     if command == "config" and subcommand == "show":
         parser.add_argument("key", nargs="?", help="chave pontilhada")
     elif command == "config" and subcommand == "set":
         parser.add_argument("key")
         parser.add_argument("value")
+    elif command == "monitoring" and subcommand == "test":
+        parser.add_argument("job_id", help="ID do agendamento monitorado")
     elif command == "approvals" and subcommand == "test":
         # `cmdline`, não `command`: o parser de topo já usa `dest="command"`,
         # e um positional homônimo o SOBRESCREVE — o despacho passaria a ver

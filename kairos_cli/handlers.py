@@ -402,6 +402,12 @@ def cmd_cron(args) -> int:
     return command(args, _home())
 
 
+def cmd_monitoring(args) -> int:
+    from kairos_cli.monitoring import command
+
+    return command(args, _home())
+
+
 def cmd_tick(args) -> int:
     from kairos_cli.cron import command
 
@@ -684,6 +690,7 @@ HANDLERS = {
     "profile": cmd_profile,
     "auth": cmd_auth,
     "cron": cmd_cron,
+    "monitoring": cmd_monitoring,
     "tick": cmd_tick,
     "sync": cmd_sync,
     "dashboard": cmd_web,

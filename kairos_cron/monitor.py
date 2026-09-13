@@ -10,16 +10,26 @@ import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 
+from kairos_cron.source import validate_script
+
 __all__ = [
     "DIFF_MAX_LINES",
     "MonitorOutcome",
     "MonitorState",
+    "decide_for_source",
+    "default_monitor_state",
     "evaluate",
+    "monitor_state_dict",
+    "monitor_state_from_job",
     "output_hash",
-    "render_change_block",
+    "validate_monitor",
+    "validate_monitor_state",
 ]
 
 DIFF_MAX_LINES = 200
+#: A saída da fonte é truncada antes de comparar; notificar por uma mudança
+#: que só existe além do corte seria comparar bytes que o agente nunca veria.
+MONITOR_MAX_OUTPUT_CHARS = 65_536
 
 
 class MonitorOutcome(StrEnum):
@@ -54,6 +64,78 @@ class MonitorDecision:
     #: O estado a persistir. Em erro de fonte é o **mesmo** de antes.
     next_state: MonitorState
     run_agent: bool
+
+
+def validate_monitor(monitor: object) -> dict:
+    """Valida a configuração de fonte de um job antes da persistência.
+
+    Hoje só o tipo ``script`` existe; a forma é estrita para que um campo
+    novo nunca seja aceito em silêncio. A fonte é executada sem shell, com
+    orçamentos fixos (ver ``kairos_cron.source``).
+    """
+    if not isinstance(monitor, dict) or set(monitor) != {"type", "script"}:
+        raise ValueError("monitor inválido")
+    if monitor["type"] != "script":
+        raise ValueError("tipo de monitor não suportado")
+    validate_script(monitor["script"])
+    return {"type": "script", "script": monitor["script"].strip()}
+
+
+def validate_monitor_state(state: object) -> dict:
+    """Estado persistido de um monitor: hash, último marco e última verificação."""
+    if not isinstance(state, dict) or set(state) != {
+        "last_output_hash",
+        "last_changed_at",
+        "last_checked_at",
+    }:
+        raise ValueError("estado de monitor inválido")
+    hash_value = state["last_output_hash"]
+    if hash_value is not None and (not isinstance(hash_value, str) or len(hash_value) != 64):
+        raise ValueError("hash de saída de monitor inválido")
+    for key in ("last_changed_at", "last_checked_at"):
+        value = state[key]
+        if value is not None and (not isinstance(value, str) or len(value) > 40):
+            raise ValueError(f"{key} inválido")
+    return dict(state)
+
+
+def default_monitor_state() -> dict:
+    return {"last_output_hash": None, "last_changed_at": None, "last_checked_at": None}
+
+
+def monitor_state_from_job(job: dict) -> MonitorState:
+    """Converte o estado persistido no objeto de decisão (sem estado → primeiro run)."""
+    raw = job.get("monitor_state")
+    if raw is None:
+        return MonitorState()
+    validated = validate_monitor_state(raw)
+    return MonitorState(
+        last_output_hash=validated["last_output_hash"],
+        last_changed_at=validated["last_changed_at"],
+    )
+
+
+def monitor_state_dict(state: MonitorState, *, checked_at: str | None = None) -> dict:
+    """Converte o estado de decisão no dicionário persistido, com a verificação."""
+    return {
+        "last_output_hash": state.last_output_hash,
+        "last_changed_at": state.last_changed_at,
+        "last_checked_at": checked_at,
+    }
+
+
+def decide_for_source(
+    state: MonitorState, source_result, *, now: str | None = None
+) -> MonitorDecision:
+    """Decide a partir do resultado real da fonte.
+
+    Uma fonte que falhou (timeout, saída não nula, executável ausente) é
+    **erro, nunca mudança** — a mesma consequência de ``evaluate`` com
+    ``source_failed=True``: o hash fica intocado.
+    """
+    if source_result.ok:
+        return evaluate(state, source_result.output, now=now)
+    return evaluate(state, None, source_failed=True, now=now)
 
 
 def evaluate(

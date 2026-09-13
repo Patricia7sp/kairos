@@ -76,6 +76,10 @@ export const api = {
   pausarAgendamento: (id, paused) => request(`/api/cron/jobs/${encodeURIComponent(id)}`, {method:"PATCH", body:{paused}}),
   excluirAgendamento: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}`, {method:"DELETE"}),
   historicoAgendamento: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/history`),
+  monitorAgendamento: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor`),
+  definirMonitor: (id, script) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor`, {method:"PUT", body:{script}}),
+  removerMonitor: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor`, {method:"DELETE"}),
+  rodarMonitor: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor/run`, {method:"POST"}),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 
