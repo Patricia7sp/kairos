@@ -33,6 +33,8 @@ _CATALOG = {
     "cron.completed": ("cron", "info", "Execução agendada concluída."),
     "cron.failed": ("cron", "error", "Falha na execução agendada."),
     "cron.unknown": ("cron", "warning", "Resultado da execução agendada desconhecido."),
+    "cron.no_change": ("cron", "info", "Fonte do monitor não mudou; o agente não rodou."),
+    "cron.monitor_error": ("cron", "error", "Fonte do monitor falhou; o agente não rodou."),
 }
 _SERVICES = frozenset(item[0] for item in _CATALOG.values())
 _LEVELS = frozenset(item[1] for item in _CATALOG.values())

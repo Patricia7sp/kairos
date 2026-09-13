@@ -36,6 +36,10 @@ export async function cronView(root, _route, { signal } = {}) {
             placeholder="Sem limite" aria-describedby="cron-limit-help" disabled>
           <small id="cron-limit-help">Deixe vazio para continuar sem limite. Falhas e resultados desconhecidos também consomem uma ocorrência.</small>
         </label>
+        <label class="k-field" data-timing="recurring" hidden>Monitor de fonte (opcional)
+          <input class="k-input" name="monitor" placeholder="/caminho/para/fonte ou comando, sem shell" aria-describedby="cron-monitor-help" disabled>
+          <small id="cron-monitor-help">O agente só roda quando a fonte muda. Falha da fonte é erro, nunca disparo. Sem shell: use o caminho completo e argumentos separados.</small>
+        </label>
         <button class="k-btn k-btn--primary" type="submit">Criar agendamento</button>
       </form>
     </section>
@@ -59,6 +63,24 @@ export async function cronView(root, _route, { signal } = {}) {
       field.disabled = label.hidden; field.required = !label.hidden && !recurring;
     });
   };
+  const monitorInfo = (job) => {
+    if (!job.monitor) return "";
+    const state = job.monitor_state || {};
+    return `<div class="k-monitor">
+      <p><strong>Monitor</strong> · <code>${esc(job.monitor.script)}</code></p>
+      <p>Última verificação: ${esc(date(state.last_checked_at))} · Última mudança: ${esc(date(state.last_changed_at))}</p>
+      <div class="k-actions">
+        <button class="k-btn k-btn--ghost" data-monitor-test="${esc(job.id)}">Testar fonte</button>
+        <button class="k-btn k-btn--ghost" data-monitor-remove="${esc(job.id)}">Remover monitor</button>
+      </div>
+    </div>`;
+  };
+  const monitorEditor = (job) => job.monitor || job.schedule.kind === "once" || exhausted(job)
+    ? "" : `<details class="k-monitor" data-monitor-edit="${esc(job.id)}">
+      <summary>Definir monitor de fonte</summary>
+      <label class="k-field">Comando, sem shell<input class="k-input" placeholder="/comando/para/fonte arg1 arg2" data-monitor-input></label>
+      <button class="k-btn k-btn--ghost" data-monitor-save="${esc(job.id)}">Salvar fonte</button>
+    </details>`;
   const render = () => {
     content.innerHTML = jobs.length ? jobs.map(job => `
       <article class="k-card" data-job="${esc(job.id)}">
@@ -66,6 +88,7 @@ export async function cronView(root, _route, { signal } = {}) {
         <p>${esc(occurrenceText(job))}</p>
         <p>${exhausted(job) ? "Limite de ocorrências atingido." : job.paused || !job.enabled ? "Pausado" : job.next_run_at ? `Próxima execução: ${esc(date(job.next_run_at))}` : "Agenda encerrada"}</p>
         <details><summary>Instrução</summary><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(job.prompt)}</p></details>
+        ${monitorInfo(job)}${monitorEditor(job)}
         <div class="k-actions">
           ${job.next_run_at && !exhausted(job) ? `<button class="k-btn k-btn--ghost" data-pause="${esc(job.id)}">${job.paused ? "Retomar" : "Pausar"}</button>` : ""}
           <button class="k-btn k-btn--ghost" data-history="${esc(job.id)}">Histórico</button>
@@ -101,7 +124,9 @@ export async function cronView(root, _route, { signal } = {}) {
     const kind = data.get("kind");
     const limit = kind !== "once" && data.get("times") ? { times: Number(data.get("times")) } : {};
     const schedule = kind === "once" ? { kind, run_at: new Date(String(data.get("run_at"))).toISOString() } : kind === "interval" ? { kind, minutes: Number(data.get("minutes")) } : { kind, expr: data.get("expr") };
-    operation(() => api.criarAgendamento({ name: data.get("name"), prompt: data.get("prompt"), schedule, ...limit }), "Agendamento criado.");
+    const monitor = kind !== "once" && String(data.get("monitor") || "").trim()
+      ? { type: "script", script: String(data.get("monitor")).trim() } : undefined;
+    operation(() => api.criarAgendamento({ name: data.get("name"), prompt: data.get("prompt"), schedule, ...(limit), ...(monitor ? { monitor } : {}) }), "Agendamento criado.");
   }, { signal: listeners.signal });
   root.querySelector("[data-refresh]").addEventListener("click", () => operation(async () => {}, "Atualizado."), { signal: listeners.signal });
   content.addEventListener("click", event => {
@@ -110,6 +135,20 @@ export async function cronView(root, _route, { signal } = {}) {
     if (button.dataset.pause) {
       const job = jobs.find(j => j.id === button.dataset.pause);
       operation(() => api.pausarAgendamento(job.id, !job.paused), job.paused ? "Agendamento retomado." : "Agendamento pausado. Uma execução já iniciada pode terminar.");
+    } else if (button.dataset.monitorSave) {
+      const id = button.dataset.monitorSave;
+      const script = button.closest("[data-monitor-edit]")?.querySelector("[data-monitor-input]").value?.trim();
+      if (!script) { message.textContent = "Informe o comando da fonte."; return; }
+      operation(() => api.definirMonitor(id, script), "Monitor definido. O agente roda quando a fonte muda.");
+    } else if (button.dataset.monitorTest) {
+      const id = button.dataset.monitorTest;
+      operation(async () => {
+        const result = await api.rodarMonitor(id);
+        message.textContent = result.ok ? `Fonte OK (${result.output_chars} caracteres) · decisão do próximo tick: ${result.decision}.` : `Fonte falhou: ${result.detail}.`;
+      }, "");
+    } else if (button.dataset.monitorRemove) {
+      const id = button.dataset.monitorRemove;
+      operation(() => api.removerMonitor(id), "Monitor removido. O agente volta a rodar a cada ocorrência.");
     } else if (button.dataset.remove) {
       const id = button.dataset.remove;
       operation(() => api.excluirAgendamento(id), "Agendamento excluído. Conversas e histórico foram preservados.");

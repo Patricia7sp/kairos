@@ -97,10 +97,25 @@ class ArvoreTests(unittest.TestCase):
         self.assertLessEqual(do_legado, set(command_names()))
 
     def test_os_subcomandos_reais_foram_preservados(self):
-        # Extraídos de `add_parser("...")` em cada módulo do legado.
+        # Extraídos de `add_parser("...")` em cada módulo do legado. O grupo
+        # `cron` ganhou os subcomandos de monitor (`monitor-set/clear/show/
+        # run`), implementados pelo lote de fontes de monitor.
         esperado = {
             "config": {"check", "edit", "env-path", "migrate", "path", "set", "show"},
-            "cron": {"list", "create", "remove", "history", "pause", "resume", "status", "tick"},
+            "cron": {
+                "list",
+                "create",
+                "remove",
+                "history",
+                "pause",
+                "resume",
+                "status",
+                "tick",
+                "monitor-set",
+                "monitor-clear",
+                "monitor-show",
+                "monitor-run",
+            },
             "skills": {"add", "install", "list", "remove", "tap"},
             "sync": {"disable", "enable", "now", "push", "status"},
             "pairing": {"clear-pending", "list", "revoke"},

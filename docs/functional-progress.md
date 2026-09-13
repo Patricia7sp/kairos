@@ -72,14 +72,16 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 - Chat: busca web opcional e ciclo real de ferramentas implementados no novo lote,
   validado conforme aceite abaixo. Arquivos/terminal continuam no Agent Runtime isolado. Outras
   ferramentas não estão habilitadas pelo Chat.
-- Cron operacional foi implementado no lote seguinte, descrito abaixo. Monitores,
-  notepad, blueprints e entrega externa seguem pendentes. Limites finitos recorrentes
+- Cron operacional foi implementado no lote seguinte, descrito abaixo. Notepad,
+  blueprints e entrega externa seguem pendentes. Monitores de fonte foram
+  implementados no lote descrito ao final deste documento. Limites finitos recorrentes
   estão publicados via PR #28.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
   de registros abaixo, já publicado via PR #27. `/api/cron/jobs` usa armazenamento real.
-- A CLI declara **50 comandos**. Após implementar `model`, `logs`, `insights` e `debug`, **25** ainda não têm handler:
+- A CLI declara **50 comandos**. Após implementar `model`, `logs`, `insights`, `debug`
+  e `monitoring`, **24** ainda não têm handler:
   acp, backup, claw, console, dump, gui, hooks, import-agent, import,
-  login, logout, memory, monitoring, pairing, pause, peer, prompt-size, setup,
+  login, logout, memory, pairing, pause, peer, prompt-size, setup,
   skin, slack, uninstall, update, verify, webhook, whatsapp. Há também subcomandos
   pendentes dentro dos grupos com handler. Esses comandos retornam 69.
 - Registry canônico possui oito provedores: anthropic, custom, deepseek, gemini, groq,
@@ -211,7 +213,7 @@ Código integrado e publicado até `1b5e317`; PRs #24 e #25 entregues. Este regi
 final foi acrescentado no arquivo local de progresso após o aceite publicado.
 
 O escopo funcional integral permanece aberto. Próximos trabalhos independentes:
-laço de ferramentas no Chat com as permissões adequadas, monitores/notepad/blueprints
+laço de ferramentas no Chat com as permissões adequadas, notepad/blueprints
 do cron, comandos CLI ainda ausentes, APIs de ambiente/logs, aceite operacional de
 MCP/plugins/skills/TUI/desktop e conectores externos. Não reutilizar os checkmarks
 históricos do README como prova de funcionamento completo.
@@ -540,7 +542,7 @@ Pendências que exigem implementação ou aceite próprio:
 
 - 26 comandos CLI ainda sem handler, listados no inventário. Subcomandos e paridade
   completa de grupos existentes também precisam de conferência.
-- Monitores de fonte, notepad, blueprints, schedulers externos e entrega a canais.
+- Notepad, blueprints, schedulers externos e entrega a canais.
 - Provedores além dos oito canônicos e as integrações de plataforma previstas;
   credenciais e contratos específicos serão necessários para seus aceites reais.
 - TUI/desktop, MCP, plugins, perfis isolados e skills ainda precisam de aceite
@@ -586,7 +588,7 @@ Revisão independente encontrou quatro falhas corrigidas com regressões:
 capacidade inválida do cache não é emitida, preço inválido e JSON do runtime
 excessivamente aninhado não interrompem as demais observações, e a seleção global
 compartilha a interpretação canônica do Chat. Segunda revisão sem bloqueadores.
-Manual: [Diagnóstico local](diagnostico.md). Restam 25 comandos sem handler; o
+Manual: [Diagnóstico local](diagnostico.md). Restam 24 comandos sem handler; o
 escopo funcional integral e as demais pendências do checkpoint continuam abertos.
 
 ### Retomada e aceite de diagnóstico — 2026-09-13
@@ -652,3 +654,43 @@ escopo funcional integral e as demais pendências do checkpoint continuam aberto
   `~/.local/share/kairos-production-backups/20260913T041107Z/`: `deployment.json`,
   `published-acceptance.json`, estados conferidos, inventário e backup completo. Não copiar esses
   arquivos privados para PRs. Este documento registra as evidências não sensíveis.
+
+## Monitores de fonte no cron — implementação e validação local
+
+Branch `feat/source-monitors`, base PR #31 integrada. Objetivo: o agente só roda
+quando a fonte muda. Execução real de comandos no host, sem shell e com ambiente
+mínimo; decisão por hash da saída; ticks suprimidos sem reserva de ocorrência nem
+linha no ledger.
+
+- Monitor de tipo `script` persistido em `cron/jobs.json` (`{type, script}`);
+  estado de comparação em `monitor_state` (`last_output_hash`, `last_changed_at`,
+  `last_checked_at`). `once` com monitor, tipo desconhecido ou campos extras são
+  recusados. `croniter` já instalado; nenhuma migração de banco — o ledger `executions`
+  não recebe linha para tick suprimido nem para erro de fonte.
+- Primeira verificação ou mudança → turno normal do agente, com o novo hash gravado
+  atomicamente no mesmo JSON do claim (uma reescrita; crash não duplica o turno).
+  Saída igual → `cron.no_change` registrado, cadência avança, nenhuma ocorrência
+  consumida. Fonte falhou (timeout, código não nulo, executável ausente) →
+  `cron.monitor_error`, nunca "mudança"; o hash anterior fica intocado.
+- Execução da fonte: `shlex.split` + `shell=False` (pipe/`&&` são literais),
+  `start_new_session=True` com kill do grupo de processos no timeout; prazos/tamanhos
+  limitados (30 s padrão, 64 KiB padrão; máximos 120 s/256 KiB); ambiente somente
+  `HOME`=KAIROS_HOME, `PATH`, `LANG`, `LC_ALL`, `TZ` — sem token Web, passphrase ou
+  `KAIROS_HOME` para o script.
+- Superfície: CLI `kairos cron monitor-set|monitor-clear|monitor-show|monitor-run`,
+  grupo `kairos monitoring list|status|test` (dest `monitoring_command`), `--monitor`
+  na criação; API `GET/PUT/DELETE /api/cron/jobs/{id}/monitor` e
+  `POST /api/cron/jobs/{id}/monitor/run`; painel mostra fonte, última verificação e
+  última mudança, com edição e teste da fonte por job. Sem integrar notepad/blueprints.
+- Regressões: decisão para first_run/no_change/source_error, hash persistido antes do
+  stream, avanço de cadência em ticks suprimidos, orçamento e ledger intocados,
+  pausado nunca executa fonte, `once`+monitor recusado em CLI e API, limpeza de
+  monitor em job não monitorado, morte do grupo de processos no timeout, e superfícies
+  CLI/API/Web coerentes.
+- Validação local: **137 testes do cron + 12 subtestes**, 24 a mais que no lote
+  anterior; `test_cli_surface` e superfícies de cron 39 testes/173 subtestes; Web
+  93 testes/4.778 subtestes; vitest 167 (14 arquivos) e `tsc --noEmit` sem erros;
+  Ruff, formato e imports em ordem. Manual: [Agendamentos](agendamentos.md).
+  O inventário de comandos sem handler caiu de 25 para **24** com o grupo `monitoring`.
+- Publicação ainda depende dos checks locais e remotos; entrega e aceite externo
+  serão registrados após confirmação.

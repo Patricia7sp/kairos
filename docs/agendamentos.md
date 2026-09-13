@@ -66,5 +66,60 @@ Ela também permite reconciliar execuções abandonadas sem confundir PIDs entre
 containers que compartilham o volume. A implantação atual usa Linux e `flock`;
 o ticker em Windows ainda não foi validado. Não remova arquivos de lock ativos.
 
-Monitores de fonte, notepad, blueprints, schedulers externos e entrega para canais
-não estão ligados a este executor. Campos sem implementação são recusados pela API.
+## Monitores de fonte
+
+Um agendamento recorrente pode ter um **monitor de fonte**: o agente só roda
+quando a fonte muda. A fonte é um comando executado a cada tick devido, e o
+resultado é comparado com a última saída:
+
+- **Primeira verificação ou mudança** → o agente roda como num tick comum, e o
+  novo hash da saída é gravado junto com o claim (uma única reescrita do JSON).
+- **Saída igual** → o tick é **suprimido**: o agente não roda, nenhuma ocorrência
+  é reservada e nenhuma linha existe no ledger. A cadência avança para o próximo
+  horário e o evento `cron.no_change` é registrado.
+- **Fonte falhou** (tempo excedido, saída não nula, executável ausente) → **erro,
+  nunca mudança**. O hash anterior fica intocado, a fonte não dispara o agente e
+  o evento `cron.monitor_error` é registrado. Um erro não rebaixa a decisão para
+  "nada mudou": continua sendo reportado como erro de fonte.
+
+```bash
+# Definir/consultar/remover a fonte de um job na CLI:
+kairos cron create --name 'Vigiado' --prompt 'Aja a partir da fonte' --every 60 \
+  --monitor '/opt/kairos/bin/check-status'
+kairos cron monitor-show ID --json
+kairos cron monitor-run ID      # executa a fonte uma vez, sem tocar em agenda
+kairos cron monitor-clear ID
+
+# O grupo dedicado:
+kairos monitoring list
+kairos monitoring status
+kairos monitoring test ID
+```
+
+A execução da fonte é deliberadamente estreita:
+
+- **Sem shell** (`shell=False`): a linha é dividida por `shlex.split`. `|`, `;`,
+  `&&` são argumentos literais, não operadores. Use o caminho completo do
+  executável e argumentos separados.
+- **Ambiente mínimo**: só `HOME` (=KAIROS_HOME), `PATH`, `LANG`, `LC_ALL` e
+  `TZ`. `KAIROS_HOME`, `KAIROS_WEB_TOKEN` e a passphrase do cofre **não** são
+  passados ao script.
+- **Orçamentos**: prazo padrão 30 s, máximo 120 s; saída padrão 64 KiB, máximo
+  256 KiB. No timeout, o grupo de processos é morto por inteiro.
+- **Sem dispatcher**: a fonte não invoca ferramentas nem envia mensagens. Falha e
+  sucesso são determinados apenas pelo código de saída e pela saída capturada.
+
+O campo persistido é `monitor: {"type": "script", "script": "<comando>"}`. O
+estado fica em `monitor_state: {last_output_hash, last_changed_at,
+last_checked_at}`. Só `script` existe hoje; `once` com monitor é recusado na
+criação. Suprimir/encontrar erro não consome o limite de ocorrências — o orçamento
+remanescente é o mesmo após um tick suprimido. Pausar um job evita até a execução
+da fonte. Habilitar o monitor de um job existente redefine o estado: o próximo
+tick devido é tratado como primeira verificação.
+
+A API Web expõe `GET/PUT/DELETE /api/cron/jobs/{id}/monitor` e
+`POST /api/cron/jobs/{id}/monitor/run` (teste avulso da fonte); o painel mostra a
+fonte, a última verificação e a última mudança de cada job monitorado.
+
+Notepad, blueprints, schedulers externos e entrega para canais não estão ligados a
+este executor. Campos sem implementação são recusados pela API.

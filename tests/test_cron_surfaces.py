@@ -104,6 +104,104 @@ def test_cron_expression_schedules_actual_next_occurrence(home):
     assert job["next_run_at"] == "2026-09-13T09:00:00+00:00"
 
 
+def test_cli_monitor_set_show_clear_and_monitoring_surface(home, capsys):
+    assert (
+        main(
+            [
+                "cron",
+                "create",
+                "--name",
+                "Vigiado",
+                "--prompt",
+                "Aja a partir da fonte",
+                "--every",
+                "5",
+                "--monitor",
+                "echo ok",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    job = json.loads(capsys.readouterr().out)
+    assert job["monitor"] == {"type": "script", "script": "echo ok"}
+    assert main(["cron", "monitor-show", job["id"], "--json"]) == 0
+    mostra = json.loads(capsys.readouterr().out)
+    assert mostra["script"] == "echo ok"
+    assert main(["monitoring", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["monitored"][0]["id"] == job["id"]
+    assert main(["monitoring", "status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["monitored"] == 1
+    assert main(["monitoring", "test", job["id"], "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["decisao"] == "first_run"
+    assert main(["cron", "monitor-clear", job["id"], "--json"]) == 0
+    capsys.readouterr()
+    assert "monitor" not in JobStore(home).get(job["id"])
+    assert main(["cron", "monitor-show", job["id"], "--json"]) != 0
+
+
+def test_cli_rejects_monitor_on_once_schedule(home):
+    assert (
+        main(
+            [
+                "cron",
+                "create",
+                "--name",
+                "Único",
+                "--prompt",
+                "x",
+                "--at",
+                "2030-01-01T00:00:00Z",
+                "--monitor",
+                "echo x",
+            ]
+        )
+        != 0
+    )
+    assert JobStore(home).list() == []
+
+
+def test_api_monitor_flow_requires_auth_and_is_real(home):
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    data = {
+        "name": "Vigiado",
+        "prompt": "Aja a partir da fonte",
+        "schedule": {"kind": "interval", "minutes": 1},
+    }
+    created = client.post("/api/cron/jobs", json=data)
+    assert created.status_code == 201
+    url = "/api/cron/jobs/" + created.json()["id"] + "/monitor"
+    assert TestClient(app).put(url, json={"script": "echo x"}).status_code == 401
+    assert client.put(url, json={"script": "echo ok"}).json()["monitor"] == {
+        "type": "script",
+        "script": "echo ok",
+    }
+    assert client.get(url).json()["monitor"]["script"] == "echo ok"
+    run = client.post(url + "/run")
+    assert run.status_code == 200
+    assert run.json()["ok"] is True
+    assert run.json()["decision"] == "first_run"
+    assert client.delete(url).status_code == 200
+    assert client.get(url).status_code == 404
+    assert client.put(url, json={"script": "echo x"}).status_code == 200
+    assert client.delete(url).status_code == 200
+
+
+def test_api_rejects_monitor_on_once_schedule(home):
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    result = client.post(
+        "/api/cron/jobs",
+        json={
+            "name": "Único",
+            "prompt": "x",
+            "schedule": {"kind": "once", "run_at": "2030-01-01T00:00:00Z"},
+            "monitor": {"type": "script", "script": "echo x"},
+        },
+    )
+    assert result.status_code == 422
+    assert JobStore(home).list() == []
+
+
 def test_web_lifespan_stops_ticker_and_closes_service_even_if_journal_write_fails(
     home, monkeypatch
 ):

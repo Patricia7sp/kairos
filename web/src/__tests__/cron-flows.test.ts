@@ -49,3 +49,29 @@ it('escapes stored job content and ignores replies after leaving the page',async
  await mount;
  expect(root.innerHTML).toBe('Outra página');
 });
+
+it('monitor flow: define, test, run on change and remove a source monitor',async()=>{
+ let job:any={id:'j',name:'Vigiado',prompt:'Aja',schedule:{kind:'interval',minutes:5},next_run_at:'2026-09-12T12:00:00Z'};
+ const calls:string[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit)=>{
+  if(url.endsWith('/status'))return json({running:true,last_tick:null});
+  if(url.includes('/monitor')&&init?.method==='PUT'){calls.push('set:'+JSON.parse(String(init.body)).script);job.monitor={type:'script',script:JSON.parse(String(init.body)).script};job.monitor_state={last_checked_at:null,last_changed_at:null};return json(job);}
+  if(url.includes('/monitor/run')&&init?.method==='POST'){calls.push('run');return json({ok:true,output_chars:2,decision:'first_run'});}
+  if(url.includes('/monitor')&&init?.method==='DELETE'){calls.push('remove');delete job.monitor;job.monitor_state=null;return json({cleared:true});}
+  if(url.includes('/monitor'))return json({monitor:job.monitor,monitor_state:job.monitor_state});
+  return json({jobs:[job]});
+ }));
+ const root=document.createElement('main');
+ await cronView(root,{});
+ // Define via editor button
+ (root.querySelector('[data-monitor-input]') as HTMLInputElement).value='echo vigia';
+ (root.querySelector('[data-monitor-save]') as HTMLButtonElement).click();await flush();await flush();
+ expect(job.monitor!.script).toBe('echo vigia');
+ // Test once
+ (root.querySelector('[data-monitor-test]') as HTMLButtonElement).click();await flush();await flush();
+ expect(calls).toContain('run');
+ // Removing returns the editor back
+ (root.querySelector('[data-monitor-remove]') as HTMLButtonElement).click();await flush();await flush();
+ expect(calls).toContain('remove');
+ expect(root.querySelector('[data-monitor-edit]')).not.toBeNull();
+});
