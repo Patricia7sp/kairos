@@ -31,10 +31,22 @@ class MonitorJob(BaseModel):
     script: StrictStr
 
 
+class NotepadValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: StrictStr
+
+
 def store(request):
     from kairos_web.server import _application_home
 
     return JobStore(_application_home(request.app))
+
+
+def notepad_store(request):
+    from kairos_cron.notepad import NotepadStore
+    from kairos_web.server import _application_home
+
+    return NotepadStore(_application_home(request.app))
 
 
 def operate(operation):
@@ -119,6 +131,41 @@ async def run_monitor_source(job_id: str, request: Request):
         }
 
     return await operate(execute)
+
+
+@router.get("/jobs/{job_id}/notepad")
+def notepad_list(job_id: str, request: Request):
+    return {"job_id": job_id, "notes": operate(lambda: notepad_store(request).list(job_id))}
+
+
+@router.get("/jobs/{job_id}/notepad/{key}")
+def notepad_get(job_id: str, key: str, request: Request):
+    return operate(
+        lambda: {"job_id": job_id, "key": key, "value": notepad_store(request).get(job_id, key)}
+    )
+
+
+@router.put("/jobs/{job_id}/notepad/{key}")
+def notepad_set(job_id: str, key: str, payload: NotepadValue, request: Request):
+    return operate(lambda: notepad_store(request).set(job_id, key, payload.value))
+
+
+@router.delete("/jobs/{job_id}/notepad/{key}")
+def notepad_delete(job_id: str, key: str, request: Request):
+    store = notepad_store(request)
+    return {
+        "job_id": job_id,
+        "key": key,
+        "deleted": operate(lambda: store.delete(job_id, key)),
+    }
+
+
+@router.delete("/jobs/{job_id}/notepad")
+def notepad_clear(job_id: str, request: Request):
+    return {
+        "job_id": job_id,
+        "cleared": operate(lambda: notepad_store(request).clear(job_id)),
+    }
 
 
 @router.get("/status")

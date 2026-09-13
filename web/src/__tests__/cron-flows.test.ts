@@ -75,3 +75,28 @@ it('monitor flow: define, test, run on change and remove a source monitor',async
  expect(calls).toContain('remove');
  expect(root.querySelector('[data-monitor-edit]')).not.toBeNull();
 });
+
+it('notepad flow: save a durable note and remove it',async()=>{
+ let job:any={id:'j',name:'Rotina',prompt:'Aja',schedule:{kind:'interval',minutes:5},next_run_at:'2026-09-12T12:00:00Z'};
+ let notes:any[]=[];
+ const calls:string[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit)=>{
+  if(url.endsWith('/status'))return json({running:true,last_tick:null});
+  if(url.includes('/notepad')&&init?.method==='PUT'){const key=decodeURIComponent(url.split('/notepad/')[1]!);const value=JSON.parse(String(init.body)).value;calls.push('set:'+key+'='+value);notes=[...notes.filter(n=>n.key!==key),{job_id:'j',key,value,updated_at:'2026-09-12T12:00:00Z'}];return json(notes[notes.length-1]);}
+  if(url.includes('/notepad')&&init?.method==='DELETE'){const key=decodeURIComponent(url.split('/notepad/')[1]!);calls.push('delete:'+key);notes=notes.filter(n=>n.key!==key);return json({job_id:'j',cleared:true});}
+  if(url.includes('/notepad'))return json({job_id:'j',notes});
+  return json({jobs:[job]});
+ }));
+ const root=document.createElement('main');
+ await cronView(root,{});
+ expect(root.textContent).toContain('Bloco de notas persistente (0)');
+ (root.querySelector('[data-note-key-input]') as HTMLInputElement).value='cursor';
+ (root.querySelector('[data-note-value-input]') as HTMLInputElement).value='42';
+ (root.querySelector('[data-note-save]') as HTMLButtonElement).click();await flush();await flush();
+ expect(calls).toContain('set:cursor=42');
+ expect(root.textContent).toContain('Bloco de notas persistente (1)');
+ expect(root.textContent).toContain('cursor');
+ (root.querySelector('[data-note-remove]') as HTMLButtonElement).click();await flush();await flush();
+ expect(calls).toContain('delete:cursor');
+ expect(root.textContent).toContain('Bloco de notas persistente (0)');
+});

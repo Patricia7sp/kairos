@@ -17,7 +17,7 @@ As duas divergências deliberadas em relação ao legado estão marcadas com
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 LEGACY_SHAPE_VERSION = 26
 FTS_STORAGE_VERSION = 1
 

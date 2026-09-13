@@ -72,8 +72,9 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
 - Chat: busca web opcional e ciclo real de ferramentas implementados no novo lote,
   validado conforme aceite abaixo. Arquivos/terminal continuam no Agent Runtime isolado. Outras
   ferramentas não estão habilitadas pelo Chat.
-- Cron operacional foi implementado no lote seguinte, descrito abaixo. Notepad,
-  blueprints e entrega externa seguem pendentes. Monitores de fonte foram
+- Cron operacional foi implementado no lote seguinte, descrito abaixo. Notepad
+  por job foi implementado no lote descrito ao final deste documento. Blueprints
+  e entrega externa seguem pendentes. Monitores de fonte foram
   implementados no lote descrito ao final deste documento. Limites finitos recorrentes
   estão publicados via PR #28.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
@@ -213,8 +214,8 @@ Código integrado e publicado até `1b5e317`; PRs #24 e #25 entregues. Este regi
 final foi acrescentado no arquivo local de progresso após o aceite publicado.
 
 O escopo funcional integral permanece aberto. Próximos trabalhos independentes:
-laço de ferramentas no Chat com as permissões adequadas, notepad/blueprints
-do cron, comandos CLI ainda ausentes, APIs de ambiente/logs, aceite operacional de
+laço de ferramentas no Chat com as permissões adequadas, blueprints do cron,
+comandos CLI ainda ausentes, APIs de ambiente/logs, aceite operacional de
 MCP/plugins/skills/TUI/desktop e conectores externos. Não reutilizar os checkmarks
 históricos do README como prova de funcionamento completo.
 
@@ -542,7 +543,8 @@ Pendências que exigem implementação ou aceite próprio:
 
 - 26 comandos CLI ainda sem handler, listados no inventário. Subcomandos e paridade
   completa de grupos existentes também precisam de conferência.
-- Notepad, blueprints, schedulers externos e entrega a canais.
+- Notepad por job implementado (bloco persistente injetado no prompt); blueprints,
+  schedulers externos e entrega a canais permanecem pendentes.
 - Provedores além dos oito canônicos e as integrações de plataforma previstas;
   credenciais e contratos específicos serão necessários para seus aceites reais.
 - TUI/desktop, MCP, plugins, perfis isolados e skills ainda precisam de aceite
@@ -681,7 +683,8 @@ linha no ledger.
   grupo `kairos monitoring list|status|test` (dest `monitoring_command`), `--monitor`
   na criação; API `GET/PUT/DELETE /api/cron/jobs/{id}/monitor` e
   `POST /api/cron/jobs/{id}/monitor/run`; painel mostra fonte, última verificação e
-  última mudança, com edição e teste da fonte por job. Sem integrar notepad/blueprints.
+  última mudança, com edição e teste da fonte por job. O notepad por job foi
+  implementado no lote seguinte; blueprints seguem fora do executor.
 - Regressões: decisão para first_run/no_change/source_error, hash persistido antes do
   stream, avanço de cadência em ticks suprimidos, orçamento e ledger intocados,
   pausado nunca executa fonte, `once`+monitor recusado em CLI e API, limpeza de
@@ -692,5 +695,38 @@ linha no ledger.
   93 testes/4.778 subtestes; vitest 167 (14 arquivos) e `tsc --noEmit` sem erros;
   Ruff, formato e imports em ordem. Manual: [Agendamentos](agendamentos.md).
   O inventário de comandos sem handler caiu de 25 para **24** com o grupo `monitoring`.
+- Publicação ainda depende dos checks locais e remotos; entrega e aceite externo
+  serão registrados após confirmação.
+
+## Notepad por job — implementação e validação local
+
+Branch `feat/cron-notepad`, base PR #33 integrada. Objetivo: memória KV durável e
+persistente entre as execuções agendadas de um job (cursors, watermarks,
+listas), mantendo o contrato do legado: escrita via CLI, sem tool de modelo.
+
+- Armazenamento na migração **v4** do `state.db` (tabela `cron_notepad`, chave
+  primária `(job_id, key)`); `SCHEMA_VERSION` subiu de 3 para 4 e a tabela entrou
+  em `CANONICAL_TABLES`. Notepad vazio injeta string vazia — prompt byte-idêntico
+  para jobs que não usam o bloco.
+- Injeção: antes de cada turno, o bloco é anexado ao início do prompt com o
+  cabeçalho literal `## Job notepad (persistent across runs)` e a instrução de
+  uso pela CLI (`kairos cron notepad ID set/get/delete/list`).
+- Limites documentados com rejeição sem escrita parcial: `MAX_KEY_CHARS` 128,
+  `MAX_VALUE_BYTES` 16 KiB por valor (UTF-8), `MAX_JOB_TOTAL_BYTES` 64 KiB por
+  job somando chave+valor. Excluir um job limpa o notepad de forma best-effort,
+  nunca bloqueando a exclusão; volume fresco não materializa `state.db`.
+- Superfícies: CLI `kairos cron notepad <id> [get|set|delete|list] [key] [value]`
+  (padrão `list`); API `GET /api/cron/jobs/{id}/notepad`, `GET/PUT/DELETE
+  /api/cron/jobs/{id}/notepad/{key}` e `DELETE .../notepad` (limpar); painel
+  mostra o bloco de notas por job com salvar/remover anotações.
+- Regressões: persistência e upsert, isolamento entre jobs, limites rejeitados
+  sem escrita parcial, render vazio/string literal, injeção no scheduler com e
+  sem notepad, limpeza na remoção, CLI real de ponta a ponta, API autenticada e
+  superfícies CLI/API/Web coerentes.
+- Validação local: **13 testes novos** de notepad; 302 testes do cron/schema/
+  storage verdes; `test_cli_surface` e `test_local_diagnostics` atualizados para
+  a versão 4; vitest **168** (14 arquivos) e `tsc --noEmit` sem erros; Ruff,
+  formato e imports em ordem. Sweep completo: 2.224 aprovados, com
+  apenas as duas reprovações esperadas do Codex. Manual: [Agendamentos](agendamentos.md).
 - Publicação ainda depende dos checks locais e remotos; entrega e aceite externo
   serão registrados após confirmação.

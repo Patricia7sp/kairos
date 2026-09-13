@@ -15,6 +15,7 @@ from pathlib import Path
 from kairos_state import schema as _schema
 from kairos_state.connection import read_schema_version
 from kairos_state.cron_schema import CRON_SCHEMA_SQL
+from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 
 __all__ = [
@@ -70,6 +71,10 @@ def _v3_cron_schema(conn: sqlite3.Connection) -> None:
     execute_schema(conn, CRON_SCHEMA_SQL)
 
 
+def _v4_notepad_schema(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, NOTEPAD_SCHEMA_SQL)
+
+
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
 #: transação. Rodar duas vezes não altera o resultado (RF-17): a versão
 #: registrada faz o segundo passe não encontrar degrau pendente.
@@ -77,6 +82,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "schema base — forma final do v26 do legado", _v1_base_schema),
     Migration(2, "sessões e journal durável de agent runtime", _v2_runtime_schema),
     Migration(3, "ledger durável de agendamentos", _v3_cron_schema),
+    Migration(4, "notepad durável por job de agendamentos", _v4_notepad_schema),
 )
 
 
@@ -143,6 +149,7 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 #: gatilhos, tabelas FTS e objetos derivados — nunca tocar nestas.
 CANONICAL_TABLES = frozenset(
     {
+        "cron_notepad",
         "executions",
         "sessions",
         "messages",

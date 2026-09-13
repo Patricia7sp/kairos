@@ -121,5 +121,46 @@ A API Web expõe `GET/PUT/DELETE /api/cron/jobs/{id}/monitor` e
 `POST /api/cron/jobs/{id}/monitor/run` (teste avulso da fonte); o painel mostra a
 fonte, a última verificação e a última mudança de cada job monitorado.
 
-Notepad, blueprints, schedulers externos e entrega para canais não estão ligados a
-este executor. Campos sem implementação são recusados pela API.
+## Bloco de notas persistente por job
+
+Cada job tem um **notepad**: um KV durável que sobrevive entre execuções
+agendadas, usado para cursors, watermarks e listas de vigilância. A escrita é
+feita pela CLI; o conteúdo é **injetado no final do prompt** antes de cada
+execução do job, como um bloco no formato:
+
+```text
+## Job notepad (persistent across runs)
+This durable scratchpad survives between scheduled runs of this job. Update it via the CLI, e.g.:
+`kairos cron notepad ID set <key> <value>` (also: get/delete/list;
+`kairos cron notepad ID delete <key>` removes an entry).
+
+- cursor: 42
+```
+
+```bash
+kairos cron notepad ID list              # lista as anotações do job
+kairos cron notepad ID get cursor        # valor de uma chave (ou "null")
+kairos cron notepad ID set cursor 42     # cria/atualiza uma chave
+kairos cron notepad ID delete cursor     # remove uma chave
+```
+
+O notepad é chaveado por id do job, mas **não exige que o job exista** no momento
+da escrita: o bloco acompanha o id e pode ser usado como memória de apoio mesmo
+em fluxos avulsos. Notepad vazio injeta **string vazia** — jobs que nunca usam a
+funcionalidade mantêm o prompt byte-idêntico. Excluir o job limpa seu notepad de
+forma best-effort (a exclusão nunca é bloqueada por isso).
+
+Limites documentados, com rejeição sem escrita parcial:
+
+- `MAX_KEY_CHARS`: 128 caracteres por chave.
+- `MAX_VALUE_BYTES`: 16 KiB por valor, medido em bytes UTF-8.
+- `MAX_JOB_TOTAL_BYTES`: 64 KiB somando chave+valor de todas as chaves do job.
+
+Os dados ficam na tabela `cron_notepad` de `state.db` (migração v4). A API Web
+expõe `GET /api/cron/jobs/{id}/notepad`, `GET/PUT/DELETE
+/api/cron/jobs/{id}/notepad/{key}` e `DELETE /api/cron/jobs/{id}/notepad`
+(limpar tudo); o painel mostra o bloco de notas de cada job e permite salvar e
+remover anotações.
+
+Blueprints, schedulers externos e entrega para canais não estão ligados a este
+executor. Campos sem implementação são recusados pela API.

@@ -113,6 +113,17 @@ def _cron_args(subcommand: str, parser) -> None:
         "monitor-run",
     ):
         parser.add_argument("job_id")
+    elif subcommand == "notepad":
+        parser.add_argument("job_id")
+        parser.add_argument(
+            "notepad_action",
+            nargs="?",
+            default="list",
+            choices=["get", "set", "delete", "list"],
+            help="Ação (padrão: list)",
+        )
+        parser.add_argument("key", nargs="?", help="Chave (get/set/delete)")
+        parser.add_argument("value", nargs="?", help="Valor a guardar (set)")
     elif subcommand == "history":
         parser.add_argument("job_id", nargs="?")
 

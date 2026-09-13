@@ -162,6 +162,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("monitor-clear", "Remove o monitor de um job"),
         _sub("monitor-show", "Mostra o monitor e o estado de verificação"),
         _sub("monitor-run", "Executa a fonte do monitor uma vez"),
+        _sub("notepad", "Memória KV durável de um job, persistente entre execuções"),
         status=Status.IMPLEMENTED,
         unit="cron",
     ),

@@ -16,6 +16,7 @@ export async function cronView(root, _route, { signal } = {}) {
   const listeners = new AbortController();
   let disposed = Boolean(signal?.aborted), busy = false, historyVersion = 0;
   let jobs = [];
+  let notepads = new Map();
   const dispose = () => { disposed = true; listeners.abort(); signal?.removeEventListener("abort", dispose); };
   if (disposed) return dispose;
   signal?.addEventListener("abort", dispose, { once: true });
@@ -81,6 +82,17 @@ export async function cronView(root, _route, { signal } = {}) {
       <label class="k-field">Comando, sem shell<input class="k-input" placeholder="/comando/para/fonte arg1 arg2" data-monitor-input></label>
       <button class="k-btn k-btn--ghost" data-monitor-save="${esc(job.id)}">Salvar fonte</button>
     </details>`;
+  const notepadInfo = (job) => {
+    const notes = notepads.get(job.id) || [];
+    const lines = notes.map(n => `<li><code>${esc(n.key)}</code>: <span style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(n.value)}</span> <button class="k-btn k-btn--ghost" type="button" data-note-remove="${esc(job.id)}" data-note-key="${esc(n.key)}">Remover</button></li>`).join("");
+    return `<details class="k-monitor" data-notepad="${esc(job.id)}">
+      <summary>Bloco de notas persistente (${notes.length})</summary>
+      ${notes.length ? `<ul style="list-style:none;padding-left:0">${lines}</ul>` : "<p>Sem anotações.</p>"}
+      <label class="k-field">Chave<input class="k-input" placeholder="cursor" data-note-key-input></label>
+      <label class="k-field">Valor<input class="k-input" placeholder="última posição lida" data-note-value-input></label>
+      <button class="k-btn k-btn--ghost" type="button" data-note-save="${esc(job.id)}">Salvar anotação</button>
+    </details>`;
+  };
   const render = () => {
     content.innerHTML = jobs.length ? jobs.map(job => `
       <article class="k-card" data-job="${esc(job.id)}">
@@ -88,7 +100,7 @@ export async function cronView(root, _route, { signal } = {}) {
         <p>${esc(occurrenceText(job))}</p>
         <p>${exhausted(job) ? "Limite de ocorrências atingido." : job.paused || !job.enabled ? "Pausado" : job.next_run_at ? `Próxima execução: ${esc(date(job.next_run_at))}` : "Agenda encerrada"}</p>
         <details><summary>Instrução</summary><p style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(job.prompt)}</p></details>
-        ${monitorInfo(job)}${monitorEditor(job)}
+        ${monitorInfo(job)}${monitorEditor(job)}${notepadInfo(job)}
         <div class="k-actions">
           ${job.next_run_at && !exhausted(job) ? `<button class="k-btn k-btn--ghost" data-pause="${esc(job.id)}">${job.paused ? "Retomar" : "Pausar"}</button>` : ""}
           <button class="k-btn k-btn--ghost" data-history="${esc(job.id)}">Histórico</button>
@@ -99,7 +111,12 @@ export async function cronView(root, _route, { signal } = {}) {
   const load = async () => {
     const [data, status] = await Promise.all([api.agendamentos(), api.statusAgendamentos()]);
     if (disposed) return;
-    jobs = data.jobs; render();
+    jobs = data.jobs;
+    const lists = await Promise.all(jobs.map(j => api.blocoNotas(j.id)
+      .then(r => [j.id, r.notes]).catch(() => [j.id, []])));
+    if (disposed) return;
+    notepads = new Map(lists);
+    render();
     root.querySelector("[data-cron-status]").textContent = status.error || (status.running ? `Serviço ativo. Verificação a cada minuto. Última verificação: ${date(status.last_tick)}.` : "Agendador não está ativo nesta instância.");
   };
   const operation = async (action, success) => {
@@ -149,6 +166,17 @@ export async function cronView(root, _route, { signal } = {}) {
     } else if (button.dataset.monitorRemove) {
       const id = button.dataset.monitorRemove;
       operation(() => api.removerMonitor(id), "Monitor removido. O agente volta a rodar a cada ocorrência.");
+    } else if (button.dataset.noteSave) {
+      const id = button.dataset.noteSave;
+      const details = button.closest("[data-notepad]");
+      const key = details?.querySelector("[data-note-key-input]").value?.trim();
+      const value = details?.querySelector("[data-note-value-input]").value ?? "";
+      if (!key) { message.textContent = "Informe a chave da anotação."; return; }
+      operation(() => api.definirNota(id, key, value), "Anotação salva.");
+    } else if (button.dataset.noteRemove) {
+      const id = button.dataset.noteRemove;
+      const key = button.dataset.noteKey;
+      operation(() => api.removerNota(id, key), "Anotação removida.");
     } else if (button.dataset.remove) {
       const id = button.dataset.remove;
       operation(() => api.excluirAgendamento(id), "Agendamento excluído. Conversas e histórico foram preservados.");
