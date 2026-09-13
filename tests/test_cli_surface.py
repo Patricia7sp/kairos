@@ -165,6 +165,18 @@ class ParserTests(unittest.TestCase):
                     argv = ["chat", "--session", "surface-test"]
                 if c.name in ("config",) and argv[1] in ("set",):
                     argv += ["k", "v"]
+                if c.name == "login":
+                    argv += ["--provider", "surface-test", "--api-key", "sk-surface-test"]
+                if c.name == "logout":
+                    argv += ["--provider", "surface-test"]
+                if c.name == "peer" and argv[1] == "add":
+                    argv += ["--target", "surface-test"]
+                if c.name == "pairing" and argv[1] == "revoke":
+                    argv += ["--target", "surface-test"]
+                if c.name == "prompt-size" and argv[1] == "set":
+                    argv += ["--size", "14"]
+                if c.name == "console" and argv[1] == "eval":
+                    argv += ["--expression", "1+1"]
                 args = self.parser.parse_args(argv)
                 self.assertEqual(args.command, c.name)
 
@@ -222,10 +234,18 @@ class ExecucaoTests(unittest.TestCase):
         db.write_bytes(b"isto nao e um banco sqlite")
         self.assertEqual(main(["doctor"]), ExitCode.ERROR)
 
-    def test_comando_declarado_SEM_implementacao_sai_com_codigo_proprio(self):
-        """A regra do projeto: reportar sucesso sem efeito é pior que
-        ausência. Script precisa distinguir 'falhou' de 'ainda não existe'."""
-        self.assertEqual(main(["login"]), ExitCode.NOT_IMPLEMENTED)
+    def test_superficie_totalmente_implementada_sem_pendencias(self):
+        """A regra do projeto continua valendo — reportar sucesso sem efeito
+        é pior que ausência — mas a superfície está 100% ligada: nenhum
+        comando declarado fica sem handler. O código próprio segue distinto
+        de OK e ERROR para qualquer comando que venha a ficar pendente."""
+        from kairos_cli.commands import COMMANDS, Status
+
+        pendentes = [c.name for c in COMMANDS if c.status is not Status.IMPLEMENTED]
+        self.assertEqual(pendentes, [])
+        for c in COMMANDS:
+            with self.subTest(cmd=c.name):
+                self.assertIn(c.name, HANDLERS)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.OK)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.ERROR)
 
@@ -277,6 +297,34 @@ class ExecucaoTests(unittest.TestCase):
             main(["import-agent", "--data", json.dumps(agent_cfg)])
         self.assertIn("Configuração do agente importada com sucesso", buf.getvalue())
 
+    def test_login_logout_persistem_no_auth_json(self):
+        import json
+
+        home = Path(self._tmp.name)
+        self.assertEqual(main(["login", "--provider", "roundtrip", "--api-key", "sk-roundtrip"]), 0)
+        dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+        self.assertIn("roundtrip", dados["credential_pool"])
+        self.assertEqual(main(["logout", "--provider", "roundtrip"]), 0)
+        dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+        self.assertNotIn("roundtrip", dados["credential_pool"])
+
+    def test_login_rejeita_placeholder(self):
+        self.assertEqual(main(["login", "--provider", "x", "--api-key", "changeme"]), 1)
+
+    def test_webhook_lista_endpoints_do_home(self):
+        import contextlib
+        import io
+        import json
+
+        home = Path(self._tmp.name)
+        (home / "webhooks.json").write_text(
+            json.dumps(["https://exemplo.test/hook"]), encoding="utf-8"
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["webhook", "list", "--json"]), 0)
+        self.assertEqual(json.loads(buf.getvalue()), {"endpoints": ["https://exemplo.test/hook"]})
+
     def test_approvals_test_devolve_codigo_por_veredito(self):
         self.assertEqual(main(["approvals", "test", "ls -la"]), 0)
         self.assertEqual(main(["approvals", "test", "sudo apt update"]), 2)
@@ -303,6 +351,22 @@ class ExecucaoTests(unittest.TestCase):
               ["version"],
               ["setup", "--json"],
               ["backup", "--json"],
+              ["telegram", "test"],
+              ["slack", "test"],
+              ["whatsapp", "test"],
+              ["webhook", "status"],
+              ["webhook", "list"],
+              ["pairing", "list"],
+              ["peer", "list"],
+              ["skin", "list"],
+              ["memory", "status"],
+              ["acp", "status"],
+              ["claw", "status"],
+              ["console", "start"],
+              ["gui", "status"],
+              ["hooks", "list"],
+              ["pause", "status"],
+              ["prompt-size", "get"],
          ):
              with self.subTest(argv=argv):
                  self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))

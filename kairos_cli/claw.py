@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_claw(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "claw_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "start":
         print("Iniciando automação de browser...")

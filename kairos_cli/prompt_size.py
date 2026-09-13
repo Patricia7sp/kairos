@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_prompt_size(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "prompt_size_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "set":
         size = getattr(args, "size", None)

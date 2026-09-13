@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_console(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "console_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "start":
         print("Iniciando console interativo...")

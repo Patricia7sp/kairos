@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_telegram(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "telegram_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "config":
         print("Configurando integração com Telegram...")

@@ -240,6 +240,17 @@ def _extra_args(  # noqa: PLR0912 - dispatcher de argumentos por comando; cascat
         parser.add_argument("--data", help="Dados JSON a importar")
     elif command == "import-agent" and subcommand is None:
         parser.add_argument("--data", help="Dados JSON do agente a importar")
+    elif command == "login" and subcommand is None:
+        parser.add_argument("--provider", required=True, help="Identificador do provedor")
+        parser.add_argument("--api-key", required=True, help="Chave de API do provedor")
+    elif command == "logout" and subcommand is None:
+        parser.add_argument("--provider", help="Provedor a desconectar (padrão: todos)")
+    elif command == "prompt-size" and subcommand == "set":
+        parser.add_argument("--size", type=int, required=True, help="Tamanho do prompt")
+    elif command == "console" and subcommand == "eval":
+        parser.add_argument("--expression", required=True, help="Expressão a avaliar")
+    elif command in ("pairing", "peer") and subcommand in ("revoke", "remove", "add"):
+        parser.add_argument("--target", required=True, help="Identificador do alvo")
     elif command == "token" and subcommand in ("show", None):
         parser.add_argument(
             "--reveal", action="store_true", help="Imprime o token inteiro (pense antes)"
