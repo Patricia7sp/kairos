@@ -63,6 +63,13 @@
 .k-grid--stats { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
 .k-grid--cards { grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
 
+.k-blueprint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--k-space-4); margin-top: var(--k-space-4); }
+.k-blueprint-grid .k-card { display: flex; flex-direction: column; gap: var(--k-space-2); }
+.k-blueprint-grid .k-actions { margin-top: auto; }
+.k-blueprint-form { border-top: 1px solid var(--k-border); margin-top: var(--k-space-5); padding-top: var(--k-space-5); }
+.k-tag { display: inline-block; padding: var(--k-space-1) var(--k-space-2); border-radius: var(--k-radius-pill); background: var(--k-surface-2); color: var(--k-text-2); font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .06em; }
+.k-actions { display: flex; flex-wrap: wrap; gap: var(--k-space-2); }
+
 .k-stat__label { font-size: var(--k-size-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--k-text-3); }
 .k-stat__value { font-size: var(--k-size-2xl); font-weight: var(--k-weight-bold); letter-spacing: -.02em; margin-top: var(--k-space-2); }
 .k-stat__hint  { font-size: var(--k-size-sm); color: var(--k-text-2); }

@@ -797,7 +797,7 @@ de cron só gera texto — a entrega é um ônus de irmandade com o dispatcher.
 - `GET /api/cron/delivery-targets` autenticado: `local` implícito (só grava) +
   um alvo por adapter registrado em `app.state.delivery_adapters` (vazio por
   padrão → só `local`). Superfícies: CLI (criação) e API (criação + consulta);
-  a UI Web ainda não oferece o campo (documentado).
+  a UI Web agora expõe um campo na tela Agendamentos com datalist derivado.
 - Regressões: derivação sem lista fixa, forma rejeitada na criação, plataforma
   desconhecida rejeitada quando há adapters registrados, obrigação gravada com
   o payload do turno, idempotência de re-gravação, turno falho sem obrigação,
@@ -850,3 +850,35 @@ spec (77–81).
   impor-se); suíte completa de cron/CLI verde (240). Sweep completo: 2266
   passed, apenas as duas reprovações conhecidas do Codex; vitest 168 + `tsc
   --noEmit` limpos. Manual: [Agendamentos](agendamentos.md).
+
+## Blueprints na UI Web — implementação e validação local
+
+Branch `feat/cron-blueprints-ui`, base PR #37 (T-11) integrada. Objetivo: fechar
+o gap documentado entre o catálogo tipado de blueprints (backend completo) e a
+tela Agendamentos (UI Web vanilla JS).
+
+- `kairos_web/ui/js/api.js`: métodos `blueprints()`, `criarBlueprint(key,
+  values)` e `alvosEntrega()` adicionados ao client API.
+- `kairos_web/ui/js/views/cron.js`:
+  - Campo **Entrega da saída (opcional)** no formulário de criação manual,
+    com `<datalist>` derivado de `GET /api/cron/delivery-targets` (plataformas
+    dinâmicas, sem hardcode). Valores distintos de `"local"` são enviados como
+    `{delivery: {target}}` no body.
+  - Secção **Automações prontas (blueprints)** com grid de cards derivado de
+    `GET /api/cron/blueprints`. Cada card mostra `category`, `title`,
+    `description`, `scheduleHuman` e `command`.
+  - Botão **Usar** abre formulário dinâmico renderizado a partir do schema
+    `fields` do blueprint (tipos `time`, `enum`, `weekdays`, `text`); submit
+    chama `POST /api/cron/blueprints/{key}/jobs` com `{values}`. Erros do
+    servidor são exibidos. Cancelar fecha o formulário.
+  - `loadCatalog()` roda como refresh não bloqueante para não atrasar a
+    primeira pintura da tela nem causar deadlock no path de disposed.
+- `kairos_web/ui/styles/components.css`: estilos `k-tag`, `k-blueprint-grid`
+  e `k-actions` adicionados.
+- `web/src/__tests__/cron-flows.test.ts`: 2 testes novos — catálogo de
+  blueprints renderiza cards, abre formulário e submete com valores variados;
+  campo de delivery envia `plataforma:destino` no body e omite quando vazio
+  ou `"local"`. Validação do datalist contra targets da API.
+- Validação local: vitest **170** (14 arquivos) e `tsc --noEmit` sem erros;
+  6 testes de `cron-flows.test.ts` (4 existentes + 2 novos) verdes; suítes
+  Python intactas. Manual: [Agendamentos](agendamentos.md).

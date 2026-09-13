@@ -211,8 +211,10 @@ saída (texto do turno, truncado a 64 KiB) como **obrigação durável** em
 O gateway drena essa obrigação pelo mesmo ledger que qualquer outra entrega —
 não há um segundo sistema de delivery. A persistência é best effort: falha ao
 gravar a obrigação não vira falha do turno (fica no log); turnos que falharam
-nunca geram obrigação. A UI Web ainda não oferece o campo; as superfícies
-operacionais são CLI e API.
+nunca geram obrigação. A UI Web agora expõe um campo **Entrega da saída
+(opcional)** no formulário de criação manual, com datalist derivado de
+`GET /api/cron/delivery-targets` e suporte livre ao formato
+`plataforma:destino`.
 
 ## Blueprints de automação
 
@@ -231,6 +233,15 @@ renderiza as quatro superfícies:
 - **Catálogo/docs** — cada entry reúne as quatro superfícies com `command`
   (slash command), `seedPrompt`, `appUrl` (`hermes://blueprint/{key}`) e
   `scheduleHuman` (a descrição amigável da agenda).
+
+A UI Web renderiza um catálogo de cards (**Automações prontas**) com
+`title`, `category`, `description`, `scheduleHuman` e o `command`
+com copiar. Um botão **Usar** abre um formulário dinâmico gerado a partir
+do schema `fields` do blueprint (tipos `time`, `enum`, `weekdays`, `text`).
+O preenchimento e o envio acionam `POST /api/cron/blueprints/{key}/jobs`
+com `{values: {slot: valor}}`; em caso de erro, a UI exibe a mensagem do
+servidor. A seção é alimentada de forma não bloqueante — o carregamento
+do catálogo não atrasa a primeira pintura da tela de agendamentos.
 
 ```bash
 kairos cron blueprint list --json
