@@ -797,6 +797,21 @@ def cmd_hooks(args) -> int:
     from kairos_cli.hooks import run_hooks
     return asyncio.run(run_hooks(_home(), args))
 
+def cmd_login(args) -> int:
+    import asyncio
+    from kairos_cli.login import run_login
+    return asyncio.run(run_login(_home(), args))
+
+def cmd_logout(args) -> int:
+    import asyncio
+    from kairos_cli.logout import run_logout
+    return asyncio.run(run_logout(_home(), args))
+
+def cmd_memory(args) -> int:
+    import asyncio
+    from kairos_cli.memory import run_memory
+    return asyncio.run(run_memory(_home(), args))
+
 HANDLERS = {
     "backup": cmd_backup,
     "debug": cmd_debug,
@@ -848,4 +863,7 @@ HANDLERS = {
     "skin": cmd_skin,
 
     "hooks": cmd_hooks,
+    "login": cmd_login,
+    "logout": cmd_logout,
+    "memory": cmd_memory,
 }

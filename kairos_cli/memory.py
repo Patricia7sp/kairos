@@ -7,7 +7,7 @@ from pathlib import Path
 async def run_memory(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "memory_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "off":
         # Desativa a memória (por exemplo, limpa estado persistente)

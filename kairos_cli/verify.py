@@ -1,4 +1,5 @@
 """Comando `kairos verify` — verificação pós-edição de código."""
+import json
 import sys
 from pathlib import Path
 
@@ -16,7 +17,6 @@ async def run_verify(home: Path, args) -> int:
         errors.append("auth.json não encontrado")
     else:
         try:
-            import json
             data = json.loads(auth_path.read_text(encoding="utf-8"))
             if "credential_pool" not in data:
                 errors.append("auth.json com estrutura inválida")

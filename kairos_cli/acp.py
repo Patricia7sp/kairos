@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_acp(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "acp_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "status":
         print("Verificando status do ACP...")

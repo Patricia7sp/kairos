@@ -6,7 +6,7 @@ from pathlib import Path
 async def run_skin(home: Path, args) -> int:
     home = Path(home)
 
-    subcommand = getattr(args, "subcommand", None)
+    subcommand = getattr(args, "skin_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "list":
         print("Temas disponíveis:")

@@ -1,21 +1,30 @@
 """Comando `kairos peer` — instâncias pares no gateway."""
-import sys
+
+from __future__ import annotations
+
 from pathlib import Path
 
 
 async def run_peer(home: Path, args) -> int:
     home = Path(home)
+    sub = getattr(args, "peer_command", None) or getattr(args, "subcommand", None)
 
-    subcommand = getattr(args, "subcommand", None)
-
-    if subcommand == "list":
-        print("Listando instâncias pares...")
-        print("  - peer_1: gateway principal")
-        print("  - peer_2: gateway de backup")
-    elif subcommand == "status":
-        print("Verificando status das instâncias pares...")
-        print("Todas as instâncias pares estão operacionais.")
-    else:
-        print("Subcomando inválido. Use: peer list | peer status")
-        return 1
-    return 0
+    if sub == "list":
+        print("Nenhuma instância par registrada.")
+        return 0
+    if sub == "add":
+        target = getattr(args, "target", None) or getattr(args, "peer", None)
+        if not target:
+            print("Informe a instância via --target.")
+            return 1
+        print(f"Par '{target}' registrado.")
+        return 0
+    if sub == "remove":
+        target = getattr(args, "target", None) or getattr(args, "peer", None)
+        if not target:
+            print("Informe a instância via --target.")
+            return 1
+        print(f"Par '{target}' removido.")
+        return 0
+    print("Subcomando inválido. Use: peer list | peer add --target ID | peer remove --target ID")
+    return 1
