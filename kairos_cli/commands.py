@@ -163,6 +163,16 @@ COMMANDS: tuple[Command, ...] = (
         _sub("monitor-show", "Mostra o monitor e o estado de verificação"),
         _sub("monitor-run", "Executa a fonte do monitor uma vez"),
         _sub("notepad", "Memória KV durável de um job, persistente entre execuções"),
+        _sub(
+            "blueprint",
+            "Blueprints de automação parametrizados",
+            _sub("list", "Lista o catálogo de blueprints"),
+            _sub("show", "Mostra as quatro superfícies de um blueprint"),
+            _sub(
+                "create",
+                "Cria um job a partir de um blueprint (slots slot=valor)",
+            ),
+        ),
         status=Status.IMPLEMENTED,
         unit="cron",
     ),

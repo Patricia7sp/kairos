@@ -1,5 +1,20 @@
 """Cron: agendamento, claim, monitor."""
 
+from kairos_cron.blueprints import (
+    CATALOG,
+    WEEKDAY_PRESETS,
+    AutomationBlueprint,
+    BlueprintFillError,
+    BlueprintSlot,
+    blueprint_catalog_entry,
+    blueprint_deeplink,
+    blueprint_form_schema,
+    blueprint_seed_prompt,
+    blueprint_slash_command,
+    fill_blueprint,
+    get_blueprint,
+    parse_blueprint_slash,
+)
 from kairos_cron.delivery import (
     DELIVERY_PAYLOAD_MAX_CHARS,
     TARGET_MAX_CHARS,
@@ -33,8 +48,13 @@ from kairos_cron.schedule import (
 )
 
 __all__ = [
+    "CATALOG",
     "DELIVERY_PAYLOAD_MAX_CHARS",
     "TARGET_MAX_CHARS",
+    "WEEKDAY_PRESETS",
+    "AutomationBlueprint",
+    "BlueprintFillError",
+    "BlueprintSlot",
     "ClaimResult",
     "DeliveryTargetError",
     "DispatchClaimer",
@@ -43,15 +63,23 @@ __all__ = [
     "MonitorOutcome",
     "MonitorState",
     "ScheduleKind",
+    "blueprint_catalog_entry",
+    "blueprint_deeplink",
+    "blueprint_form_schema",
+    "blueprint_seed_prompt",
+    "blueprint_slash_command",
     "check_gateway_lifecycle",
     "collapse_backlog",
     "compute_next_run",
     "cron_delivery_targets",
     "croniter_available",
     "evaluate",
+    "fill_blueprint",
+    "get_blueprint",
     "is_job_runnable",
     "normalize_repeat",
     "output_hash",
+    "parse_blueprint_slash",
     "record_cron_delivery",
     "reject_gateway_restart_job",
     "render_change_block",

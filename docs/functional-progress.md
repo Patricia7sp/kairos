@@ -808,3 +808,45 @@ de cron só gera texto — a entrega é um ônus de irmandade com o dispatcher.
   ordem. Sweep completo e `ci.sh --fast` seguem a mesma linha dos lotes
   anteriores (apenas as duas reprovações esperadas do Codex). Manual:
   [Agendamentos](agendamentos.md).
+
+## Blueprints de automação — implementação e validação local
+
+Branch `feat/cron-blueprints`, base PR #36 (T-10) integrada. Objetivo (T-11):
+catálogo tipado de automações agendadas onde **um schema de slots** gera as
+quatro superfícies (formulário, slash command, prompt-semente e deep-link), e
+`fill_blueprint` devolve os kwargs de `JobStore.create` — **sem segundo motor
+de jobs**. Origem do legado: `cron/blueprint_catalog.py` (19) e o critério da
+spec (77–81).
+
+- `kairos_cron/blueprints.py` novo: `BlueprintSlot` (name/type
+  time|enum|text|weekdays/label/default/options/optional/strict/help),
+  `AutomationBlueprint` (key/title/description/category/schedule_template/
+  prompt_template/slots/skills/tags), `WEEKDAY_PRESETS`, `CATALOG` com **12
+  blueprints** autocontidos em português, `get_blueprint`,
+  `blueprint_form_schema`, `blueprint_slash_command`, `parse_blueprint_slash`
+  (roundtrip determinístico `/blueprint <key> slot=val`), `blueprint_deeplink`
+  (`hermes://blueprint/{key}`), `blueprint_seed_prompt`,
+  `_humanize_schedule`, `blueprint_catalog_entry` (reúne as quatro superfícies
+  + `scheduleHuman`), `_resolve_schedule` (placeholders `{minute}/{hour}`,
+  `{dow}`, `*/{interval_min}`, faixas `{start_hour}-{end_hour}/{interval_hours}`),
+  `fill_blueprint` (valida slots desconhecidos, obrigatórios ausentes e enum
+  strict; devolve `{name, prompt, schedule: {kind: cron, expr}, delivery}`),
+  `BlueprintFillError`.
+- Divergências kairos documentadas: **sem lista de plataformas** — o slot
+  `deliver` é `text` com `strict=False` (a forma `plataforma:destino` é
+  validada no JobStore e a adequação dinâmica do adapter é do dispatcher);
+  `origin` tratado como `local`; jobs não carregam `skills`; prompts sem
+  referências a skills externas.
+- Web (`kairos_web/cron_api.py`): `GET /api/cron/blueprints`,
+  `GET /api/cron/blueprints/{key}` (404 `blueprint não encontrado`),
+  `POST /api/cron/blueprints/{key}/jobs` → `fill_blueprint` + `store.create`
+  reutilizando o caminho exato de `create_job` (guard de ciclo de vida,
+  validação de delivery e executor compartilhados); `BlueprintFillError`
+  mapeado para `422` com a mensagem.
+- CLI: `kairos cron blueprint list|show|create` (`create` aceita pares
+  `slot=valor` e o slash command inteiro colado — roundtrip).
+- Validação local: **37 testes novos** de catálogo/renderizadores/fill +
+  **8 de superfície** (CLI/API reais, 404/422, guard e delivery ainda
+  impor-se); suíte completa de cron/CLI verde (240). Sweep completo: 2266
+  passed, apenas as duas reprovações conhecidas do Codex; vitest 168 + `tsc
+  --noEmit` limpos. Manual: [Agendamentos](agendamentos.md).

@@ -7,6 +7,13 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
+from kairos_cron.blueprints import (
+    CATALOG,
+    BlueprintFillError,
+    blueprint_catalog_entry,
+    fill_blueprint,
+    get_blueprint,
+)
 from kairos_cron.delivery import (
     DeliveryTargetError,
     cron_delivery_targets,
@@ -43,6 +50,11 @@ class NotepadValue(BaseModel):
     value: StrictStr
 
 
+class BlueprintValues(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: dict = Field(default_factory=dict)
+
+
 def store(request):
     from kairos_web.server import _application_home
 
@@ -62,6 +74,8 @@ def operate(operation):
     except KeyError as exc:
         raise HTTPException(404, "agendamento não encontrado") from exc
     except LifecycleGuardError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except BlueprintFillError as exc:
         raise HTTPException(422, str(exc)) from exc
     except DeliveryTargetError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -94,6 +108,38 @@ def list_delivery_targets(request: Request):
             *cron_delivery_targets(delivery_adapters(request)),
         ]
     }
+
+
+@router.get("/blueprints")
+def list_blueprints():
+    """Catálogo de automações tipadas — cada entry reúne as quatro superfícies:
+    formulário, slash command, prompt-semente e deep-link."""
+    return {"blueprints": [blueprint_catalog_entry(bp) for bp in CATALOG]}
+
+
+@router.get("/blueprints/{key}")
+def show_blueprint(key: str):
+    bp = get_blueprint(key)
+    if bp is None:
+        raise HTTPException(404, "blueprint não encontrado")
+    return {"blueprint": blueprint_catalog_entry(bp)}
+
+
+@router.post("/blueprints/{key}/jobs", status_code=201)
+def create_blueprint_job(key: str, payload: BlueprintValues, request: Request):
+    """Cria um job a partir de um blueprint — o mesmo executor, guard de ciclo
+    de vida e validação de delivery das demais superfícies (sem segundo motor)."""
+    bp = get_blueprint(key)
+    if bp is None:
+        raise HTTPException(404, "blueprint não encontrado")
+
+    def _create():
+        kwargs = fill_blueprint(bp, payload.values)
+        if kwargs.get("delivery") is not None:
+            validate_delivery(kwargs["delivery"], adapters=delivery_adapters(request))
+        return store(request).create(**kwargs)
+
+    return operate(_create)
 
 
 @router.get("/jobs")

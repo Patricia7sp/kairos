@@ -401,3 +401,134 @@ def test_web_lifespan_stops_ticker_and_closes_service_even_if_journal_write_fail
     assert closed == [True]
     # The next owner can recover the nonterminal attempt after storage returns.
     assert JobStore(home).history(job["id"])[0]["status"] == "running"
+
+
+def test_cli_blueprint_list_show_and_create_are_real(home, capsys):
+    assert main(["cron", "blueprint", "list", "--json"]) == 0
+    catalog = json.loads(capsys.readouterr().out)
+    assert len(catalog["blueprints"]) == 12
+    keys = {b["key"] for b in catalog["blueprints"]}
+    assert "morning-brief" in keys and "important-mail" in keys
+
+    assert main(["cron", "blueprint", "list", "--category", "email", "--json"]) == 0
+    only_email = json.loads(capsys.readouterr().out)["blueprints"]
+    assert {b["key"] for b in only_email} == {"important-mail"}
+
+    assert main(["cron", "blueprint", "show", "weekly-review", "--json"]) == 0
+    entry = json.loads(capsys.readouterr().out)
+    assert entry["key"] == "weekly-review"
+    assert entry["command"].startswith("/blueprint weekly-review")
+    assert entry["appUrl"].startswith("hermes://blueprint/weekly-review")
+    assert len(entry["fields"]) > 0
+
+    assert main(["cron", "blueprint", "show", "nao-existe", "--json"]) != 0
+
+
+def test_cli_blueprint_create_uses_defaults_and_overrides(home, capsys):
+    assert (
+        main(
+            [
+                "cron",
+                "blueprint",
+                "create",
+                "custom-reminder",
+                "time=09:00",
+                "what=testar o deploy",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    job = json.loads(capsys.readouterr().out)
+    assert job["name"] == "Lembrete personalizado"
+    assert "testar o deploy" in job["prompt"]
+    assert job["schedule"]["kind"] == "cron"
+    assert job["schedule"]["expr"] == "0 9 * * *"
+    assert "delivery" not in job or job["delivery"] is None
+    assert JobStore(home).list()[0]["id"] == job["id"]
+
+
+def test_cli_blueprint_create_via_slash_roundtrip(home, capsys):
+    assert (
+        main(
+            [
+                "cron",
+                "blueprint",
+                "create",
+                "/blueprint important-mail interval_min=60",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    job = json.loads(capsys.readouterr().out)
+    assert job["schedule"]["expr"].startswith("*/60")
+
+
+def test_cli_blueprint_create_rejects_unknown_slot(home, capsys):
+    assert main(["cron", "blueprint", "create", "morning-brief", "bogus=x"]) != 0
+    capsys.readouterr()
+    assert JobStore(home).list() == []
+
+
+def test_cli_blueprint_create_rejects_missing_required(home, capsys):
+    assert main(["cron", "blueprint", "create", "morning-brief", "time="]) != 0
+    capsys.readouterr()
+    assert JobStore(home).list() == []
+
+
+def test_api_blueprint_list_show_require_auth_and_are_real(home):
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    assert TestClient(app).get("/api/cron/blueprints").status_code == 401
+    catalog = client.get("/api/cron/blueprints")
+    assert catalog.status_code == 200
+    assert len(catalog.json()["blueprints"]) == 12
+
+    assert TestClient(app).get("/api/cron/blueprints/morning-brief").status_code == 401
+    entry = client.get("/api/cron/blueprints/morning-brief")
+    assert entry.status_code == 200
+    assert entry.json()["blueprint"]["title"] == "Resumo da manhã"
+    assert client.get("/api/cron/blueprints/nao-existe").status_code == 404
+
+
+def test_api_blueprint_create_job_is_real_and_guard_is_shared(home):
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    result = client.post(
+        "/api/cron/blueprints/custom-reminder/jobs",
+        json={"values": {"time": "09:00", "what": "testar api"}},
+    )
+    assert result.status_code == 201
+    job = result.json()
+    assert "testar api" in job["prompt"]
+    assert JobStore(home).list()[0]["id"] == job["id"]
+
+    blocked = client.post(
+        "/api/cron/blueprints/custom-reminder/jobs",
+        json={"values": {"colp": "x"}},
+    )
+    assert blocked.status_code == 422
+    assert "colp" in blocked.json()["detail"]
+    assert JobStore(home).list() == [job]
+
+
+def test_api_blueprint_job_enforces_lifecycle_guard(home):
+    """O prompt de um blueprint também passa pelo guard de ciclo de vida —
+    sem segundo motor de jobs."""
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    values = {"what": "hermes gateway restart", "time": "09:00"}
+    result = client.post("/api/cron/blueprints/custom-reminder/jobs", json={"values": values})
+    assert result.status_code == 422
+    assert "laço de reinício" in result.json()["detail"]
+    assert JobStore(home).list() == []
+
+
+def test_api_blueprint_delivery_still_validated(home, monkeypatch):
+    monkeypatch.setattr(app.state, "delivery_adapters", {"wpp"}, raising=False)
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    result = client.post(
+        "/api/cron/blueprints/custom-reminder/jobs",
+        json={"values": {"time": "09:00", "deliver": "orb:chat"}},
+    )
+    assert result.status_code == 422
+    assert "não está entre os adapters registrados" in result.json()["detail"]
+    assert JobStore(home).list() == []
