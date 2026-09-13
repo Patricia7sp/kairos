@@ -41,8 +41,18 @@ export async function cronView(root, _route, { signal } = {}) {
           <input class="k-input" name="monitor" placeholder="/caminho/para/fonte ou comando, sem shell" aria-describedby="cron-monitor-help" disabled>
           <small id="cron-monitor-help">O agente só roda quando a fonte muda. Falha da fonte é erro, nunca disparo. Sem shell: use o caminho completo e argumentos separados.</small>
         </label>
+        <label class="k-field">Entrega da saída (opcional)
+          <input class="k-input" name="deliver" list="delivery-targets" placeholder="wpp:+5511999990000" aria-describedby="cron-deliver-help">
+          <datalist id="delivery-targets"></datalist>
+          <small id="cron-deliver-help">Onde entregar a saída do turno completo, no formato plataforma:destino. Deixe vazio (ou "local") para só gravar. As sugestões vêm dos adapters registrados.</small>
+        </label>
         <button class="k-btn k-btn--primary" type="submit">Criar agendamento</button>
       </form>
+    </section>
+    <section class="k-card" data-blueprint-section>
+      <div class="k-page-head"><h2>Automações prontas (blueprints)</h2><p>Recorrência e instrução já definidas; preencha os slots e crie. Sem digitar cron.</p></div>
+      <div class="k-blueprint-grid" data-blueprint-grid></div>
+      <div data-blueprint-form hidden></div>
     </section>
     <div class="k-page-head"><h2>Seus agendamentos</h2><button class="k-btn k-btn--ghost" data-refresh>Atualizar</button></div>
     <p data-job-message role="status"></p><div data-jobs></div>
@@ -51,9 +61,60 @@ export async function cronView(root, _route, { signal } = {}) {
   const content = root.querySelector("[data-jobs]");
   const message = root.querySelector("[data-job-message]");
   const history = root.querySelector("[data-job-history]");
+  const blueprintGrid = root.querySelector("[data-blueprint-grid]");
+  const blueprintForm = root.querySelector("[data-blueprint-form]");
+  const deliveryDatalist = root.querySelector("#delivery-targets");
+  let blueprints = [];
+  let deliveryTargets = [{ id: "local", name: "Local (só grava)" }];
   const setBusy = (value) => {
     busy = value;
     root.querySelectorAll("button").forEach(b => { b.disabled = value; });
+  };
+  const fieldToInput = (field) => {
+    const label = field.label || field.name;
+    const help = field.help ? `<small>${esc(field.help)}</small>` : "";
+    if (field.type === "time") {
+      return `<label class="k-field">${esc(label)}<input class="k-input" type="time" name="bp-${esc(field.name)}" value="${esc(field.default ?? "08:00")}" ${field.optional ? "" : "required"}></label>`;
+    }
+    if (field.type === "enum") {
+      return `<label class="k-field">${esc(label)}<select class="k-select" name="bp-${esc(field.name)}">${(field.options || []).map(o => `<option value="${esc(o)}" ${String(o) === String(field.default) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>${help}</label>`;
+    }
+    if (field.type === "weekdays") {
+      return `<label class="k-field">${esc(label)}<select class="k-select" name="bp-${esc(field.name)}">${(field.options || []).map(o => `<option value="${esc(o)}" ${String(o) === String(field.default) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>${help}</label>`;
+    }
+    const datalist = field.name === "deliver" ? ' list="delivery-targets"' : "";
+    return `<label class="k-field">${esc(label)}<input class="k-input"${datalist} name="bp-${esc(field.name)}" value="${esc(field.default ?? "")}" ${field.optional ? "" : "required"}>${help}</label>`;
+  };
+  const openBlueprint = (key) => {
+    const bp = blueprints.find(b => b.key === key);
+    if (!bp) return;
+    blueprintForm.innerHTML = `<h3>${esc(bp.title)}</h3>
+      <p>${esc(bp.scheduleHuman)}</p>
+      <form class="k-form" data-blueprint-form-inner>
+        ${(bp.fields || []).map(fieldToInput).join("")}
+        <div class="k-actions">
+          <button class="k-btn k-btn--primary" type="submit">Criar com ${esc(bp.title)}</button>
+          <button class="k-btn k-btn--ghost" type="button" data-blueprint-cancel>Cancelar</button>
+        </div>
+      </form>`;
+    blueprintForm.hidden = false;
+    const innerForm = blueprintForm.querySelector("[data-blueprint-form-inner]");
+    innerForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (!innerForm.reportValidity()) return;
+      const data = new FormData(innerForm);
+      const values = {};
+      for (const field of bp.fields) {
+        const value = data.get(`bp-${field.name}`);
+        if (value !== null && String(value).trim() !== "") values[field.name] = String(value).trim();
+      }
+      const ok = await operation(() => api.criarBlueprint(bp.key, values), `Automação "${bp.title}" criada.`);
+      if (!disposed && ok) blueprintForm.hidden = true;
+    }, { signal: listeners.signal });
+    blueprintForm.querySelector("[data-blueprint-cancel]").addEventListener("click", () => {
+      if (disposed || busy) return;
+      blueprintForm.hidden = true;
+    }, { signal: listeners.signal });
   };
   const timing = () => {
     const kind = form.elements.namedItem("kind").value;
@@ -93,6 +154,19 @@ export async function cronView(root, _route, { signal } = {}) {
       <button class="k-btn k-btn--ghost" type="button" data-note-save="${esc(job.id)}">Salvar anotação</button>
     </details>`;
   };
+  const renderBlueprints = () => {
+    blueprintGrid.innerHTML = blueprints.length ? blueprints.map(b => `
+      <article class="k-card">
+        <p><span class="k-tag">${esc(b.category)}</span></p>
+        <h3>${esc(b.title)}</h3>
+        <p>${esc(b.description)}</p>
+        <p>Repetição: ${esc(b.scheduleHuman)}</p>
+        <code style="white-space:normal;overflow-wrap:anywhere">${esc(b.command)}</code>
+        <div class="k-actions">
+          <button class="k-btn k-btn--primary" data-blueprint-use="${esc(b.key)}">Usar</button>
+        </div>
+      </article>`).join("") : '<p>Nenhuma automação disponível.</p>';
+  };
   const render = () => {
     content.innerHTML = jobs.length ? jobs.map(job => `
       <article class="k-card" data-job="${esc(job.id)}">
@@ -108,6 +182,20 @@ export async function cronView(root, _route, { signal } = {}) {
         </div>
       </article>`).join("") : '<p>Nenhum agendamento criado.</p>';
   };
+  const renderDatalist = () => {
+    deliveryDatalist.innerHTML = deliveryTargets.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  };
+  const loadCatalog = () => {
+    Promise.all([api.blueprints(), api.alvosEntrega()])
+      .then(([bpData, targetsData]) => {
+        if (disposed) return;
+        blueprints = bpData?.blueprints || [];
+        deliveryTargets = targetsData?.targets || [{ id: "local", name: "Local (só grava)" }];
+        renderDatalist();
+        renderBlueprints();
+      })
+      .catch(() => {});
+  };
   const load = async () => {
     const [data, status] = await Promise.all([api.agendamentos(), api.statusAgendamentos()]);
     if (disposed) return;
@@ -118,17 +206,20 @@ export async function cronView(root, _route, { signal } = {}) {
     notepads = new Map(lists);
     render();
     root.querySelector("[data-cron-status]").textContent = status.error || (status.running ? `Serviço ativo. Verificação a cada minuto. Última verificação: ${date(status.last_tick)}.` : "Agendador não está ativo nesta instância.");
+    loadCatalog();
   };
   const operation = async (action, success) => {
-    if (disposed || busy) return;
+    if (disposed || busy) return false;
     setBusy(true);
     try {
       await action();
-      if (disposed) return;
+      if (disposed) return false;
       await load();
       if (!disposed) message.textContent = success;
+      return true;
     } catch {
       if (!disposed) message.textContent = "Não foi possível concluir. Confira os dados e atualize para verificar o estado salvo.";
+      return false;
     } finally {
       if (!disposed) setBusy(false);
     }
@@ -143,7 +234,16 @@ export async function cronView(root, _route, { signal } = {}) {
     const schedule = kind === "once" ? { kind, run_at: new Date(String(data.get("run_at"))).toISOString() } : kind === "interval" ? { kind, minutes: Number(data.get("minutes")) } : { kind, expr: data.get("expr") };
     const monitor = kind !== "once" && String(data.get("monitor") || "").trim()
       ? { type: "script", script: String(data.get("monitor")).trim() } : undefined;
-    operation(() => api.criarAgendamento({ name: data.get("name"), prompt: data.get("prompt"), schedule, ...(limit), ...(monitor ? { monitor } : {}) }), "Agendamento criado.");
+    const deliverStr = String(data.get("deliver") || "").trim();
+    const delivery = deliverStr && deliverStr !== "local" ? { target: deliverStr } : undefined;
+    operation(() => api.criarAgendamento({
+      name: data.get("name"),
+      prompt: data.get("prompt"),
+      schedule,
+      ...(limit),
+      ...(monitor ? { monitor } : {}),
+      ...(delivery ? { delivery } : {}),
+    }), "Agendamento criado.");
   }, { signal: listeners.signal });
   root.querySelector("[data-refresh]").addEventListener("click", () => operation(async () => {}, "Atualizado."), { signal: listeners.signal });
   content.addEventListener("click", event => {
@@ -191,6 +291,11 @@ export async function cronView(root, _route, { signal } = {}) {
         if (!disposed && version === historyVersion) history.textContent = "Não foi possível carregar o histórico.";
       });
     }
+  }, { signal: listeners.signal });
+  blueprintGrid.addEventListener("click", event => {
+    const button = event.target.closest("button[data-blueprint-use]");
+    if (!button || busy || disposed) return;
+    openBlueprint(button.dataset.blueprintUse);
   }, { signal: listeners.signal });
   await operation(async () => {}, "");
   return dispose;

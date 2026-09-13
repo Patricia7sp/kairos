@@ -96,7 +96,68 @@ it('notepad flow: save a durable note and remove it',async()=>{
  expect(calls).toContain('set:cursor=42');
  expect(root.textContent).toContain('Bloco de notas persistente (1)');
  expect(root.textContent).toContain('cursor');
- (root.querySelector('[data-note-remove]') as HTMLButtonElement).click();await flush();await flush();
- expect(calls).toContain('delete:cursor');
- expect(root.textContent).toContain('Bloco de notas persistente (0)');
+(root.querySelector('[data-note-remove]') as HTMLButtonElement).click();await flush();await flush();
+  expect(calls).toContain('delete:cursor');
+  expect(root.textContent).toContain('Bloco de notas persistente (0)');
+});
+
+it('blueprint catalog renders ready-made automations and fills the slot form into POST jobs',async()=>{
+ const blueprint={key:'mail-check',title:'Monitor de e-mail importante',category:'email',description:'Avisa só o que importa.',scheduleHuman:'a cada 30 minutos',command:'/blueprint mail-check interval_min=30',fields:[
+  {name:'interval_min',type:'enum',label:'De quanto em quanto?',default:'30',options:['15','30','60'],optional:false,strict:true,help:'minutos',},
+  {name:'criteria',type:'text',label:'Só me avise se…',default:'precisa de resposta hoje',optional:false,strict:false,help:'',options:[]},
+  {name:'deliver',type:'text',label:'Onde entregar?',default:'local',optional:true,strict:false,help:'',options:[]},
+ ]};
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit)=>{
+  if(url.endsWith('/status'))return json({running:true,last_tick:null});
+  if(url.endsWith('/blueprints'))return json({blueprints:[blueprint]});
+  if(url.endsWith('/delivery-targets'))return json({targets:[{id:'local',name:'Local (só grava)'}]});
+  if(init.method==='POST'&&url.includes('/blueprints/')){
+   const body=JSON.parse(String(init.body));writes.push(body);
+   return json({id:'bp',name:'Blueprint',prompt:'Aja',enabled:true,paused:false,schedule:{kind:'interval',minutes:30}});
+  }
+  return json({jobs:[]});
+ }));
+ const root=document.createElement('main');
+ await cronView(root,{});
+ await flush();await flush();
+ expect(root.querySelector('[data-blueprint-grid]')!.textContent).toContain('Monitor de e-mail importante');
+ (root.querySelector('[data-blueprint-use="mail-check"]') as HTMLButtonElement).click();
+ const form=root.querySelector('[data-blueprint-form-inner]') as HTMLFormElement;
+ expect(form.querySelector('[name="bp-interval_min"]')).not.toBeNull();
+ expect((form.querySelector('[name="bp-interval_min"]') as HTMLSelectElement).value).toBe('30');
+ (form.querySelector('[name="bp-criteria"]') as HTMLInputElement).value='menciona prazo';
+ (form.querySelector('[name="bp-deliver"]') as HTMLInputElement).value='wpp:+5511999990000';
+ (form.querySelector('[name="bp-interval_min"]') as HTMLSelectElement).value='15';
+ form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ await flush();await flush();
+ expect(writes).toEqual([{values:{interval_min:'15',criteria:'menciona prazo',deliver:'wpp:+5511999990000'}}]);
+});
+
+it('delivery: manual create sends plataforma:destino, local is omitted and datalist comes from adapters',async()=>{
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit)=>{
+  if(url.endsWith('/status'))return json({running:true,last_tick:null});
+  if(url.endsWith('/blueprints'))return json({blueprints:[]});
+  if(url.endsWith('/delivery-targets'))return json({targets:[{id:'wpp',name:'WhatsApp'}]});
+  if(init.method==='POST'){const body=JSON.parse(String(init.body));writes.push(body);return json({...body,id:'j',enabled:true,paused:false,next_run_at:'2026-09-12T12:00:00Z'});}
+  return json({jobs:[]});
+ }));
+ const root=document.createElement('main');
+ await cronView(root,{});
+ await flush();await flush();
+ expect([...(root.querySelector('datalist#delivery-targets') as HTMLDataListElement).options].map(o=>o.value)).toEqual(['wpp']);
+ (root.querySelector('[name=name]') as HTMLInputElement).value='Vigia';
+ (root.querySelector('[name=prompt]') as HTMLInputElement).value='Aja';
+ (root.querySelector('[name=kind]') as HTMLSelectElement).value='interval';
+ root.querySelector('[name=kind]')!.dispatchEvent(new Event('change'));
+ (root.querySelector('[name=minutes]') as HTMLInputElement).value='15';
+ (root.querySelector('[name=deliver]') as HTMLInputElement).value='wpp:+5511999990000';
+ root.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ await flush();await flush();
+ expect(writes[0]!.delivery).toEqual({target:'wpp:+5511999990000'});
+ (root.querySelector('[name=deliver]') as HTMLInputElement).value='';
+ root.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ await flush();await flush();
+ expect(writes[1]!.delivery).toBeUndefined();
 });

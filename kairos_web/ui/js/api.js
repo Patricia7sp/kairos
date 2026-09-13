@@ -83,6 +83,9 @@ export const api = {
   blocoNotas: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad`),
   definirNota: (id, key, value) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad/${encodeURIComponent(key)}`, {method:"PUT", body:{value}}),
   removerNota: (id, key) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad/${encodeURIComponent(key)}`, {method:"DELETE"}),
+  blueprints: () => request("/api/cron/blueprints"),
+  criarBlueprint: (key, values) => request(`/api/cron/blueprints/${encodeURIComponent(key)}/jobs`, {method:"POST", body:{values}}),
+  alvosEntrega: () => request("/api/cron/delivery-targets"),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 
