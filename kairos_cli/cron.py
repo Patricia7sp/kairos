@@ -25,8 +25,14 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
         monitor = (
             {"type": "script", "script": args.monitor} if getattr(args, "monitor", None) else None
         )
+        delivery = {"target": args.deliver} if getattr(args, "deliver", None) else None
         result = store.create(
-            name=args.name, prompt=args.prompt, schedule=schedule, times=args.times, monitor=monitor
+            name=args.name,
+            prompt=args.prompt,
+            schedule=schedule,
+            times=args.times,
+            monitor=monitor,
+            delivery=delivery,
         )
     elif sub == "list":
         result = {"jobs": store.list()}

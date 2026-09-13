@@ -1,5 +1,13 @@
 """Cron: agendamento, claim, monitor."""
 
+from kairos_cron.delivery import (
+    DELIVERY_PAYLOAD_MAX_CHARS,
+    TARGET_MAX_CHARS,
+    DeliveryTargetError,
+    cron_delivery_targets,
+    record_cron_delivery,
+    validate_delivery,
+)
 from kairos_cron.dispatch import (
     ClaimResult,
     DispatchClaimer,
@@ -25,7 +33,10 @@ from kairos_cron.schedule import (
 )
 
 __all__ = [
+    "DELIVERY_PAYLOAD_MAX_CHARS",
+    "TARGET_MAX_CHARS",
     "ClaimResult",
+    "DeliveryTargetError",
     "DispatchClaimer",
     "LifecycleGuardError",
     "MonitorDecision",
@@ -35,11 +46,14 @@ __all__ = [
     "check_gateway_lifecycle",
     "collapse_backlog",
     "compute_next_run",
+    "cron_delivery_targets",
     "croniter_available",
     "evaluate",
     "is_job_runnable",
     "normalize_repeat",
     "output_hash",
+    "record_cron_delivery",
     "reject_gateway_restart_job",
     "render_change_block",
+    "validate_delivery",
 ]

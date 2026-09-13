@@ -101,6 +101,10 @@ def _cron_args(subcommand: str, parser) -> None:
             "--monitor",
             help="Comando da fonte que decide se o agente roda (exige agendamento recorrente)",
         )
+        parser.add_argument(
+            "--deliver",
+            help="Entrega a saída ao destino 'plataforma:destino' (adapter registrado no gateway)",
+        )
     elif subcommand == "monitor-set":
         parser.add_argument("job_id")
         parser.add_argument("script", help="Comando da fonte, sem shell")

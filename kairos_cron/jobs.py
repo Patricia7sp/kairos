@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from kairos_cron.delivery import validate_delivery
 from kairos_cron.lifecycle_guard import check_gateway_lifecycle
 from kairos_cron.monitor import default_monitor_state, validate_monitor, validate_monitor_state
 from kairos_cron.schedule import compute_next_run
@@ -118,6 +119,10 @@ class JobStore:
             validate_monitor(job["monitor"])
         if job.get("monitor_state") is not None:
             validate_monitor_state(job["monitor_state"])
+        if job.get("delivery") is not None:
+            # Só a forma é revalidada na leitura: a adequação do adapter é
+            # decisão dinâmica do dispatcher no momento da entrega.
+            validate_delivery(job["delivery"])
 
     def _write(self, document: dict) -> None:
         secure_atomic_write_text(self.path, json.dumps(document, ensure_ascii=False, indent=2))
@@ -139,6 +144,7 @@ class JobStore:
         now: datetime | None = None,
         times: int | None = None,
         monitor: dict | None = None,
+        delivery: dict | None = None,
     ) -> dict:
         now = now or datetime.now(UTC)
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
@@ -150,6 +156,7 @@ class JobStore:
             if schedule["kind"] == "once":
                 raise ValueError("monitor exige agendamento recorrente")
             monitor = validate_monitor(monitor)
+        delivery = validate_delivery(delivery)
         check_gateway_lifecycle(prompt, monitor["script"] if monitor is not None else None)
         times = _repeat_limit(schedule["kind"], times)
         next_run = (
@@ -171,6 +178,8 @@ class JobStore:
             "monitor": monitor,
             "monitor_state": default_monitor_state() if monitor is not None else None,
         }
+        if delivery is not None:
+            job["delivery"] = delivery
         with credential_file_lock(self.path):
             document = self._read()
             document["jobs"].append(job)

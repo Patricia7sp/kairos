@@ -18,7 +18,7 @@ from kairos_cron.monitor import (
     monitor_state_from_job,
 )
 from kairos_cron.notepad import render_notepad_section
-from kairos_integration.interaction_contract import InteractionEnvelope
+from kairos_integration.interaction_contract import InteractionEnvelope, InteractionEventKind
 from kairos_observability.service_events import record_service_event_async
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ class Scheduler:
                 try:
                     success = False
                     failed = False
+                    output: list[str] = []
                     async with (
                         asyncio.timeout(self.timeout),
                         aclosing(self.service.stream(envelope)) as stream,
@@ -100,9 +101,20 @@ class Scheduler:
                                 failed = True
                             elif event.kind == "turn_end":
                                 success = True
+                            elif event.kind == InteractionEventKind.DELTA and event.text:
+                                output.append(event.text)
                     if success and not failed:
                         self.store.finish(execution_id, "completed")
                         event_code = "cron.completed"
+                        delivery = job.get("delivery")
+                        if delivery:
+                            # Entrega é ônus à parte do turno: falha de
+                            # persistência não pode virar falha do job.
+                            self._record_delivery(
+                                execution_id,
+                                delivery["target"],
+                                "".join(output),
+                            )
                     else:
                         self.store.finish(
                             execution_id,
@@ -135,6 +147,18 @@ class Scheduler:
             self.last_tick = now.isoformat()
             self.last_error = None
         return report
+
+    def _record_delivery(self, execution_id: str, target: str, output: str) -> None:
+        """Registra a obrigação durável de entrega da saída completada.
+
+        Best effort: a entrega é consequência, não o turno em si. Falha de
+        persistência fica registrada no log; o job já está terminado."""
+        try:
+            from kairos_cron.delivery import record_cron_delivery
+
+            record_cron_delivery(self.home, "cron-" + execution_id, target, output)
+        except Exception:
+            logger.exception("não foi possível gravar obrigação de entrega de %s", execution_id)
 
     @staticmethod
     def _monitor_due(job: dict, now: datetime) -> bool:

@@ -767,3 +767,44 @@ não dispara em prosa"); foi substituído por um padrão ancorado.
   Sweep completo: **2.237 aprovados**, 13 pulados, 24 desmarcados, 5.600
   subtests — apenas as duas reprovações esperadas do Codex. Manual:
   [Agendamentos](agendamentos.md).
+
+## Integração com o DeliveryDispatcher do gateway — implementação e validação local
+
+Branch `feat/cron-delivery`, base PR #35 integrada. Objetivo (T-10): a saída do
+job percorre o **ledger durável de obrigações do gateway**, e os destinos
+derivam dos **adapters registrados** — sem lista de plataforma hardcoded. O
+legado derivava `cron_delivery_targets()` das plataformas configuradas e as
+engovia também no `cronjob` do agente; kairos não tem tool de modelo, e o turno
+de cron só gera texto — a entrega é um ônus de irmandade com o dispatcher.
+
+- `kairos_cron/delivery.py` novo: `cron_delivery_targets(adapters)` deriva os
+  alvos **exclusivamente** do conjunto de adapters recebido (nenhuma lista de
+  plataformas no código); `validate_delivery(delivery, adapters)` normaliza o
+  `plataforma:destino` (prefixo antes do primeiro `:` escolhe o adapter; não
+  vazio, ≤200 chars, sem controle) e, quando adapters registrados são
+  fornecidos, exige que o prefixo esteja entre eles; `record_cron_delivery`
+  grava a obrigação `cron-<execution>` em `delivery_obligations` (`state.db`)
+  truncando o payload a **64 KiB**. `DeliveryTargetError` mapeia a `422` com a
+  justificativa (como o guard).
+- `JobStore.create(..., delivery)` opcional: forma validada na criação e na
+  releitura (adequação do adapter é decisão dinâmica do dispatcher). CLI
+  `kairos cron create --deliver plataforma:destino`; API aceita
+  `delivery: {"target": ...}` no `POST /api/cron/jobs`.
+- Scheduler: acumula o texto `delta` do turno; **só** turno completado com
+  `delivery` grava obrigação durável. Persistência é best effort (falha logada,
+  nunca vira falha do turno); turno falho nunca gera obrigação; job sem
+  delivery não abre `state.db`.
+- `GET /api/cron/delivery-targets` autenticado: `local` implícito (só grava) +
+  um alvo por adapter registrado em `app.state.delivery_adapters` (vazio por
+  padrão → só `local`). Superfícies: CLI (criação) e API (criação + consulta);
+  a UI Web ainda não oferece o campo (documentado).
+- Regressões: derivação sem lista fixa, forma rejeitada na criação, plataforma
+  desconhecida rejeitada quando há adapters registrados, obrigação gravada com
+  o payload do turno, idempotência de re-gravação, turno falho sem obrigação,
+  falha de storage sem quebrar o turno, CL/I + API persistentes e
+  `delivery-targets` autenticado e derivado.
+- Validação local: **25 testes novos** de delivery + 5 nas superfícies;
+  suítes de cron/schema/storage e superfícies CLI/API verdes; Ruff e formato em
+  ordem. Sweep completo e `ci.sh --fast` seguem a mesma linha dos lotes
+  anteriores (apenas as duas reprovações esperadas do Codex). Manual:
+  [Agendamentos](agendamentos.md).

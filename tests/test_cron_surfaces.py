@@ -259,6 +259,101 @@ def test_lifecycle_prose_passes_and_monitor_script_is_scanned(home):
     assert JobStore(home).get(created.json()["id"]) is not None
 
 
+def test_cli_and_api_create_with_delivery_persist_the_target(home, capsys):
+    assert (
+        main(
+            [
+                "cron",
+                "create",
+                "--name",
+                "Entregue",
+                "--prompt",
+                "Escreva o relatório",
+                "--every",
+                "5",
+                "--deliver",
+                "wpp:alice",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    job = json.loads(capsys.readouterr().out)
+    assert job["delivery"] == {"target": "wpp:alice"}
+    assert JobStore(home).list()[0]["delivery"] == {"target": "wpp:alice"}
+
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    delivery = {"delivery": {"target": "telegram:eu"}}
+    api = client.post(
+        "/api/cron/jobs",
+        json={
+            "name": "Entregue API",
+            "prompt": "Resumo",
+            "schedule": {"kind": "interval", "minutes": 5},
+            **delivery,
+        },
+    )
+    assert api.status_code == 201
+    assert api.json()["delivery"] == {"target": "telegram:eu"}
+
+
+def test_cli_rejects_malformed_delivery_target(home, capsys):
+    assert (
+        main(
+            [
+                "cron",
+                "create",
+                "--name",
+                "X",
+                "--prompt",
+                "x",
+                "--every",
+                "5",
+                "--deliver",
+                "semseparador",
+            ]
+        )
+        != 0
+    )
+    capsys.readouterr()
+    assert JobStore(home).list() == []
+
+
+def test_api_rejects_delivery_platform_not_among_registered_adapters(home, monkeypatch):
+    monkeypatch.setattr(app.state, "delivery_adapters", {"wpp", "telegram"}, raising=False)
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    result = client.post(
+        "/api/cron/jobs",
+        json={
+            "name": "X",
+            "prompt": "x",
+            "schedule": {"kind": "interval", "minutes": 5},
+            "delivery": {"target": "orb:chat"},
+        },
+    )
+    assert result.status_code == 422
+    assert "não está entre os adapters registrados" in result.json()["detail"]
+    assert JobStore(home).list() == []
+
+
+def test_delivery_targets_derive_from_registered_adapters(home):
+    client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+    assert TestClient(app).get("/api/cron/delivery-targets").status_code == 401
+
+    sem_adapter = client.get("/api/cron/delivery-targets")
+    assert sem_adapter.status_code == 200
+    assert sem_adapter.json() == {"targets": [{"id": "local", "name": "Local (só grava)"}]}
+
+    app.state.delivery_adapters = {"wpp", "telegram", "slack_pub"}
+    try:
+        with_adapter = client.get("/api/cron/delivery-targets")
+    finally:
+        del app.state.delivery_adapters
+    assert with_adapter.status_code == 200
+    ids = [t["id"] for t in with_adapter.json()["targets"]]
+    assert ids == ["local", "slack_pub", "telegram", "wpp"]
+
+
 def test_web_lifespan_stops_ticker_and_closes_service_even_if_journal_write_fails(
     home, monkeypatch
 ):
