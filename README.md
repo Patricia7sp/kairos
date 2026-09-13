@@ -59,6 +59,9 @@ kairos approvals test "rm -rf build" --deny "rm *" --yolo   # sai 3: deny vence 
 São **50 comandos** declarados na superfície. Os implementados usam as units reconstruídas; os demais
 saem com código **69** e dizem qual unit já existe — nunca com 0 em silêncio.
 
+`kairos debug [--json]` fornece um [diagnóstico local sem reparos](docs/diagnostico.md),
+com limites explícitos para autenticação, geração e integridade do banco.
+
 ## Agendamentos
 
 A tela Agendamentos e `kairos cron` administram jobs persistidos com execução real

@@ -162,7 +162,7 @@ COMMANDS: tuple[Command, ...] = (
         unit="cron",
     ),
     _c("dashboard", "Painel web e interface gráfica", status=Status.IMPLEMENTED, unit="web"),
-    _c("debug", "Diagnóstico de baixo nível"),
+    _c("debug", "Diagnóstico local sem reparos", status=Status.IMPLEMENTED, unit="observability"),
     _c(
         "doctor",
         "Diagnóstico do ambiente e do estado",

@@ -656,7 +656,16 @@ def cmd_insights(args) -> int:
     return run_insights(_home(), args)
 
 
+def cmd_debug(args) -> int:
+    import asyncio
+
+    from kairos_cli.debug import run_debug
+
+    return asyncio.run(run_debug(_home(), args))
+
+
 HANDLERS = {
+    "debug": cmd_debug,
     "insights": cmd_insights,
     "logs": cmd_logs,
     "model": cmd_model,

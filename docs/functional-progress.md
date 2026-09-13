@@ -556,3 +556,63 @@ apenas por adicionar um handler ou uma interface.
 As notas locais de entrega anteriores foram incorporadas aos PRs seguintes e
 preservadas adicionalmente em stashes identificados. Não reaplicar esses stashes
 sem comparar o conteúdo: já está documentado aqui.
+
+## Continuação — diagnóstico local de Chat, Modelos e Provedores
+
+Branch `feat/local-diagnostics`, base PR #30 (`b47018d`). `kairos debug [--json]`
+agora observa configuração e catálogo canônicos, schema/tabelas do Chat, diário
+operacional e RPC `runtime.status` no socket existente. Não abre cofre, não chama
+provedores, não atualiza catálogo, não migra dados nem inicia runtime.
+
+Autenticação e geração permanecem `not_tested`, integridade completa do banco
+também. `complete` significa apenas fontes locais observadas; falta de runtime
+ou diário pode não impedir Chat. Política OpenRouter é identificada como padrão
+da aplicação, mantendo `data_collection: deny`, sem alegar inspecionar conta ou
+conversas. Saída não contém IDs de modelo, paths, URLs, segredos ou erros brutos.
+
+- Chat: streaming, persistência, cancelamento, contabilidade e busca opcional
+  exercitados com integração real e provedores HTTP controlados. A geração externa
+  bem-sucedida do modelo gratuito selecionado com `deny` continua não validada.
+- Modelos: catálogo, seleção, atualização, capacidades, parâmetros e CLI
+  implementados; presença/autenticação não equivalem a geração.
+- Provedores: oito adaptadores canônicos e gestão de credenciais/configuração/
+  conexão implementados; faltam aceites externos específicos e provedores além
+  desses oito. Ollama operacional permanece adiado.
+
+26 testes focados passaram: SQLite/configuração/diário/cache reais, servidor Unix
+real, timeout, cancelamento e fechamento de conexão, modelo não selecionável,
+ausência de home sem criação, preservação de dados e CLI em processo novo.
+Revisão independente encontrou quatro falhas corrigidas com regressões:
+capacidade inválida do cache não é emitida, preço inválido e JSON do runtime
+excessivamente aninhado não interrompem as demais observações, e a seleção global
+compartilha a interpretação canônica do Chat. Segunda revisão sem bloqueadores.
+Manual: [Diagnóstico local](diagnostico.md). Restam 25 comandos sem handler; o
+escopo funcional integral e as demais pendências do checkpoint continuam abertos.
+
+### Retomada e aceite de diagnóstico — 2026-09-13
+
+- CI local final: **2.190 testes Python + 5.583 subtestes**, 13 skips opcionais,
+  **166 Web**, **17 TUI**, **18 desktop**; Ruff, formato, tipos, shellcheck, recall
+  e lock passaram. Codex dos testes fixado em 0.153.4, sem alterar a instalação
+  do usuário. Imagem construída e **23 testes Docker + 24 subtestes** passaram,
+  sem skips, com stub s6 derivado da imagem deste lote.
+- CLI em dois processos novos, saída textual e JSON, com configuração/SQLite/
+  diário e servidor Unix reais em home descartável: complete, saída 0, somente
+  duas chamadas runtime.status, dados preservados. Ausência de runtime na CLI
+  empacotada retorna incomplete/1 como previsto, com rede do contêiner desativada.
+- Consulta à instalação atual pela nova imagem, com volume montado somente para
+  leitura, usuário 10000 e rede desativada: configuração/provedor reconhecidos,
+  banco schema 3/WAL disponível, registros e runtime prontos. O modelo configurado
+  está ausente do catálogo local, portanto o resultado é incomplete. Não houve
+  atualização de catálogo, inspeção de credenciais, geração nem troca de modelo.
+- Esse aceite usa a imagem de validação; a aplicação em serviço continua na imagem
+  publicada no PR #29. Não confundir a consulta com implantação deste lote.
+- Relatórios temporários: `/tmp/kairos-local-diagnostics-acceptance.json`,
+  `/tmp/kairos-local-diagnostics-production-readonly.json`,
+  `/tmp/kairos-local-diagnostics-ci-final.log` e
+  `/tmp/kairos-local-diagnostics-container.log`. Os resultados relevantes
+  estão registrados aqui para sobreviver à limpeza de `/tmp`.
+- Lote preparado para revisão em PR; integração na main e implantação permanecem
+  pendentes. O próximo passo é concluir essa entrega antes de escolher outro
+  comando do inventário. `verify` e `memory` ainda não têm os executores descritos
+  no checkpoint anterior; não marcá-los como implementados.
