@@ -9,7 +9,7 @@ from kairos_integration.interaction_contract import InteractionEnvelope
 from kairos_providers import ModelSelectionContext, ProviderModelRef
 from kairos_state.repositories import SessionRepository
 
-__all__ = ["SelectionContextLoader", "parse_ref"]
+__all__ = ["SelectionContextLoader", "parse_config_ref", "parse_ref"]
 
 
 def parse_ref(value: Any) -> ProviderModelRef | None:
@@ -60,8 +60,8 @@ class SelectionContextLoader:
             message=parse_ref(envelope.override),
             conversation=parse_ref(persisted.ref if persisted is not None else None),
             activity=_activity_ref(profile_config, envelope.activity),
-            profile=parse_ref(_config_ref(profile_config)),
-            global_default=parse_ref(_config_ref(self._global_config)),
+            profile=parse_config_ref(profile_config),
+            global_default=parse_config_ref(self._global_config),
             message_parameters=envelope.parameters or None,
             conversation_parameters=(
                 persisted.parameters if persisted is not None and persisted.parameters else None
@@ -72,14 +72,17 @@ class SelectionContextLoader:
         )
 
 
-def _config_ref(config: Mapping[str, Any]) -> Any:
+def parse_config_ref(config: Mapping[str, Any]) -> ProviderModelRef | None:
+    """Parse a configured default without loading conversations or credentials."""
     model = config.get("model")
     if isinstance(model, str) and isinstance(config.get("provider"), str):
-        return {
-            "provider": config["provider"],
-            "model": model,
-        }
-    return model
+        return parse_ref(
+            {
+                "provider": config["provider"],
+                "model": model,
+            }
+        )
+    return parse_ref(model)
 
 
 def _activity_ref(config: Mapping[str, Any], activity: str | None) -> ProviderModelRef | None:
