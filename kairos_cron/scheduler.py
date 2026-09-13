@@ -17,6 +17,7 @@ from kairos_cron.monitor import (
     monitor_state_dict,
     monitor_state_from_job,
 )
+from kairos_cron.notepad import render_notepad_section
 from kairos_integration.interaction_contract import InteractionEnvelope
 from kairos_observability.service_events import record_service_event_async
 
@@ -50,7 +51,7 @@ class Scheduler:
         self.last_tick = None
         self.last_error = None
 
-    async def tick(  # noqa: PLR0912 - um tick por job, alternando monitor e execução; separar romperia a atomicidade
+    async def tick(  # noqa: PLR0912, PLR0915 - um tick por job, alternando monitor e execução; separar romperia a atomicidade
         self, *, now: datetime | None = None
     ) -> dict:
         now = now or datetime.now(UTC)
@@ -80,8 +81,12 @@ class Scheduler:
                     continue
                 job, execution_id = claimed
                 self.store.running(execution_id)
+                content = job["prompt"]
+                notepad_section = render_notepad_section(self.home, job["id"])
+                if notepad_section:
+                    content = notepad_section + content
                 envelope = InteractionEnvelope(
-                    conversation_id="cron-" + execution_id, source="cron", content=job["prompt"]
+                    conversation_id="cron-" + execution_id, source="cron", content=content
                 )
                 try:
                     success = False

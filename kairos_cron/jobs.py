@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import closing
 from datetime import UTC, datetime
@@ -14,6 +15,8 @@ from kairos_cron.monitor import default_monitor_state, validate_monitor, validat
 from kairos_cron.schedule import compute_next_run
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 from kairos_state import connect, migrate
+
+logger = logging.getLogger(__name__)
 
 
 def timestamp(value: str) -> datetime:
@@ -216,6 +219,17 @@ class JobStore:
             job = self._find(document, job_id)
             document["jobs"].remove(job)
             self._write(document)
+        # Best effort: um bloco órfão após remover o job não pode bloquear a
+        # remoção. Só abre o banco canônico se já existir, para não criar
+        # `state.db` num volume virgem só por causa de uma remoção.
+        notepad_db = self.home / "state.db"
+        if notepad_db.exists():
+            try:
+                from kairos_cron.notepad import NotepadStore
+
+                NotepadStore(self.home).clear(job_id)
+            except Exception:  # noqa: BLE001 - remoção é o que conta; posto órfão é aceitável
+                logger.debug("could not clear notepad for removed job %s", job_id)
 
     @staticmethod
     def _find(document: dict, job_id: str) -> dict:

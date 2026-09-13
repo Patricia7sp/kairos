@@ -80,6 +80,9 @@ export const api = {
   definirMonitor: (id, script) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor`, {method:"PUT", body:{script}}),
   removerMonitor: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor`, {method:"DELETE"}),
   rodarMonitor: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/monitor/run`, {method:"POST"}),
+  blocoNotas: (id) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad`),
+  definirNota: (id, key, value) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad/${encodeURIComponent(key)}`, {method:"PUT", body:{value}}),
+  removerNota: (id, key) => request(`/api/cron/jobs/${encodeURIComponent(id)}/notepad/${encodeURIComponent(key)}`, {method:"DELETE"}),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 

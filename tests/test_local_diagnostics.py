@@ -13,7 +13,7 @@ import pytest
 
 from kairos_cli.main import main
 from kairos_observability.service_events import record_service_event
-from kairos_state import connect, initialize_schema
+from kairos_state import SCHEMA_VERSION, connect, initialize_schema
 
 
 def ready_home(home):
@@ -87,7 +87,7 @@ def test_complete_observation_does_not_mean_authentication_or_generation(tmp_pat
         assert report["model"]["state"] == "available"
         assert report["model"]["generation"] == "not_tested"
         assert report["model"]["catalog_sources"] == ["curated"]
-        assert report["database"]["schema_version"] == 3
+        assert report["database"]["schema_version"] == SCHEMA_VERSION
         assert report["database"]["integrity"] == "not_tested"
         assert report["events"] == {"state": "ready"}
         assert report["runtime"] == {"state": "ready", "enabled": True}
@@ -147,7 +147,9 @@ def test_database_probes_do_not_repair_or_migrate(tmp_path, kind, state):
     else:
         with sqlite3.connect(path) as db:
             db.execute("CREATE TABLE schema_version(version INTEGER)")
-            db.execute("INSERT INTO schema_version VALUES (?)", (1 if kind == "old" else 3,))
+            db.execute(
+                "INSERT INTO schema_version VALUES (?)", (1 if kind == "old" else SCHEMA_VERSION,)
+            )
     before = path.read_bytes()
     from kairos_observability.diagnostics import read_diagnostics
 

@@ -45,6 +45,8 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
         result = show_monitor(store, args.job_id)
     elif sub == "monitor-run":
         result = run_monitor_now(store, args.job_id, home)
+    elif sub == "notepad":
+        result = cmd_notepad(args, home)
     elif sub == "tick":
 
         async def run():
@@ -67,6 +69,29 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
         }
     _emit(result, as_json=args.json)
     return 1 if sub == "tick" and (result["failed"] or result["busy"]) else 0
+
+
+def cmd_notepad(args, home) -> dict:
+    """Memória KV durável de um job (não exige que o job ainda exista — o
+    bloco é chaveado por id, como no legado)."""
+    from kairos_cron.notepad import NotepadStore
+
+    store = NotepadStore(home)
+    action = getattr(args, "notepad_action", "list") or "list"
+    job_id, key, value = args.job_id, getattr(args, "key", None), getattr(args, "value", None)
+    if action == "set":
+        if not key or value is None:
+            raise ValueError("set exige chave e valor")
+        return store.set(job_id, key, value)
+    if action == "get":
+        if not key:
+            raise ValueError("get exige chave")
+        return {"job_id": job_id, "key": key, "value": store.get(job_id, key)}
+    if action == "delete":
+        if not key:
+            raise ValueError("delete exige chave")
+        return {"job_id": job_id, "key": key, "deleted": store.delete(job_id, key)}
+    return {"job_id": job_id, "notes": store.list(job_id)}
 
 
 def show_monitor(store, job_id: str) -> dict:

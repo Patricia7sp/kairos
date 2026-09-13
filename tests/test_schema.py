@@ -101,7 +101,7 @@ class SchemaTestCase(unittest.TestCase):
     def test_versao_do_schema_e_propria_do_kairos(self):
         # A versão do legado fica registrada para rastreabilidade, não como a nossa.
         self.assertEqual(read_schema_version(self.db), SCHEMA_VERSION)
-        self.assertEqual(SCHEMA_VERSION, 3)
+        self.assertEqual(SCHEMA_VERSION, 4)
         self.assertEqual(LEGACY_SHAPE_VERSION, 26)
 
     def test_inicializacao_e_idempotente(self):

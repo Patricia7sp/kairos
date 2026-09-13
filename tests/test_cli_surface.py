@@ -115,6 +115,7 @@ class ArvoreTests(unittest.TestCase):
                 "monitor-clear",
                 "monitor-show",
                 "monitor-run",
+                "notepad",
             },
             "skills": {"add", "install", "list", "remove", "tap"},
             "sync": {"disable", "enable", "now", "push", "status"},
