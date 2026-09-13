@@ -1,6 +1,6 @@
 # Progresso funcional do Kairos
 
-Atualizado em 12/09/2026. Código publicado na `main`: PR #29, `901e1bd`.
+Atualizado em 13/09/2026. Código publicado na `main`: PR #31, `a896c6f`.
 Este documento inclui o checkpoint de continuidade após a implantação. A conclusão integral não está declarada.
 
 ## Mandato e critérios
@@ -77,8 +77,8 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
   estão publicados via PR #28.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
   de registros abaixo, já publicado via PR #27. `/api/cron/jobs` usa armazenamento real.
-- A CLI declara **50 comandos**. Após implementar `model`, `logs` e `insights`, **26** ainda não têm handler:
-  acp, backup, claw, console, debug, dump, gui, hooks, import-agent, import,
+- A CLI declara **50 comandos**. Após implementar `model`, `logs`, `insights` e `debug`, **25** ainda não têm handler:
+  acp, backup, claw, console, dump, gui, hooks, import-agent, import,
   login, logout, memory, monitoring, pairing, pause, peer, prompt-size, setup,
   skin, slack, uninstall, update, verify, webhook, whatsapp. Há também subcomandos
   pendentes dentro dos grupos com handler. Esses comandos retornam 69.
@@ -612,7 +612,43 @@ escopo funcional integral e as demais pendências do checkpoint continuam aberto
   `/tmp/kairos-local-diagnostics-ci-final.log` e
   `/tmp/kairos-local-diagnostics-container.log`. Os resultados relevantes
   estão registrados aqui para sobreviver à limpeza de `/tmp`.
-- Lote preparado para revisão em PR; integração na main e implantação permanecem
-  pendentes. O próximo passo é concluir essa entrega antes de escolher outro
-  comando do inventário. `verify` e `memory` ainda não têm os executores descritos
-  no checkpoint anterior; não marcá-los como implementados.
+- Integração e implantação deste lote concluídas conforme o registro abaixo.
+  `verify` e `memory` ainda não têm os executores descritos no checkpoint anterior;
+  não marcá-los como implementados.
+
+### Publicação do diagnóstico local — PR #31
+
+- Usuária autorizou o merge e as próximas implantações. PR #31 integrada em
+  `a896c6fc05cc3b84959c1474a563382b3aa01399`; código revisado
+  `abf86305ae3274bf9a69c69b1116073eea8181df`. Os nove checks remotos passaram.
+- Imagem `sha256:3780394c72b4ee4a9ef3f89aa8fbbfbd1963df89b1335cfd3572dd57797d3a78`
+  publicada na aplicação. Aplicação e broker saudáveis; container/imagem do broker
+  e keeper preservados. Porta Tailscale, mounts e ambiente da stack preservados.
+- Backup privado `20260913T041107Z`: **4.270 arquivos** restaurados em volume
+  descartável e conferidos por conteúdo, proprietário e permissões; dois bancos
+  íntegros, **10 checkpoints e duas baselines** com archives/digests validados.
+  O backup completo inclui o perfil dedicado e as credenciais, sem publicação.
+- **21 sessões, 64 mensagens, oito registros de uso, 16 turnos e 3.476 eventos
+  de runtime** preservados, assim como tags e execuções cron. Cinco arquivos
+  protegidos permaneceram idênticos. A reinicialização do broker renovou somente
+  `runtime_sessions.updated_at` de uma sessão; todos os demais campos foram
+  comparados e permaneceram iguais.
+- Conferência operacional corrigida para permitir auxiliares WAL/SHM na leitura
+  SQLite após parar os escritores e comparar mounts por destino, sem depender
+  da ordem devolvida pelo Docker. Uma reversão preventiva para a imagem anterior
+  foi concluída saudável antes da repetição bem-sucedida; nenhum backup foi
+  restaurado sobre o volume ativo.
+- CLI `debug --json` publicada: configuração/provedor/banco disponíveis, registros
+  e runtime prontos. Resultado `incomplete` porque o modelo configurado está
+  ausente do catálogo local. Nenhuma atualização de catálogo, troca de modelo
+  ou geração foi feita para alterar esse resultado; proteção `deny` preservada.
+- Aceite publicado em Chromium: **dez APIs HTTP 200**, autenticação por cookie
+  httpOnly, anônimo recebe 401 e `/api/env` permanece 410. API de uso e CLI
+  insights idênticas. Dez rotas em **390/900/1400 px**, sem erros JavaScript
+  nem overflow. Nova conferência após o navegador confirmou os dados protegidos
+  idênticos. Volume descartável de restauração removido após o aceite; backup
+  privado preservado.
+- Evidências duráveis em
+  `~/.local/share/kairos-production-backups/20260913T041107Z/`: `deployment.json`,
+  `published-acceptance.json`, estados conferidos, inventário e backup completo. Não copiar esses
+  arquivos privados para PRs. Este documento registra as evidências não sensíveis.
