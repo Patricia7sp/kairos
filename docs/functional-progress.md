@@ -728,5 +728,42 @@ listas), mantendo o contrato do legado: escrita via CLI, sem tool de modelo.
   a versão 4; vitest **168** (14 arquivos) e `tsc --noEmit` sem erros; Ruff,
   formato e imports em ordem. Sweep completo: 2.224 aprovados, com
   apenas as duas reprovações esperadas do Codex. Manual: [Agendamentos](agendamentos.md).
-- Publicação ainda depende dos checks locais e remotos; entrega e aceite externo
-  serão registrados após confirmação.
+
+## Guard do ciclo de vida do gateway — implementação e validação local
+
+Branch `feat/lifecycle-guard`, base PR #34 integrada. Objetivo: fechar o laço de
+reinício disfarçado de automação na **criação** do job. O guard legado era um
+matcher de substring (barrava "pkill", "kill -9" e "docker restart" até em
+prosa) exatamente o que o critério da T-09 proíbe ("padrão command-shaped que
+não dispara em prosa"); foi substituído por um padrão ancorado.
+
+- `kairos_cron/lifecycle_guard.py` novo: regex **command-shaped** de 5 ramos
+  (ancorado em identificador concreto — `kairos (gateway) restart|stop`,
+  `hermes gateway restart|stop`, `launchctl`/`systemctl` contra unit do
+  gateway, `p?kill`/`killall` contra o processo, `docker restart|stop` contra
+  container kairos), colapso de continuação de linha POSIX (`\`+nova linha) e
+  debate de data-sink: `grep`/`journalctl`/`sqlite3`/`psql` passam como dados,
+  `grep … | sh` continua barrado. `check_gateway_lifecycle(prompt, script)`
+  levanta `LifecycleGuardError`; `dispatch.reject_gateway_restart_job` só
+  re-exporta o guard por compatibilidade (API pública preservada).
+- Aplicado em `JobStore.create` (instrução **e** monitor) e `JobStore.set_monitor`
+  — pontos únicos por onde passam CLI e API. **Política de entrada**: a releitura
+  do arquivo não re-roda o guard, senão um job salvo antes de um endurecimento
+  do padrão tornaria o documento inteiro ilegível no boot.
+- Superfícies: CLI imprime a justificativa e sai 1; API Web responde **422** com
+  a mensagem informativa (em `operate`; mudança localizada em
+  `kairos_web/cron_api.py`). A ferramenta `cronjob` do agente e o `terminal_tool`
+  sob `_HERMES_GATEWAY=1` do legado **não existem** em kairos (divergência
+  documentada: não há tool de modelo; o turno de cron só gera texto de modelo).
+- Regressões: formas de comando rejeitadas na criação sem nada escrito, prosa
+  citando gateway/restart aceita, diagnóstico em data-sink aceito e
+  `… | sh` barrado, continuação de linha barrada, monitor rejeitado na criação
+  e no `set_monitor` sem escrita parcial, e leitura tolerante de job salvo antes
+  do endurecimento.
+- Validação local: **13 testes novos** (unidade do guard, `test_cron.py` +
+  operacional + superfícies CLI/API); suíte cron/schema/storage **176** verdes;
+  vitest **168** (14 arquivos) e `tsc --noEmit` limpos; Ruff e formato em ordem;
+  `ci.sh --fast` passa exceto "Testes (unitários)" pela causa Codex conhecida.
+  Sweep completo: **2.237 aprovados**, 13 pulados, 24 desmarcados, 5.600
+  subtests — apenas as duas reprovações esperadas do Codex. Manual:
+  [Agendamentos](agendamentos.md).

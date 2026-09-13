@@ -162,5 +162,29 @@ expõe `GET /api/cron/jobs/{id}/notepad`, `GET/PUT/DELETE
 (limpar tudo); o painel mostra o bloco de notas de cada job e permite salvar e
 remover anotações.
 
+## Guard do ciclo de vida do gateway
+
+Na **criação** (nunca na execução) o guard rejeita jobs cuja **instrução** ou
+**script de monitor** contém comando no formato que reiniciaria o próprio
+processo que os executa — `kairos (gateway) restart|stop`, `hermes gateway
+restart|stop`, `launchctl`/`systemctl` contra uma unit do gateway, `p?kill`/
+`killall` contra o processo, `docker restart|stop` contra um container kairos.
+É imposto em `JobStore.create` e `JobStore.set_monitor`, o que cobre toda
+superfície de escrita: CLI `kairos cron create`/`monitor-set` e API Web
+`POST /api/cron/jobs`/`PUT /api/cron/jobs/{id}/monitor`.
+
+O padrão é **command-shaped**: ancora num identificador de comando concreto,
+então **não dispara em prosa**. Um prompt que só cita comportamento de gateway
+em inglês (ex.: "Kong API gateway restart behavior") ou comandos de
+diagnóstico em data sink (`grep 'systemctl restart kairos' /var/log/syslog`,
+`sqlite3 … LIKE '%pkill -f kairos%'`) é aceito; `grep … | sh` continua barrado.
+Também colapsa continuações de linha POSIX (`\` + nova linha) antes de
+comparar.
+
+É **política de entrada**: a releitura do arquivo de jobs não re-roda o guard
+(um job salvo antes de um endurecimento do padrão não pode tornar o documento
+inteiro ilegível no boot). A recusa é um `ValueError` (`LifecycleGuardError`):
+a CLI imprime em vermelho e sai 1; a API responde `422` com a justificativa.
+
 Blueprints, schedulers externos e entrega para canais não estão ligados a este
 executor. Campos sem implementação são recusados pela API.

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from kairos_cron.jobs import JobStore
+from kairos_cron.lifecycle_guard import LifecycleGuardError
 
 router = APIRouter(prefix="/api/cron")
 
@@ -54,6 +55,8 @@ def operate(operation):
         return operation()
     except KeyError as exc:
         raise HTTPException(404, "agendamento não encontrado") from exc
+    except LifecycleGuardError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, "agendamento ou arquivo de jobs inválido") from exc
     except (OSError, sqlite3.Error) as exc:

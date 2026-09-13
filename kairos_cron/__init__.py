@@ -7,6 +7,7 @@ from kairos_cron.dispatch import (
     is_job_runnable,
     reject_gateway_restart_job,
 )
+from kairos_cron.lifecycle_guard import check_gateway_lifecycle
 from kairos_cron.monitor import (
     MonitorDecision,
     MonitorOutcome,
@@ -31,6 +32,7 @@ __all__ = [
     "MonitorOutcome",
     "MonitorState",
     "ScheduleKind",
+    "check_gateway_lifecycle",
     "collapse_backlog",
     "compute_next_run",
     "croniter_available",

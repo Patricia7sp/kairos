@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from kairos_cron.lifecycle_guard import LifecycleGuardError, check_gateway_lifecycle
 from kairos_domain.scheduling import JobState
 
 __all__ = [
@@ -85,21 +86,6 @@ def is_job_runnable(*, enabled: bool, paused: bool, state: JobState | None = Non
     return state not in (JobState.PAUSED, JobState.DISABLED)
 
 
-class LifecycleGuardError(ValueError):
-    """Job que reiniciaria o gateway."""
-
-
-#: Formas de comando que derrubariam o próprio processo que as executa.
-_RESTART_MARKERS = (
-    "kairos gateway restart",
-    "kairos restart",
-    "systemctl restart kairos",
-    "docker restart",
-    "kill -9",
-    "pkill",
-)
-
-
 def reject_gateway_restart_job(command: str) -> None:
     """Rejeitado **na criação**, não na execução (#30719).
 
@@ -110,13 +96,8 @@ def reject_gateway_restart_job(command: str) -> None:
 
     Rejeitar na execução seria tarde: o job já estaria salvo, e o usuário
     descobriria pelo sintoma.
+
+    Nome público legado preservado por compatibilidade; a implementação é o
+    guard command-shaped de `kairos_cron.lifecycle_guard`.
     """
-    baixo = command.lower()
-    for marcador in _RESTART_MARKERS:
-        if marcador in baixo:
-            raise LifecycleGuardError(
-                f"comando {command!r} reiniciaria o gateway. Um job assim mata o "
-                f"processo que o executa: a execução nunca alcança estado terminal "
-                f"durável, é reconciliada como 'unknown' no boot e dispara de novo — "
-                f"laço de reinício disfarçado de automação."
-            )
+    check_gateway_lifecycle(command)
