@@ -186,5 +186,33 @@ comparar.
 inteiro ilegível no boot). A recusa é um `ValueError` (`LifecycleGuardError`):
 a CLI imprime em vermelho e sai 1; a API responde `422` com a justificativa.
 
-Blueprints, schedulers externos e entrega para canais não estão ligados a este
-executor. Campos sem implementação são recusados pela API.
+## Entrega da saída pelo ledger do gateway
+
+Um job pode pedir **entrega** da saída do turno completo com `delivery:
+{"target": "plataforma:destino"}` (CLI `--deliver plataforma:destino`; a API
+aceita o campo `delivery` no `POST /api/cron/jobs`). O alvo segue a mesma
+semântica do gateway: o **prefixo antes do primeiro `:` escolhe o adapter**, o
+resto é o endereço no destino.
+
+Os destinos oferecidos nunca vêm de uma lista de plataformas hardcoded: derivam
+dos **adapters registrados** no processo (`app.state.delivery_adapters` da
+composição Web). `GET /api/cron/delivery-targets` sempre devolve o `local`
+implícito (só grava) e, além dele, um alvo por adapter registrado — sem nenhum
+adapter registrado, só `local` aparece. Na criação web, quando há adapters
+registrados, o prefixo do target precisa estar nesse conjunto (senão `422` com
+a plataforma citada). Sem adapters declarados, apenas a forma
+`plataforma:destino` é exigida na criação; a adequação dinâmica do adapter
+continua sendo decisão do dispatcher (`kairos_gateway.service`), que suspende
+obrigações cujo adapter ainda não existe.
+
+Quando o turno termina com sucesso e o job tem `delivery`, o scheduler grava a
+saída (texto do turno, truncado a 64 KiB) como **obrigação durável** em
+`delivery_obligations` (`state.db`), estado `pending`, id `cron-<execution>`.
+O gateway drena essa obrigação pelo mesmo ledger que qualquer outra entrega —
+não há um segundo sistema de delivery. A persistência é best effort: falha ao
+gravar a obrigação não vira falha do turno (fica no log); turnos que falharam
+nunca geram obrigação. A UI Web ainda não oferece o campo; as superfícies
+operacionais são CLI e API.
+
+Blueprints e schedulers externos não estão ligados a este executor. Campos sem
+implementação são recusados pela API.

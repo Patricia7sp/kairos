@@ -7,6 +7,11 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
+from kairos_cron.delivery import (
+    DeliveryTargetError,
+    cron_delivery_targets,
+    validate_delivery,
+)
 from kairos_cron.jobs import JobStore
 from kairos_cron.lifecycle_guard import LifecycleGuardError
 
@@ -20,6 +25,7 @@ class CreateJob(BaseModel):
     schedule: dict
     times: StrictInt | None = Field(default=None, ge=1, le=1_000_000)
     monitor: dict | None = None
+    delivery: dict | None = None
 
 
 class PauseJob(BaseModel):
@@ -57,10 +63,37 @@ def operate(operation):
         raise HTTPException(404, "agendamento não encontrado") from exc
     except LifecycleGuardError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except DeliveryTargetError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, "agendamento ou arquivo de jobs inválido") from exc
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(503, "armazenamento de agendamentos indisponível") from exc
+
+
+def delivery_adapters(request):
+    """Adapters registrados no processo, se a composição os declarou.
+
+    Sem lista fixa no código: a validação deriva do que estiver aqui (vazio
+    quando nenhum adapter foi registrado — a presença dinâmica do adapter é do
+    dispatcher)."""
+    declared = getattr(request.app.state, "delivery_adapters", None) or ()
+    return {a for a in declared if isinstance(a, str) and a and not a.isspace()}
+
+
+@router.get("/delivery-targets")
+def list_delivery_targets(request: Request):
+    """Destinos que o dropdown deve oferecer.
+
+    Inclui sempre o ``local`` implícito (só grava); além dele, a lista deriva
+    dinamicamente dos adapters registrados — nunca de uma lista de plataformas
+    hardcoded. Sem adapters registrados, só ``local`` aparece."""
+    return {
+        "targets": [
+            {"id": "local", "name": "Local (só grava)"},
+            *cron_delivery_targets(delivery_adapters(request)),
+        ]
+    }
 
 
 @router.get("/jobs")
@@ -70,7 +103,13 @@ def list_jobs(request: Request):
 
 @router.post("/jobs", status_code=201)
 def create_job(payload: CreateJob, request: Request):
-    return operate(lambda: store(request).create(**payload.model_dump()))
+    def _create():
+        body = payload.model_dump()
+        if body.get("delivery") is not None:
+            validate_delivery(body["delivery"], adapters=delivery_adapters(request))
+        return store(request).create(**body)
+
+    return operate(_create)
 
 
 @router.patch("/jobs/{job_id}")
