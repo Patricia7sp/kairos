@@ -53,6 +53,8 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
         result = run_monitor_now(store, args.job_id, home)
     elif sub == "notepad":
         result = cmd_notepad(args, home)
+    elif sub == "blueprint":
+        result = cmd_blueprint(args, home, store)
     elif sub == "tick":
 
         async def run():
@@ -98,6 +100,52 @@ def cmd_notepad(args, home) -> dict:
             raise ValueError("delete exige chave")
         return {"job_id": job_id, "key": key, "deleted": store.delete(job_id, key)}
     return {"job_id": job_id, "notes": store.list(job_id)}
+
+
+def cmd_blueprint(args, home, store) -> dict:
+    """`kairos cron blueprint list|show|create` — catálogo tipado sem segundo
+    motor de jobs: o create preenche o blueprint e reusa o mesmo `JobStore`."""
+    from kairos_cron.blueprints import (
+        CATALOG,
+        blueprint_catalog_entry,
+        fill_blueprint,
+        get_blueprint,
+        parse_blueprint_slash,
+    )
+
+    action = getattr(args, "blueprint_command", "list") or "list"
+    if action == "list":
+        entries = [blueprint_catalog_entry(bp) for bp in CATALOG]
+        category = getattr(args, "category", None)
+        if category:
+            entries = [e for e in entries if e["category"] == category]
+        return {"blueprints": entries}
+
+    if action == "show":
+        bp = get_blueprint(args.key)
+        if bp is None:
+            raise KeyError("blueprint não encontrado")
+        return blueprint_catalog_entry(bp)
+
+    # create
+    key = args.key.strip()
+    values = {}
+
+    def apply_pairs(pairs):
+        for raw in pairs:
+            name, _, value = raw.partition("=")
+            if not name:
+                raise ValueError(f"par de slot inválido: {raw!r} (esperado slot=valor)")
+            values[name] = value
+
+    if key.startswith("/blueprint"):
+        key, slash_values = parse_blueprint_slash(key)
+        values.update(slash_values)
+    apply_pairs(args.sets or ())
+    bp = get_blueprint(key)
+    if bp is None:
+        raise KeyError("blueprint não encontrado")
+    return store.create(**fill_blueprint(bp, values))
 
 
 def show_monitor(store, job_id: str) -> dict:

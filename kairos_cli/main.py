@@ -85,6 +85,8 @@ def build_parser():
 
 
 def _cron_args(subcommand: str, parser) -> None:
+    import argparse
+
     if subcommand == "create":
         parser.add_argument("--name", required=True)
         parser.add_argument("--prompt", required=True)
@@ -130,6 +132,42 @@ def _cron_args(subcommand: str, parser) -> None:
         parser.add_argument("value", nargs="?", help="Valor a guardar (set)")
     elif subcommand == "history":
         parser.add_argument("job_id", nargs="?")
+    elif subcommand == "blueprint":
+        boo = parser.add_subparsers(dest="blueprint_command", metavar="<subcomando>")
+        bp_list = boo.add_parser("list", help="Lista o catálogo de blueprints")
+        bp_list.add_argument(
+            "--category", help="Filtra por categoria (daily, weekly, email, general)"
+        )
+        bp_list.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
+        bp_show = boo.add_parser("show", help="Mostra as quatro superfícies de um blueprint")
+        bp_show.add_argument("key")
+        bp_show.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
+        bp_create = boo.add_parser(
+            "create", help="Cria um job a partir de um blueprint (slots slot=valor)"
+        )
+        bp_create.add_argument("key", help="Chave do blueprint; ou um slash command inteiro")
+        bp_create.add_argument(
+            "sets",
+            nargs="*",
+            metavar="slot=valor",
+            help="Valores dos slots; defaults são usados onde omitidos",
+        )
+        bp_create.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
 
 
 def _model_args(subcommand: str, parser) -> None:

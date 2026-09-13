@@ -116,6 +116,7 @@ class ArvoreTests(unittest.TestCase):
                 "monitor-show",
                 "monitor-run",
                 "notepad",
+                "blueprint",
             },
             "skills": {"add", "install", "list", "remove", "tap"},
             "sync": {"disable", "enable", "now", "push", "status"},

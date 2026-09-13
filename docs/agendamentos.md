@@ -214,5 +214,46 @@ gravar a obrigação não vira falha do turno (fica no log); turnos que falharam
 nunca geram obrigação. A UI Web ainda não oferece o campo; as superfícies
 operacionais são CLI e API.
 
+## Blueprints de automação
+
+Um **blueprint** é uma automação agendada tipada: um schema de slots
+parametriza uma recorrência e um prompt, e o preenchimento gera os kwargs de
+`JobStore.create` — o mesmo executor, guard de ciclo de vida e validação de
+delivery das demais superfícies, sem segundo motor de jobs. Uma definição única
+renderiza as quatro superfícies:
+
+- **Web** — `GET /api/cron/blueprints` (catálogo), `GET /api/cron/blueprints/{key}`
+  (entry completo), `POST /api/cron/blueprints/{key}/jobs` (cria o job a partir
+  de `{"values": {slot: valor}}`; `422` na validação com a justificativa do fill).
+- **CLI** — `kairos cron blueprint list [--category X]`, `show KEY`, `create KEY
+  slot=valor ...` (defaults quando o slot é omitido).
+- **Agente** — `seedPrompt` injeta o prompt-semente já preenchido.
+- **Catálogo/docs** — cada entry reúne as quatro superfícies com `command`
+  (slash command), `seedPrompt`, `appUrl` (`hermes://blueprint/{key}`) e
+  `scheduleHuman` (a descrição amigável da agenda).
+
+```bash
+kairos cron blueprint list --json
+kairos cron blueprint show weekly-review --json
+kairos cron blueprint create custom-reminder time=09:00 'what=testar o deploy'
+kairos cron blueprint create '/blueprint important-mail interval_min=60'  # roundtrip
+```
+
+O slash command é uma serialização determinística: `parse_blueprint_slash`
+decodifica `/blueprint <key> slot=valor ...` de volta em `(key, values)`, então
+CLI, chat e deep-link consomem a mesma forma. O `create` aceita o comando
+inteiro colado.
+
+O catálogo não hardcoda plataformas: o slot `deliver` é texto livre
+(`strict=False`, default `local`); a validação real continua no `JobStore`
+(forma `plataforma:destino` e, na API, adequação aos adapters registrados).
+O `origin` do legado é tratado como `local` — não há canal de origem em kairos.
+Prompts do catálogo são autocontidos, escritos em português e sem referências a
+skills; jobs kairos não carregam `skills` (a lista fica como metadados).
+
+Slots desconhecidos, obrigatórios ausentes e enum strict fora das opções
+levantam `BlueprintFillError` com a mensagem citando o slot — a API responde
+`422` e a CLI imprime o erro e sai 1.
+
 Blueprints e schedulers externos não estão ligados a este executor. Campos sem
 implementação são recusados pela API.
