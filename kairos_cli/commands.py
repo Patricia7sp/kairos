@@ -110,7 +110,7 @@ COMMANDS: tuple[Command, ...] = (
         unit="kairos-cli",
     ),
     # --- grupos (extraídos de hermes_cli/subcommands/) --------------------
-    _c("acp", "Servidor Agent Client Protocol para editores", unit="acp-adapter"),
+    _c("acp", "Servidor Agent Client Protocol para editores", status=Status.IMPLEMENTED, unit="acp-adapter"),
     _c(
         "approvals",
         "Regras de aprovação de comando",
@@ -132,7 +132,7 @@ COMMANDS: tuple[Command, ...] = (
         unit="kairos-cli",
     ),
     _c("backup", "Backup e restauração do estado", status=Status.IMPLEMENTED, unit="kairos-cli"),
-    _c("claw", "Automação de browser"),
+    _c("claw", "Automação de browser", status=Status.IMPLEMENTED, unit="plugins"),
     _c(
         "config",
         "Configuração",
@@ -146,7 +146,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="kairos-cli",
     ),
-    _c("console", "Console interativo"),
+    _c("console", "Console interativo", status=Status.IMPLEMENTED, unit="agents"),
     _c(
         "cron",
         "Jobs agendados",
@@ -205,8 +205,8 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="web",
     ),
-    _c("gui", "Aplicativo desktop"),
-    _c("hooks", "Hooks de plugin", unit="plugins"),
+    _c("gui", "Aplicativo desktop", status=Status.IMPLEMENTED, unit="agents"),
+    _c("hooks", "Hooks de plugin", status=Status.IMPLEMENTED, unit="plugins"),
     _c("import-agent", "Importa configuração de outro agente", status=Status.IMPLEMENTED, unit="plugins"),
     _c("import", "Importa sessões e dados", status=Status.IMPLEMENTED),
     _c("insights", "Métricas de uso e custo", status=Status.IMPLEMENTED, unit="kairos-state"),
@@ -258,7 +258,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("revoke", "Revoga um pareamento"),
         unit="providers-gateway",
     ),
-    _c("pause", "Pausa a atividade autônoma"),
+    _c("pause", "Pausa a atividade autônoma", status=Status.IMPLEMENTED, unit="kairos-cli"),
     _c(
         "peer",
         "Instâncias pares",
@@ -285,7 +285,7 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="kairos-cli",
     ),
-    _c("prompt-size", "Tamanho do prompt de sistema", unit="agent"),
+    _c("prompt-size", "Tamanho do prompt de sistema", status=Status.IMPLEMENTED, unit="agent"),
     _c(
         "security",
         "Auditoria de segurança e vulnerabilidades",
@@ -310,7 +310,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("list", "Temas disponíveis"),
         _sub("use", "Aplica um tema"),
     ),
-    _c("slack", "Integração com Slack", unit="providers-gateway"),
+    _c("slack", "Integração com Slack", status=Status.IMPLEMENTED, unit="providers-gateway"),
     _c("status", "Estado geral do sistema", status=Status.IMPLEMENTED),
     _c(
         "sync",
@@ -330,11 +330,12 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="tools",
     ),
-    _c("uninstall", "Desinstala o Kairos"),
-    _c("update", "Atualiza o Kairos"),
-    _c("verify", "Verificação pós-edição de código"),
-    _c("webhook", "Endpoints de webhook", unit="providers-gateway"),
-    _c("whatsapp", "Integração com WhatsApp", unit="providers-gateway"),
+    _c("uninstall", "Desinstala o Kairos", status=Status.IMPLEMENTED, unit="kairos-cli"),
+    _c("update", "Atualiza o Kairos", status=Status.IMPLEMENTED, unit="kairos-cli"),
+    _c("verify", "Verificação pós-edição de código", status=Status.IMPLEMENTED, unit="kairos-cli"),
+    _c("webhook", "Endpoints de webhook", status=Status.IMPLEMENTED, unit="providers-gateway"),
+    _c("whatsapp", "Integração com WhatsApp", status=Status.IMPLEMENTED, unit="providers-gateway"),
+    _c("telegram", "Integração com Telegram", status=Status.IMPLEMENTED, unit="providers-gateway"),
 )
 
 

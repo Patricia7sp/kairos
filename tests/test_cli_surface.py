@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parent.parent
 #: Comandos que nascem no Kairos e não têm correspondente no legado.
 #: `token` existe porque o painel precisava de um caminho para a credencial
 #: que não passasse por variável de ambiente nem por log.
-PROPRIOS_DO_KAIROS = frozenset({"runtime", "token"})
+PROPRIOS_DO_KAIROS = frozenset({"runtime", "token", "telegram"})
 
 
 class ArvoreTests(unittest.TestCase):
@@ -225,7 +225,7 @@ class ExecucaoTests(unittest.TestCase):
     def test_comando_declarado_SEM_implementacao_sai_com_codigo_proprio(self):
         """A regra do projeto: reportar sucesso sem efeito é pior que
         ausência. Script precisa distinguir 'falhou' de 'ainda não existe'."""
-        self.assertEqual(main(["claw"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertEqual(main(["login"]), ExitCode.NOT_IMPLEMENTED)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.OK)
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.ERROR)
 

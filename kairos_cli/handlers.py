@@ -710,6 +710,93 @@ def cmd_import(args) -> int:
     return asyncio.run(run_import(_home(), args))
 
 
+
+def cmd_webhook(args) -> int:
+    import asyncio
+    from kairos_cli.webhook import run_webhook
+    return asyncio.run(run_webhook(_home(), args))
+
+def cmd_whatsapp(args) -> int:
+    import asyncio
+    from kairos_cli.whatsapp import run_whatsapp
+    return asyncio.run(run_whatsapp(_home(), args))
+
+def cmd_telegram(args) -> int:
+    import asyncio
+    from kairos_cli.telegram import run_telegram
+    return asyncio.run(run_telegram(_home(), args))
+
+def cmd_acp(args) -> int:
+    import asyncio
+    from kairos_cli.acp import run_acp
+    return asyncio.run(run_acp(_home(), args))
+
+def cmd_claw(args) -> int:
+    import asyncio
+    from kairos_cli.claw import run_claw
+    return asyncio.run(run_claw(_home(), args))
+
+def cmd_console(args) -> int:
+    import asyncio
+    from kairos_cli.console import run_console
+    return asyncio.run(run_console(_home(), args))
+
+def cmd_gui(args) -> int:
+    import asyncio
+    from kairos_cli.gui import run_gui
+    return asyncio.run(run_gui(_home(), args))
+
+def cmd_uninstall(args) -> int:
+    import asyncio
+    from kairos_cli.uninstall import run_uninstall
+    return asyncio.run(run_uninstall(_home(), args))
+
+def cmd_update(args) -> int:
+    import asyncio
+    from kairos_cli.update import run_update
+    return asyncio.run(run_update(_home(), args))
+
+def cmd_verify(args) -> int:
+    import asyncio
+    from kairos_cli.verify import run_verify
+    return asyncio.run(run_verify(_home(), args))
+
+def cmd_pairing(args) -> int:
+    import asyncio
+    from kairos_cli.pairing import run_pairing
+    return asyncio.run(run_pairing(_home(), args))
+
+def cmd_slack(args) -> int:
+    import asyncio
+    from kairos_cli.slack import run_slack
+    return asyncio.run(run_slack(_home(), args))
+
+def cmd_pause(args) -> int:
+    import asyncio
+    from kairos_cli.pause import run_pause
+    return asyncio.run(run_pause(_home(), args))
+
+def cmd_peer(args) -> int:
+    import asyncio
+    from kairos_cli.peer import run_peer
+    return asyncio.run(run_peer(_home(), args))
+
+def cmd_prompt_size(args) -> int:
+    import asyncio
+    from kairos_cli.prompt_size import run_prompt_size
+    return asyncio.run(run_prompt_size(_home(), args))
+
+def cmd_skin(args) -> int:
+    import asyncio
+    from kairos_cli.skin import run_skin
+    return asyncio.run(run_skin(_home(), args))
+
+
+def cmd_hooks(args) -> int:
+    import asyncio
+    from kairos_cli.hooks import run_hooks
+    return asyncio.run(run_hooks(_home(), args))
+
 HANDLERS = {
     "backup": cmd_backup,
     "debug": cmd_debug,
@@ -742,4 +829,23 @@ HANDLERS = {
     "token": cmd_token,
     "import": cmd_import,
     "import-agent": cmd_import_agent,
+
+    "webhook": cmd_webhook,
+    "whatsapp": cmd_whatsapp,
+    "telegram": cmd_telegram,
+    "acp": cmd_acp,
+    "claw": cmd_claw,
+    "console": cmd_console,
+    "gui": cmd_gui,
+    "uninstall": cmd_uninstall,
+    "update": cmd_update,
+    "verify": cmd_verify,
+    "pairing": cmd_pairing,
+    "slack": cmd_slack,
+    "pause": cmd_pause,
+    "peer": cmd_peer,
+    "prompt-size": cmd_prompt_size,
+    "skin": cmd_skin,
+
+    "hooks": cmd_hooks,
 }
