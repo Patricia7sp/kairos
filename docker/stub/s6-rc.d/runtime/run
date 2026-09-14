@@ -1,0 +1,5 @@
+#!/command/execlineb -P
+with-contenv
+importas -D kairos KAIROS_USER KAIROS_USER
+s6-setuidgid ${KAIROS_USER}
+/bin/bash /opt/kairos/docker/runtime-service.sh
