@@ -243,6 +243,7 @@ async function abrirSessao(id, painel, recarregar, atual) {
           <button type="button" class="k-btn k-btn--ghost" data-exportar-sessao>Exportar JSON</button>
           <button type="button" class="k-btn k-btn--ghost" data-exportar-markdown>Exportar Markdown</button>
           <button type="button" class="k-btn k-btn--ghost" data-fixar-sessao>${sessao.pinned ? "Desafixar" : "Fixar"}</button>
+          <button type="button" class="k-btn k-btn--ghost" data-renomear-sessao>Renomear</button>
           <button type="button" class="k-btn k-btn--ghost" data-arquivar-sessao>${sessao.archived ? "Desarquivar" : "Arquivar"}</button>
           <button type="button" class="k-btn k-btn--ghost" data-ocultar-sessao>${sessao.hidden ? "Mostrar" : "Ocultar"}</button>
           <span class="k-badge ${sessao.status === "aberta" ? "k-badge--ok" : ""}">${esc(sessao.archived ? "arquivada" : sessao.status)}</span>
@@ -300,6 +301,23 @@ async function abrirSessao(id, painel, recarregar, atual) {
     } catch (e) {
       if (!atual()) return;
       painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível atualizar a visibilidade"));
+      botao.disabled = false;
+    }
+  });
+  painel.querySelector("[data-renomear-sessao]").addEventListener("click", async (ev) => {
+    const botao = ev.currentTarget;
+    const tituloAtual = sessao.title || sessao.id;
+    const resposta = prompt("Renomear sessão:", tituloAtual || "");
+    if (resposta === null) return;
+    const nome = resposta.trim().slice(0, 120);
+    if (!nome || nome === tituloAtual) return;
+    botao.disabled = true;
+    try {
+      await api.renomearSessao(id, nome);
+      await recarregar();
+    } catch (e) {
+      if (!atual()) return;
+      painel.insertAdjacentHTML("afterbegin", erroHtml(e, "Não foi possível renomear a sessão"));
       botao.disabled = false;
     }
   });

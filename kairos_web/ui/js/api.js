@@ -120,6 +120,8 @@ export const api = {
   sessao:    (id) => request(`/api/sessions/${encodeURIComponent(id)}`),
   mensagens: (id) => request(`/api/sessions/${encodeURIComponent(id)}/messages`),
   atualizarSessao: (id, campos) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: campos }),
+  renomearSessao: (id, displayName) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { display_name: displayName } }),
+  excluirSessao: (id) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   modelos:   (filtros = {}) => {
     const params = new URLSearchParams();
     if (filtros.provider) params.set("provider", filtros.provider);

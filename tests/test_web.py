@@ -927,6 +927,114 @@ class SessoesTests(unittest.TestCase):
         msgs = corpo.get("messages", corpo)
         self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
 
+    def test_sessao_pode_ser_renomeada_pelo_apelido(self):
+        res = self.client.patch(
+            "/api/sessions/s-fechada", json={"display_name": "Pedido de férias"}
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["title"], "Pedido de férias")
+        detalhe = self.client.get("/api/sessions/s-fechada").json()
+        self.assertEqual(detalhe["title"], "Pedido de férias")
+
+    def test_renomear_com_nome_vazio_limpa_o_apelido(self):
+        from kairos_state import connect, default_db_path
+        from kairos_state.repositories.sessions import SessionRepository
+
+        conn = connect(default_db_path())
+        SessionRepository(conn).create(
+            session_id="s-titulo",
+            source="web",
+            started_at=2,
+            display_name="Apelido",
+            title="Título automático",
+        )
+        conn.close()
+        self.client.patch("/api/sessions/s-titulo", json={"display_name": "   "})
+        detalhe = self.client.get("/api/sessions/s-titulo").json()
+        self.assertEqual(detalhe["title"], "Título automático")
+
+    def test_display_name_invalido_e_recusado(self):
+        invalido = self.client.patch("/api/sessions/s-fechada", json={"display_name": 42})
+        self.assertEqual(invalido.status_code, 400)
+        self.assertEqual(invalido.json()["error"], "session_display_name_must_be_string")
+        longo = self.client.patch("/api/sessions/s-fechada", json={"display_name": "x" * 121})
+        self.assertEqual(longo.status_code, 400)
+        self.assertEqual(longo.json()["error"], "session_display_name_too_long")
+
+    def test_sessao_pode_ser_excluida_com_todos_os_dependentes(self):
+        self.client.patch("/api/sessions/s-fechada", json={"archived": True, "tags": ["projeto"]})
+        res = self.client.delete("/api/sessions/s-fechada")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"status": "deleted", "id": "s-fechada"})
+        self.assertEqual(self.client.get("/api/sessions/s-fechada").status_code, 404)
+        restantes = self.client.get("/api/sessions").json()["sessions"]
+        self.assertEqual([s["id"] for s in restantes], ["s-aberta"])
+        from kairos_state import connect, default_db_path
+
+        conn = connect(default_db_path())
+        try:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ?", ("s-fechada",)
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM session_tags WHERE session_id = ?", ("s-fechada",)
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            conn.close()
+
+    def test_delete_de_sessao_runtime_e_recusado(self):
+        from kairos_state import connect, default_db_path
+
+        conn = connect(default_db_path())
+        project = Path(self._tmp.name) / "projeto"
+        project.mkdir()
+        with conn:
+            conn.execute(
+                "INSERT INTO sessions(id,source,started_at,cwd,execution_kind) "
+                "VALUES ('s-runtime','web',2,?,'agent_runtime')",
+                (str(project),),
+            )
+            conn.execute(
+                "INSERT INTO runtime_sessions(session_id,runtime_kind,requested_cwd,canonical_cwd,"
+                "sandbox_profile,state,directory_device,directory_inode,created_at,updated_at) "
+                "VALUES ('s-runtime','codex',?,?,'read_only','ready',?,?,2,2)",
+                (
+                    str(project),
+                    str(project.resolve()),
+                    project.stat().st_dev,
+                    project.stat().st_ino,
+                ),
+            )
+        conn.close()
+
+        res = self.client.delete("/api/sessions/s-runtime")
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.json()["error"], "session_runtime_not_deletable")
+
+    def test_delete_de_sessao_com_filhos_e_recusado(self):
+        from kairos_state import connect, default_db_path
+        from kairos_state.repositories.sessions import SessionRepository
+
+        conn = connect(default_db_path())
+        sr = SessionRepository(conn)
+        sr.create(session_id="s-pai", source="web", started_at=2)
+        sr.create(session_id="s-filha", source="web", started_at=3, parent_session_id="s-pai")
+        conn.close()
+
+        res = self.client.delete("/api/sessions/s-pai")
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.json()["error"], "session_has_children")
+
+    def test_excluir_sessao_inexistente_devolve_404(self):
+        res = self.client.delete("/api/sessions/nao-existe")
+        self.assertEqual(res.status_code, 404)
+
 
 class SessoesInterfaceTests(unittest.TestCase):
     """Contratos pequenos da interação da tabela e da transcrição."""
