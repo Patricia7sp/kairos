@@ -1,4 +1,5 @@
 """Comando `kairos gui` — aplicativo desktop."""
+
 import sys
 from pathlib import Path
 

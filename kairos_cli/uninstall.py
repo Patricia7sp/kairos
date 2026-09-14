@@ -1,4 +1,5 @@
 """Comando `kairos uninstall` — desinstala o Kairos."""
+
 from pathlib import Path
 
 

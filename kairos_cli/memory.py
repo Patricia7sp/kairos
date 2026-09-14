@@ -1,4 +1,5 @@
 """Comando `kairos memory` — memória de longo prazo."""
+
 import json
 from pathlib import Path
 

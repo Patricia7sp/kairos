@@ -1,4 +1,5 @@
 """Comando `kairos acp` — Agent Client Protocol para editores."""
+
 from pathlib import Path
 
 

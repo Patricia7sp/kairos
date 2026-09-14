@@ -254,6 +254,7 @@ class ExecucaoTests(unittest.TestCase):
         import json
 
         from kairos_cli.startup_fast import resolve_kairos_home
+
         home = Path(resolve_kairos_home())
         home.mkdir(parents=True, exist_ok=True)
         buf = io.StringIO()
@@ -443,29 +444,29 @@ class ExecucaoTests(unittest.TestCase):
             ["skills", "list"],
             ["config", "path"],
             ["config", "check"],
-              ["tick"],
-              ["version"],
-              ["setup", "--json"],
-              ["backup", "--json"],
-              ["telegram", "test"],
-              ["slack", "test"],
-              ["whatsapp", "test"],
-              ["webhook", "status"],
-              ["webhook", "list"],
-              ["pairing", "list"],
-              ["peer", "list"],
-              ["skin", "list"],
-              ["memory", "status"],
-              ["acp", "status"],
-              ["claw", "status"],
-              ["console", "eval", "--expression", "2+2"],
-              ["gui", "status"],
-              ["hooks", "list"],
-              ["pause", "status"],
-              ["prompt-size", "get"],
-         ):
-             with self.subTest(argv=argv):
-                 self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))
+            ["tick"],
+            ["version"],
+            ["setup", "--json"],
+            ["backup", "--json"],
+            ["telegram", "test"],
+            ["slack", "test"],
+            ["whatsapp", "test"],
+            ["webhook", "status"],
+            ["webhook", "list"],
+            ["pairing", "list"],
+            ["peer", "list"],
+            ["skin", "list"],
+            ["memory", "status"],
+            ["acp", "status"],
+            ["claw", "status"],
+            ["console", "eval", "--expression", "2+2"],
+            ["gui", "status"],
+            ["hooks", "list"],
+            ["pause", "status"],
+            ["prompt-size", "get"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))
 
     def test_saida_JSON_e_valida(self):
         import contextlib

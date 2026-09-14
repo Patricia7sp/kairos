@@ -1,4 +1,5 @@
 """Comando `kairos dump` — exportação estruturada de fontes locais reais."""
+
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,9 @@ async def run_dump(home: Path, args) -> int:
                 if _.is_file():
                     source_lines += 1
 
-    total_size = sum(p.stat().st_size for p in home.rglob("*") if p.is_file()) if home.exists() else 0
+    total_size = (
+        sum(p.stat().st_size for p in home.rglob("*") if p.is_file()) if home.exists() else 0
+    )
     report["sources"] = {
         "home": str(home),
         "home_size_bytes": total_size,

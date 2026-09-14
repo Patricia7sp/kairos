@@ -1,4 +1,5 @@
 """Comando `kairos slack` — integração com Slack."""
+
 from pathlib import Path
 
 

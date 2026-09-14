@@ -1,4 +1,5 @@
 """Comando `kairos telegram` — integração com Telegram."""
+
 from pathlib import Path
 
 

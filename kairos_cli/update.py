@@ -1,4 +1,5 @@
 """Comando `kairos update` — atualiza o Kairos."""
+
 from pathlib import Path
 
 
