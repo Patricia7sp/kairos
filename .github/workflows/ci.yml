@@ -71,19 +71,17 @@ jobs:
           SHELLCHECK_OPTS: -e SC1091
         with:
           scandir: "."
-          additional_files: "kairos"
-          # `additional_files: kairos` existe para apanhar o executável, mas
-          # o glob apanha junto os marcadores s6-rc em user/contents.d —
-          # arquivos VAZIOS, não scripts, e por isso rendem SC2148
-          # (sem shebang). Não há shebang a acrescentar: no s6-rc o que
-          # importa é o NOME do arquivo, e o conteúdo é deliberadamente nada.
+          # O glob apanha os marcadores s6-rc em user/contents.d — arquivos
+          # VAZIOS, não scripts, e por isso rendem SC2148 (sem shebang). Não
+          # há shebang a acrescentar: no s6-rc o que importa é o NOME do
+          # arquivo, e o conteúdo é deliberadamente nada.
           ignore_names: "main-kairos runtime"
           # `skills/` é conteúdo instalável de terceiros — mesma razão pela
           # qual o ruff também o ignora.
           ignore_paths: "skills"
 
   dockerfile:
-    name: Lint do Dockerfile (hadolint)
+    name: Lint dos Dockerfiles (hadolint)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -91,6 +89,12 @@ jobs:
         with:
           dockerfile: Dockerfile
           config: .hadolint.yaml
+      # A imagem-stub também é receita: sem lint, um DL3046 novo passaria
+      # despercebido. A action lint um arquivo por passo, então o stub entra
+      # como passo próprio — na mesma versão binária validada localmente
+      # (v2.12.0) para não depender do binário flutuante da action.
+      - name: Lint do Dockerfile.stub
+        run: docker run --rm -v "$PWD:/mnt" -w "/mnt" hadolint/hadolint:v2.12.0 hadolint -c .hadolint.yaml Dockerfile.stub
 
   image:
     name: Imagem + testes de integração
