@@ -132,7 +132,7 @@ async def collect(service, envelope):
 def test_search_round_preserves_policy_persists_results_and_counts_every_call(db, monkeypatch):
     async def scenario():
         search = AsyncMock(return_value=InteractionToolResult("s1", '{"results":["fonte"]}'))
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway([tool_round("s1"), answer_round(), answer_round()])
         events = await collect(make_service(db, gateway), turn(web_search=True))
         assert [e.kind for e in events].count("turn_start") == 1
@@ -169,7 +169,7 @@ def test_search_round_preserves_policy_persists_results_and_counts_every_call(db
 def test_disabled_search_never_executes_and_closes_unsolicited_calls(db, monkeypatch):
     async def scenario():
         search = AsyncMock()
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway([tool_round("s1")])
         events = await collect(make_service(db, gateway), turn())
         search.assert_not_awaited()
@@ -189,7 +189,7 @@ def test_round_budget_stops_repeated_searches_with_durable_errors(db, monkeypatc
             return InteractionToolResult(call.id, '{"results":[]}')
 
         mock = AsyncMock(side_effect=search)
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", mock)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", mock)
         gateway = RoundGateway([tool_round(f"s{i}") for i in range(5)])
         events = await collect(make_service(db, gateway), turn(web_search=True))
         assert mock.await_count == 4
@@ -214,7 +214,7 @@ def test_cancel_search_completes_pending_tool_history_without_followup(db, monke
             finally:
                 cancelled.set()
 
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway([tool_round("s1", "s2")])
         task = asyncio.create_task(collect(make_service(db, gateway), turn(web_search=True)))
         await asyncio.wait_for(started.wait(), 2)
@@ -237,7 +237,7 @@ def test_eight_calls_allow_final_answer_but_remove_tool_definitions(db, monkeypa
             return InteractionToolResult(call.id, '{"results":[]}')
 
         mock = AsyncMock(side_effect=search)
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", mock)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", mock)
         gateway = RoundGateway([tool_round(*(f"s{i}" for i in range(8))), answer_round()])
         events = await collect(make_service(db, gateway), turn(web_search=True))
         assert mock.await_count == 8
@@ -250,7 +250,7 @@ def test_eight_calls_allow_final_answer_but_remove_tool_definitions(db, monkeypa
 def test_generated_call_ids_may_repeat_between_distinct_provider_rounds(db, monkeypatch):
     async def scenario():
         search = AsyncMock(return_value=InteractionToolResult("local-call-1", '{"results":[]}'))
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway(
             [tool_round("local-call-1"), tool_round("local-call-1"), answer_round()]
         )
@@ -294,7 +294,7 @@ def test_cancel_during_transcript_write_finishes_accounting_once(db, monkeypatch
 def test_followup_provider_failure_keeps_first_round_accounting_and_search(db, monkeypatch):
     async def scenario():
         search = AsyncMock(return_value=InteractionToolResult("s1", '{"results":[]}'))
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway(
             [tool_round("s1"), [ProviderError(ProviderErrorKind.AUTH, retryable=False)]]
         )
@@ -324,7 +324,7 @@ def test_reopen_after_crash_adds_missing_result_before_new_user_message(db, monk
             ),
         )
         search = AsyncMock()
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = RoundGateway([answer_round()])
         await collect(make_service(db, gateway), turn())
         messages = gateway.requests[0].messages
@@ -350,7 +350,7 @@ def test_cancel_during_followup_still_counts_started_provider_call(db, monkeypat
                     yield event
 
         search = AsyncMock(return_value=InteractionToolResult("s1", '{"results":[]}'))
-        monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+        monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
         gateway = BlockingFollowup([tool_round("s1")])
         task = asyncio.create_task(collect(make_service(db, gateway), turn(web_search=True)))
         await asyncio.wait_for(started.wait(), 2)

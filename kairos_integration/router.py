@@ -78,9 +78,23 @@ class InteractionRouter:
             or not envelope.idempotency_key.strip()
             or envelope.override is not None
             or envelope.web_search
+            or envelope.tools
             or any(key in envelope.parameters for key in _IDENTITY_PARAMETERS)
         ):
             raise RuntimeErrorInfo("invalid_event", "envelope de runtime inválido", False)
+
+    def decide_tool_approval(
+        self,
+        *,
+        approval_id: str,
+        session_id: str,
+        decision: str,
+    ) -> None:
+        """Repassa a decisão do Chat ao serviço de modelo; nunca bloqueia."""
+        decide = getattr(self.model_service, "decide_tool_approval", None)
+        if decide is None:
+            raise RuntimeErrorInfo("unavailable", "serviço de interação indisponível", False)
+        decide(approval_id=approval_id, session_id=session_id, decision=decision)
 
     async def aclose(self) -> None:
         if self._closed:

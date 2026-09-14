@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 
+from kairos_integration.interaction_contract import InteractionToolResult
 from kairos_providers.adapter_contract import CanonicalToolCall
 from kairos_tools import builtin
 
@@ -234,3 +235,174 @@ def test_caller_cancellation_propagates_and_stops_search(chat_tools, monkeypatch
         assert stopped.is_set()
 
     asyncio.run(scenario())
+
+
+def test_definitions_reach_accepted_chat_tools_from_the_registry(chat_tools):
+    names = {_definition_name(definition) for definition in chat_tools.chat_tool_definitions()}
+    assert names == set(chat_tools.CHAT_TOOLS)
+    assert "web_search" in names
+    assert names <= set(chat_tools.CHAT_TOOLS)
+
+
+def _definition_name(definition):
+    return definition["function"]["name"]
+
+
+def test_definitions_exclude_web_search_when_disabled(chat_tools):
+    names = {
+        _definition_name(definition)
+        for definition in chat_tools.chat_tool_definitions(web_search_enabled=False)
+    }
+    assert "web_search" not in names
+    assert "bash" in names and "read_file" in names
+
+
+def test_definitions_drop_everything_outside_the_chat_allowlist(chat_tools):
+    foreign = {"function": {"name": "runtime_port_forward", "parameters": {}}}
+    names = {
+        _definition_name(definition)
+        for definition in chat_tools.chat_tool_definitions(definitions=[foreign])
+    }
+    assert names == set()
+
+
+def test_mutating_tools_require_approval_read_only_do_not(chat_tools):
+    assert all(chat_tools.needs_tool_approval(name) for name in chat_tools.MUTATING_TOOLS)
+    for name in ("read_file", "list_dir", "search_files", "web_extract", "web_search"):
+        assert not chat_tools.needs_tool_approval(name)
+
+
+def test_denied_result_is_a_safe_error(chat_tools):
+    result = chat_tools.denied_tool_result(call("{}", name="bash"))
+    assert result.tool_call_id == "search-123"
+    assert result.is_error is True
+    assert json.loads(result.content) == {
+        "status": "denied",
+        "error": "Execução recusada pelo usuário.",
+        "results": [],
+    }
+
+
+def test_generic_executor_rejects_unsupported_tool_without_execution(chat_tools):
+    executed = []
+
+    def dispatch(name, arguments):
+        executed.append(name)
+        return name
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call("{}", name="runtime_port_forward"), execute=dispatch)
+    )
+    assert executed == []
+    assert result.is_error
+    assert json.loads(result.content)["status"] == "unsupported_tool"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        "",
+        "{",
+        "[]",
+        "null",
+        '{"command":"ls","command":"ls"}',
+        "{" + " " * 16_384 + "}",
+    ],
+    ids=["empty", "broken-json", "array", "null", "duplicate", "oversized"],
+)
+def test_generic_executor_rejects_invalid_argument_bodies(chat_tools, arguments):
+    executed = []
+
+    def dispatch(name, args):
+        executed.append((name, args))
+        return "ran"
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call(arguments, name="bash"), execute=dispatch)
+    )
+    assert executed == []
+    assert json.loads(result.content)["status"] == "invalid_arguments"
+
+
+def test_generic_executor_forwards_structurally_valid_bodies_to_the_handler(chat_tools):
+    seen = []
+
+    def dispatch(name, arguments):
+        seen.append(arguments)
+        return {"error": "comando não suportado pelo handler"}
+
+    for raw in ("{}", '{"command":true}', '{"command":null}'):
+        result = asyncio.run(chat_tools.execute_chat_tool(call(raw, name="bash"), execute=dispatch))
+        assert result.is_error
+    assert seen == [{}, {"command": True}, {"command": None}]
+
+
+def test_generic_executor_dispatches_and_serializes_plain_output(chat_tools):
+    seen = {}
+
+    def dispatch(name, arguments):
+        seen.update(arguments)
+        return arguments
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(
+            call(json.dumps({"command": "ls", "path": "/tmp"}), name="bash"), execute=dispatch
+        )
+    )
+    assert not result.is_error
+    assert json.loads(result.content) == {"command": "ls", "path": "/tmp"}
+    assert seen == {"command": "ls", "path": "/tmp"}
+
+
+def test_generic_executor_awaits_async_output(chat_tools):
+    async def dispatch(name, arguments):
+        return {"ok": True}
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call('{"command":"ls"}', name="bash"), execute=dispatch)
+    )
+    assert json.loads(result.content) == {"ok": True}
+
+
+def test_generic_executor_flags_dict_error_without_raising(chat_tools):
+    def dispatch(name, arguments):
+        return {"error": "permissão negada"}
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call('{"command":"ls"}', name="bash"), execute=dispatch)
+    )
+    assert result.is_error
+    assert json.loads(result.content) == {"error": "permissão negada"}
+
+
+def test_generic_executor_caps_oversized_output(chat_tools):
+    def dispatch(name, arguments):
+        return "x" * (chat_tools.MAX_OUTPUT_BYTES + 1)
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call('{"command":"ls"}', name="bash"), execute=dispatch)
+    )
+    assert result.is_error
+    assert json.loads(result.content)["status"] == "output_too_large"
+
+
+def test_generic_executor_failure_is_never_leaked(chat_tools):
+    def dispatch(name, arguments):
+        raise RuntimeError("private host detail")
+
+    result = asyncio.run(
+        chat_tools.execute_chat_tool(call('{"command":"ls"}', name="bash"), execute=dispatch)
+    )
+    assert result.is_error
+    assert json.loads(result.content)["status"] == "failed"
+    assert "private host detail" not in result.content
+
+
+def test_generic_executor_routes_web_search_to_search_branch(chat_tools, monkeypatch):
+    async def fake_search(call):
+        return InteractionToolResult(call.id, '{"results":[]}')
+
+    monkeypatch.setattr(chat_tools, "execute_web_search", fake_search)
+    result = asyncio.run(chat_tools.execute_chat_tool(call('{"query":"test"}', name="web_search")))
+    assert not result.is_error
+    assert json.loads(result.content)["results"] == []

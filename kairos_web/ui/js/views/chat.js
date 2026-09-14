@@ -75,9 +75,23 @@ export function reduceTurn(state, event) {
       id: event.tool_call.id, name: event.tool_call.name, status: "running",
     }] };
   }
+  if (event.type === "tool_approval_request" && event.tool_call && event.approval_id) {
+    const call = event.tool_call;
+    const approval = {
+      id: call.id, name: call.name, status: "awaiting",
+      approvalId: event.approval_id, arguments: String(call.arguments ?? ""),
+    };
+    const running = state.tools.some((tool) => tool.id === call.id
+      && (tool.status === "running" || tool.status === "awaiting"));
+    return { ...state, tools: running
+      ? state.tools.map((tool) => tool.id === call.id
+          && (tool.status === "running" || tool.status === "awaiting") ? approval : tool)
+      : [...state.tools, approval] };
+  }
   if (event.type === "tool_result" && event.tool_result) {
     return { ...state, tools: state.tools.map((tool) =>
-      tool.status === "running" && tool.id === event.tool_result.tool_call_id
+      tool.id === event.tool_result.tool_call_id
+        && (tool.status === "running" || tool.status === "awaiting")
         ? { ...tool, status: event.tool_result.is_error ? "error" : "done",
           content: String(event.tool_result.content ?? "") } : tool) };
   }
@@ -189,10 +203,46 @@ const searchResultMarkup = (content) => {
   }).join("")}</ol>`;
 };
 
-const toolMarkup = (tool) => `<details class="k-chat-tool" ${tool.content == null ? "" : "open"}>
-  <summary>${esc(tool.name === "web_search" ? "Busca web" : tool.name || "Ferramenta")} · ${
-    tool.status === "running" ? "Buscando…" : tool.status === "error" ? "Falha" : "Concluída"}</summary>
-  ${tool.content == null ? "" : searchResultMarkup(tool.content)}</details>`;
+const genericResultMarkup = (content) => {
+  if (content == null) return "";
+  if (typeof content !== "string") return `<pre>${esc(String(content))}</pre>`;
+  let parsed;
+  try { parsed = JSON.parse(content); } catch { /* Plain text stays as-is. */ }
+  if (typeof parsed?.error === "string") return `<p>${esc(parsed.error)}</p>`;
+  return `<pre>${esc(content)}</pre>`;
+};
+
+const toolLabel = (name) => name === "web_search" ? "Busca web" : name || "Ferramenta";
+
+const approvalMarkup = (tool) => {
+  const args = tool.arguments
+    ? `<pre class="k-chat-tool__args">${esc(tool.arguments)}</pre>` : "";
+  const pending = tool.status === "running"
+    ? '<p class="k-chat-tool__pending">Aguardando execução…</p>'
+    : `<div class="k-chat-tool__actions">
+        <button type="button" class="k-btn k-btn--primary" data-approval="allow">Permitir</button>
+        <button type="button" class="k-btn" data-approval="deny">Recusar</button>
+      </div>`;
+  return `<div class="k-chat-tool__approval" data-approval-id="${esc(tool.approvalId)}" data-tool="${esc(tool.id)}">
+    <p><strong>Execução requer sua aprovação.</strong> A ferramenta <code>${esc(tool.name || "desconhecida")}</code>
+      pode alterar arquivos ou o ambiente.</p>${args}${pending}</div>`;
+};
+
+const toolResultMarkup = (tool) => tool.name === "web_search"
+  ? searchResultMarkup(tool.content)
+  : genericResultMarkup(tool.content);
+
+const toolStateLabel = (tool) => tool.status === "running"
+  ? tool.approvalId ? "Aguardando execução…" : tool.name === "web_search" ? "Buscando…" : "Executando…"
+  : tool.status === "awaiting" ? "Requer aprovação"
+  : tool.status === "error" ? (tool.decision === "deny" ? "Recusada" : "Falha")
+  : "Concluída";
+
+const toolMarkup = (tool) => tool.status === "awaiting" || tool.status === "running" && tool.approvalId
+  ? `<section class="k-chat-tool k-chat-tool--approval"><header>${esc(toolLabel(tool.name))} · ${toolStateLabel(tool)}</header>${approvalMarkup(tool)}</section>`
+  : `<details class="k-chat-tool" ${tool.content == null ? "" : "open"}>
+  <summary>${esc(toolLabel(tool.name))} · ${toolStateLabel(tool)}</summary>
+  ${toolResultMarkup(tool)}</details>`;
 
 const messageMarkup = (message) => message.role === "tool"
   ? `<article class="k-chat-message k-chat-message--tool">${toolMarkup({
@@ -607,6 +657,22 @@ export async function chatView(root, _route, { signal } = {}) {
     const button = event.target.closest("[data-session-id]");
     if (button && !busy) void loadSession(button.dataset.sessionId);
   });
+  messages.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-approval]");
+    if (!button) return;
+    const card = button.closest("[data-approval-id]");
+    const approvalId = card?.dataset.approvalId;
+    const toolId = card?.dataset.tool;
+    const decision = button.dataset.approval;
+    if (!approvalId || !toolId || !["allow", "deny"].includes(decision)) return;
+    turn = { ...turn, tools: turn.tools.map((tool) =>
+      tool.id === toolId && tool.status === "awaiting"
+        ? { ...tool, status: "running", decision,
+          approvalId, arguments: tool.arguments } : tool) };
+    scheduleTurn();
+    api.decidirFerramentaChat(sessionId, approvalId, decision)
+      .catch((error) => { status.textContent = error.message || "Falha ao confirmar a ferramenta."; });
+  });
   chat.querySelector("[data-new-chat]").addEventListener("click", () => {
     if (busy) return;
     startNewConversation();
@@ -638,10 +704,13 @@ export async function chatView(root, _route, { signal } = {}) {
       pendingAdmission = { sessionId, content, userNode, generation };
     }
     activeStream = { sessionId, generation };
+    const selectedModel = (modelPayload.models || []).find((model) =>
+      model.provider === selection.provider && model.id === selection.model);
+    const toolsEnabled = selectedModel?.capabilities?.tools === true;
     try {
       client.sendMessage({
         sessionId, content, provider: selection.provider, model: selection.model,
-        webSearch,
+        webSearch, tools: toolsEnabled,
         profile: selection.profile,
         parameters: Object.keys(selection.parameters || {}).length ? selection.parameters : undefined,
       });

@@ -1,18 +1,50 @@
-"""Chat's narrow, asynchronous web-search boundary; never dispatch host tools."""
+"""Fronteira assíncrona do Chat para o ferramental core, com aprovação por turno.
+
+O Chat expõe um subconjunto deliberado do registro — as ferramentas core que
+fazem sentido numa conversa (WS-2). Ferramentas **mutadoras** (bash,
+write_file, edit_file, patch) exigem aprovação explícita por chamada antes de
+executar; o gate de decisão vive no serviço de interação, que emite
+``tool_approval_request`` e aguarda a decisão. Nunca despachamos ferramentas de
+runtime ou de terceiros aqui.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from kairos_integration.interaction_contract import InteractionToolResult
 from kairos_providers.adapter_contract import CanonicalToolCall
 from kairos_tools import builtin
+from kairos_tools.registry import registry
+
+logger = logging.getLogger(__name__)
 
 MAX_ARGUMENT_BYTES = 16_384
 MAX_OUTPUT_BYTES = 32_768
 SEARCH_TIMEOUT_SECONDS = 15.0
+TOOL_APPROVAL_TIMEOUT_SECONDS = 90.0
+
+#: Ferramentas que alteram o sistema hospedeiro e exigem aprovação por turno.
+MUTATING_TOOLS: frozenset[str] = frozenset({"bash", "write_file", "edit_file", "patch"})
+
+#: Subconjunto core exposto ao Chat. Tudo fora daqui é recusado nomeado.
+CHAT_TOOLS: frozenset[str] = frozenset(
+    {
+        "web_search",
+        "bash",
+        "write_file",
+        "edit_file",
+        "patch",
+        "read_file",
+        "list_dir",
+        "search_files",
+        "web_extract",
+    }
+)
 
 WEB_SEARCH_TOOLS: tuple[dict[str, Any], ...] = (
     {
@@ -36,6 +68,44 @@ WEB_SEARCH_TOOLS: tuple[dict[str, Any], ...] = (
         },
     },
 )
+
+
+def _definition_name(definition: Mapping[str, Any]) -> str | None:
+    function = definition.get("function")
+    if isinstance(function, Mapping):
+        name = function.get("name")
+        return name if isinstance(name, str) else None
+    name = definition.get("name")
+    return name if isinstance(name, str) else None
+
+
+def chat_tool_definitions(
+    *,
+    web_search_enabled: bool = True,
+    definitions: Sequence[Mapping[str, Any]] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """As definições que o modelo vê neste turno, filtradas ao Chat.
+
+    A disponibilidade de toolset já foi resolvida por ``get_definitions``; aqui
+    só cortamos para o subconjunto do Chat e honramos o interruptor de busca web.
+    """
+    source = definitions if definitions is not None else registry.get_definitions()
+    return tuple(
+        dict(definition)
+        for definition in source
+        if isinstance(definition, Mapping)
+        and _definition_name(definition) in CHAT_TOOLS
+        and (web_search_enabled or _definition_name(definition) != "web_search")
+    )
+
+
+def needs_tool_approval(name: str) -> bool:
+    return name in MUTATING_TOOLS
+
+
+def denied_tool_result(call: CanonicalToolCall) -> InteractionToolResult:
+    """Resultado canônico de uma ferramenta recusada pelo usuário ou por timeout."""
+    return _error(call, "denied")
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -63,19 +133,87 @@ def _arguments(raw: str) -> tuple[str, int]:
     return query, limit
 
 
+def _body_arguments(raw: str) -> dict[str, Any] | None:
+    """Argumentos JSON de uma chamada genérica, com rejeição de chaves duplicadas."""
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_ARGUMENT_BYTES:
+        return None
+    try:
+        value = json.loads(raw, object_pairs_hook=_unique_object)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    return value
+
+
 def _error(call: CanonicalToolCall, status: str) -> InteractionToolResult:
     messages = {
         "unsupported_tool": "Ferramenta não disponível no Chat.",
-        "invalid_arguments": "Argumentos inválidos para a busca web.",
+        "invalid_arguments": "Argumentos inválidos para a ferramenta.",
         "timeout": "A busca web excedeu o tempo limite.",
-        "output_too_large": "Os resultados da busca excederam o limite de tamanho.",
-        "unavailable": "A busca web está indisponível no momento.",
+        "output_too_large": "O resultado da ferramenta excedeu o limite de tamanho.",
+        "unavailable": "A ferramenta está indisponível no momento.",
+        "denied": "Execução recusada pelo usuário.",
+        "failed": "A ferramenta falhou ao ser executada.",
     }
     return InteractionToolResult(
         tool_call_id=call.id,
         content=json.dumps({"status": status, "error": messages[status], "results": []}),
         is_error=True,
     )
+
+
+def _serialize(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(
+                value,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError, RecursionError):
+            text = str(value)
+    if len(text.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        return None
+    return text
+
+
+def _result(call: CanonicalToolCall, value: Any) -> InteractionToolResult:
+    content = _serialize(value)
+    if content is None:
+        return _error(call, "output_too_large")
+    is_error = isinstance(value, dict) and isinstance(value.get("error"), str)
+    return InteractionToolResult(tool_call_id=call.id, content=content, is_error=is_error)
+
+
+async def execute_chat_tool(
+    call: CanonicalToolCall,
+    *,
+    execute: Callable[[str, dict[str, Any]], Any] | None = None,
+) -> InteractionToolResult:
+    """Valida a chamada, executa a ferramenta e serializa com limites rígidos."""
+    if call.name not in CHAT_TOOLS:
+        return _error(call, "unsupported_tool")
+    if call.name == "web_search":
+        return await execute_web_search(call)
+    arguments = _body_arguments(call.arguments)
+    if arguments is None:
+        return _error(call, "invalid_arguments")
+    dispatch = execute if execute is not None else registry.dispatch
+    try:
+        value = dispatch(call.name, arguments)
+        if asyncio.iscoroutine(value):
+            value = await value
+    except TypeError:
+        return _error(call, "invalid_arguments")
+    except Exception:
+        logger.warning("ferramenta %r do Chat explodiu", call.name, exc_info=True)
+        return _error(call, "failed")
+    return _result(call, value)
 
 
 async def execute_web_search(call: CanonicalToolCall) -> InteractionToolResult:

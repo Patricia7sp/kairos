@@ -339,6 +339,11 @@
 .k-chat-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow-y: auto; }
 .k-chat-tool li { margin-top: var(--k-space-3); overflow-wrap: anywhere; }
 .k-chat-tool li small { display: block; }
+.k-chat-tool--approval header { color: var(--k-text-3); font-size: var(--k-size-xs); font-weight: var(--k-weight-bold); text-transform: uppercase; }
+.k-chat-tool__approval { display: grid; gap: var(--k-space-2); margin-top: var(--k-space-2); }
+.k-chat-tool__approval .k-chat-tool__args { margin: 0; padding: var(--k-space-2); background: var(--k-surface); border-radius: var(--k-radius); }
+.k-chat-tool__approval .k-chat-tool__actions { display: flex; gap: var(--k-space-2); }
+.k-chat-tool__approval .k-chat-tool__pending { color: var(--k-text-3); margin: 0; }
 .k-chat__composer { display: flex; flex-wrap: wrap; gap: var(--k-space-3); padding: var(--k-space-4); border-top: 1px solid var(--k-border); }
 .k-chat__search { flex-basis: 100%; display: grid; gap: var(--k-space-2); }
 .k-chat__search label { display: flex; align-items: center; gap: var(--k-space-2); }

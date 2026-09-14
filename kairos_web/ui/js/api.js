@@ -122,6 +122,10 @@ export const api = {
   atualizarSessao: (id, campos) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: campos }),
   renomearSessao: (id, displayName) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { display_name: displayName } }),
   excluirSessao: (id) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  decidirFerramentaChat: (sessionId, approvalId, decision) =>
+    request(`/api/chat/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(approvalId)}`, {
+      method: "POST", body: { decision },
+    }),
   modelos:   (filtros = {}) => {
     const params = new URLSearchParams();
     if (filtros.provider) params.set("provider", filtros.provider);

@@ -92,7 +92,7 @@ def test_real_gemini_parallel_and_sequential_rounds_preserve_signatures_after_re
     async def search(call):
         return InteractionToolResult(call.id, '{"results":[]}')
 
-    monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+    monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
 
     async def scenario():
         db_path = tmp_path / "state.db"

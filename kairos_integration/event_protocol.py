@@ -61,6 +61,15 @@ def _event_fields(event: InteractionEvent) -> dict[str, Any]:
             "content": event.tool_result.content,
             "is_error": event.tool_result.is_error,
         }
+    elif event.kind is InteractionEventKind.TOOL_APPROVAL_REQUEST:
+        if event.tool_call is None or event.tool_approval_id is None:
+            raise ValueError("tool_approval_request exige tool_call e approval_id")
+        tool_call = {
+            "id": event.tool_call.id,
+            "name": event.tool_call.name,
+            "arguments": event.tool_call.arguments,
+        }
+        payload.update(approval_id=event.tool_approval_id, tool_call=tool_call)
     elif event.kind is InteractionEventKind.USAGE:
         payload["usage"] = (
             {

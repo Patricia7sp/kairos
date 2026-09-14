@@ -32,7 +32,7 @@ def test_search_loop_records_model_and_search_outcomes_without_content(
                     "s1", '{"results":[{"snippet":"private-result"}]}', is_error=search_failed
                 )
 
-            monkeypatch.setattr("kairos_integration.interaction_service.execute_web_search", search)
+            monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
             envelope = InteractionEnvelope(
                 conversation_id="private-id",
                 source="web",

@@ -6,6 +6,7 @@ const KNOWN_EVENTS = new Set([
   "delta",
   "reasoning_delta",
   "tool_call",
+  "tool_approval_request",
   "tool_result",
   "usage",
   "turn_error",
@@ -60,7 +61,7 @@ export class ChatClient {
     return true;
   }
 
-  sendMessage({ sessionId, content, provider, model, profile, activity, parameters, webSearch = false } = {}) {
+  sendMessage({ sessionId, content, provider, model, profile, activity, parameters, webSearch = false, tools = false } = {}) {
     if (!this.socket || this.socket.readyState !== 1) throw new Error("Chat desconectado");
     const message = {
       type: "message",
@@ -68,6 +69,7 @@ export class ChatClient {
       session_id: sessionId,
       content,
       web_search: webSearch === true,
+      tools: tools === true,
       ...(provider && model ? { provider, model } : {}),
       ...(profile ? { profile } : {}),
       ...(activity ? { activity } : {}),

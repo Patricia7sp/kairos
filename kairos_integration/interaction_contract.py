@@ -43,6 +43,7 @@ class InteractionEventKind(StrEnum):
     REASONING_DELTA = "reasoning_delta"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    TOOL_APPROVAL_REQUEST = "tool_approval_request"
     USAGE = "usage"
     TURN_ERROR = "turn_error"
     TURN_END = "turn_end"
@@ -113,10 +114,13 @@ class InteractionEnvelope:
     parameters: Mapping[str, Any] = field(default_factory=dict)
     idempotency_key: str | None = None
     web_search: bool = False
+    tools: bool = False
 
     def __post_init__(self) -> None:
         if type(self.web_search) is not bool:
             raise TypeError("web_search deve ser booleano")
+        if type(self.tools) is not bool:
+            raise TypeError("tools deve ser booleano")
         if not isinstance(self.conversation_id, str) or not self.conversation_id.strip():
             raise ValueError("conversation_id é obrigatório")
         if not isinstance(self.source, str) or not self.source.strip():
@@ -196,6 +200,7 @@ class InteractionEvent:
     reasoning: str = ""
     tool_call: CanonicalToolCall | None = None
     tool_result: InteractionToolResult | None = None
+    tool_approval_id: str | None = None
     usage: TokenUsage | None = None
     cost: InteractionCost = field(default_factory=InteractionCost)
     finish_reason: str | None = None
@@ -256,6 +261,22 @@ class InteractionEvent:
             kind=InteractionEventKind.TOOL_RESULT,
             conversation_id=conversation_id,
             tool_result=result,
+        )
+
+    @classmethod
+    def tool_approval_request(
+        cls,
+        approval_id: str,
+        call: CanonicalToolCall,
+        conversation_id: str | None = None,
+    ) -> InteractionEvent:
+        if not isinstance(call, CanonicalToolCall):
+            raise TypeError("call deve ser CanonicalToolCall")
+        return cls(
+            kind=InteractionEventKind.TOOL_APPROVAL_REQUEST,
+            conversation_id=conversation_id,
+            tool_call=call,
+            tool_approval_id=approval_id,
         )
 
     @classmethod

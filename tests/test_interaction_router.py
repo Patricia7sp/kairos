@@ -27,10 +27,14 @@ class FakeModelService:
     def __init__(self) -> None:
         self.envelopes = []
         self.closed = False
+        self.approval_decisions = []
 
     async def stream(self, envelope):
         self.envelopes.append(envelope)
         yield "model-event"
+
+    def decide_tool_approval(self, *, approval_id, session_id, decision):
+        self.approval_decisions.append((approval_id, session_id, decision))
 
     async def aclose(self):
         self.closed = True
@@ -213,6 +217,14 @@ async def test_runtime_acceptance_callback_precedes_subscription(tmp_path: Path)
             parameters={"cwd": "/tmp/other"},
             idempotency_key="key",
         ),
+        InteractionEnvelope("runtime-session", "test", "x", tools=True, idempotency_key="key"),
+        InteractionEnvelope(
+            "runtime-session",
+            "test",
+            "x",
+            web_search=True,
+            idempotency_key="key",
+        ),
     ],
 )
 @async_test
@@ -239,3 +251,22 @@ async def test_runtime_requires_key_and_rejects_provider_or_identity_override(
     assert raised.value.code == "invalid_event"
     assert runtime.submitted == []
     await router.aclose()
+
+
+def test_router_forwards_tool_approval_decisions_to_the_model_service(tmp_path: Path) -> None:
+    router, model, _runtime = make_router(tmp_path)
+    router.decide_tool_approval(approval_id="a1", session_id="s1", decision="deny")
+    assert model.approval_decisions == [("a1", "s1", "deny")]
+    asyncio.run(router.aclose())
+
+
+def test_router_reports_unavailable_when_model_service_cannot_decide(tmp_path: Path) -> None:
+    class DummyModel:
+        async def aclose(self):
+            return None
+
+    router = InteractionRouter(tmp_path, DummyModel(), FakeRuntimeClient())
+    with pytest.raises(RuntimeErrorInfo) as raised:
+        router.decide_tool_approval(approval_id="a1", session_id="s1", decision="allow")
+    assert raised.value.code == "unavailable"
+    asyncio.run(router.aclose())

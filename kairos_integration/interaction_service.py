@@ -5,14 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from kairos_integration.admission import InteractionAdmissionGate
-from kairos_integration.chat_tools import WEB_SEARCH_TOOLS, execute_web_search
+from kairos_integration.chat_tools import (
+    CHAT_TOOLS,
+    TOOL_APPROVAL_TIMEOUT_SECONDS,
+    WEB_SEARCH_TOOLS,
+    chat_tool_definitions,
+    denied_tool_result,
+    execute_chat_tool,
+    needs_tool_approval,
+)
 from kairos_integration.cost_accounting import estimate_interaction_cost
 from kairos_integration.interaction_contract import (
     InteractionCost,
@@ -168,6 +178,7 @@ class InteractionService:
         self._retry_policy = retry_policy or RetryPolicy()
         self._admission = admission
         self._event_home = event_home
+        self._tool_approvals: dict[str, tuple[str, asyncio.Future[str]]] = {}
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -293,6 +304,7 @@ class InteractionService:
         accumulator = TurnAccumulator()
         tool_rounds = 0
         executed_calls: list[str] = []
+        enabled_names = self._chat_tool_names(envelope)
         while True:
             async with aclosing(
                 self._stream_accountable_round(
@@ -349,25 +361,26 @@ class InteractionService:
                 return
 
             limit_error = None
-            if not envelope.web_search:
+            if not (envelope.tools or envelope.web_search):
                 limit_error = InteractionServiceError(
                     "tools_disabled",
-                    "a busca web está desligada para este turno",
+                    "as ferramentas estão desligadas para este turno",
                     retryable=False,
                 )
             elif tool_rounds >= 4 or len(executed_calls) + len(accumulator.tool_calls) > 8:
                 limit_error = InteractionServiceError(
                     "tool_limit",
-                    "limite de buscas deste turno atingido",
+                    "limite de ferramentas deste turno atingido",
                     retryable=False,
                 )
             async with aclosing(
-                self._execute_search_calls(
+                self._execute_tool_calls(
                     envelope.conversation_id,
                     selection,
                     accumulator.tool_calls,
                     executed_calls,
                     limit_error,
+                    enabled_names,
                 )
             ) as stream:
                 async for event in stream:
@@ -379,7 +392,11 @@ class InteractionService:
             request = replace(
                 request,
                 messages=self._history(envelope.conversation_id),
-                tools=WEB_SEARCH_TOOLS if tool_rounds < 4 and len(executed_calls) < 8 else (),
+                tools=(
+                    self._chat_tools(envelope)
+                    if tool_rounds < 4 and len(executed_calls) < 8
+                    else ()
+                ),
             )
             accumulator = TurnAccumulator()
 
@@ -427,23 +444,109 @@ class InteractionService:
             accumulator, "chat.failed" if accumulator.error else "chat.completed"
         )
 
-    async def _execute_search_calls(
+    async def _execute_tool_calls(  # noqa: PYI028
         self,
         conversation_id: str,
         selection: ResolvedModelSelection,
         calls: list[CanonicalToolCall],
         executed_calls: list[str],
         limit_error: InteractionServiceError | None,
+        enabled_names: frozenset[str],
     ) -> AsyncIterator[InteractionEvent]:
         for call in calls:
             if limit_error is not None:
                 result = _tool_error(call.id, limit_error.message)
+            elif call.name not in enabled_names:
+                result = _tool_error(call.id, "ferramenta não habilitada para este turno")
             else:
                 executed_calls.append(call.id)
-                result = await execute_web_search(call)
+                if needs_tool_approval(call.name):
+                    approval_id, future = self._open_approval(conversation_id)
+                    yield InteractionEvent.tool_approval_request(approval_id, call, conversation_id)
+                    decision = await self._await_approval(
+                        approval_id, future, call.name, conversation_id
+                    )
+                    if decision != "allow":
+                        result = denied_tool_result(call)
+                    else:
+                        result = await execute_chat_tool(call)
+                    await self._observe_tool(call, result)
+                else:
+                    result = await execute_chat_tool(call)
+                    await self._observe_tool(call, result)
             await self._persist_tool_result(conversation_id, call, result, selection)
-            await self._observe("search.failed" if result.is_error else "search.completed")
             yield InteractionEvent.from_tool_result(result, conversation_id)
+
+    def _open_approval(self, conversation_id: str) -> tuple[str, asyncio.Future[str]]:
+        approval_id = uuid.uuid4().hex
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._tool_approvals[approval_id] = (conversation_id, future)
+        return approval_id, future
+
+    async def _await_approval(
+        self,
+        approval_id: str,
+        future: asyncio.Future[str],
+        call_name: str,
+        conversation_id: str,
+    ) -> str:
+        """Aguarda a decisão do usuário; timeout recusa por falha segura."""
+        try:
+            try:
+                return await asyncio.wait_for(future, timeout=TOOL_APPROVAL_TIMEOUT_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "aprovação da ferramenta %r na conversa %s expirou; recusada",
+                    call_name,
+                    conversation_id,
+                )
+                return "deny"
+        finally:
+            self._tool_approvals.pop(approval_id, None)
+
+    async def _observe_tool(
+        self,
+        call: CanonicalToolCall,
+        result: InteractionToolResult,
+    ) -> None:
+        family = "search" if call.name == "web_search" else "tool"
+        await self._observe(f"{family}.failed" if result.is_error else f"{family}.completed")
+
+    def decide_tool_approval(
+        self,
+        *,
+        approval_id: str,
+        session_id: str,
+        decision: str,
+    ) -> None:
+        """Resolve uma aprovação pendente do Chat; nunca bloqueia."""
+        if decision not in {"allow", "deny"}:
+            raise InteractionServiceError(
+                "approval_invalid_decision",
+                "decisão de aprovação inválida",
+                retryable=False,
+            )
+        pending = self._tool_approvals.get(approval_id)
+        if pending is None:
+            raise InteractionServiceError(
+                "approval_not_found",
+                "aprovação não encontrada ou já expirada",
+                retryable=False,
+            )
+        expected_session, future = pending
+        if expected_session != session_id:
+            raise InteractionServiceError(
+                "approval_session_mismatch",
+                "aprovação pertence a outra conversa",
+                retryable=False,
+            )
+        if future.done():
+            raise InteractionServiceError(
+                "approval_already_decided",
+                "aprovação já decidida",
+                retryable=False,
+            )
+        future.set_result(decision)
 
     async def _stream_accountable_round(
         self,
@@ -634,7 +737,7 @@ class InteractionService:
             if message.role == "tool":
                 pending.pop(message.tool_call_id, None)
         for call in pending.values():
-            result = _tool_error(call.id, "busca interrompida; resultado não disponível")
+            result = _tool_error(call.id, "ferramenta interrompida; resultado não disponível")
             args = (conversation_id, "tool")
             kwargs = {
                 "content": result.content,
@@ -684,9 +787,28 @@ class InteractionService:
                 model=snapshot.ref,
                 messages=self._history(envelope.conversation_id),
                 parameters=snapshot.parameters,
-                tools=WEB_SEARCH_TOOLS if envelope.web_search else (),
+                tools=self._chat_tools(envelope),
             ),
         )
+
+    @staticmethod
+    def _chat_tools(envelope: InteractionEnvelope) -> tuple[dict[str, Any], ...]:
+        if envelope.tools:
+            return chat_tool_definitions(web_search_enabled=envelope.web_search)
+        if envelope.web_search:
+            return WEB_SEARCH_TOOLS
+        return ()
+
+    @staticmethod
+    def _chat_tool_names(envelope: InteractionEnvelope) -> frozenset[str]:
+        if envelope.tools:
+            tools = set(CHAT_TOOLS)
+            if not envelope.web_search:
+                tools.discard("web_search")
+            return frozenset(tools)
+        if envelope.web_search:
+            return frozenset({"web_search"})
+        return frozenset()
 
     def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
         prepare = getattr(self._gateway, "prepare", None)

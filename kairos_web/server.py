@@ -26,7 +26,10 @@ from pydantic import BaseModel
 
 from kairos_cli.auth import AuthStore
 from kairos_integration import build_interaction_router as build_interaction_service
-from kairos_integration.interaction_contract import InteractionServiceUnavailableError
+from kairos_integration.interaction_contract import (
+    InteractionServiceError,
+    InteractionServiceUnavailableError,
+)
 from kairos_observability.service_events import record_service_event_async
 from kairos_providers.adapters.openrouter import OpenRouterRoutingPolicy
 from kairos_providers.catalog import UnknownModelError
@@ -1118,6 +1121,35 @@ async def get_session_messages(session_id: str, request: Request):
 
 
 # --- WEBSOCKET CHAT STREAMING ---
+
+
+@app.post("/api/chat/sessions/{session_id}/tool-approvals/{approval_id}")
+async def chat_tool_approval(
+    session_id: str, approval_id: str, payload: dict[str, Any], request: Request
+):
+    """Resolve a confirmação por turno de uma ferramenta mutadora do Chat.
+
+    Só existe enquanto o turno aguarda a decisão; depois de decidida ou
+    expirada, responde 404 para que o SPA reaja a uma execução já consumida.
+    """
+    service = getattr(request.app.state, "interaction_service", None)
+    decide = getattr(service, "decide_tool_approval", None)
+    if decide is None:
+        return JSONResponse({"error": "unavailable"}, status_code=503)
+    decision = payload.get("decision")
+    if decision not in {"allow", "deny"}:
+        return JSONResponse({"error": "approval_invalid_decision"}, status_code=400)
+    try:
+        decide(approval_id=approval_id, session_id=session_id, decision=decision)
+    except InteractionServiceError as exc:
+        status = {
+            "approval_not_found": 404,
+            "approval_session_mismatch": 403,
+            "approval_already_decided": 409,
+            "approval_invalid_decision": 400,
+        }.get(exc.error_kind, 400)
+        return JSONResponse({"error": exc.error_kind}, status_code=status)
+    return JSONResponse({"status": "decided"})
 
 
 @app.websocket("/ws/chat")
