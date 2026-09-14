@@ -17,9 +17,16 @@ async def run_import_agent(home: Path, args) -> int:
         print("Dados inválidos: esperado um JSON.", file=sys.stderr)
         return 1
 
-    if isinstance(data, dict) and "agent" in data:
-        print("Configuração do agente importada com sucesso.")
-    else:
+    if not isinstance(data, dict) or "agent" not in data:
         print("Formato inválido. Esperado: {\"agent\": {config}}")
         return 1
+
+    agent = data["agent"]
+    if not isinstance(agent, dict):
+        print("Formato inválido. Em 'agent', esperado um objeto de configuração.")
+        return 1
+
+    agent_path = home / "agent.json"
+    agent_path.write_text(json.dumps(agent, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Configuração do agente importada com sucesso em {agent_path}.")
     return 0

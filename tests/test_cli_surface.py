@@ -154,35 +154,28 @@ class ParserTests(unittest.TestCase):
         self.parser = build_parser()
 
     def test_a_arvore_monta_e_todo_comando_e_alcancavel(self):
+        defaults = {
+            "approvals.test": ("approvals", "test", "ls"),
+            "chat": ("chat", "--session", "surface-test"),
+            "config.set": ("config", "set", "k", "v"),
+            "login": ("login", "--provider", "surface-test", "--api-key", "sk-surface-test"),
+            "logout": ("logout", "--provider", "surface-test"),
+            "peer.add": ("peer", "add", "--target", "surface-test"),
+            "peer.remove": ("peer", "remove", "--target", "surface-test"),
+            "pairing.revoke": ("pairing", "revoke", "--target", "surface-test"),
+            "prompt-size.set": ("prompt-size", "set", "--size", "14"),
+            "console.eval": ("console", "eval", "--expression", "1+1"),
+            "skin.use": ("skin", "use", "--theme", "dark"),
+            "hooks.use": ("hooks", "use", "--hook", "pre-turn"),
+        }
         for c in COMMANDS:
             with self.subTest(cmd=c.name):
                 argv = [c.name]
                 if c.subcommands:
                     argv.append(c.subcommands[0].name)
-                if c.name == "approvals":
-                    argv = ["approvals", "test", "ls"]
-                if c.name == "chat":
-                    argv = ["chat", "--session", "surface-test"]
-                if c.name in ("config",) and argv[1] in ("set",):
-                    argv += ["k", "v"]
-                if c.name == "login":
-                    argv += ["--provider", "surface-test", "--api-key", "sk-surface-test"]
-                if c.name == "logout":
-                    argv += ["--provider", "surface-test"]
-                if c.name == "peer" and argv[1] == "add":
-                    argv += ["--target", "surface-test"]
-                if c.name == "pairing" and argv[1] == "revoke":
-                    argv += ["--target", "surface-test"]
-                if c.name == "prompt-size" and argv[1] == "set":
-                    argv += ["--size", "14"]
-                if c.name == "console" and argv[1] == "eval":
-                    argv += ["--expression", "1+1"]
-                if c.name == "skin" and argv[1] == "use":
-                    argv += ["--theme", "dark"]
-                if c.name == "hooks" and argv[1] == "use":
-                    argv += ["--hook", "pre-turn"]
-                if c.name == "peer" and argv[1] == "remove":
-                    argv += ["--target", "surface-test"]
+                chave = c.name if not c.subcommands else f"{c.name}.{argv[1]}"
+                if chave in defaults:
+                    argv = list(defaults[chave])
                 args = self.parser.parse_args(argv)
                 self.assertEqual(args.command, c.name)
 
@@ -304,6 +297,25 @@ class ExecucaoTests(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             main(["import-agent", "--data", json.dumps(agent_cfg)])
         self.assertIn("Configuração do agente importada com sucesso", buf.getvalue())
+        persistido = json.loads((Path(self._tmp.name) / "agent.json").read_text(encoding="utf-8"))
+        self.assertEqual(persistido, {"name": "test-agent", "capabilities": ["chat"]})
+
+    def test_import_agent_rejeita_formato_ou_dados_invalidos(self):
+        import contextlib
+        import io
+
+        for payload in ('{"nome": "x"}', '{"agent": "x"}', "{lixo"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(main(["import-agent", "--data", payload]), 1)
+
+    def test_uninstall_remove_home_de_verdade_e_falha_se_ausente(self):
+        home = Path(self._tmp.name)
+        marker = home / "state.db"
+        marker.write_text("x", encoding="utf-8")
+        self.assertEqual(main(["uninstall"]), 0)
+        self.assertFalse(home.exists())
+        self.assertEqual(main(["uninstall"]), 1)
 
     def test_login_logout_persistem_no_auth_json(self):
         import json
