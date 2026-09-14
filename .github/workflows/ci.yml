@@ -112,11 +112,14 @@ jobs:
           docker build --target runtime-broker -t kairos:runtime-broker-test .
           docker run --rm --entrypoint docker kairos:runtime-broker-test --version
       - name: Imagem-stub para o ciclo de vida s6
+        # Receita commitada (Dockerfile.stub): espelha a estrutura da imagem
+        # real — s6-overlay, dispatch, stage2, cont-init — trocando só o que
+        # os 7 testes de RealImageTests validam (eco de UID, boom→42, ordem
+        # dos cont-init, marcador e remap). Antes isto regenerava um stub
+        # inline que DESCARTABA a receita commitada.
         run: |
-          printf 'FROM kairos:test\nRUN printf %s > /opt/kairos/.venv/bin/kairos && chmod +x /opt/kairos/.venv/bin/kairos\n' \
-            "'#!/bin/bash\ncase \"\$1\" in\n  gateway) echo \"GATEWAY uid=\$(id -u)\"; sleep 3 ;;\n  dashboard) echo \"DASH uid=\$(id -u)\"; sleep 3 ;;\n  runtime) echo \"RUNTIME uid=\$(id -u)\"; sleep 3 ;;\n  boom) exit 42 ;;\n  echo) cat ;;\n  *) echo \"CLI uid=\$(id -u) args=\$*\" ;;\nesac\n'" \
-            > Dockerfile.stub
-          docker build -t kairos:stub -f Dockerfile.stub .
+          docker build --check -f Dockerfile.stub .
+          docker build -f Dockerfile.stub -t kairos:stub .
       - name: Testes de integração
         run: uv run pytest -q tests/test_container.py::RealImageTests
 
