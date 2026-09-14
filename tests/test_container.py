@@ -849,6 +849,35 @@ class RealImageTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "codex-cli 0.154.0")
 
+    def test_a_politica_do_worker_embarcada_attesta_os_dois_modos(self):
+        """E2E do pacote embarcado: WorkerPolicy produz os dois conjuntos de
+        security-opt (protótipo e sandbox interna), com os caminhos/países de
+        runtime documentados. Só aparece num container real depois de a própria
+        imagem ter sido construída — a deriva entre o que se testa fora e o que
+        a imagem copia foi exatamente a classe de bug que o RealImage captura."""
+        r = self.run_in(
+            "-c",
+            "from kairos_runtime.experimental.worker_policy import (\n"
+            "    WorkerPolicy, SANDBOX_SECCOMP, SANDBOX_APPARMOR,\n"
+            ")\n"
+            "IMAGE = 'sha256:' + 'a' * 64\n"
+            "NAME = 'kairos-worker-' + 'b' * 32\n"
+            "prototype = WorkerPolicy(IMAGE, NAME)\n"
+            "sandbox = WorkerPolicy(IMAGE, NAME, sandbox=True)\n"
+            "def sec(args):\n"
+            "    return sorted(args[i + 1] for i, a in enumerate(args) if a == '--security-opt')\n"
+            "proto = sec(prototype.create_args())\n"
+            "snds = sec(sandbox.create_args())\n"
+            "assert proto == ['no-new-privileges'], f'protótipo: {proto}'\n"
+            "assert 'no-new-privileges' in snds, f'base de sandbox: {snds}'\n"
+            "assert f'seccomp={SANDBOX_SECCOMP}' in snds, f'seccomp de sandbox: {snds}'\n"
+            "assert f'apparmor={SANDBOX_APPARMOR}' in snds, f'apparmor de sandbox: {snds}'\n"
+            "assert SANDBOX_SECCOMP == '/opt/kairos/seccomp-runtime.json'\n"
+            "assert SANDBOX_APPARMOR == 'kairos-worker-runtime'\n",
+            entrypoint="/opt/kairos/.venv/bin/python",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_runtime_enabled_reflete_o_probe_real_da_plataforma(self):
         name = "kairos-test-runtime-sandbox"
         config = REPO / "tests" / "fixtures" / "container_runtime_enabled.yaml"
