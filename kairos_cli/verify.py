@@ -1,4 +1,5 @@
 """Comando `kairos verify` — verificação pós-edição de código."""
+
 import json
 from pathlib import Path
 

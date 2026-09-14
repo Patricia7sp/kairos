@@ -1,4 +1,5 @@
 """Comando `kairos import-agent` — importa configuração de outro agente."""
+
 import json
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ async def run_import_agent(home: Path, args) -> int:
         return 1
 
     if not isinstance(data, dict) or "agent" not in data:
-        print("Formato inválido. Esperado: {\"agent\": {config}}")
+        print('Formato inválido. Esperado: {"agent": {config}}')
         return 1
 
     agent = data["agent"]

@@ -1,4 +1,5 @@
 """Comando `kairos backup` — snapshot do home do Kairos."""
+
 import json
 import os
 import tarfile
@@ -33,11 +34,21 @@ async def run_backup(home: Path, args) -> int:
             tar.add(p, arcname=str(rel))
 
     size = archive.stat().st_size
-    files = sum(1 for _ in home.rglob("*") if _.is_file() and not any(part in excludes for part in _.relative_to(home).parts))
+    files = sum(
+        1
+        for _ in home.rglob("*")
+        if _.is_file() and not any(part in excludes for part in _.relative_to(home).parts)
+    )
 
     as_json = getattr(args, "json", False)
     if as_json:
-        print(json.dumps({"archive": str(archive), "home": str(home), "size_bytes": size, "files": files}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"archive": str(archive), "home": str(home), "size_bytes": size, "files": files},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(f"Backup de {home}")
         print(f"  archive: {archive}")

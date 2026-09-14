@@ -1,4 +1,5 @@
 """Comando `kairos claw` — automação de browser."""
+
 import sys
 from pathlib import Path
 

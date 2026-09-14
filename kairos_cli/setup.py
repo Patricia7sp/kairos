@@ -1,4 +1,5 @@
 """Comando `kairos setup` — inicializa idempotentemente o home do Kairos."""
+
 import json
 import os
 import secrets
@@ -40,7 +41,13 @@ async def run_setup(home: Path, args) -> int:
 
     as_json = getattr(args, "json", False)
     if as_json:
-        print(json.dumps({"home": str(home), "schema_version": versao, "token_created": created_token}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"home": str(home), "schema_version": versao, "token_created": created_token},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(f"Home: {home}")
         print(f"  web-token: {'criado' if created_token else 'já existia'} em {token_path} (0600)")

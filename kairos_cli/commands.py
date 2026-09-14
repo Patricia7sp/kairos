@@ -242,7 +242,12 @@ COMMANDS: tuple[Command, ...] = (
         status=Status.IMPLEMENTED,
         unit="plugins",
     ),
-    _c("import-agent", "Importa configuração de outro agente", status=Status.IMPLEMENTED, unit="plugins"),
+    _c(
+        "import-agent",
+        "Importa configuração de outro agente",
+        status=Status.IMPLEMENTED,
+        unit="plugins",
+    ),
     _c("import", "Importa sessões e dados", status=Status.IMPLEMENTED),
     _c("insights", "Métricas de uso e custo", status=Status.IMPLEMENTED, unit="kairos-state"),
     _c("login", "Autentica num provedor", status=Status.IMPLEMENTED, unit="kairos-cli"),
