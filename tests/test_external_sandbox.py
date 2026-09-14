@@ -392,3 +392,27 @@ def test_worker_policy_sandbox_rejects_extra_security_opts():
     inspected["HostConfig"]["SecurityOpt"].append("seccomp=unconfined")
     with pytest.raises(ValueError):
         p.validate(inspected)
+
+
+def test_docker_worker_sandbox_env_activates_sandbox_mode(tmp_path, monkeypatch):
+    from kairos_runtime.experimental.docker_worker import DockerWorker
+
+    monkeypatch.setenv("KAIROS_WORKER_SANDBOX", "1")
+    worker = DockerWorker(tmp_path, image="kairos:external-sandbox")
+    assert worker.sandbox is True
+
+
+def test_docker_worker_sandbox_env_absent_means_no_sandbox(tmp_path, monkeypatch):
+    from kairos_runtime.experimental.docker_worker import DockerWorker
+
+    monkeypatch.delenv("KAIROS_WORKER_SANDBOX", raising=False)
+    worker = DockerWorker(tmp_path, image="kairos:external-sandbox")
+    assert worker.sandbox is False
+
+
+def test_docker_worker_sandbox_explicit_flag_wins_over_env(tmp_path, monkeypatch):
+    from kairos_runtime.experimental.docker_worker import DockerWorker
+
+    monkeypatch.setenv("KAIROS_WORKER_SANDBOX", "0")
+    worker = DockerWorker(tmp_path, image="kairos:external-sandbox", sandbox=False)
+    assert worker.sandbox is False
