@@ -9,6 +9,7 @@
 #
 # Uso:
 #   scripts/live-acceptance.sh store SK-....XX [dias]   # guarda (dias = 1 padrão, máx 7)
+#   scripts/live-acceptance.sh renew [dias|AAAA-MM-DD]  # prorroga a validade da chave já guardada
 #   scripts/live-acceptance.sh run                      # roda o aceite (recusa se expirado)
 #   scripts/live-acceptance.sh status                   # quanto falta da validade
 set -u
@@ -29,26 +30,54 @@ ordinal() {
   date -u -d "$d" +%s 2>/dev/null || die "formato de data inválido: $d (use AAAA-MM-DD)"
 }
 
+# Normaliza o alvo (dias ou data AAAA-MM-DD) num prazo >= hoje. Limite de 60
+# dias: a credencial é de teste, não pode exceder o mês seguinte + troll.
+resolva_alvo() {
+  local alvo="$1"
+  local hoje_s expira
+  hoje_s="$(ordinal "$(hoje)")"
+  case "$alvo" in
+    ''|*[!0-9]*) expira="$(date -u -d "$alvo" +%F 2>/dev/null)" || die "alvo inválido: $alvo (use dias ou AAAA-MM-DD)" ;;
+    *) expira="$(date -u -d "+${alvo} day" +%F 2>/dev/null)" || die "alvo inválido: $alvo" ;;
+  esac
+  local expira_s
+  expira_s="$(ordinal "$expira")"
+  if [ "$expira_s" -lt "$hoje_s" ]; then
+    die "prazo $expira já passou — escolha hoje ou futuro"
+  fi
+  if [ "$(( (expira_s - hoje_s) / 86400 ))" -gt 60 ]; then
+    die "prazo $expira ultrapassa 60 dias — recusado para credencial de teste"
+  fi
+  printf '%s' "$expira"
+}
+
+grava() {
+  local token="$1" expira="$2"
+  umask 077
+  printf '%s=%s\n%s=%s\n' "$TOKEN_KEY" "$token" "$EXPIRES_KEY" "$expira" > "$SECRETS"
+  printf 'chave em %s (0600) válida até %s\n' "$SECRETS" "$expira"
+}
+
 store() {
   local token="${1:-}"
-  local dias="${2:-1}"
+  local alvo="${2:-1}"
   [ -n "$token" ] || die "token vazio"
   case "$token" in
     sk-*) ;;
     *) die "a chave deve começar com sk- (formato da OpenAI)" ;;
   esac
-  case "$dias" in
-    ''|*[!0-9]*) die "dias deve ser um inteiro" ;;
-  esac
-  if [ "$dias" -lt 1 ] || [ "$dias" -gt 7 ]; then
-    die "dias deve estar entre 1 e 7"
-  fi
   local expira
-  expira="$(date -u -d "+${dias} day" +%F)" || die "falha ao calcular a validade"
+  expira="$(resolva_alvo "$alvo")" || exit 1
+  grava "$token" "$expira"
+  printf 'Depois do aceite, revogue a chave no dashboard da OpenAI para que ela deixe de existir de fato.\n'
+}
 
-  umask 077
-  printf '%s=%s\n%s=%s\n' "$TOKEN_KEY" "$token" "$EXPIRES_KEY" "$expira" > "$SECRETS"
-  printf 'chave guardada em %s (0600) até %s (%s dia(s))\n' "$SECRETS" "$expira" "$dias"
+renew() {
+  load || exit 1
+  local expira
+  expira="$(resolva_alvo "${1:-}")" || exit 1
+  grava "${!TOKEN_KEY}" "$expira"
+  printf 'Prazo prorrogado — a chave continua a mesma, só a validade local muda.\n'
   printf 'Depois do aceite, revogue a chave no dashboard da OpenAI para que ela deixe de existir de fato.\n'
 }
 
@@ -81,6 +110,9 @@ case "$cmd" in
   store)
     store "${2:-}" "${3:-1}"
     ;;
+  renew)
+    renew "${2:-}"
+    ;;
   status)
     load
     check || exit 1
@@ -94,6 +126,6 @@ case "$cmd" in
       "${UV:-uv}" run pytest -q -m runtime_live tests/test_runtime_live.py
     ;;
   *)
-    die "comando desconhecido: $cmd (use store|run|status)"
+    die "comando desconhecido: $cmd (use store|renew|run|status)"
     ;;
 esac
