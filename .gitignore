@@ -13,8 +13,10 @@ __pycache__/
 # frontend
 node_modules/
 
-# worktrees locais de desenvolvimento
 .worktrees/
+
+# aceite real — credencial da OpenAI + prazo de validade (nunca commitada)
+.env.live
 
 # artefatos locais do companion visual de brainstorming
 .superpowers/
