@@ -40,6 +40,27 @@ def assert_removed(worker):
     assert result.stdout.strip() == ""
 
 
+@pytest.mark.skipif(
+    os.environ.get("KAIROS_RUNTIME_SANDBOX_TEST") != "1", reason="opt-in host AppArmor + seccomp"
+)
+def test_sandbox_mode_worker_attests_runtime_profiles(tmp_path):
+    """Requires the host AppArmor profile loaded and the seccomp JSON published."""
+    project = tmp_path / "project"
+    project.mkdir()
+
+    async def scenario():
+        worker = DockerWorker(project, image=IMAGE, sandbox=True)
+        async with worker:
+            assert worker.policy.sandbox is True
+            assert worker.evidence["status"]["Seccomp"] == "2"
+            assert worker.evidence["apparmor"] == "kairos-worker-runtime (enforce)"
+            result = await worker.execute(["codex", "sandbox", "/bin/true"])
+            assert result["exitCode"] == 0, result
+        assert_removed(worker)
+
+    asyncio.run(scenario())
+
+
 def test_real_codex_executes_with_standard_docker_isolation(tmp_path):
     project = tmp_path / "project"
     project.mkdir()

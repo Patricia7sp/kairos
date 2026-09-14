@@ -324,3 +324,71 @@ def test_worker_policy_rejects_wrong_image_mount_or_apparmor(key, bad):
     inspected[key] = bad
     with pytest.raises(ValueError):
         p.validate(inspected)
+
+
+def sandbox_policy():
+    return WorkerPolicy(
+        "sha256:" + "a" * 64, "kairos-worker-" + "b" * 32, writable=False, sandbox=True
+    )
+
+
+def sandbox_inspection(p):
+    from kairos_runtime.experimental.worker_policy import (
+        SANDBOX_APPARMOR,
+        SANDBOX_SECCOMP,
+    )
+
+    inspected = inspection(p)
+    inspected["AppArmorProfile"] = SANDBOX_APPARMOR
+    inspected["HostConfig"]["SecurityOpt"] = [
+        "no-new-privileges",
+        f"seccomp={SANDBOX_SECCOMP}",
+    ]
+    return inspected
+
+
+def test_worker_policy_sandbox_requests_seccomp_and_apparmor():
+    p = sandbox_policy()
+    argv = p.create_args()
+    assert "--security-opt" in argv
+    secopts = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--security-opt"]
+    assert "no-new-privileges" in secopts
+    assert any(opt.startswith("seccomp=") for opt in secopts)
+    assert "apparmor=kairos-worker-runtime" in secopts
+    assert "--cap-drop" in argv and "--privileged" not in argv
+
+
+def test_worker_policy_sandbox_accepts_the_expected_boundary():
+    p = sandbox_policy()
+    p.validate(sandbox_inspection(p))
+
+
+def test_worker_policy_sandbox_rejects_missing_seccomp():
+    p = sandbox_policy()
+    inspected = sandbox_inspection(p)
+    inspected["HostConfig"]["SecurityOpt"] = ["no-new-privileges"]
+    with pytest.raises(ValueError):
+        p.validate(inspected)
+
+
+def test_worker_policy_sandbox_rejects_missing_apparmor():
+    p = sandbox_policy()
+    inspected = sandbox_inspection(p)
+    inspected["AppArmorProfile"] = "docker-default"
+    with pytest.raises(ValueError):
+        p.validate(inspected)
+
+
+def test_worker_policy_sandbox_tolerates_daemon_apparmor_security_opt():
+    p = sandbox_policy()
+    inspected = sandbox_inspection(p)
+    inspected["HostConfig"]["SecurityOpt"].append("apparmor=kairos-worker-runtime")
+    p.validate(inspected)
+
+
+def test_worker_policy_sandbox_rejects_extra_security_opts():
+    p = sandbox_policy()
+    inspected = sandbox_inspection(p)
+    inspected["HostConfig"]["SecurityOpt"].append("seccomp=unconfined")
+    with pytest.raises(ValueError):
+        p.validate(inspected)
