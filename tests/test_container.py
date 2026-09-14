@@ -382,7 +382,7 @@ class DockerfileTests(unittest.TestCase):
         self.assertIn("build.sh /opt/kairos/lib ||", self.src)
 
     def test_codex_pinned_preserva_o_pacote_verificado_amd64(self):
-        self.assertIn("ARG CODEX_VERSION=0.153.4", self.src)
+        self.assertIn("ARG CODEX_VERSION=0.154.0", self.src)
         self.assertIn(
             "a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821",
             self.src,
@@ -847,7 +847,7 @@ class RealImageTests(unittest.TestCase):
             "test -x /usr/local/lib/codex/bin/codex-code-mode-host",
         )
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), "codex-cli 0.153.4")
+        self.assertEqual(r.stdout.strip(), "codex-cli 0.154.0")
 
     def test_runtime_enabled_reflete_o_probe_real_da_plataforma(self):
         name = "kairos-test-runtime-sandbox"

@@ -1,6 +1,6 @@
 agent_runtime:
   enabled: true
   codex_binary: /usr/local/bin/codex
-  codex_version: 0.153.4
+  codex_version: 0.154.0
   allowed_directories: []
   broad_access_enabled: false

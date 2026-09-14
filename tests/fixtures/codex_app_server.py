@@ -12,7 +12,7 @@ loaded_threads = set()
 MODE = sys.argv[1] if len(sys.argv) > 1 else "adapter"
 
 if MODE == "version":
-    print("codex-cli 0.153.4")
+    print("codex-cli 0.154.0")
     raise SystemExit(0)
 if MODE == "bad-version":
     print("codex-cli 9.9.9")
@@ -51,7 +51,7 @@ def thread(
         "status": {"type": "idle"},
         "path": None,
         "cwd": cwd,
-        "cliVersion": "0.153.4",
+        "cliVersion": "0.154.0",
         "source": "appServer",
         "agentNickname": None,
         "agentRole": None,
@@ -132,7 +132,7 @@ for raw_line in sys.stdin:
 
     if method == "initialize":
         if MODE == "bad-initialize":
-            send({"id": request_id, "result": {"userAgent": "codex/0.153.4"}})
+            send({"id": request_id, "result": {"userAgent": "codex/0.154.0"}})
             continue
         send(
             {
@@ -141,7 +141,7 @@ for raw_line in sys.stdin:
                     "codexHome": os.environ["CODEX_HOME"],
                     "platformFamily": "unix",
                     "platformOs": "linux",
-                    "userAgent": "kairos/0.153.4 (Ubuntu 26.4.0; x86_64) dumb (kairos; 0.1.0)",
+                    "userAgent": "kairos/0.154.0 (Ubuntu 26.4.0; x86_64) dumb (kairos; 0.1.0)",
                 },
             }
         )
