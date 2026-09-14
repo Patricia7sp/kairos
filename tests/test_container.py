@@ -384,7 +384,7 @@ class DockerfileTests(unittest.TestCase):
     def test_codex_pinned_preserva_o_pacote_verificado_amd64(self):
         self.assertIn("ARG CODEX_VERSION=0.154.0", self.src)
         self.assertIn(
-            "a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821",
+            "fc6e3e3b85f2cf7d664520ee5c66a7fe4aa12bae7d46834f47e2f165fd0d6f78",
             self.src,
         )
         self.assertIn("codex-package-x86_64-unknown-linux-musl.tar.gz", self.src)
@@ -939,6 +939,15 @@ class RealImageTests(unittest.TestCase):
         self.assertIn("/opt/data/state.db", saida)
         self.assertIn("integrity_check", saida)
 
-    def test_comando_nao_implementado_DIZ_isso_em_vez_de_falhar_mudo(self):
+    def test_comando_implementado_roda_com_efeito_real_no_container(self):
         r = self.run_in("backup", entrypoint=None)
-        self.assertIn("ainda não foi implementado", r.stdout + r.stderr)
+        saida = r.stdout + r.stderr
+        self.assertIn("Backup de /opt/data", saida)
+        self.assertIn("archive:", saida)
+        self.assertIn("tamanho:", saida)
+
+    def test_comando_desconhecido_falha_barulhento_em_vez_de_mudo(self):
+        r = self.run_in("nao-existe", entrypoint=None)
+        saida = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("invalid choice", saida)

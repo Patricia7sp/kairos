@@ -7,7 +7,7 @@ em `kairos runtime status` ou `GET /api/runtime/status`.
 
 ## Container
 
-A imagem amd64 instala o pacote standalone oficial do Codex CLI 0.153.4 em
+A imagem amd64 instala o pacote standalone oficial do Codex CLI 0.154.0 em
 `/usr/local/lib/codex` e expõe `/usr/local/bin/codex`. O build verifica o
 SHA-256 antes de extrair e mantém os recursos do pacote, incluindo `bwrap`,
 `zsh`, `rg` e `codex-code-mode-host`. O serviço s6 `runtime` roda como o usuário
@@ -39,7 +39,7 @@ Edite `/opt/data/config.yaml` no volume persistente:
 agent_runtime:
   enabled: true
   codex_binary: /usr/local/bin/codex
-  codex_version: 0.153.4
+  codex_version: 0.154.0
   allowed_directories:
     - /projects/example
   broad_access_enabled: false
@@ -103,7 +103,7 @@ KAIROS_RUNTIME_LIVE_API_KEY='chave-dedicada' \
 uv run pytest -q -m runtime_live tests/test_runtime_live.py
 ```
 
-Use `KAIROS_RUNTIME_LIVE_CODEX` para apontar outro binário 0.153.4. Nunca rode
+Use `KAIROS_RUNTIME_LIVE_CODEX` para apontar outro binário 0.154.0. Nunca rode
 esse teste com autenticação pessoal herdada. A ausência da chave dedicada é um
 skip explícito, não um aceite.
 
