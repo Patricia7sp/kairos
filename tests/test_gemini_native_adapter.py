@@ -303,3 +303,79 @@ class GeminiNativeAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(context.exception.kind, ProviderErrorKind.INTERNAL)
         self.assertNotIn(secret, str(context.exception))
+
+    async def test_repeated_local_call_ids_keep_each_round_name_and_signature(self):
+        request = AdapterRequest(
+            model=ProviderModelRef("gemini", "gemini-3.7-flash"),
+            messages=(
+                CanonicalMessage(role="user", content=(ContentPart("text", "Search"),)),
+                CanonicalMessage(
+                    role="assistant",
+                    content=(),
+                    tool_calls=(
+                        CanonicalToolCall(
+                            "gemini-call-1",
+                            "web_search",
+                            '{"query":"Kairos"}',
+                            thought_signature="first-round-signature",
+                        ),
+                    ),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    tool_call_id="gemini-call-1",
+                    content=(ContentPart("text", '{"results":[]}'),),
+                ),
+                CanonicalMessage(
+                    role="assistant",
+                    content=(),
+                    tool_calls=(
+                        CanonicalToolCall(
+                            "gemini-call-1",
+                            "unknown_tool",
+                            "{}",
+                            thought_signature="second-round-signature",
+                        ),
+                    ),
+                ),
+                CanonicalMessage(
+                    role="tool",
+                    tool_call_id="gemini-call-1",
+                    content=(ContentPart("text", '{"error":"unsupported_tool"}'),),
+                ),
+            ),
+        )
+
+        def handler(http_request):
+            contents = json.loads(http_request.content)["contents"]
+            responses = [
+                part["functionResponse"]
+                for message in contents
+                for part in message["parts"]
+                if "functionResponse" in part
+            ]
+            self.assertEqual([part["name"] for part in responses], ["web_search", "unknown_tool"])
+            signatures = [
+                part["thoughtSignature"]
+                for message in contents
+                for part in message["parts"]
+                if "functionCall" in part
+            ]
+            self.assertEqual(signatures, ["first-round-signature", "second-round-signature"])
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "candidates": [
+                            {"content": {"parts": [{"text": "Done"}]}, "finishReason": "STOP"}
+                        ]
+                    }
+                ),
+            )
+
+        async with client_for(httpx.MockTransport(handler)) as client:
+            events = await collect(
+                GeminiNativeAdapter(client, api_key="fixture-key").stream(request)
+            )
+        self.assertEqual(events[0].text, "Done")
+        self.assertEqual(events[-1].finish_reason, "stop")
