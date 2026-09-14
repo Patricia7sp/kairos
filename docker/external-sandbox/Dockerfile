@@ -2,7 +2,7 @@
 FROM python:3.11-slim-bookworm AS worker
 
 ARG TARGETARCH
-ARG CODEX_VERSION=0.153.4
+ARG CODEX_VERSION=0.154.0
 ARG CODEX_SHA256=a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821
 
 RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates curl git \

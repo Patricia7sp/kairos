@@ -111,9 +111,9 @@ def read_chatgpt_headers(home: Path, *, minimum_validity: int = 0) -> dict[str, 
         return {
             "Authorization": "Bearer " + access,
             "ChatGPT-Account-Id": account,
-            "version": "0.153.4",
+            "version": "0.154.0",
             "originator": "codex_cli_rs",
-            "User-Agent": "kairos-runtime/0.153.4",
+            "User-Agent": "kairos-runtime/0.154.0",
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }

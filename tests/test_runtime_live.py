@@ -144,7 +144,7 @@ async def test_real_runtime_two_projects_queue_parallel_restart_and_logout(  # n
         pytest.skip("aceite real exige KAIROS_RUNTIME_LIVE_API_KEY dedicada")
     executable = os.environ.get("KAIROS_RUNTIME_LIVE_CODEX") or shutil.which("codex")
     if not executable:
-        pytest.skip("Codex 0.153.4 não encontrado")
+        pytest.skip("Codex 0.154.0 não encontrado")
 
     home = tmp_path / "home"
     project_a = tmp_path / "project-a"

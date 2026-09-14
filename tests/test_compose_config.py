@@ -123,7 +123,7 @@ def test_config_semeada_desabilita_runtime_com_codex_pinned():
     assert config["agent_runtime"] == {
         "enabled": False,
         "codex_binary": "/usr/local/bin/codex",
-        "codex_version": "0.153.4",
+        "codex_version": "0.154.0",
         "allowed_directories": [],
         "project_catalogs": [],
         "broad_access_enabled": False,
