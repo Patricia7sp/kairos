@@ -34,7 +34,7 @@ agent_runtime:
     - /home/operador/projetos/exemplo
 ```
 
-O broker exige Codex 0.153.4. A imagem é resolvida para um digest imutável em
+O broker exige Codex 0.154.0. A imagem é resolvida para um digest imutável em
 cada criação. Para fixar também entre sessões, configure `docker_image` com o
 ID `sha256:...` da imagem validada. `broad_access` é recusado neste backend.
 Diretórios que contenham o broker, ou estejam dentro dele, também são recusados.

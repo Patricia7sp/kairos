@@ -1,6 +1,6 @@
 # Sandbox externa experimental
 
-Este protótipo valida comandos reais do Codex 0.153.4 em containers descartáveis
+Este protótipo valida comandos reais do Codex 0.154.0 em containers descartáveis
 usando Docker padrão. Não habilita o runtime em produção nem precisa de novos
 perfis AppArmor. O launcher roda no host; o worker não recebe controle do Docker.
 
@@ -102,4 +102,4 @@ precisam de testes próprios antes de habilitar o backend.
 Fontes utilizadas: [Dev Containers](https://code.visualstudio.com/docs/devcontainers/containers),
 [Docker seccomp](https://docs.docker.com/engine/security/seccomp/),
 [Docker proxy](https://docs.docker.com/engine/cli/proxy/),
-[command/exec no Codex fixado](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/app-server-protocol/src/protocol/v2/command_exec.rs).
+[command/exec no Codex fixado](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/command_exec.rs).

@@ -201,7 +201,7 @@ agent_runtime:
     - /projects/current
 ```
 
-`codex_version` não é uma chave desse backend. O Codex CLI 0.153.4 está fixado
+`codex_version` não é uma chave desse backend. O Codex CLI 0.154.0 está fixado
 nas imagens do broker e do worker e sua compatibilidade é verificada pelo
 runtime.
 
