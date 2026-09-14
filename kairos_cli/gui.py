@@ -9,12 +9,10 @@ async def run_gui(home: Path, args) -> int:
     subcommand = getattr(args, "gui_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "start":
-        print("Iniciando aplicativo desktop...")
-        print("GUI do Kairos iniciada.")
-    elif subcommand == "status":
-        print("Verificando status da GUI...")
-        print("GUI: não operacional (modo CLI).")
-    else:
-        print("Subcomando inválido. Use: gui start | gui status")
+        print("kairos: aplicativo desktop indisponível neste modo.", file=sys.stderr)
         return 1
-    return 0
+    if subcommand == "status":
+        print("GUI: não operacional (modo CLI).")
+        return 0
+    print("Subcomando inválido. Use: gui start | gui status")
+    return 1

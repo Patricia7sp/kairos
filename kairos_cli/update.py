@@ -12,8 +12,7 @@ async def run_update(home: Path, args) -> int:
     current = fast_version_line()
     print(f"Kairos versão atual: {current}")
 
-    # Placeholder: em um cenário real, consultaria um endpoint de versão
-    print("Verificando atualizações...")
-    print("Nenhuma atualização disponível no momento.")
+    print("Verificação automática de atualizações indisponível neste modo.")
+    print("Atualize via gerenciador de pacotes ou refaça o deploy a partir do repositório.")
 
-    return 0
+    return 1
