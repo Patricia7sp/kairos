@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,9 @@ from typing import Any
 MIB = 1024**2
 LABEL = "io.kairos.external-sandbox"
 ENVIRONMENT = {"HOME": "/home/worker", "CODEX_HOME": "/home/worker/.codex"}
+APPARMOR_PROTOTYPE = "docker-default"
+SANDBOX_APPARMOR = "kairos-worker-runtime"
+SANDBOX_SECCOMP = os.environ.get("KAIROS_WORKER_SECCOMP_PATH", "/opt/kairos/seccomp-runtime.json")
 IMAGE_ENV_KEYS = frozenset(
     {
         "PATH",
@@ -28,6 +32,7 @@ class WorkerPolicy:
     image_id: str
     name: str
     writable: bool = False
+    sandbox: bool = False
 
     def __post_init__(self):
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.image_id):
@@ -36,6 +41,8 @@ class WorkerPolicy:
             raise ValueError("nome de worker inválido")
         if type(self.writable) is not bool:
             raise ValueError("modo inválido")
+        if type(self.sandbox) is not bool:
+            raise ValueError("modo sandbox inválido")
 
     @property
     def tmpfs(self) -> dict[str, str]:
@@ -62,34 +69,41 @@ class WorkerPolicy:
             "10000:10000",
             "--cap-drop",
             "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--init",
-            "--ipc",
-            "private",
-            "--cgroupns",
-            "private",
-            "--memory",
-            "512m",
-            "--memory-swap",
-            "512m",
-            "--cpus",
-            "1",
-            "--pids-limit",
-            "128",
-            "--shm-size",
-            "16m",
-            "--restart",
-            "no",
-            "--log-driver",
-            "none",
-            "--stop-timeout",
-            "2",
-            "--workdir",
-            "/workspace",
-            "--entrypoint",
-            "/bin/sleep",
         ]
+        security_opts = ["no-new-privileges"]
+        if self.sandbox:
+            security_opts.extend([f"seccomp={SANDBOX_SECCOMP}", f"apparmor={SANDBOX_APPARMOR}"])
+        for security_opt in security_opts:
+            args.extend(["--security-opt", security_opt])
+        args.extend(
+            [
+                "--init",
+                "--ipc",
+                "private",
+                "--cgroupns",
+                "private",
+                "--memory",
+                "512m",
+                "--memory-swap",
+                "512m",
+                "--cpus",
+                "1",
+                "--pids-limit",
+                "128",
+                "--shm-size",
+                "16m",
+                "--restart",
+                "no",
+                "--log-driver",
+                "none",
+                "--stop-timeout",
+                "2",
+                "--workdir",
+                "/workspace",
+                "--entrypoint",
+                "/bin/sleep",
+            ]
+        )
         for key, value in ENVIRONMENT.items():
             args.extend(["--env", f"{key}={value}"])
         for path, options in self.tmpfs.items():
@@ -105,7 +119,8 @@ class WorkerPolicy:
 
         require(inspected.get("Image") == self.image_id)
         require(inspected.get("Name") == "/" + self.name)
-        require(inspected.get("AppArmorProfile") == "docker-default")
+        expected_apparmor = SANDBOX_APPARMOR if self.sandbox else APPARMOR_PROTOTYPE
+        require(inspected.get("AppArmorProfile") == expected_apparmor)
         require(inspected.get("State", {}).get("Running") is True)
         require(inspected.get("Mounts") == [])
         config = inspected.get("Config", {})
@@ -125,12 +140,23 @@ class WorkerPolicy:
             environment[key] = value
         require(all(environment.get(key) == value for key, value in ENVIRONMENT.items()))
         host = inspected.get("HostConfig", {})
+        security_opts = host.get("SecurityOpt")
+        if self.sandbox:
+            allowed_security = {
+                "no-new-privileges",
+                f"seccomp={SANDBOX_SECCOMP}",
+                f"apparmor={SANDBOX_APPARMOR}",
+            }
+            require(isinstance(security_opts, list) and set(security_opts) <= allowed_security)
+            for required in ("no-new-privileges", f"seccomp={SANDBOX_SECCOMP}"):
+                require(required in security_opts)
+        else:
+            require(security_opts == ["no-new-privileges"])
         for key, expected in {
             "Privileged": False,
             "ReadonlyRootfs": True,
             "NetworkMode": "none",
             "CapDrop": ["ALL"],
-            "SecurityOpt": ["no-new-privileges"],
             "Init": True,
             "PidMode": "",
             "IpcMode": "private",

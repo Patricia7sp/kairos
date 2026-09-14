@@ -43,12 +43,19 @@ print(json.dumps({
 class DockerWorker:
     """Async context with explicit, cancellation-safe container ownership."""
 
-    def __init__(self, project: Path, *, image: str, writable: bool = False):
+    def __init__(
+        self, project: Path, *, image: str, writable: bool = False, sandbox: bool | None = None
+    ):
         if not image or image.startswith("-") or type(writable) is not bool:
             raise ValueError("imagem ou modo inválido")
+        if sandbox is not None and type(sandbox) is not bool:
+            raise ValueError("modo sandbox inválido")
+        if sandbox is None:
+            sandbox = os.environ.get("KAIROS_WORKER_SANDBOX") == "1"
         self.project = project
         self.image = image
         self.writable = writable
+        self.sandbox = sandbox
         self.name = "kairos-worker-" + uuid.uuid4().hex
         self._config = tempfile.TemporaryDirectory(prefix="kairos-docker-client-")
         docker = shutil.which("docker")
@@ -101,7 +108,7 @@ class DockerWorker:
             raise ValueError("imagem de worker contém recursos inesperados")
         if any(entry.partition("=")[0] not in IMAGE_ENV_KEYS for entry in config.get("Env", [])):
             raise ValueError("imagem de worker contém ambiente inesperado")
-        self.policy = WorkerPolicy(image["Id"], self.name, self.writable)
+        self.policy = WorkerPolicy(image["Id"], self.name, self.writable, self.sandbox)
         await self._create()
         await self._run("start", self.name)
         _, inspected, _ = await self._run("inspect", self.name)

@@ -12,7 +12,9 @@ from .docker_worker import DockerWorker
 
 
 async def _run(args):
-    worker = DockerWorker(args.project, image=args.image, writable=args.writable)
+    worker = DockerWorker(
+        args.project, image=args.image, writable=args.writable, sandbox=args.sandbox
+    )
     try:
         async with worker:
             result = await worker.execute(args.command, timeout_ms=args.timeout_ms)
@@ -21,6 +23,7 @@ async def _run(args):
                 "image_id": worker.policy.image_id,
                 "worker": worker.name,
                 "workspace_writable": args.writable,
+                "inner_sandbox": worker.sandbox,
                 "kernel": worker.evidence,
                 "command": result,
             }
@@ -38,6 +41,11 @@ def main():
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--image", default="kairos:external-sandbox")
     parser.add_argument("--writable", action="store_true")
+    parser.add_argument(
+        "--sandbox",
+        action="store_true",
+        help="habilita a sandbox interna (bwrap via codex sandbox) com perfis de runtime",
+    )
     parser.add_argument("--timeout-ms", type=int, default=5000)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
