@@ -10,6 +10,7 @@ import os
 import stat
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -162,7 +163,7 @@ class ChatGPTModelTransport:
     async def __call__(self, body):
         if body.get("model") != self.model:
             raise RuntimeErrorInfo("invalid_policy", "modelo não autorizado", False)
-        request = dict(body, store=False, stream=True)
+        request: dict[str, Any] = dict(body, store=False, stream=True)
         include = request.get("include", [])
         if not isinstance(include, list) or any(not isinstance(item, str) for item in include):
             raise RuntimeErrorInfo("invalid_event", "requisição de modelo inválida", False)

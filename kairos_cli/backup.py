@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tarfile
 import tempfile
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from pathlib import Path
 async def run_backup(home: Path, args) -> int:
     home = Path(home)
     if not home.exists():
-        print(f"kairos: home {home} não existe", file=os.sys.stderr)
+        print(f"kairos: home {home} não existe", file=sys.stderr)
         return 1
 
     output = getattr(args, "output", None)
