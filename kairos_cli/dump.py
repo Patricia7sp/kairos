@@ -1,12 +1,6 @@
 """Comando `kairos dump` — exportação estruturada de fontes locais reais."""
-import asyncio
 import json
 import os
-import shutil
-import stat
-import tarfile
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 

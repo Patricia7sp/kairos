@@ -180,7 +180,7 @@ def _model_args(subcommand: str, parser) -> None:
             parser.add_argument("model", help="Identificador exato do modelo")
 
 
-def _extra_args(  # noqa: PLR0912 - dispatcher de argumentos por comando; cascata objetiva
+def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comando; cascata objetiva, não (de)codificável em tabela
     command: str, subcommand: str | None, parser
 ) -> None:
     """Argumentos específicos, onde o comando os exige."""

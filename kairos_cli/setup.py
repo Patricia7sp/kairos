@@ -1,5 +1,4 @@
 """Comando `kairos setup` — inicializa idempotentemente o home do Kairos."""
-import asyncio
 import json
 import os
 import secrets
@@ -20,7 +19,7 @@ async def run_setup(home: Path, args) -> int:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(token + "\n")
 
-    from kairos_state import connect, read_schema_version, migrate
+    from kairos_state import connect, migrate, read_schema_version
 
     db_path = home / "state.db"
     conn = connect(db_path)
