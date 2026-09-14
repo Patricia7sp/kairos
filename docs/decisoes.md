@@ -1753,6 +1753,42 @@ antes dos imports pesados; este é esse uso.
 
 ---
 
+## Tarefa 08 — Ferramentas core (extensão)
+
+### D-08.1 — search_files, patch e web_extract entram no core sem ripgrep
+
+**Divergência.** No legado, `search_files` (`n`) dependia de ripgrep externo; no
+Kairos, os três são stdlib-only (re + difflib + httpx). Isso permite rodar em
+qualquer imagem sem binário adicional e garante comportamento determinístico em
+testes. O custo é performance em repositórios muito grandes — aceito no escopo
+do core; otimização posterior via binário opcional pode ser adicionada sem
+mudar a interface. `web_extract` faz extração básica (strip de scripts/styles
+e normalização inline/block) sem minificador HTML; a fidelidade é suficiente
+para responder perguntas; implantação futura pode usar `minify-html` sem
+quebrar o contrato.
+
+### D-08.2 — Fuzzy com âncora, não nove estratégias
+
+**Divergência.** O legado usava nove estratégias de fuzzy (whitespace, indentação,
+case, etc.). No Kairos, o fallback difuso é por `difflib` com rstrip em
+linhas e âncora pela linha mais longa: se a janela inteira cobre o bloco
+com ratio >= 0.75 e folga sobre o segundo melhor, aplica; caso contrário
+recusa. Isso é deliberadamente mais conservador — evita substituição
+ambígua — e evita dependências externas (rapidfuzz).
+
+### D-08.3 — Lote SEARCH/REPLACE e terminal como alias não adotado
+
+O modo `patch` suporta blocos `<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`
+com arquivo opcional na linha do marcador. O batch multi-arquivo é aplicado
+sequencialmente por arquivo (coerente com o princípio de escrita sequencial).
+`terminal` (o nome da allowlist de sandbox) não é registrado: a ferramenta
+de shell no Kairos continua sendo `bash` com o mesmo handler. Adicionar um
+alias `terminal` a duplicaria no schema, violando o cinto estreito; a
+resolução do nome da allowlist para efeito de sandbox pode ser feita em
+tempo de despacho sem expor dois nomes.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
