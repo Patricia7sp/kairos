@@ -177,6 +177,12 @@ class ParserTests(unittest.TestCase):
                     argv += ["--size", "14"]
                 if c.name == "console" and argv[1] == "eval":
                     argv += ["--expression", "1+1"]
+                if c.name == "skin" and argv[1] == "use":
+                    argv += ["--theme", "dark"]
+                if c.name == "hooks" and argv[1] == "use":
+                    argv += ["--hook", "pre-turn"]
+                if c.name == "peer" and argv[1] == "remove":
+                    argv += ["--target", "surface-test"]
                 args = self.parser.parse_args(argv)
                 self.assertEqual(args.command, c.name)
 
@@ -250,9 +256,9 @@ class ExecucaoTests(unittest.TestCase):
         self.assertNotEqual(ExitCode.NOT_IMPLEMENTED, ExitCode.ERROR)
 
     def test_dump_emite_json_valido_com_fontes_locais(self):
-        import json
-        import io
         import contextlib
+        import io
+        import json
 
         from kairos_cli.startup_fast import resolve_kairos_home
         home = Path(resolve_kairos_home())
@@ -274,9 +280,9 @@ class ExecucaoTests(unittest.TestCase):
         self.assertEqual(main(["setup", "--json"]), 0)
 
     def test_import_com_credenciais_json(self):
-        import json
-        import io
         import contextlib
+        import io
+        import json
 
         # Formato esperado: {"credentials": {"api_key": "...", "provider": "..."}}
         creds = {"credentials": {"api_key": "sk-test-import", "provider": "openai"}}
@@ -284,11 +290,13 @@ class ExecucaoTests(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             main(["import", "--data", json.dumps(creds)])
         self.assertIn("Credenciais importadas com sucesso", buf.getvalue())
+        dados = json.loads((Path(self._tmp.name) / "auth.json").read_text(encoding="utf-8"))
+        self.assertIn("openai", dados["credential_pool"])
 
     def test_import_agent_com_config_json(self):
-        import json
-        import io
         import contextlib
+        import io
+        import json
 
         # Formato esperado: {"agent": {"name": "...", "capabilities": [...]}}
         agent_cfg = {"agent": {"name": "test-agent", "capabilities": ["chat"]}}
@@ -310,6 +318,82 @@ class ExecucaoTests(unittest.TestCase):
 
     def test_login_rejeita_placeholder(self):
         self.assertEqual(main(["login", "--provider", "x", "--api-key", "changeme"]), 1)
+
+    def test_console_eval_avaliacao_real_e_recusa_codigo(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["console", "eval", "--expression", "2+3*4"]), 0)
+        self.assertEqual(buf.getvalue().strip(), "14")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["console", "eval", "--expression", "__import__('os')"]), 1)
+
+    def test_skin_use_persiste_tema(self):
+        from kairos_cli.config import load_config
+
+        self.assertEqual(main(["skin", "use", "--theme", "dark"]), 0)
+        self.assertEqual((load_config() or {}).get("ui", {}).get("theme"), "dark")
+
+    def test_prompt_size_set_get_persiste(self):
+        import contextlib
+        import io
+
+        self.assertEqual(main(["prompt-size", "set", "--size", "42"]), 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["prompt-size", "get"]), 0)
+        self.assertIn("42", buf.getvalue())
+
+    def test_peer_add_list_remove_persiste(self):
+        self.assertEqual(main(["peer", "add", "--target", "p1"]), 0)
+        self.assertEqual(main(["peer", "remove", "--target", "p1"]), 0)
+        self.assertEqual(main(["peer", "remove", "--target", "p1"]), 1)
+
+    def test_pairing_revoke_exige_registro(self):
+        import json
+
+        home = Path(self._tmp.name)
+        (home / "pairings.json").write_text(
+            json.dumps({"active": ["u1"], "pending": []}), encoding="utf-8"
+        )
+        self.assertEqual(main(["pairing", "revoke", "--target", "u1"]), 0)
+        self.assertEqual(main(["pairing", "revoke", "--target", "u1"]), 1)
+
+    def test_pause_alterna_estado_real(self):
+        import contextlib
+        import io
+
+        self.assertEqual(main(["pause"]), 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["pause", "status"]), 0)
+        self.assertIn("pausada", buf.getvalue())
+        self.assertEqual(main(["pause", "resume"]), 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["pause", "status"]), 0)
+        self.assertIn("ativa", buf.getvalue())
+
+    def test_integracoes_test_nao_alegam_envio(self):
+        import contextlib
+        import io
+
+        for cmd in ("slack", "telegram", "whatsapp"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(main([cmd, "test"]), 0)
+            self.assertIn("nada foi enviado", buf.getvalue())
+
+    def test_inicios_indisponiveis_falham_em_vez_de_fingir(self):
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["claw", "start"]), 1)
+            self.assertEqual(main(["gui", "start"]), 1)
+            self.assertEqual(main(["update"]), 1)
 
     def test_webhook_lista_endpoints_do_home(self):
         import contextlib
@@ -362,7 +446,7 @@ class ExecucaoTests(unittest.TestCase):
               ["memory", "status"],
               ["acp", "status"],
               ["claw", "status"],
-              ["console", "start"],
+              ["console", "eval", "--expression", "2+2"],
               ["gui", "status"],
               ["hooks", "list"],
               ["pause", "status"],

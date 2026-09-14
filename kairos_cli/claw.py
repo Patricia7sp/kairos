@@ -9,12 +9,10 @@ async def run_claw(home: Path, args) -> int:
     subcommand = getattr(args, "claw_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "start":
-        print("Iniciando automação de browser...")
-        print("Navegador iniciado em segundo plano.")
-    elif subcommand == "status":
-        print("Verificando status do claw...")
-        print("Claw ativo: nenhuma tarefa em execução.")
-    else:
-        print("Subcomando inválido. Use: claw start | claw status")
+        print("kairos: automação de browser indisponível neste modo.", file=sys.stderr)
         return 1
-    return 0
+    if subcommand == "status":
+        print("Claw: nenhuma tarefa em execução.")
+        return 0
+    print("Subcomando inválido. Use: claw start | claw status")
+    return 1

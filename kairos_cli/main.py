@@ -249,6 +249,10 @@ def _extra_args(  # noqa: PLR0912 - dispatcher de argumentos por comando; cascat
         parser.add_argument("--size", type=int, required=True, help="Tamanho do prompt")
     elif command == "console" and subcommand == "eval":
         parser.add_argument("--expression", required=True, help="Expressão a avaliar")
+    elif command == "skin" and subcommand == "use":
+        parser.add_argument("--theme", required=True, help="Tema a aplicar")
+    elif command == "hooks" and subcommand == "use":
+        parser.add_argument("--hook", required=True, help="Hook a ativar")
     elif command in ("pairing", "peer") and subcommand in ("revoke", "remove", "add"):
         parser.add_argument("--target", required=True, help="Identificador do alvo")
     elif command == "token" and subcommand in ("show", None):

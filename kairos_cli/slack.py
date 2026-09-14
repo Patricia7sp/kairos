@@ -1,5 +1,4 @@
 """Comando `kairos slack` — integração com Slack."""
-import sys
 from pathlib import Path
 
 
@@ -11,10 +10,10 @@ async def run_slack(home: Path, args) -> int:
     if subcommand == "config":
         print("Configurando integração com Slack...")
         print("Por favor, configure o webhook URL no painel do Slack.")
-    elif subcommand == "test":
+        return 0
+    if subcommand == "test":
         print("Testando conexão com Slack...")
-        print("Mensagem de teste enviada ao canal configurado.")
-    else:
-        print("Subcomando inválido. Use: slack config | slack test")
-        return 1
-    return 0
+        print("Nenhum canal configurado; nada foi enviado.")
+        return 0
+    print("Subcomando inválido. Use: slack config | slack test")
+    return 1
