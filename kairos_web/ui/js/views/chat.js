@@ -104,6 +104,24 @@ export function newConversationId(cryptoImpl = globalThis.crypto) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+const sessionsNavMarkup = (sessions) => `${sessions.map((session) => session.execution_kind === "agent_runtime"
+  ? `<a class="k-chat__session" href="#/runtime?session=${encodeURIComponent(session.id)}">
+    <strong>${esc(session.title || "Sessão Codex")}</strong><small>Agent Runtime · ${esc(session.runtime_state || "")}</small></a>`
+  : `<div class="k-chat__session-row">
+    <button class="k-chat__session" type="button" data-session-id="${esc(session.id)}"
+      aria-label="Abrir conversa ${esc(session.title || "sem título")}">
+      <strong>${esc(session.title || "Sem título")}</strong><small>${esc(session.model || "")}</small></button>
+    <details class="k-chat__session-menu" data-session-menu="${esc(session.id)}">
+      <summary aria-label="Opções da conversa ${esc(session.title || "sem título")}">⋯</summary>
+      <ul role="menu" aria-label="Ações da conversa">
+        <li><button type="button" role="menuitem" data-menu-action="rename">Renomear</button></li>
+        <li><button type="button" role="menuitem" data-menu-action="archive">Arquivar</button></li>
+        <li><button type="button" role="menuitem" data-menu-action="delete" class="k-chat__menu--perigo">Excluir</button></li>
+      </ul>
+    </details>
+  </div>`
+).join("") || "<p>Nenhuma conversa ainda.</p>"}`;
+
 export function chatShellMarkup({
   providers = [], sessions = [], models = [], selection = {}, connected = false,
 }) {
@@ -114,12 +132,7 @@ export function chatShellMarkup({
   return `<div class="k-chat" data-chat>
     <aside class="k-chat__sessions" aria-label="Conversas">
       <button class="k-btn k-btn--primary" type="button" data-new-chat>Nova conversa</button>
-      <nav data-session-list>${sessions.map((session) => session.execution_kind === "agent_runtime"
-        ? `<a class="k-chat__session" href="#/runtime?session=${encodeURIComponent(session.id)}">
-          <strong>${esc(session.title || "Sessão Codex")}</strong><small>Agent Runtime · ${esc(session.runtime_state || "")}</small></a>`
-        : `<button class="k-chat__session" type="button" data-session-id="${esc(session.id)}">
-          <strong>${esc(session.title || "Sem título")}</strong><small>${esc(session.model || "")}</small></button>`
-      ).join("") || "<p>Nenhuma conversa ainda.</p>"}</nav>
+      <nav data-session-list>${sessionsNavMarkup(sessions)}</nav>
     </aside>
     <section class="k-chat__conversation" aria-label="Conversa">
       <div class="k-chat__messages" data-chat-messages aria-live="polite"></div>
@@ -297,9 +310,12 @@ export async function chatView(root, _route, { signal } = {}) {
     if (!persisted) storeDraft(sessionId, selection);
     changeModel.href = modelsHash(sessionId, selection, persisted);
     changeModel.setAttribute("aria-disabled", String(busy));
-    for (const button of chat.querySelectorAll("[data-session-id], [data-new-chat]")) {
+    for (const button of chat.querySelectorAll("[data-session-id], [data-new-chat], [data-menu-action]")) {
       button.disabled = busy;
     }
+    chat.querySelectorAll("[data-session-menu] > summary").forEach((summary) => {
+      summary.setAttribute("aria-disabled", String(busy));
+    });
   };
   const updateComposer = () => {
     const disabled = !socketConnected || !ready || busy || sessionLoading || blockingLoadError;
@@ -507,26 +523,13 @@ export async function chatView(root, _route, { signal } = {}) {
     }
   };
 
-  if (persisted) {
-    await loadSession(sessionId);
-    if (disposed || signal?.aborted) return dispose;
-  } else {
-    replaceHash(draftHash(sessionId, selection));
-    syncSelection();
-    await probeSelectedProvider();
-    if (disposed || signal?.aborted) return dispose;
-  }
+  const reloadSessions = async () => {
+    const frescas = await api.sessoes({ status: "abertas", limit: 50 });
+    if (disposed || signal?.aborted) return;
+    chat.querySelector("[data-session-list]").innerHTML = sessionsNavMarkup(frescas.sessions || []);
+  };
 
-  const ticket = await api.wsTicket();
-  if (disposed || signal?.aborted) return dispose;
-  client.connect({ token: ticket.ticket });
-
-  chat.querySelector("[data-session-list]").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-session-id]");
-    if (button && !busy) void loadSession(button.dataset.sessionId);
-  });
-  chat.querySelector("[data-new-chat]").addEventListener("click", () => {
-    if (busy) return;
+  const startNewConversation = () => {
     generation += 1;
     probeGeneration += 1;
     sessionLoading = false;
@@ -545,6 +548,68 @@ export async function chatView(root, _route, { signal } = {}) {
     syncSelection();
     void probeSelectedProvider();
     form.elements.content.focus();
+  };
+
+  const handleSessionMenu = async (id, action) => {
+    if (busy) return;
+    try {
+      if (action === "rename") {
+        const atual = (sessionPayload.sessions || []).find((session) => session.id === id);
+        const resposta = prompt("Renomear conversa:", atual?.title || "");
+        if (resposta === null) return;
+        const nome = resposta.trim().slice(0, 120);
+        await api.renomearSessao(id, nome || null);
+        await reloadSessions();
+      } else if (action === "archive") {
+        await api.atualizarSessao(id, { archived: true });
+        await reloadSessions();
+      } else if (action === "delete") {
+        const confirma = confirm("Excluir esta conversa? As mensagens serão apagadas e esta ação não pode ser desfeita.");
+        if (!confirma) return;
+        await api.excluirSessao(id);
+        await reloadSessions();
+      }
+      if (sessionId === id && (action === "archive" || action === "delete")) {
+        status.textContent = socketConnected ? "Conectado." : "";
+        startNewConversation();
+        return;
+      }
+      status.textContent = socketConnected ? "Conectado." : "";
+    } catch (error) {
+      status.textContent = error.message || "Falha ao atualizar a conversa.";
+    }
+    updateComposer();
+  };
+
+  if (persisted) {
+    await loadSession(sessionId);
+    if (disposed || signal?.aborted) return dispose;
+  } else {
+    replaceHash(draftHash(sessionId, selection));
+    syncSelection();
+    await probeSelectedProvider();
+    if (disposed || signal?.aborted) return dispose;
+  }
+
+  const ticket = await api.wsTicket();
+  if (disposed || signal?.aborted) return dispose;
+  client.connect({ token: ticket.ticket });
+
+  chat.querySelector("[data-session-list]").addEventListener("click", (event) => {
+    if (busy) return;
+    const itemMenu = event.target.closest("[data-menu-action]");
+    if (itemMenu) {
+      const linha = itemMenu.closest("[data-session-menu]");
+      event.preventDefault();
+      void handleSessionMenu(linha.dataset.sessionMenu, itemMenu.dataset.menuAction);
+      return;
+    }
+    const button = event.target.closest("[data-session-id]");
+    if (button && !busy) void loadSession(button.dataset.sessionId);
+  });
+  chat.querySelector("[data-new-chat]").addEventListener("click", () => {
+    if (busy) return;
+    startNewConversation();
   });
   changeModel.addEventListener("click", (event) => {
     if (busy) event.preventDefault();

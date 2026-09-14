@@ -866,29 +866,90 @@ async def get_session(session_id: str, request: Request):
         conn.close()
 
 
-@app.patch("/api/sessions/{session_id}")
-async def update_session(session_id: str, payload: dict[str, Any], request: Request):
-    """Atualiza somente metadados de organização; o transcript é imutável aqui."""
-    permitidos = {"archived", "pinned", "hidden", "tags"}
+_ALTERACAO_AUSENTE = object()
+
+
+def _separar_atualizacao(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str] | None, object, JSONResponse | None]:
+    """Separa flags, tags e apelido do payload de atualização da sessão.
+
+    Retorna ``(flags, tags, display_name, erro)``. ``display_name`` é
+    ``_ALTERACAO_AUSENTE`` quando a chave não veio; vazio/``None`` significam
+    "limpar o apelido". Quando ``erro`` volta preenchido, os demais campos não
+    devem ser aplicados.
+    """
+    permitidos = {"archived", "pinned", "hidden", "tags", "display_name"}
     desconhecidos = set(payload) - permitidos
     if desconhecidos or not payload:
-        return JSONResponse(
-            {"error": "invalid_session_update", "allowed": sorted(permitidos)},
-            status_code=400,
+        return (
+            {},
+            None,
+            _ALTERACAO_AUSENTE,
+            JSONResponse(
+                {"error": "invalid_session_update", "allowed": sorted(permitidos)},
+                status_code=400,
+            ),
         )
-    flags = {k: v for k, v in payload.items() if k != "tags"}
+    flags = {k: v for k, v in payload.items() if k not in ("tags", "display_name")}
     if any(not isinstance(v, bool) for v in flags.values()):
-        return JSONResponse({"error": "session_flags_must_be_boolean"}, status_code=400)
-    tags_payload = payload.get("tags")
+        return (
+            {},
+            None,
+            _ALTERACAO_AUSENTE,
+            JSONResponse({"error": "session_flags_must_be_boolean"}, status_code=400),
+        )
     tags: list[str] | None = None
     if "tags" in payload:
+        tags_payload = payload.get("tags")
         if not isinstance(tags_payload, list) or any(not isinstance(v, str) for v in tags_payload):
-            return JSONResponse(
-                {"error": "session_tags_must_be_a_list_of_strings"}, status_code=400
+            return (
+                {},
+                None,
+                _ALTERACAO_AUSENTE,
+                JSONResponse({"error": "session_tags_must_be_a_list_of_strings"}, status_code=400),
             )
         tags = sorted({v.strip().lower() for v in tags_payload if v.strip()})
         if len(tags) > 20 or any(len(v) > 32 for v in tags):
-            return JSONResponse({"error": "session_tags_limit_exceeded"}, status_code=400)
+            return (
+                {},
+                None,
+                _ALTERACAO_AUSENTE,
+                JSONResponse({"error": "session_tags_limit_exceeded"}, status_code=400),
+            )
+    display_name: object = _ALTERACAO_AUSENTE
+    if "display_name" in payload:
+        valor_nome = payload["display_name"]
+        if valor_nome is not None and not isinstance(valor_nome, str):
+            return (
+                {},
+                None,
+                _ALTERACAO_AUSENTE,
+                JSONResponse({"error": "session_display_name_must_be_string"}, status_code=400),
+            )
+        display_name = (valor_nome or "").strip()
+        if isinstance(display_name, str) and len(display_name) > 120:
+            return (
+                {},
+                None,
+                _ALTERACAO_AUSENTE,
+                JSONResponse(
+                    {"error": "session_display_name_too_long", "max": 120}, status_code=400
+                ),
+            )
+    return flags, tags, display_name, None
+
+
+@app.patch("/api/sessions/{session_id}")
+async def update_session(session_id: str, payload: dict[str, Any], request: Request):
+    """Atualiza metadados de organização; o transcript é imutável aqui.
+
+    Além das flags e das tags, aceita ``display_name`` (renomear): valor vazio
+    ou só de espaços limpa o apelido e o catálogo volta ao ``title`` gerado.
+    """
+    flags, tags, display_name, erro = _separar_atualizacao(payload)
+    if erro is not None:
+        return erro
 
     conn = _get_db(request.app)
     try:
@@ -901,6 +962,11 @@ async def update_session(session_id: str, payload: dict[str, Any], request: Requ
                 valores = [int(flags[k]) for k in flags]
                 valores.append(session_id)
                 conn.execute(f"UPDATE sessions SET {assignments} WHERE id = ?", valores)  # noqa: S608 — colunas vêm da lista permitida acima
+            if display_name is not _ALTERACAO_AUSENTE:
+                conn.execute(
+                    "UPDATE sessions SET display_name = ? WHERE id = ?",
+                    (display_name or None, session_id),
+                )
             if tags is not None:
                 conn.execute("DELETE FROM session_tags WHERE session_id = ?", (session_id,))
                 conn.executemany(
@@ -915,6 +981,69 @@ async def update_session(session_id: str, payload: dict[str, Any], request: Requ
         linha_dict = _linha_sessao(linha)
         linha_dict["tags"] = _tags_para_sessoes(conn, [session_id]).get(session_id, [])
         return linha_dict
+    finally:
+        conn.close()
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str, request: Request):
+    """Apaga a conversa e seus dependentes numa transação.
+
+    Sessões de agent runtime são recusadas: a identidade do runtime é
+    imutável após o vínculo e o próprio schema bloqueia a remoção com um
+    trigger. O caminho da conversa model é o que o chat usa — e é o único que
+    esta rota apaga.
+    """
+    conn = _get_db(request.app)
+    try:
+        linha = conn.execute(
+            "SELECT execution_kind FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if linha is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
+        runtime = conn.execute(
+            "SELECT 1 FROM runtime_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if runtime is not None or linha["execution_kind"] == "agent_runtime":
+            return JSONResponse(
+                {
+                    "error": "session_runtime_not_deletable",
+                    "detail": (
+                        "Sessões de agent runtime são gerenciadas pelo supervisor; "
+                        "use Arquivar para tirá-las da lista."
+                    ),
+                },
+                status_code=409,
+            )
+        filhos = conn.execute(
+            "SELECT 1 FROM sessions WHERE parent_session_id = ? LIMIT 1", (session_id,)
+        ).fetchone()
+        if filhos is not None:
+            return JSONResponse(
+                {
+                    "error": "session_has_children",
+                    "detail": (
+                        "Esta conversa tem sessões filhas (compactação/ramificação); "
+                        "arquive-a em vez de excluir, para não romper a linhagem."
+                    ),
+                },
+                status_code=409,
+            )
+        with conn:
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM session_model_usage WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM session_tags WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM compression_locks WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM session_turn_leases WHERE conversation_id = ?", (session_id,))
+            conn.execute("DELETE FROM gateway_routing WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM delivery_obligations WHERE session_id = ?", (session_id,))
+            conn.execute(
+                "DELETE FROM async_delegations "
+                "WHERE origin_session = ? OR origin_ui_session_id = ?",
+                (session_id, session_id),
+            )
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        return {"status": "deleted", "id": session_id}
     finally:
         conn.close()
 

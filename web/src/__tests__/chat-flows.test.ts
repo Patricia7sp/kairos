@@ -762,3 +762,169 @@ describe("fluxos reais do Chat", () => {
     cleanup();
   });
 });
+
+describe("menu de ações da conversa", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    location.hash = "#/chat";
+    FakeSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const detail = (session: JsonRecord) => ({ ...session, selection: {
+    provider: "openai", model: "gpt-test", parameters: {}, reason: "global_default",
+  } });
+
+  const mountExisting = async (options: BackendOptions) => {
+    location.hash = "#/chat?session=existing-session";
+    const backend = installBackend(options);
+    const root = document.createElement("main");
+    const cleanup = await chatView(root, {}, { signal: new AbortController().signal });
+    FakeSocket.instances[0]!.emit("open");
+    return { root, cleanup, backend };
+  };
+
+  it("mostra o menu ⋮ apenas nas conversas de chat, nunca nas de runtime", async () => {
+    const runtimeSession = { ...oldSession, id: "runtime-1", title: "Sessão Codex",
+      execution_kind: "agent_runtime", runtime_state: "ready" };
+    const { root, cleanup } = await mountExisting({
+      sessions: [oldSession, runtimeSession],
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [] },
+    });
+    const menus = root.querySelectorAll("[data-session-menu]");
+    expect(menus).toHaveLength(1);
+    expect(menus[0]!.getAttribute("data-session-menu")).toBe("existing-session");
+    expect([...root.querySelectorAll("[data-menu-action]")].map((b) => b.textContent))
+      .toEqual(["Renomear", "Arquivar", "Excluir"]);
+    cleanup();
+  });
+
+  it("renomeia a conversa pelo menu e atualiza o título na lista", async () => {
+    vi.stubGlobal("prompt", vi.fn().mockReturnValue("Relatório Q3"));
+    let currentSessions = [oldSession];
+    const { root, cleanup, backend } = await mountExisting({
+      sessions: currentSessions,
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [] },
+      overrides: (path, method) => {
+        if (path === "/api/sessions/existing-session" && method === "PATCH") {
+          currentSessions = [{ ...oldSession, title: "Relatório Q3" }];
+          return jsonResponse({ ...oldSession, title: "Relatório Q3" });
+        }
+        if (path.startsWith("/api/sessions?") && method === "GET") {
+          return jsonResponse({ sessions: currentSessions, total: currentSessions.length,
+            offset: 0, limit: 50, has_more: false });
+        }
+        return undefined;
+      },
+    });
+
+    root.querySelector<HTMLButtonElement>('[data-menu-action="rename"]')!.click();
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-session-id="existing-session"]')!.textContent)
+        .toContain("Relatório Q3");
+    });
+    expect(backend.requests).toContainEqual({
+      path: "/api/sessions/existing-session", method: "PATCH", body: { display_name: "Relatório Q3" },
+    });
+    expect(root.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(false);
+    cleanup();
+  });
+
+  it("arquiva uma conversa que não é a atual e a tira da lista", async () => {
+    const target = { ...oldSession, id: "target-session", title: "Para arquivar" };
+    let currentSessions = [oldSession, target];
+    const { root, cleanup, backend } = await mountExisting({
+      sessions: currentSessions,
+      details: { "existing-session": detail(oldSession), "target-session": detail(target) },
+      messages: { "existing-session": [], "target-session": [] },
+      overrides: (path, method) => {
+        if (path === "/api/sessions/target-session" && method === "PATCH") {
+          currentSessions = currentSessions.filter((s) => s.id !== "target-session");
+          return jsonResponse({ ...target, archived: true });
+        }
+        if (path.startsWith("/api/sessions?") && method === "GET") {
+          return jsonResponse({ sessions: currentSessions, total: currentSessions.length,
+            offset: 0, limit: 50, has_more: false });
+        }
+        return undefined;
+      },
+    });
+
+    root.querySelector<HTMLDetailsElement>('[data-session-menu="target-session"]')!
+      .querySelector<HTMLButtonElement>('[data-menu-action="archive"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-session-menu="target-session"]')).toBeNull();
+    });
+    expect(root.querySelector('[data-session-menu="existing-session"]')).not.toBeNull();
+    expect(backend.requests).toContainEqual({
+      path: "/api/sessions/target-session", method: "PATCH", body: { archived: true },
+    });
+    cleanup();
+  });
+
+  it("exclui a conversa atual e começa uma conversa nova", async () => {
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    let currentSessions = [oldSession];
+    const { root, cleanup, backend } = await mountExisting({
+      sessions: currentSessions,
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [
+        { id: "m-old", role: "assistant", content: "histórico", created_at: 1 },
+      ] },
+      overrides: (path, method) => {
+        if (path === "/api/sessions/existing-session" && method === "DELETE") {
+          currentSessions = [];
+          return jsonResponse({ status: "deleted", id: "existing-session" });
+        }
+        if (path.startsWith("/api/sessions?") && method === "GET") {
+          return jsonResponse({ sessions: currentSessions, total: currentSessions.length,
+            offset: 0, limit: 50, has_more: false });
+        }
+        return undefined;
+      },
+    });
+    expect(root.querySelector("[data-chat-messages]")!.textContent).toContain("histórico");
+
+    root.querySelector<HTMLButtonElement>('[data-menu-action="delete"]')!.click();
+
+    await vi.waitFor(() => {
+      expect(location.hash).toMatch(
+        /^#\/chat\?provider=openai&model=gpt-test&new=1&session=[0-9a-f-]+$/,
+      );
+    });
+    expect(root.querySelector("[data-chat-messages]")!.textContent).not.toContain("histórico");
+    expect(backend.requests).toContainEqual({
+      path: "/api/sessions/existing-session", method: "DELETE", body: undefined,
+    });
+    cleanup();
+  });
+
+  it("não exclui quando o usuário cancela a confirmação", async () => {
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
+    const { root, cleanup, backend } = await mountExisting({
+      sessions: [oldSession],
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [] },
+    });
+
+    root.querySelector<HTMLButtonElement>('[data-menu-action="delete"]')!.click();
+    await flush();
+
+    expect(backend.requests.some((request) => request.method === "DELETE")).toBe(false);
+    expect(root.querySelector('[data-session-menu="existing-session"]')).not.toBeNull();
+    cleanup();
+  });
+});

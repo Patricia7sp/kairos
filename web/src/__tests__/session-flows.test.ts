@@ -60,6 +60,29 @@ describe("session library", () => {
     expect(api.atualizarSessao).toHaveBeenCalledWith("b", { archived: true });
   });
 
+  it("renames the session via the detail panel and reloads the list", async () => {
+    vi.spyOn(api, "renomearSessao").mockResolvedValue({});
+    vi.stubGlobal("prompt", vi.fn().mockReturnValue("Projeto alfa"));
+    await mount();
+    click('[data-sessao="a"]');
+    await flush();
+    click("[data-renomear-sessao]");
+    await flush();
+    expect(api.renomearSessao).toHaveBeenCalledWith("a", "Projeto alfa");
+    expect(root.querySelector("[data-detalhe] h3")?.textContent).toBe("Session a");
+  });
+
+  it("does not rename when the prompt is cancelled", async () => {
+    vi.spyOn(api, "renomearSessao").mockResolvedValue({});
+    vi.stubGlobal("prompt", vi.fn().mockReturnValue(null));
+    await mount();
+    click('[data-sessao="a"]');
+    await flush();
+    click("[data-renomear-sessao]");
+    await flush();
+    expect(api.renomearSessao).not.toHaveBeenCalled();
+  });
+
   it("ignores an older selection error after another session opens", async () => {
     const old = deferred<ReturnType<typeof session>>();
     api.sessao.mockImplementation((id: string) => id === "a" ? old.promise : Promise.resolve(session(id)));
