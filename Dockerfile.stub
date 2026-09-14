@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+#
+# Imagem-stub do Kairos — SÓ para os testes de ciclo de vida do s6.
+#
+# Espelha a ESTRUTURA da imagem real (s6-overlay, entrypoint-dispatch, shim de
+# exec, stage2-hook, cont-init.d, usuário kairos) mas substitui o que seria
+# pesado e demorado por um container-fantasma rápido:
+#
+#   gateway/dashboard/runtime reais  →  eco de UID que dorme (forever)
+#   CLI real                         →  kairos-fantasma (aceita --version)
+#   código novo, codex, gcc, CJK     →  NADA (build em segundos)
+#
+# O que NÃO muda é justamente o alvo dos testes: o contrato de supervisão do
+# /init, o dispatch de entrypoint (PID-1 vs não-PID-1), o shim de exec, o
+# stage2 de bootstrap, a ordem dos cont-init.d e a propagação do exit code do
+# main program.
+
+FROM python:3.11-slim-bookworm AS stub
+
+ARG S6_OVERLAY_VERSION=3.2.0.2
+ARG KAIROS_UID=10000
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/opt/data \
+    KAIROS_HOME=/opt/data
+
+RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates curl xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- s6-overlay --------------------------------------------------------------
+# Mesmo requisito da imagem real: ser o PID 1 é o que permite o dispatch
+# escolher entre a árvore completa e a degradação anunciada.
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp/
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp/
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz \
+    && rm -f /tmp/s6-overlay-*.tar.xz
+
+# --- usuário não-privilegiado -------------------------------------------------
+RUN useradd -l -u ${KAIROS_UID} -m -d /opt/data kairos
+
+# --- scripts e árvore s6 ------------------------------------------------------
+# A árvore real vem junto; os assets de `docker/stub/` são copiados POR CIMA:
+# main-wrapper com `boom`, runtime-service com eco de UID, e os run de
+# gateway/dashboard/runtime transformados em eco que dorme.
+WORKDIR /opt/kairos
+COPY docker/ ./docker/
+COPY docker/stub/main-wrapper.sh ./docker/main-wrapper.sh
+COPY docker/stub/runtime-service.sh ./docker/runtime-service.sh
+COPY docker/stub/s6-rc.d/ ./docker/s6-rc.d/
+
+# O kairos-fantasma ocupa o caminho que o main-wrapper e o shim esperam.
+COPY docker/stub/venv-bin/kairos /opt/kairos/.venv/bin/kairos
+
+RUN mkdir -p /opt/kairos/bin /etc/cont-init.d /etc/s6-overlay/s6-rc.d \
+    && chmod 0755 /opt/kairos/docker/main-wrapper.sh \
+                  /opt/kairos/docker/runtime-service.sh \
+                  /opt/kairos/docker/stub/*.sh \
+    && install -m 0755 /opt/kairos/docker/bin/kairos /opt/kairos/bin/kairos \
+    && install -m 0755 /opt/kairos/docker/cont-init.d/01-kairos-setup  /etc/cont-init.d/01-kairos-setup \
+    && install -m 0755 /opt/kairos/docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms \
+    && install -m 0755 /opt/kairos/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles \
+    && cp -r /opt/kairos/docker/s6-rc.d/. /etc/s6-overlay/s6-rc.d/ \
+    && chmod 0755 /opt/kairos/.venv/bin/kairos
+
+ENV PATH="/opt/kairos/bin:${PATH}" \
+    S6_KEEP_ENV=1
+
+VOLUME ["/opt/data"]
+
+ENTRYPOINT ["/opt/kairos/docker/entrypoint-dispatch.sh"]

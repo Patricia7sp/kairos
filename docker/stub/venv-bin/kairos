@@ -1,0 +1,17 @@
+#!/bin/bash
+# kairos-fantasma da imagem-stub.
+#
+# Ocupa o caminho que o main-wrapper e o shim de exec esperam
+# (/opt/kairos/.venv/bin/kairos) sem instalar o pacote real. Só o necessário
+# para os testes de ciclo de vida do s6 rodarem: --version com rc 0.
+set -euo pipefail
+
+case "${1:-}" in
+  --version|-V)
+    echo "kairos 0.1.0 [container]"
+    exit 0
+    ;;
+esac
+
+echo "kairos: kairos-fantasma — subcomando '$*' não existe no stub s6" >&2
+exit 1
