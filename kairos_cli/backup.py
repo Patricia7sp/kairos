@@ -2,7 +2,8 @@
 import json
 import os
 import tarfile
-from datetime import datetime, timezone
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -16,8 +17,10 @@ async def run_backup(home: Path, args) -> int:
     if output:
         archive = Path(output)
     else:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        archive = Path(f"/tmp/kairos-backup-{ts}.tar.gz")
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        fd, tmp_path = tempfile.mkstemp(prefix="kairos-backup-", suffix=f"-{ts}.tar.gz")
+        os.close(fd)
+        archive = Path(tmp_path)
 
     excludes = {"__pycache__", ".cache", ".pytest_cache"}
     with tarfile.open(archive, "w:gz") as tar:
