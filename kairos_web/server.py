@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import html
 import json
 import logging
 import os
 import secrets
 import threading
+import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing, asynccontextmanager
 from hmac import compare_digest
@@ -45,6 +47,7 @@ from kairos_security.credentials import (
     build_credential_service,
 )
 from kairos_security.credentials.io import credential_file_lock
+from kairos_state.repositories import shares as shares_repo
 from kairos_state.repositories.sessions import SessionRepository
 from kairos_web.chat_transport import (
     interaction_envelope_from_json,
@@ -1128,7 +1131,200 @@ async def get_session_messages(session_id: str, request: Request):
         conn.close()
 
 
-# --- WEBSOCKET CHAT STREAMING ---
+# --- COMPARTILHAMENTO DE CONVERSAS ---
+
+_SHARE_MAX_HORIZON_DAYS = 365 * 5
+_SHARE_MIN_HORIZON_DAYS = 1
+
+
+class ShareCreateRequest(BaseModel):
+    expires_at: float | None = None
+
+
+def _share_payload(row, *, agora: float) -> dict[str, Any]:
+    expira = row["expires_at"]
+    ativo = row["revoked_at"] is None and (expira is None or expira > agora)
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "created_at": row["created_at"],
+        "expires_at": expira,
+        "revoked_at": row["revoked_at"],
+        "active": ativo,
+    }
+
+
+@app.post("/api/sessions/{session_id}/shares", status_code=201)
+async def create_share(
+    session_id: str,
+    payload: ShareCreateRequest | None,
+    request: Request,
+) -> JSONResponse:
+    """Cria um link de leitura desta conversa.
+
+    O token em texto claro é devolvido **uma única vez**, na criação. O banco
+    guarda apenas o digest; por isso a lista/revogação usam o ``id``, e o link
+    não é recuperável depois de criado.
+    """
+    conn = _get_db(request.app)
+    try:
+        if SessionRepository(conn).get(session_id) is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
+        agora = time.time()
+        expira = None
+        if payload is not None and payload.expires_at is not None:
+            expira = payload.expires_at
+            if expira <= agora:
+                return JSONResponse({"error": "share_expiry_in_past"}, status_code=400)
+            if expira > agora + _SHARE_MAX_HORIZON_DAYS * 86400:
+                return JSONResponse(
+                    {"error": "share_expiry_too_far", "max_days": _SHARE_MAX_HORIZON_DAYS},
+                    status_code=400,
+                )
+        token = shares_repo.new_token()
+        with conn:
+            share_id = shares_repo.create_share(
+                conn, session_id, token, expires_at=expira, created_at=agora
+            )
+        return JSONResponse(
+            {
+                "share": {
+                    "id": share_id,
+                    "session_id": session_id,
+                    "created_at": agora,
+                    "expires_at": expira,
+                    "revoked_at": None,
+                    "active": True,
+                    "url": f"{str(request.base_url).rstrip('/')}/shared/{token}",
+                    "token": token,
+                }
+            },
+            status_code=201,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/api/sessions/{session_id}/shares")
+async def list_shares(session_id: str, request: Request) -> JSONResponse:
+    conn = _get_db(request.app)
+    try:
+        if SessionRepository(conn).get(session_id) is None:
+            return JSONResponse({"error": "session_not_found", "id": session_id}, status_code=404)
+        agora = time.time()
+        linhas = [
+            _share_payload(row, agora=agora) for row in shares_repo.list_shares(conn, session_id)
+        ]
+        return {"session_id": session_id, "shares": linhas}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/sessions/{session_id}/shares/{share_id}")
+async def revoke_share(session_id: str, share_id: int, request: Request) -> JSONResponse:
+    """Revoga um link. Marca suave: a linha fica para auditoria de quem viu."""
+    conn = _get_db(request.app)
+    try:
+        linha = shares_repo.get_share(conn, share_id)
+        if linha is None or linha["session_id"] != session_id:
+            return JSONResponse({"error": "share_not_found", "id": share_id}, status_code=404)
+        with conn:
+            revogado = shares_repo.revoke_share(conn, share_id)
+        if not revogado:
+            return JSONResponse({"error": "share_already_revoked", "id": share_id}, status_code=409)
+        return {"status": "revoked", "id": share_id}
+    finally:
+        conn.close()
+
+
+def _pagina_share_nao_encontrada() -> HTMLResponse:
+    corpo = (
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Link indisponível · Kairos</title></head><body>"
+        "<main style='max-width:38rem;margin:3rem auto;padding:0 1rem;font-family:sans-serif'>"
+        "<h1>Link indisponível</h1><p>Este link de conversa está expirado, foi revogado "
+        "ou nunca existiu.</p></main></body></html>"
+    )
+    return HTMLResponse(
+        content=corpo,
+        status_code=404,
+        headers={"X-Robots-Tag": "noindex", "Cache-Control": "no-store"},
+    )
+
+
+def _pagina_de_share_html(sessao, mensagens, *, expira) -> str:
+    titulo = sessao["display_name"] or sessao["title"] or sessao["id"]
+    cabecalho = [html.escape(str(titulo))]
+    if sessao["source"]:
+        cabecalho.append(html.escape(f"origem: {sessao['source']}"))
+
+    def msg(m) -> str:
+        papel = str(m["role"])
+        rotulo = {"user": "Você", "assistant": "Kairos"}.get(papel, papel)
+        return (
+            "<article style='margin:0 0 1.25rem'>"
+            f"<h2 style='margin:0 0 .25rem;font-size:.8rem;letter-spacing:.04em;"
+            f"text-transform:uppercase;color:#667085'>{html.escape(rotulo)}</h2>"
+            f"<pre style='white-space:pre-wrap;word-wrap:break-word;margin:0;font:inherit'>"
+            f"{html.escape(m['content'])}</pre></article>"
+        )
+
+    aviso = ""
+    if expira is not None:
+        quando = time.strftime("%d/%m/%Y %H:%M", time.localtime(expira))
+        aviso = (
+            f"<p style='color:#667085;font-size:.85rem'>Este link expira em "
+            f"{html.escape(quando)} (fuso do servidor).</p>"
+        )
+    return (
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Kairos — conversa compartilhada</title></head><body>"
+        "<main style='max-width:44rem;margin:2.5rem auto;padding:0 1rem;"
+        "font-family:system-ui,-apple-system,sans-serif;line-height:1.55;color:#17202a'>"
+        "<header style='border-bottom:1px solid #e4e7ec;padding-bottom:1rem;margin-bottom:1.5rem'>"
+        f"<h1 style='margin:0 0 .25rem;font-size:1.4rem'>{cabecalho[0]}</h1>"
+        f"<p style='margin:0;color:#667085;font-size:.85rem'>{html.escape(cabecalho[1] or '')}</p>"
+        "</header>"
+        + "".join(msg(m) for m in mensagens)
+        + aviso
+        + "<footer style='margin-top:2.5rem;padding-top:1rem;border-top:1px solid #e4e7ec;"
+        "color:#98a2b3;font-size:.8rem'>Compartilhado via Kairos · leitura apenas</footer>"
+        "</main></body></html>"
+    )
+
+
+@app.get("/shared/{share_token}")
+async def shared_session_view(share_token: str, request: Request) -> Response:
+    """Página pública de leitura de uma conversa compartilhada.
+
+    Rota fora de ``/api``: um link de compartilhamento é, por natureza, acessível
+    a quem não possui o token de sessão. A página sai sem scripts e sem assets —
+    o conteúdo é renderizado e escapado no servidor (fail-closed), e o acesso é
+    negado quando o link está revogado ou expirado.
+    """
+    conn = _get_db(request.app)
+    try:
+        linha = shares_repo.find_active_share(conn, share_token)
+        if linha is None:
+            return _pagina_share_nao_encontrada()
+        sessao = SessionRepository(conn).get(linha["session_id"])
+        if sessao is None:
+            return _pagina_share_nao_encontrada()
+        mensagens = conn.execute(
+            "SELECT id, role, content, timestamp FROM messages "
+            "WHERE session_id = ? AND role IN ('user','assistant') "
+            "AND content IS NOT NULL AND content != '' ORDER BY timestamp, id",
+            (linha["session_id"],),
+        ).fetchall()
+        corpo = _pagina_de_share_html(sessao, mensagens, expira=linha["expires_at"])
+        return HTMLResponse(
+            content=corpo,
+            headers={"X-Robots-Tag": "noindex", "Cache-Control": "no-store"},
+        )
+    finally:
+        conn.close()
 
 
 @app.post("/api/chat/sessions/{session_id}/tool-approvals/{approval_id}")

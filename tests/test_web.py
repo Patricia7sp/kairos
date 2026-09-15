@@ -1073,3 +1073,154 @@ class SessoesInterfaceTests(unittest.TestCase):
         self.assertIn("data-pagina-proxima", texto)
         self.assertIn("Exportar Markdown", texto)
         self.assertIn("api.atualizarSessao(id, { tags })", texto)
+
+
+class CompartilhamentoWebTests(unittest.TestCase):
+    """Link de leitura de conversa: criar, listar, revogar, expirar.
+
+    O contrato central é de segurança: o token em texto claro aparece **uma
+    única vez** (na criação), o banco guarda apenas o digest, a página pública
+    sai sem scripts/assets e é negada quando revogado/expirado.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._home_antigo = os.environ.get("KAIROS_HOME")
+        os.environ["KAIROS_HOME"] = self._tmp.name
+        self.addCleanup(self._restaurar)
+
+        from kairos_state import connect, initialize_schema
+        from kairos_state.repositories.messages import MessageRepository
+        from kairos_state.repositories.sessions import SessionRepository
+
+        self._conn = connect(Path(self._tmp.name) / "state.db")
+        initialize_schema(self._conn)
+        sr = SessionRepository(self._conn)
+        mr = MessageRepository(self._conn)
+        agora = 1_700_000_000.0
+        sr.create(
+            session_id="s-share", source="web", started_at=agora, display_name="Conversa teste"
+        )
+        mr.append(
+            session_id="s-share", role="user", content="o que é <b>kairos</b>?", timestamp=agora
+        )
+        mr.append(
+            session_id="s-share",
+            role="assistant",
+            content="resposta <script>alert(1)</script> aqui",
+            timestamp=agora + 1,
+        )
+        self._conn.commit()
+        self._conn.close()
+        self.client = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
+        self.anon = TestClient(app)
+
+    def _restaurar(self):
+        if self._home_antigo is None:
+            os.environ.pop("KAIROS_HOME", None)
+        else:
+            os.environ["KAIROS_HOME"] = self._home_antigo
+
+    def _criar(self, **json_body) -> dict:
+        resposta = self.client.post("/api/sessions/s-share/shares", json=json_body)
+        self.assertEqual(resposta.status_code, 201)
+        return resposta.json()["share"]
+
+    def test_criar_devolve_token_uma_vez_e_o_banco_so_guarda_o_digest(self):
+        share = self._criar()
+        self.assertTrue(share["active"])
+        self.assertTrue(share["url"].startswith("http://testserver/shared/"))
+        self.assertEqual(share["session_id"], "s-share")
+        from kairos_state import connect, default_db_path
+
+        conn = connect(default_db_path())
+        try:
+            linha = conn.execute("SELECT * FROM session_shares").fetchone()
+            self.assertIsNotNone(linha)
+            self.assertNotIn(share["token"], linha["token_hash"])
+            self.assertEqual(len(linha["token_hash"]), 64)
+        finally:
+            conn.close()
+
+    def test_rota_publica_renderiza_conversa_escapada_e_sem_assets(self):
+        share = self._criar()
+        pagina = self.anon.get(share["url"])
+        self.assertEqual(pagina.status_code, 200)
+        self.assertEqual(pagina.headers.get("x-robots-tag"), "noindex")
+        corpo = pagina.text
+        self.assertIn("o que é &lt;b&gt;kairos&lt;/b&gt;?", corpo)
+        self.assertIn("resposta &lt;script&gt;alert(1)&lt;/script&gt; aqui", corpo)
+        self.assertIn("Conversa teste", corpo)
+        self.assertNotIn("<script>", corpo)
+        self.assertNotIn("<img", corpo)
+
+    def test_rota_publica_recusa_token_desconhecido(self):
+        self.assertEqual(self.anon.get("/shared/token-que-nao-existe").status_code, 404)
+
+    def test_revogacao_derruba_o_link_e_revogar_de_novo_e_409(self):
+        share = self._criar()
+        lista = self.client.get("/api/sessions/s-share/shares").json()["shares"]
+        self.assertEqual(lista[0]["id"], share["id"])
+        self.assertTrue(lista[0]["active"])
+        revogado = self.client.delete(f"/api/sessions/s-share/shares/{share['id']}")
+        self.assertEqual(revogado.status_code, 200)
+        self.assertEqual(revogado.json()["status"], "revoked")
+        self.assertEqual(
+            self.anon.get(share["url"]).status_code, 404, "link revogado não pode abrir"
+        )
+        de_novo = self.client.delete(f"/api/sessions/s-share/shares/{share['id']}")
+        self.assertEqual(de_novo.status_code, 409)
+        self.assertEqual(de_novo.json()["error"], "share_already_revoked")
+
+    def test_expiracao_no_passado_e_recusada_e_no_futuro_dera_404(self):
+        from kairos_state import connect, default_db_path
+
+        passado = self.client.post("/api/sessions/s-share/shares", json={"expires_at": 1.0})
+        self.assertEqual(passado.status_code, 400)
+        self.assertEqual(passado.json()["error"], "share_expiry_in_past")
+        share = self._criar(expires_at=1_800_000_000.0)
+        self.assertEqual(self.anon.get(share["url"]).status_code, 200)
+        conn = connect(default_db_path())
+        with conn:
+            conn.execute("UPDATE session_shares SET expires_at = 1.0 WHERE id = ?", (share["id"],))
+        conn.close()
+        self.assertEqual(
+            self.anon.get(share["url"]).status_code, 404, "link expirado não pode abrir"
+        )
+
+    def test_expiracao_longinqua_e_recusada(self):
+        import time as _time
+
+        longe = self.client.post(
+            "/api/sessions/s-share/shares",
+            json={"expires_at": _time.time() + 365 * 7 * 86400},
+        )
+        self.assertEqual(longe.status_code, 400)
+        self.assertEqual(longe.json()["error"], "share_expiry_too_far")
+
+    def test_rotas_de_share_exigem_token_de_sessao(self):
+        sem_token = TestClient(app)
+        for metodo, url in (
+            ("post", "/api/sessions/s-share/shares"),
+            ("get", "/api/sessions/s-share/shares"),
+            ("delete", "/api/sessions/s-share/shares/1"),
+        ):
+            resposta = getattr(sem_token, metodo)(url)
+            self.assertEqual(resposta.status_code, 401, f"{metodo} {url} deveria pedir auth")
+
+    def test_share_de_sessao_inexistente_e_404(self):
+        resposta = self.client.post("/api/sessions/inexistente/shares", json={})
+        self.assertEqual(resposta.status_code, 404)
+        self.assertEqual(resposta.json()["error"], "session_not_found")
+
+    def test_revogar_share_de_outra_sessao_e_404(self):
+        share = self._criar()
+        resposta = self.client.delete(f"/api/sessions/outra-sessao/shares/{share['id']}")
+        self.assertEqual(resposta.status_code, 404)
+
+    def test_expurgo_da_sessao_derruba_os_links(self):
+        share = self._criar()
+        apagado = self.client.delete("/api/sessions/s-share")
+        self.assertEqual(apagado.status_code, 200)
+        self.assertEqual(self.anon.get(share["url"]).status_code, 404)

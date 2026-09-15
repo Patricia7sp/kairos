@@ -139,6 +139,11 @@ export const api = {
   atualizarSessao: (id, campos) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: campos }),
   renomearSessao: (id, displayName) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { display_name: displayName } }),
   excluirSessao: (id) => request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  compartilharSessao: (id, opts = {}) => request(`/api/sessions/${encodeURIComponent(id)}/shares`, {
+    method: "POST", body: { ...(opts.expires_at ? { expires_at: opts.expires_at } : {}) },
+  }),
+  compartilhamentosSessao: (id) => request(`/api/sessions/${encodeURIComponent(id)}/shares`),
+  revogarCompartilhamento: (id, shareId) => request(`/api/sessions/${encodeURIComponent(id)}/shares/${encodeURIComponent(String(shareId))}`, { method: "DELETE" }),
   decidirFerramentaChat: (sessionId, approvalId, decision) =>
     request(`/api/chat/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(approvalId)}`, {
       method: "POST", body: { decision },

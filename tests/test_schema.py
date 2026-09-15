@@ -101,7 +101,7 @@ class SchemaTestCase(unittest.TestCase):
     def test_versao_do_schema_e_propria_do_kairos(self):
         # A versão do legado fica registrada para rastreabilidade, não como a nossa.
         self.assertEqual(read_schema_version(self.db), SCHEMA_VERSION)
-        self.assertEqual(SCHEMA_VERSION, 4)
+        self.assertEqual(SCHEMA_VERSION, 5)
         self.assertEqual(LEGACY_SHAPE_VERSION, 26)
 
     def test_inicializacao_e_idempotente(self):
@@ -160,6 +160,31 @@ class SchemaTestCase(unittest.TestCase):
                 "INSERT INTO gateway_routing(scope, session_key, session_id) "
                 "VALUES ('global','chave','sessao-inexistente')"
             )
+
+    def test_session_shares_tem_fk_cascade_e_digest_unico(self):
+        """Compartilhamento herda o ciclo de vida da conversa.
+
+        O link não pode sobreviver à conversa: apagar a sessão leva os shares
+        junto (cascade), e dois links diferentes nunca compartilham o digest.
+        """
+        self.db.execute("INSERT INTO sessions(id, source, started_at) VALUES ('s1','cli',1.0)")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO session_shares(session_id, token_hash, created_at) "
+                "VALUES ('inexistente','digest-x',1.0)"
+            )
+        self.db.execute(
+            "INSERT INTO session_shares(session_id, token_hash, created_at) "
+            "VALUES ('s1','digest-1',1.0)"
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO session_shares(session_id, token_hash, created_at) "
+                "VALUES ('s1','digest-1',2.0)"
+            )
+        self.db.execute("DELETE FROM sessions WHERE id='s1'")
+        restantes = self.db.execute("SELECT COUNT(*) FROM session_shares").fetchone()[0]
+        self.assertEqual(restantes, 0)
 
     def test_lease_de_turno_e_chaveado_pela_identidade_duravel(self):
         """ADR 004: o lock fica do lado do DADO, não da chave de coordenação."""
