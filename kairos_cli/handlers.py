@@ -447,6 +447,11 @@ def cmd_gateway(args) -> int:
 
     svc = GatewayService(_home(), poll_interval=getattr(args, "interval", 5.0) or 5.0)
 
+    from kairos_gateway.adapters import build_platform_adapters
+
+    for adapter in build_platform_adapters(_home()).values():
+        svc.register_adapter(adapter)
+
     if sub == "status":
         svc.boot()
         _emit(svc.status(), as_json=as_json)
