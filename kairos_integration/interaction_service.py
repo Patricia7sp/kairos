@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
@@ -306,6 +307,7 @@ class InteractionService:
         executed_calls: list[str] = []
         enabled_names = self._chat_tool_names(envelope)
         while True:
+            round_started = time.monotonic()
             async with aclosing(
                 self._stream_accountable_round(
                     envelope.conversation_id,
@@ -315,6 +317,8 @@ class InteractionService:
                     accumulator,
                     totals=totals,
                     costs=costs,
+                    source=envelope.source,
+                    round_started=round_started,
                 )
             ) as stream:
                 async for event in stream:
@@ -342,6 +346,8 @@ class InteractionService:
                     accumulator,
                     cost=cost,
                     turn_accounting=turn_accounting,
+                    source=envelope.source,
+                    round_started=round_started,
                 ),
                 task_name="kairos-provider-round-commit",
             )
@@ -381,6 +387,7 @@ class InteractionService:
                     executed_calls,
                     limit_error,
                     enabled_names,
+                    source=envelope.source,
                 )
             ) as stream:
                 async for event in stream:
@@ -409,6 +416,8 @@ class InteractionService:
         *,
         cost: InteractionCost,
         turn_accounting: dict[str, object],
+        source: str,
+        round_started: float,
     ) -> None:
         # Transcript and accounting finish as one owned operation even if the
         # transport disappears while SQLite's ordered worker is writing.
@@ -441,7 +450,17 @@ class InteractionService:
         await self._flush_usage()
 
         await self._observe_round(
-            accumulator, "chat.failed" if accumulator.error else "chat.completed"
+            accumulator,
+            "chat.failed" if accumulator.error else "chat.completed",
+            meta=self._chat_event_meta(
+                conversation_id=conversation_id,
+                source=source,
+                round_started=round_started,
+                event_code="chat.failed" if accumulator.error else "chat.completed",
+                error_kind=(
+                    accumulator.error.kind.value if accumulator.error is not None else None
+                ),
+            ),
         )
 
     async def _execute_tool_calls(  # noqa: PLR0917
@@ -452,6 +471,7 @@ class InteractionService:
         executed_calls: list[str],
         limit_error: InteractionServiceError | None,
         enabled_names: frozenset[str],
+        source: str,
     ) -> AsyncIterator[InteractionEvent]:
         for call in calls:
             if limit_error is not None:
@@ -470,10 +490,14 @@ class InteractionService:
                         result = denied_tool_result(call)
                     else:
                         result = await execute_chat_tool(call)
-                    await self._observe_tool(call, result)
+                    await self._observe_tool(
+                        call, result, conversation_id=conversation_id, source=source
+                    )
                 else:
                     result = await execute_chat_tool(call)
-                    await self._observe_tool(call, result)
+                    await self._observe_tool(
+                        call, result, conversation_id=conversation_id, source=source
+                    )
             await self._persist_tool_result(conversation_id, call, result, selection)
             yield InteractionEvent.from_tool_result(result, conversation_id)
 
@@ -508,9 +532,21 @@ class InteractionService:
         self,
         call: CanonicalToolCall,
         result: InteractionToolResult,
+        *,
+        conversation_id: str,
+        source: str,
     ) -> None:
         family = "search" if call.name == "web_search" else "tool"
-        await self._observe(f"{family}.failed" if result.is_error else f"{family}.completed")
+        await self._observe(
+            f"{family}.failed" if result.is_error else f"{family}.completed",
+            meta={
+                "origin": source,
+                "call_type": "search" if call.name == "web_search" else "chat_tool",
+                "status": "failed" if result.is_error else "completed",
+                "tool": call.name,
+                "conversation_id": conversation_id,
+            },
+        )
 
     def decide_tool_approval(
         self,
@@ -558,6 +594,8 @@ class InteractionService:
         *,
         totals: TurnAccumulator,
         costs: list[InteractionCost],
+        source: str,
+        round_started: float,
     ) -> AsyncIterator[InteractionEvent]:
         try:
             async with aclosing(
@@ -580,6 +618,8 @@ class InteractionService:
                     totals=totals,
                     costs=costs,
                     event_code=event_code,
+                    source=source,
+                    round_started=round_started,
                 ),
                 task_name="kairos-interrupted-round-accounting",
             )
@@ -597,6 +637,8 @@ class InteractionService:
         totals: TurnAccumulator,
         costs: list[InteractionCost],
         event_code: str,
+        source: str,
+        round_started: float,
     ) -> None:
         if not accumulator.attempts:
             return
@@ -632,20 +674,52 @@ class InteractionService:
         )
         await self._flush_usage()
 
-        await self._observe_round(accumulator, event_code)
+        await self._observe_round(
+            accumulator,
+            event_code,
+            meta=self._chat_event_meta(
+                conversation_id=conversation_id,
+                source=source,
+                round_started=round_started,
+                event_code=event_code,
+            ),
+        )
 
-    async def _observe(self, code: str, **counters: int) -> None:
+    async def _observe(self, code: str, *, meta: dict | None = None, **counters: int) -> None:
         if self._event_home is not None:
-            await record_service_event_async(self._event_home, code, **counters)
+            await record_service_event_async(self._event_home, code, meta=meta, **counters)
 
-    async def _observe_round(self, accumulator: TurnAccumulator, code: str) -> None:
+    def _chat_event_meta(
+        self,
+        *,
+        conversation_id: str,
+        source: str,
+        round_started: float,
+        event_code: str,
+        error_kind: str | None = None,
+    ) -> dict:
+        status = event_code.split(".", 1)[1] if "." in event_code else event_code
+        meta: dict = {
+            "origin": source,
+            "call_type": "chat",
+            "status": status,
+            "duration_ms": max(0, round((time.monotonic() - round_started) * 1000)),
+            "conversation_id": conversation_id,
+        }
+        if error_kind is not None:
+            meta["error"] = error_kind
+        return meta
+
+    async def _observe_round(
+        self, accumulator: TurnAccumulator, code: str, *, meta: dict | None = None
+    ) -> None:
         counters = {"api_calls": accumulator.attempts}
         if accumulator.usage is not None:
             counters.update(
                 input_tokens=accumulator.usage.input_tokens,
                 output_tokens=accumulator.usage.output_tokens,
             )
-        await self._observe(code, **counters)
+        await self._observe(code, meta=meta, **counters)
 
     async def _stream_provider_round(
         self,

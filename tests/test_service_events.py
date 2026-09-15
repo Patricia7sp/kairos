@@ -77,6 +77,99 @@ def test_catalog_accepts_only_defined_service_events(tmp_path, code, service, le
     assert (event["service"], event["level"]) == (service, level)
 
 
+def test_meta_round_trips_and_old_journals_read_as_empty(tmp_path):
+    events = module()
+    assert events.record_service_event(
+        tmp_path,
+        "chat.completed",
+        api_calls=2,
+        meta={
+            "origin": "web",
+            "call_type": "chat",
+            "status": "completed",
+            "duration_ms": 150,
+            "conversation_id": "conv-001",
+        },
+    )
+    raw = json.loads(journal(tmp_path).read_text())
+    assert set(raw) == {"timestamp", "code", "counters", "meta"}
+    assert raw["meta"] == {
+        "origin": "web",
+        "call_type": "chat",
+        "status": "completed",
+        "duration_ms": 150,
+        "conversation_id": "conv-001",
+    }
+    assert events.read_service_events(tmp_path)["events"][0]["meta"] == raw["meta"]
+
+    old = seed(tmp_path, encoded(code="web.started"), rotated=True)
+    assert old.exists()
+    result = events.read_service_events(tmp_path)
+    assert result["events"][-1]["meta"] == {}
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"unknown_key": "private-sentinel"},
+        {"origin": ""},
+        {"origin": " "},
+        {"origin": "x" * 25},
+        {"call_type": "x" * 33},
+        {"status": "x" * 25},
+        {"model": "x" * 129},
+        {"conversation_id": "x" * 129},
+        {"tool": "x" * 65},
+        {"error": "x" * 97},
+        {"duration_ms": "150"},
+        {"duration_ms": -1},
+        {"duration_ms": 86_400_001},
+        {"duration_ms": 150.5},
+        {"origin": 7},
+        {"conversation_id": None},
+        "private-sentinel",
+        5,
+        {"origin": True},
+    ],
+    ids=[
+        "unknown-key",
+        "empty-origin",
+        "blank-origin",
+        "oversized-origin",
+        "oversized-call-type",
+        "oversized-status",
+        "oversized-model",
+        "oversized-conversation-id",
+        "oversized-tool",
+        "oversized-error",
+        "string-duration",
+        "negative-duration",
+        "oversized-duration",
+        "float-duration",
+        "int-for-string",
+        "none-value",
+        "non-dict-string",
+        "non-dict-int",
+        "bool-for-string",
+    ],
+)
+def test_invalid_meta_is_rejected_without_creating_files(tmp_path, meta):
+    assert module().record_service_event(tmp_path, "chat.completed", meta=meta) is False
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_corrupt_meta_record_is_explicit_and_never_exposes_raw_lines(tmp_path):
+    seed(
+        tmp_path,
+        b'{"timestamp":"2026-09-12T12:00:00Z","code":"web.started","counters":{},'
+        b'"meta":{"unknown_key":"private-sentinel"}}\n',
+    )
+    result = module().read_service_events(tmp_path)
+    assert result["state"] == "error"
+    assert result["events"] == []
+    assert "private" not in json.dumps(result)
+
+
 @pytest.mark.parametrize(
     ("code", "counters"),
     [
