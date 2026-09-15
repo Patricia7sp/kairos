@@ -53,6 +53,7 @@ from kairos_web.chat_transport import (
 from kairos_web.cron_api import router as cron_router
 from kairos_web.logs_api import router as logs_router
 from kairos_web.message_metadata import public_message_accounting
+from kairos_web.messaging_api import router as messaging_router
 from kairos_web.observability_api import router as observability_router
 from kairos_web.provider_api import (
     list_models_payload,
@@ -93,12 +94,16 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
         installed_runtime_client = True
     from kairos_cron.scheduler import Scheduler
 
-    scheduler = Scheduler(_application_home(application), service)
+    home = _application_home(application)
+    scheduler = Scheduler(home, service)
     cron_task = asyncio.create_task(scheduler.run(), name="kairos-cron-ticker")
     application.state.cron_scheduler = scheduler
     application.state.cron_task = cron_task
+    from kairos_gateway.adapters import build_platform_adapters
+
+    application.state.delivery_adapters = sorted(build_platform_adapters(home))
     try:
-        await record_service_event_async(_application_home(application), "web.started")
+        await record_service_event_async(home, "web.started")
         yield
     finally:
         try:
@@ -114,6 +119,8 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
         finally:
             del application.state.cron_task
             del application.state.cron_scheduler
+            if getattr(application.state, "delivery_adapters", None) is not None:
+                del application.state.delivery_adapters
             if owns_service and getattr(application.state, "interaction_service", None) is service:
                 del application.state.interaction_service
             if (
@@ -133,6 +140,7 @@ app.include_router(provider_credentials_router)
 app.include_router(tools_router)
 app.include_router(settings_router)
 app.include_router(cron_router)
+app.include_router(messaging_router)
 
 
 @app.exception_handler(RequestValidationError)

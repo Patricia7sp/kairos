@@ -13,6 +13,7 @@ import { chatView } from "./views/chat.js";
 import { skillsView } from "./views/skills.js";
 import { sessoesView } from "./views/sessoes.js";
 import { ferramentasView } from "./views/ferramentas.js";
+import { mensageriaView } from "./views/mensageria.js";
 import { modelosView } from "./views/modelos.js";
 import { provedoresView } from "./views/provedores.js";
 import { cronView } from "./views/cron.js";
@@ -32,6 +33,7 @@ const ROTAS = [
   { id: "modelos",     titulo: "Modelos",     icone: "models",    grupo: "Configuração", view: modelosView },
   { id: "provedores",  titulo: "Provedores",  icone: "providers", grupo: "Configuração", view: provedoresView },
   { id: "ferramentas", titulo: "Ferramentas", icone: "tools",     grupo: "Configuração", view: ferramentasView },
+  { id: "mensageria",  titulo: "Mensageria",  icone: "tools",     grupo: "Configuração", view: mensageriaView },
   { id: "registros",   titulo: "Registros",   icone: "providers", grupo: "Configuração", view: logsView },
   { id: "ajustes",     titulo: "Ajustes",     icone: "config",    grupo: "Configuração", view: ajustesView },
 ];

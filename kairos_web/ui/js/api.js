@@ -86,6 +86,23 @@ export const api = {
   blueprints: () => request("/api/cron/blueprints"),
   criarBlueprint: (key, values) => request(`/api/cron/blueprints/${encodeURIComponent(key)}/jobs`, {method:"POST", body:{values}}),
   alvosEntrega: () => request("/api/cron/delivery-targets"),
+  mensageriaStatus: () => request("/api/messaging"),
+  salvarMensageria: (platform, config) => request(`/api/messaging/${encodeURIComponent(platform)}`, {
+    method: "PUT", body: { config },
+  }),
+  salvarCredencialMensageria: (platform, secret) =>
+    request(`/api/messaging/${encodeURIComponent(platform)}/credential`, {
+      method: "POST", body: { secret },
+    }),
+  removerCredencialMensageria: (platform) =>
+    request(`/api/messaging/${encodeURIComponent(platform)}/credential`, { method: "DELETE" }),
+  testarMensageria: (platform, target) =>
+    request(`/api/messaging/${encodeURIComponent(platform)}/test`, {
+      method: "POST", body: { ...(target ? { target } : {}) },
+    }),
+  enviarMensagem: (target, text) => request("/api/messaging/send", {
+    method: "POST", body: { target, text },
+  }),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 
