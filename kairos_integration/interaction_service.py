@@ -444,7 +444,7 @@ class InteractionService:
             accumulator, "chat.failed" if accumulator.error else "chat.completed"
         )
 
-    async def _execute_tool_calls(  # noqa: PYI028
+    async def _execute_tool_calls(  # noqa: PLR0917
         self,
         conversation_id: str,
         selection: ResolvedModelSelection,
