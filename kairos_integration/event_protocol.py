@@ -29,7 +29,7 @@ def interaction_event_to_json(
     return payload
 
 
-def _event_fields(event: InteractionEvent) -> dict[str, Any]:
+def _event_fields(event: InteractionEvent) -> dict[str, Any]:  # noqa: PLR0912
     payload: dict[str, Any] = {}
     if event.kind is InteractionEventKind.TURN_START:
         if event.snapshot is None:
