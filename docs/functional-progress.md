@@ -986,3 +986,10 @@ autora ("commit e depois docs").
   não-implementado). Passou a apontar a tela de Integrações / `POST
   /api/messaging/telegram/credential`, que é o caminho real
   (`save_platform_secret`).
+- **Merge:** PR #64 squash-mergeado em `38f36e0`; `main` mergeado verificado com
+  a suíte inteira (2.611 passados, 14 pulados, 5.810 subtests) e `ruff` limpo.
+- **Flake de CI corrigido à parte:** o job de testes reprovou sob carga em
+  `tests/test_runtime_service.py::test_slow_subscriber_gets_resumable_gap_without_blocking_execution`
+  (`sequence_gap` vazando pelo helper `terminal`). O helper passou a retomar
+  pelo último cursor, como o transporte web, em PR #65 (`8b1be7f`), com teste
+  determinístico que falha sem a correção.
