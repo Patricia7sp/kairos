@@ -23,10 +23,13 @@ from kairos_gateway.adapters import (
     messaging_status,
 )
 from kairos_gateway.adapters.config import (
+    add_webhook_endpoint,
     drop_platform_secret,
     load_config,
+    remove_webhook_endpoint,
     save_config,
     save_platform_secret,
+    webhook_endpoints,
 )
 from kairos_state import connect
 from kairos_state.migrations import migrate
@@ -61,6 +64,12 @@ class CredentialBody(BaseModel):
 class TestBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target: StrictStr | None = None
+
+
+class WebhookBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: StrictStr
+    url: StrictStr
 
 
 class SendBody(BaseModel):
@@ -157,6 +166,39 @@ def _default_test_target(platform: str) -> str | None:
     if platform == "webhook":
         return "webhook:"
     return None
+
+
+@router.get("/messaging/webhook/endpoints")
+def webhook_endpoints_list(request: Request):
+    """Endpoint de webhook tem gestão própria: listar, adicionar, remover.
+
+    O webhook não tem segredo — o endpoint é a entrega — então estes endpoints
+    valem sem cofre. Testar um endpoint específico é o POST de teste com
+    destino `webhook:{nome}`, reutilizando o adapter real.
+    """
+    home = _home(request)
+    return {
+        "enabled": load_config(home).get("webhook", {}).get("enabled", False),
+        "endpoints": webhook_endpoints(home),
+    }
+
+
+@router.post("/messaging/webhook/endpoints")
+def webhook_endpoint_add(body: WebhookBody, request: Request):
+    """Adiciona um endpoint ao arquivo; validação falha fechado em 422."""
+    try:
+        return add_webhook_endpoint(_home(request), body.name, body.url)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.delete("/messaging/webhook/endpoints/{name}")
+def webhook_endpoint_remove(name: str, request: Request):
+    """Remove um endpoint nomeado; nome inexistente é erro (422), não silêncio."""
+    try:
+        return remove_webhook_endpoint(_home(request), name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 TEST_TEXT = "Messageria Kairos — teste de conexão."

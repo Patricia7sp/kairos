@@ -161,6 +161,48 @@ def test_send_delivers_via_fake_adapter(home):
     assert resp.json()["obligation_id"]
 
 
+def test_webhook_endpoints_add_list_remove(home):
+    client = _client()
+    lista = client.get("/api/messaging/webhook/endpoints")
+    assert lista.status_code == 200
+    assert lista.json() == {"enabled": False, "endpoints": []}
+
+    added = client.post(
+        "/api/messaging/webhook/endpoints",
+        json={"name": "alerta", "url": "https://hooks.exemplo.com/x"},
+    )
+    assert added.status_code == 200
+    assert added.json() == {"name": "alerta", "url": "https://hooks.exemplo.com/x"}
+
+    lista = client.get("/api/messaging/webhook/endpoints")
+    assert lista.json()["endpoints"] == [{"name": "alerta", "url": "https://hooks.exemplo.com/x"}]
+
+    removed = client.delete("/api/messaging/webhook/endpoints/alerta")
+    assert removed.status_code == 200
+    assert removed.json()["removed"] is True
+    assert client.get("/api/messaging/webhook/endpoints").json()["endpoints"] == []
+
+
+def test_webhook_endpoints_fail_closed(home):
+    client = _client()
+    duplicado = client.post(
+        "/api/messaging/webhook/endpoints", json={"name": "a", "url": "https://x"}
+    )
+    assert duplicado.status_code == 200
+    de_novo = client.post(
+        "/api/messaging/webhook/endpoints", json={"name": "a", "url": "https://y"}
+    )
+    assert de_novo.status_code == 422
+    sem_nome = client.post(
+        "/api/messaging/webhook/endpoints", json={"name": "  ", "url": "https://x"}
+    )
+    assert sem_nome.status_code == 422
+    url_ruim = client.post("/api/messaging/webhook/endpoints", json={"name": "b", "url": "ftp://x"})
+    assert url_ruim.status_code == 422
+    inexistente = client.delete("/api/messaging/webhook/endpoints/nao-existe")
+    assert inexistente.status_code == 422
+
+
 def test_send_rejects_bad_target(home):
     resp = _client().post(
         "/api/messaging/send",

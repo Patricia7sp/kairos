@@ -33,6 +33,12 @@ __all__ = [
     "tool_error",
 ]
 
+#: Nome da allowlist de sandbox para o shell → ferramenta real no despacho.
+#: `terminal` não é registrado — o handler é o `bash` — então resolvê-lo aqui
+#: dá o efeito de sandbox a quem chama pelo nome da política sem expor um
+#: segundo schema (D-08.3).
+SANDBOX_ALIASES: dict[str, str] = {"terminal": "bash"}
+
 
 class ToolsUnavailableUnderTest(RuntimeError):
     """RF-14 — ferramentas bloqueadas sob pytest.
@@ -210,6 +216,10 @@ class ToolRegistry:
 
     # -- despacho ----------------------------------------------------------
 
+    def _resolve_alias(self, name: str) -> str:
+        """Nome da allowlist de sandbox → ferramenta registrada (D-08.3)."""
+        return SANDBOX_ALIASES.get(name, name)
+
     def dispatch(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         """Executa por nome. **Nunca levanta.**
 
@@ -223,7 +233,7 @@ class ToolRegistry:
                 "se for exatamente isso que o teste quer"
             )
 
-        entry = self._tools.get(name)
+        entry = self._tools.get(self._resolve_alias(name))
         if entry is None:
             return tool_error(f"Unknown tool: {name}")
 

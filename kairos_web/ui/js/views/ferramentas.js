@@ -29,6 +29,8 @@ function cartao(tool) {
       <div class="k-skill__meta"><span class="k-badge">${esc(tool.toolset)}</span>
         <span class="k-badge ${tool.available ? "k-badge--ok" : ""}">${tool.available ? "Disponível" : "Indisponível"}</span>
         ${tool.plugin ? `<span class="k-badge">Plugin: ${esc(tool.plugin)}</span>` : ""}
+        ${tool.chat ? '<span class="k-badge k-badge--accent">No Chat</span>' : '<span class="k-badge">Fora do Chat</span>'}
+        ${tool.mutating ? '<span class="k-badge k-badge--warn">Exige aprovação</span>' : ""}
       </div>
     </div></header>
     <p class="k-skill__desc">${esc(tool.description || "Sem descrição registrada.")}</p>
@@ -56,7 +58,9 @@ export async function ferramentasView(raiz, _rota, { signal } = {}) {
   signal?.addEventListener("abort", dispose, { once: true });
   raiz.innerHTML = `
     <div class="k-page-head"><h1>Ferramentas</h1>
-      <p>Capacidades registradas para execução pelo agente e pela CLI. O Chat de modelos não anexa este catálogo automaticamente.</p>
+      <p>Capacidades registradas para execução pelo agente e pela CLI, tiradas do registro real
+        do processo. No Chat entra apenas o subconjunto com o selo “No Chat”; as marcadas como
+        “Exige aprovação” pedem confirmação a cada turno.</p>
     </div>
     <div class="k-skill-bar" role="search">
       <label class="k-field k-skill-busca"><span class="k-sr">Buscar ferramentas</span>

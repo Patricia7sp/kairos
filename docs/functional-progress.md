@@ -882,3 +882,50 @@ tela Agendamentos (UI Web vanilla JS).
 - Validação local: vitest **170** (14 arquivos) e `tsc --noEmit` sem erros;
   6 testes de `cron-flows.test.ts` (4 existentes + 2 novos) verdes; suítes
   Python intactas. Manual: [Agendamentos](agendamentos.md).
+
+## Integrações próprias e memória do Kairos — P2 + P4 (ferramentas)
+
+Branch `feat/integracoes-e-ferramentas`, base PR #38 (T-11 UI) integrada. Três
+frentes fechadas no mesmo lote, com a mesma regra: **efeito real ou ausência**.
+
+- **Tela Integrações (P2):** a rota de navegação *Mensageria* virou
+  *Integrações* (`kairos_web/ui/js/views/integracoes.js`), abrigando duas abas:
+  **Mensageria** (painel existente, filtrado por `mensageria.js`) e
+  **Webhooks** — lista, criação e remoção de endpoints próprios. Cada endpoint
+  vira uma entrada no arquivo de configuração. Backend dedicado em
+  `kairos_web/messaging_api.py` (`GET/POST /api/messaging/webhook/endpoints`,
+  `DELETE /api/messaging/webhook/endpoints/{name}`, `WebhookBody`), com
+  validação **fail-closed 422** (endpoint sem `value`); helpers atômicos
+  (`webhook_endpoints`/`add_webhook_endpoint`/`remove_webhook_endpoint`) em
+  `kairos_gateway/adapters/config.py`.
+  Client API enriquecido (`api.js`), estilos `.k-tabs` em `components.css`.
+- **Ferramentas da tela (P4, texto):** `kairos_web/tools_api.py` agora anota o
+  inventário com `chat`/`mutating` (derivados de `CHAT_TOOLS`/`MUTATING_TOOLS`,
+  importados no momento da listagem) e os textos da tela distinguem
+  "No Chat", "Fora do Chat" e "Exige aprovação" (`ferramentas.js`), sem
+  privilégios inventados.
+- **Alias `terminal`→`bash` adotado (P4):** o schema não ganhou segundo nome; a
+  resolução ocorre só no despacho (`SANDBOX_ALIASES` + `_resolve_alias` em
+  `kairos_tools/registry.py`), conforme D-08.3. Quem despacha `terminal` recebe
+  o handler `bash`, e o inventário continua expondo `bash` único.
+- **Toolset `memory` com executor real (P4):**
+  - `kairos_tools/memory.py`: `MemoryStore` file-backed
+    (`$KAIROS_HOME/memories/MEMORY.md` e `USER.md`), ações `list|add|replace|
+    remove`, delimitação `\n§\n`, limites de caracteres (memória 2200, usuário
+    1375) e guardas fail-closed herdadas do legado: arquivo presente porém
+    ilegível → recusa (nunca tratar como vazio); deriva externa (conteúdo que
+    não arredonda pelo parser ou entrada além do limite) → recusa com snapshot
+    `.bak`; escrita atômica 0600 sob `credential_file_lock`.
+  - Registrado no toolset próprio (`register_memory_tool`), **fora do**
+    `CHAT_TOOLS` — o cinto estreito não expõe memória ao gate de aprovação do
+    Chat (D-08.3).
+  - CLI com efeito: `kairos memory status` lê as entradas do store real;
+    `kairos memory off` limpa o store removendo os arquivos. O registro de
+    linha 620 ("`memory` ainda não tem executor") está **superado**: o executor
+    descrito lá é a ferramenta `store_*` do legado, substituída pelo store
+    interno usado aqui; `verify` continua pendente.
+- Validação local: **15 testes** de `test_messaging_api.py`, **57** de
+  `test_tools.py`, **3** de `test_tools_inventory.py`, **22** de
+  `test_memory_tool.py` (store, guardas, registro, despacho e CLI
+  `kairos memory`) e **7** testes de integrações no vitest — todos verdes; Ruff e
+  formato limpos. Sweep completo e ci.sh na linha dos lotes anteriores.
