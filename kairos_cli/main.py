@@ -226,8 +226,39 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="habilita busca web no Chat; consultas são enviadas ao DuckDuckGo",
         )
         parser.add_argument(
+            "--experiences",
+            action="store_true",
+            help="injeta experiências ativas como referência no turno atual (opt-in)",
+        )
+        parser.add_argument(
             "--idempotency-key",
             help="chave durável para repetir manualmente o mesmo turno de runtime",
+        )
+    elif command == "memory" and subcommand == "experiences":
+        parser.add_argument(
+            "experience_action",
+            choices=("list", "add", "confirm", "reject", "invalidate", "record"),
+            help="Ação sobre as experiências aprendidas",
+        )
+        parser.add_argument(
+            "experience_id", nargs="?", help="ID da experiência (exceto em list/add)"
+        )
+        parser.add_argument("--trigger", help="Gatilho textual (add)")
+        parser.add_argument("--observation", default="", help="Observação/erro observado (add)")
+        parser.add_argument("--correction", help="Correção a aplicar (add)")
+        parser.add_argument("--scope", default="global", help="Escopo da experiência (add)")
+        parser.add_argument("--confidence", type=float, default=0.9, help="Confiança inicial (add)")
+        parser.add_argument(
+            "--status",
+            choices=("candidata", "ativa", "invalida"),
+            default="ativa",
+            help="Estado inicial da experiência (add)",
+        )
+        parser.add_argument(
+            "--all", action="store_true", help="Inclui candidatas e inválidas na listagem (list)"
+        )
+        parser.add_argument(
+            "--success", action="store_true", help="Registra sucesso no record (senão, falha)"
         )
     elif command == "gateway" and subcommand in ("run", None):
         parser.add_argument("--once", action="store_true", help="Roda um único tick e sai")
@@ -235,6 +266,18 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             "--interval", type=float, default=5.0, help="Segundos entre ticks (padrão: 5)"
         )
     elif command == "gateway" and subcommand == "stop":
+        parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
+    elif command == "telegram" and subcommand == "config":
+        parser.add_argument(
+            "--enabled", choices=("true", "false"), help="ativa/desativa envio (outbound)"
+        )
+        parser.add_argument(
+            "--inbound-enabled", choices=("true", "false"), help="ativa/desativa canal de entrada"
+        )
+        parser.add_argument("--allowed-ids", help="IDs Telegram autorizados, separados por vírgula")
+        parser.add_argument("--poll-interval", type=float, help="segundos entre polls (0.5–300)")
+        parser.add_argument("--chat-default", help="chat_id padrão para envio")
+    elif command == "telegram" and subcommand == "stop":
         parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
     elif command == "import" and subcommand is None:
         parser.add_argument("--data", help="Dados JSON a importar")

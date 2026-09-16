@@ -125,6 +125,67 @@ def test_cli_search_flag_reaches_canonical_envelope(monkeypatch, tmp_path):
     assert "web_search" not in fake.envelopes[0].parameters
 
 
+def test_cli_experiences_sem_correcoes_nao_muda_o_turno(monkeypatch, tmp_path):
+    fake = FakeInteractionService((turn_end(),))
+    install_service(monkeypatch, tmp_path, fake)
+
+    assert main(["chat", "--session", "s1", "--experiences", "oi"]) == ExitCode.OK
+    assert fake.envelopes[0].content == "oi"
+
+
+def test_cli_experiences_off_e_sem_flag_e_inteira(monkeypatch, tmp_path):
+    from kairos_memory import ExperienceStatus, ExperienceStore
+
+    store = ExperienceStore(tmp_path)
+    store.add(
+        trigger="login falha 401",
+        observation="token expirado",
+        correction="kairos auth refresh",
+        status=ExperienceStatus.ATIVA,
+    )
+    fake = FakeInteractionService((turn_end(),))
+    install_service(monkeypatch, tmp_path, fake)
+
+    assert main(["chat", "--session", "s1", "login falha 401"]) == ExitCode.OK
+    assert fake.envelopes[0].content == "login falha 401"
+
+
+def test_cli_experiences_injeta_correcao_no_turno_atual(monkeypatch, tmp_path):
+    from kairos_memory import EXPERIENCE_BLOCK_HEADER, ExperienceStatus, ExperienceStore
+
+    store = ExperienceStore(tmp_path)
+    store.add(
+        trigger="login falha 401",
+        observation="token expirado",
+        correction="kairos auth refresh",
+        status=ExperienceStatus.ATIVA,
+    )
+    fake = FakeInteractionService((turn_end(),))
+    install_service(monkeypatch, tmp_path, fake)
+
+    assert main(["chat", "--session", "s1", "--experiences", "login falha 401"]) == ExitCode.OK
+    content = fake.envelopes[0].content
+    assert content.startswith(EXPERIENCE_BLOCK_HEADER)
+    assert "kairos auth refresh" in content
+    assert content.endswith("login falha 401")
+
+
+def test_cli_experiences_nao_injeta_candidatas(monkeypatch, tmp_path):
+    from kairos_memory import ExperienceStore
+
+    store = ExperienceStore(tmp_path)
+    store.add(
+        trigger="rede corpus caiu",
+        observation="sem conectividade",
+        correction="(pendente)",
+    )
+    fake = FakeInteractionService((turn_end(),))
+    install_service(monkeypatch, tmp_path, fake)
+
+    assert main(["chat", "--session", "s1", "--experiences", "rede corpus caiu"]) == ExitCode.OK
+    assert fake.envelopes[0].content == "rede corpus caiu"
+
+
 @pytest.mark.parametrize(
     ("flag", "value"),
     [("--provider", "openrouter"), ("--model", "acme/chat")],

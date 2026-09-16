@@ -41,11 +41,62 @@ _PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook")
 
 #: Campos não-secretos aceitos por plataforma. Chave -> tipo Python.
 _FIELDS: dict[str, dict[str, type]] = {
-    "telegram": {"enabled": bool, "chat_id_default": str},
+    "telegram": {"enabled": bool, "chat_id_default": str, "inbound": dict},
     "whatsapp": {"enabled": bool, "phone_number_id": str, "number_default": str},
     "slack": {"enabled": bool, "channel_default": str},
     "webhook": {"enabled": bool, "endpoints": list},
 }
+
+#: Campos opcionais com padrão — ausência não é erro; o padrão entra no merge.
+_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {"telegram": frozenset({"inbound"})}
+
+#: Esquema do canal de entrada (bloco ``inbound`` do Telegram).
+#:
+#: ``allowed_user_ids`` vazio significa **ninguém autorizado** (fail-closed):
+#: o canal de entrada só responde a remetentes vistos aqui.
+_INBOUND_FIELDS: dict[str, tuple[type | tuple[type, ...], bool]] = {
+    "enabled": (bool, False),
+    "allowed_user_ids": (list, False),
+    "poll_interval_seconds": ((int, float), True),
+    "experiences": (bool, False),
+}
+
+#: Campos do inbound cuja ausência é aceita — o padrão entra silenciosamente.
+#: ``experiences`` liga a injeção de experiências ativas por turno no canal.
+_INBOUND_OPTIONAL: frozenset[str] = frozenset({"experiences"})
+
+
+def _valid_inbound(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("configuração de inbound deve ser um objeto")
+    validated: dict[str, Any] = {}
+    for campo, (tipo, rango) in _INBOUND_FIELDS.items():
+        if campo not in value:
+            if campo in _INBOUND_OPTIONAL:
+                validated[campo] = False
+                continue
+            raise ValueError(f"configuração de inbound exige a chave '{campo}'")
+        valor = value[campo]
+        if tipo is bool:
+            if not isinstance(valor, bool):
+                raise ValueError(f"'{campo}' de inbound deve ser booleano")
+        elif tipo is list:
+            if not (
+                isinstance(valor, list)
+                and all(isinstance(i, int) and not isinstance(i, bool) for i in valor)
+            ):
+                raise ValueError(f"'{campo}' de inbound deve ser uma lista de IDs numéricos")
+        else:
+            if not isinstance(valor, (int, float)) or isinstance(valor, bool):
+                raise ValueError(f"'{campo}' de inbound deve ser um número")
+            if rango and not 0.5 <= valor <= 300:
+                raise ValueError(f"'{campo}' de inbound deve ser segundos entre 0.5 e 300")
+            valor = float(valor)
+        validated[campo] = valor
+    extra = set(value) - set(_INBOUND_FIELDS)
+    if extra:
+        raise ValueError(f"chaves desconhecidas em inbound: {', '.join(sorted(extra))}")
+    return validated
 
 
 @dataclass(frozen=True)
@@ -56,7 +107,16 @@ class WebhookEndpoint:
 
 def default_config() -> dict[str, dict[str, Any]]:
     return {
-        "telegram": {"enabled": False, "chat_id_default": ""},
+        "telegram": {
+            "enabled": False,
+            "chat_id_default": "",
+            "inbound": {
+                "enabled": False,
+                "allowed_user_ids": [],
+                "poll_interval_seconds": 2.0,
+                "experiences": False,
+            },
+        },
         "whatsapp": {"enabled": False, "phone_number_id": "", "number_default": ""},
         "slack": {"enabled": False, "channel_default": ""},
         "webhook": {"enabled": False, "endpoints": []},
@@ -66,8 +126,11 @@ def default_config() -> dict[str, dict[str, Any]]:
 def _validate_platform_config(name: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"configuração de {name} deve ser um objeto")
+    normalized: dict[str, Any] = {}
     for campo, tipo in _FIELDS[name].items():
         if campo not in value:
+            if campo in _OPTIONAL_FIELDS.get(name, frozenset()):
+                continue
             raise ValueError(f"configuração de {name} exige a chave '{campo}'")
         valor = value[campo]
         if tipo is bool and not isinstance(valor, bool):
@@ -78,10 +141,16 @@ def _validate_platform_config(name: str, value: Any) -> dict[str, Any]:
             not isinstance(valor, list) or not all(_valid_endpoint(e) for e in valor)
         ):
             raise ValueError(f"'{campo}' de {name} deve ser uma lista de endpoints")
+        if tipo is dict:
+            if campo == "inbound":
+                valor = _valid_inbound(valor)
+            else:
+                raise ValueError(f"'{campo}' de {name} tem esquema desconhecido")
+        normalized[campo] = valor
     extra = set(value) - set(_FIELDS[name])
     if extra:
         raise ValueError(f"chaves desconhecidas em {name}: {', '.join(sorted(extra))}")
-    return {campo: value[campo] for campo in _FIELDS[name]}
+    return normalized
 
 
 def _valid_endpoint(endpoint: Any) -> bool:
@@ -108,7 +177,7 @@ def load_config(home: Path) -> dict[str, dict[str, Any]]:
     for nome in _PLATFORMS:
         valor = raw.get(nome)
         if valor is not None:
-            doc[nome] = _validate_platform_config(nome, valor)
+            doc[nome] = {**default_config()[nome], **_validate_platform_config(nome, valor)}
     return doc
 
 
@@ -116,7 +185,9 @@ def save_config(home: Path, doc: dict[str, dict[str, Any]]) -> dict[str, dict[st
     """Valida o documento inteiro antes de tocar no disco; o arquivo nasce atômico."""
     normalizado: dict[str, dict[str, Any]] = {}
     for nome in _PLATFORMS:
-        normalizado[nome] = _validate_platform_config(nome, doc.get(nome, default_config()[nome]))
+        base = {**default_config()[nome]}
+        base.update(_validate_platform_config(nome, doc.get(nome, default_config()[nome])))
+        normalizado[nome] = base
     home.mkdir(parents=True, exist_ok=True)
     secure_atomic_write_text(
         home / MESSAGING_FILE, json.dumps(normalizado, ensure_ascii=False, indent=2)

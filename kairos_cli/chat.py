@@ -63,6 +63,7 @@ async def run_chat(
     quiet: bool = False,
     idempotency_key: str | None = None,
     web_search: bool = False,
+    experiences: bool = False,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -86,6 +87,8 @@ async def run_chat(
                 idempotency_key=idempotency_key or (uuid.uuid4().hex if runtime_session else None),
                 runtime_session=runtime_session,
                 web_search=web_search,
+                home=home,
+                experiences=experiences,
             )
         return await _run_interactive(
             service,
@@ -95,6 +98,8 @@ async def run_chat(
             quiet=quiet,
             runtime_session=runtime_session,
             web_search=web_search,
+            home=home,
+            experiences=experiences,
         )
     except InteractionServiceUnavailableError as exc:
         print(exc.message, file=sys.stderr, flush=True)
@@ -115,6 +120,8 @@ async def _run_interactive(
     quiet: bool,
     runtime_session: bool = False,
     web_search: bool = False,
+    home: Path | None = None,
+    experiences: bool = False,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -139,6 +146,8 @@ async def _run_interactive(
                 idempotency_key=uuid.uuid4().hex if runtime_session else None,
                 runtime_session=runtime_session,
                 web_search=web_search,
+                home=home,
+                experiences=experiences,
             ),
         )
 
@@ -153,7 +162,10 @@ async def _run_turn(
     idempotency_key: str | None = None,
     runtime_session: bool = False,
     web_search: bool = False,
+    home: Path | None = None,
+    experiences: bool = False,
 ) -> int:
+    content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
         conversation_id=session_id,
         source="cli",
@@ -231,6 +243,22 @@ async def _run_turn(
     finally:
         renderer.finish_line()
     return 1 if renderer.failed else 0
+
+
+def _augment_with_experiences(content: str, home: Path) -> str:
+    """Prefixa o turno atual com experiências ativas relevantes (opt-in).
+
+    A injeção é deliberadamente local: vai no `content` enviado ao serviço,
+    nunca no system prompt nem em mensagens já persistidas. A "Lei 1" de
+    `kairos_integration.surfaces` trata o prefixo de prompt como cache sagrado
+    por conversa — reescrevê-lo a cada turno invalidaria o cache.
+    """
+    from kairos_memory import build_experience_context
+
+    context = build_experience_context(content, home)
+    if not context:
+        return content
+    return f"{context}\n\n{content}"
 
 
 def _model_override(provider: str | None, model: str | None) -> ProviderModelRef | None:

@@ -9,6 +9,8 @@ kairos_gateway
 kairos_i18n
 kairos_integration
 kairos_mcp
+kairos_memory
+kairos_observability
 kairos_plugins
 kairos_providers
 kairos_runtime
