@@ -88,7 +88,8 @@ def update_platform(platform: str, body: ConfigBody, request: Request):
     _known(platform)
     try:
         doc = load_config(_home(request))
-        novo = doc[platform] | body.config
+        novo = {**doc[platform]}
+        novo.update(body.config)
         doc[platform] = novo
         saved = save_config(_home(request), doc)
     except (ValueError, OSError) as exc:

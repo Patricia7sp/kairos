@@ -93,6 +93,7 @@ COPY kairos_observability/ ./kairos_observability/
 COPY kairos_runtime/ ./kairos_runtime/
 COPY kairos_evals/ ./kairos_evals/
 COPY kairos_web/ ./kairos_web/
+COPY kairos_memory/ ./kairos_memory/
 COPY kairos_security/ ./kairos_security/
 COPY skills/ ./skills/
 COPY locales/ ./locales/
