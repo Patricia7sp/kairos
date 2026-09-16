@@ -103,6 +103,11 @@ export const api = {
   enviarMensagem: (target, text) => request("/api/messaging/send", {
     method: "POST", body: { target, text },
   }),
+  endpointsWebhook: () => request("/api/messaging/webhook/endpoints"),
+  criarEndpointWebhook: (name, url) => request("/api/messaging/webhook/endpoints", {
+    method: "POST", body: { name, url },
+  }),
+  removerEndpointWebhook: (name) => request(`/api/messaging/webhook/endpoints/${encodeURIComponent(name)}`, { method: "DELETE" }),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 

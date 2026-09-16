@@ -72,6 +72,12 @@ def test_inventory_contains_live_registrations_and_requires_authentication(tmp_p
         assert data["total"] == len(registry.get_all_tool_names())
         assert name in {tool["name"] for tool in data["tools"]}
         assert name in next(group for group in data["toolsets"] if group["name"] == "core")["tools"]
+        # o catálogo da tela diz o que o Chat usa e o que pede aprovação
+        read = next(tool for tool in data["tools"] if tool["name"] == "read_file")
+        assert read["chat"] is True and read["mutating"] is False
+        write = next(tool for tool in data["tools"] if tool["name"] == "write_file")
+        assert write["chat"] is True and write["mutating"] is True
+        assert all("chat" in tool and "mutating" in tool for tool in data["tools"])
     finally:
         registry.unregister(name)
 

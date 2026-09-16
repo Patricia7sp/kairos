@@ -252,6 +252,18 @@ class RegistroTests(unittest.TestCase):
         # falha do sistema.
         self.assertEqual(self.r.dispatch("inexistente"), tool_error("Unknown tool: inexistente"))
 
+    def test_terminal_resolve_para_bash_sem_duplicar_o_schema(self):
+        # D-08.3: `terminal` é nome da allowlist de sandbox, não ferramenta.
+        # O despacho o resolve para `bash` — quem fala com a sandbox funciona,
+        # e o catálogo continua com um único schema.
+        self.r.register("bash", lambda command: f"bash:{command}", SCHEMA)
+        self.assertEqual(self.r.dispatch("terminal", {"command": "ls"}), "bash:ls")
+        self.assertIn("bash", self.r.get_all_tool_names())
+        self.assertNotIn("terminal", self.r.get_all_tool_names())
+        self.assertNotIn("terminal", [d["name"] for d in self.r.get_definitions()])
+        # Ferramenta nomeada inexistente continua erro nomeado pelo nome dado.
+        self.assertEqual(self.r.dispatch("zoeira"), tool_error("Unknown tool: zoeira"))
+
     def test_rf05_handler_async_e_bridgeado(self):
         async def lento(x):
             await asyncio.sleep(0)

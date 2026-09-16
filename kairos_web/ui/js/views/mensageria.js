@@ -1,7 +1,7 @@
-/* Mensageria: configuração de canais (Telegram, WhatsApp, Slack, Webhook)
- * e entrega à vista. Segredos vão ao cofre e nunca voltam a esta tela;
- * o botão Testar realmente conversa com a plataforma, e Enviar passa pelo
- * ledger durável — sem efeito sem rastro. */
+/* Mensageria: configuração de canais (Telegram, WhatsApp, Slack) e entrega à
+ * vista. Segredos vão ao cofre e nunca voltam a esta tela; o botão Testar
+ * realmente conversa com a plataforma, e Enviar passa pelo ledger durável —
+ * sem efeito sem rastro. Webhook tem gestão própria na aba de Integrações. */
 
 import { api } from "../api.js";
 
@@ -12,7 +12,6 @@ const EXEMPLOS = {
   telegram: "telegram:123456789",
   whatsapp: "whatsapp:+5511999999999",
   slack: "slack:#geral",
-  webhook: "webhook:nome-do-endpoint",
 };
 
 const badge = (p) => {
@@ -23,17 +22,11 @@ const badge = (p) => {
 };
 
 function camposConfig(p) {
-  if (p.platform === "webhook") {
-    const linhas = (p.valores.endpoints || []).map((e) => `${e.name} ${e.url}`).join("\n");
-    return `<label class="k-field"><span class="k-label">Endpoints (um por linha: nome URL)</span>
-      <textarea class="k-textarea" name="endpoints" rows="4" placeholder="alerta https://hooks.seu-servico.com/x">${esc(linhas)}</textarea></label>`;
-  }
   return p.campos.map((c) => `<label class="k-field"><span class="k-label">${esc(c.label)}</span>
     <input class="k-input" name="${esc(c.key)}" value="${esc(p.valores[c.key] || "")}"></label>`).join("");
 }
 
 function credencialMarkup(p) {
-  if (p.platform === "webhook") return "";
   const acao = p.configured ? "Substituir" : "Salvar";
   return `<form class="k-provider__credential" data-cm-credential-form>
     <label for="cm-cred-${esc(p.platform)}">${esc(p.secreto_campo)}</label>
@@ -63,7 +56,7 @@ function plataformaCard(p) {
       <fieldset>${camposConfig(p)}</fieldset>
       <div class="k-provider__actions">
         <button class="k-btn k-btn--ghost" type="submit" data-cm-save>Salvar configuração</button>
-        <button class="k-btn k-btn--ghost" type="button" data-cm-test>${p.platform === "slack" || p.platform === "webhook" ? "Enviar teste" : "Testar conexão"}</button>
+        <button class="k-btn k-btn--ghost" type="button" data-cm-test>${p.platform === "slack" ? "Enviar teste" : "Testar conexão"}</button>
       </div>
     </form>
     ${credencialMarkup(p)}
@@ -87,9 +80,10 @@ export async function mensageriaView(raiz, _rota, { signal } = {}) {
   signal?.addEventListener("abort", dispose, { once: true });
   const isActive = () => !disposed && !signal?.aborted;
 
-  raiz.innerHTML = `<div class="k-page-head"><h1>Mensageria</h1>
+  raiz.innerHTML = `<div class="k-page-head"><h2>Mensageria</h2>
     <p>Canais de entrega para agendamentos e comandos. O envio passa pela fila durável;
-      se a plataforma cair, a mensagem continua pendente e o gateway reentrega.</p></div>
+      se a plataforma cair, a mensagem continua pendente e o gateway reentrega.
+      Webhooks se configuram na aba própria.</p></div>
     <p class="k-sk__resumo" data-cm-vault role="status"></p>
     <section data-cm-send class="k-card k-skill" aria-label="Envio imediato">
       <header class="k-skill__head"><div><h2>Enviar agora</h2>
@@ -124,19 +118,6 @@ export async function mensageriaView(raiz, _rota, { signal } = {}) {
 
   const lerValores = (p, form, card) => {
     const habilitado = card.querySelector("[data-cm-enabled]").checked;
-    if (p.platform === "webhook") {
-      const endpoints = [];
-      for (const linha of form.elements.endpoints.value.split("\n")) {
-        const partes = linha.trim().split(/\s+/);
-        if (partes.length === 0 || (partes.length === 1 && partes[0] === "")) continue;
-        if (partes.length < 2) throw new Error(`Linha de endpoint inválida: "${linha.trim()}"`);
-        const name = partes[0];
-        const url = partes[1];
-        if (!/^https?:\/\//.test(url)) throw new Error(`URL inválida em "${linha.trim()}": use http(s).`);
-        endpoints.push({ name, url });
-      }
-      return { enabled: habilitado, endpoints };
-    }
     const out = { enabled: habilitado };
     for (const campo of p.campos) out[campo.key] = form.elements[campo.key].value.trim();
     return out;
@@ -241,7 +222,7 @@ export async function mensageriaView(raiz, _rota, { signal } = {}) {
     const dados = await api.mensageriaStatus();
     if (!isActive()) return dispose;
     avisarVault(dados.platforms?.[0]?.vault);
-    const plataformas = dados.platforms || [];
+    const plataformas = (dados.platforms || []).filter((p) => p.platform !== "webhook");
     lista.innerHTML = plataformas.map(plataformaCard).join("");
     for (const p of plataformas) {
       const card = lista.querySelector(`[data-cm="${p.platform}"]`);
@@ -263,7 +244,7 @@ export async function mensageriaView(raiz, _rota, { signal } = {}) {
       }, { signal: listeners.signal });
       form.querySelector("[data-cm-test]").addEventListener("click", (e) => {
         e.preventDefault();
-        const alvo = p.platform === "slack" || p.platform === "webhook" ? null : "";
+        const alvo = p.platform === "slack" ? null : "";
         void testar(card, p, alvo, status, e.currentTarget);
       }, { signal: listeners.signal });
       response?.addEventListener("submit", (e) => {

@@ -72,13 +72,14 @@ beforeEach(() => {
 afterEach(() => { controller.abort(); vi.restoreAllMocks(); });
 
 describe("mensageria screen", () => {
-  it("renders each platform card with the real delivery state", async () => {
+  it("renders each messaging channel card with the real delivery state", async () => {
     await mount();
     const cards = root.querySelectorAll("[data-cm]");
-    expect(cards).toHaveLength(4);
+    // webhook existe no status, mas tem gestão própria na aba Integrações.
+    expect(cards).toHaveLength(3);
     expect(root.querySelector('[data-cm="telegram"]')?.textContent).toContain("Entregando");
     expect(root.querySelector('[data-cm="whatsapp"]')?.textContent).toContain("Sem credencial");
-    expect(root.querySelector('[data-cm="webhook"]')?.textContent).toContain("Não configurado");
+    expect(root.querySelector('[data-cm="webhook"]')).toBeNull();
   });
 
   it("shows the vault banner when the credential vault is locked", async () => {
@@ -145,22 +146,6 @@ describe("mensageria screen", () => {
     await flush();
     expect(api.testarMensageria).toHaveBeenCalledWith("telegram", "");
     expect(root.querySelector('[data-cm="telegram"] [data-cm-status]')?.textContent).toContain("Conexão verificada");
-  });
-
-  it("parses webhook endpoints written one per line", async () => {
-    await mount();
-    change('[data-cm="webhook"] textarea', "alerta https://hooks.exemplo.com/x\naviso http://hooks.local/y", "input");
-    root.querySelector<HTMLInputElement>('[data-cm="webhook"] [name="enabled"]')!.click();
-    await flush();
-    root.querySelector<HTMLButtonElement>('[data-cm="webhook"] [data-cm-save]')!.click();
-    await flush();
-    expect(api.salvarMensageria).toHaveBeenCalledWith("webhook", {
-      enabled: true,
-      endpoints: [
-        { name: "alerta", url: "https://hooks.exemplo.com/x" },
-        { name: "aviso", url: "http://hooks.local/y" },
-      ],
-    });
   });
 
   it("records the send result from delivery and from the queue", async () => {

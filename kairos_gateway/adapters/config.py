@@ -130,6 +130,50 @@ def endpoints(home: Path) -> dict[str, str]:
     return {entry["name"]: entry["url"] for entry in raw}
 
 
+def webhook_endpoints(home: Path) -> list[dict[str, str]]:
+    """Endpoints de webhook na ordem salva, sem depender de campo extra."""
+    return list(load_config(home).get("webhook", {}).get("endpoints", []))
+
+
+def _endpoint_name(name: str) -> str:
+    nome = name.strip()
+    if not nome:
+        raise ValueError("nome do endpoint é obrigatório")
+    return nome
+
+
+def _endpoint_url(url: str) -> str:
+    destino = url.strip()
+    if not (destino.startswith("http://") or destino.startswith("https://")):
+        raise ValueError("URL do endpoint deve começar com http(s)://")
+    return destino
+
+
+def add_webhook_endpoint(home: Path, name: str, url: str) -> dict[str, str]:
+    """Adiciona um endpoint de webhook; valida antes de tocar no disco."""
+    nome = _endpoint_name(name)
+    destino = _endpoint_url(url)
+    doc = load_config(home)
+    atual = doc["webhook"]["endpoints"]
+    if any(entry["name"] == nome for entry in atual):
+        raise ValueError(f"endpoint '{nome}' já existe")
+    doc["webhook"]["endpoints"] = [*atual, {"name": nome, "url": destino}]
+    save_config(home, doc)
+    return {"name": nome, "url": destino}
+
+
+def remove_webhook_endpoint(home: Path, name: str) -> dict[str, str | bool]:
+    """Remove um endpoint de webhook; falha fechado quando ele não existe."""
+    nome = _endpoint_name(name)
+    doc = load_config(home)
+    restantes = [entry for entry in doc["webhook"]["endpoints"] if entry["name"] != nome]
+    if len(restantes) == len(doc["webhook"]["endpoints"]):
+        raise ValueError(f"endpoint '{nome}' não existe")
+    doc["webhook"]["endpoints"] = restantes
+    save_config(home, doc)
+    return {"name": nome, "removed": True}
+
+
 # --- cofre ------------------------------------------------------------------
 
 

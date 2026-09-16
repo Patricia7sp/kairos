@@ -14,6 +14,7 @@ const inventory = {
   tools: [
     {
       name: "read_file", toolset: "core", available: true, description: "Read local text",
+      chat: true, mutating: false,
       schema: { type: "function", function: { name: "read_file", parameters: {
         type: "object", required: ["path"], properties: {
           path: { type: "string", description: "File path" },
@@ -22,7 +23,7 @@ const inventory = {
       } } },
     },
     {
-      name: "remote_read", toolset: "remote", available: false,
+      name: "remote_read", toolset: "remote", available: false, chat: false, mutating: true,
       description: "Remote <script>bad()</script> resource",
       schema: { type: "function", function: { name: "remote_read", parameters: {
         type: "object", properties: {},
@@ -60,9 +61,13 @@ describe("registered tools", () => {
     expect(local.textContent).toContain("path");
     expect(local.textContent).toContain("obrigatório");
     expect(local.textContent).toContain("Starting line");
-    expect(root.textContent).toContain("CLI");
-    expect(root.textContent).toContain("Chat");
-    expect(root.textContent).toContain("automaticamente");
+    // o catálogo documenta o que o Chat usa de verdade: leitura+escrita
+    // marcadas no card, e o subconjunto do Chat recusado por nome.
+    expect(local.querySelector(".k-skill__meta")?.textContent).toContain("No Chat");
+    expect(local.querySelector(".k-skill__meta")?.textContent).not.toContain("Exige aprovação");
+    const remote = root.querySelector('[data-tool="remote_read"]')!;
+    expect(remote.querySelector(".k-skill__meta")?.textContent).toContain("Fora do Chat");
+    expect(remote.querySelector(".k-skill__meta")?.textContent).toContain("Exige aprovação");
     expect(root.querySelector("script")).toBeNull();
     expect(root.textContent).toContain("<script>bad()</script>");
   });

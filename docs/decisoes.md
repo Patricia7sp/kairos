@@ -1776,16 +1776,30 @@ com ratio >= 0.75 e folga sobre o segundo melhor, aplica; caso contrário
 recusa. Isso é deliberadamente mais conservador — evita substituição
 ambígua — e evita dependências externas (rapidfuzz).
 
-### D-08.3 — Lote SEARCH/REPLACE e terminal como alias não adotado
+### D-08.3 — Lote SEARCH/REPLACE e terminal como alias de despacho
 
 O modo `patch` suporta blocos `<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`
 com arquivo opcional na linha do marcador. O batch multi-arquivo é aplicado
 sequencialmente por arquivo (coerente com o princípio de escrita sequencial).
 `terminal` (o nome da allowlist de sandbox) não é registrado: a ferramenta
 de shell no Kairos continua sendo `bash` com o mesmo handler. Adicionar um
-alias `terminal` a duplicaria no schema, violando o cinto estreito; a
-resolução do nome da allowlist para efeito de sandbox pode ser feita em
-tempo de despacho sem expor dois nomes.
+alias `terminal` a duplicaria no schema, violando o cinto estreito.
+
+**Adotado na implementação:** a resolução do nome da allowlist para efeito de
+sandbox é feita em tempo de despacho, sem expor dois nomes — `SANDBOX_ALIASES =
+{"terminal": "bash"}` em `kairos_tools/registry.py`, resolvido apenas em
+`ToolRegistry.dispatch` via `_resolve_alias`. O catálogo (inventory e
+`get_definitions`) continua exibindo um único schema; quem fala com a sandbox
+pelo nome da política funciona, e o gatilho de aprovação do Chat permanece o
+`bash` real.
+
+**O toolset `memory` (memória de longo prazo) acolhe a mesma lógica:** a
+ferramenta é registrada no toolset próprio (`kairos_tools/memory.py`) e fica
+**fora** do `CHAT_TOOLS` — o cinto estreito não a expõe ao modelo nem a submete
+ao gate de aprovação por turno. O efeito real é o executável `kairos memory`
+(`status` lê MEMORY.md/USER.md; `off` limpa o store em `$KAIROS_HOME/memories`),
+o mesmo store file-backed usado pela ferramenta, com guardas fail-closed de
+deriva/leitura herdadas do legado.
 
 ---
 

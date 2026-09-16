@@ -1,27 +1,38 @@
-"""Comando `kairos memory` — memória de longo prazo."""
+"""Comando `kairos memory` — memória de longo prazo (toolset `memory`)."""
 
-import json
 from pathlib import Path
+
+from kairos_tools.memory import MemoryStore
 
 
 async def run_memory(home: Path, args) -> int:
-    home = Path(home)
+    """Executor real do toolset `memory`.
+
+    `status` lê os arquivos do store (MEMORY.md/USER.md); `off` limpa o estado
+    persistente (remove os dois arquivos). O comando deixa de ser placeholder:
+    ele fala com o mesmo store que o restante do Kairos usa.
+    """
+    store = MemoryStore(home=home)
 
     subcommand = getattr(args, "memory_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "off":
-        # Desativa a memória (por exemplo, limpa estado persistente)
-        memory_path = home / "memory.json"
-        if memory_path.exists():
-            memory_path.unlink()
-        print("Memória de longo prazo desativada.")
+        store.clear()
+        print(
+            "Memória de longo prazo limpa "
+            f"(removidos {store.mem_dir / 'MEMORY.md'} e {store.mem_dir / 'USER.md'})."
+        )
     elif subcommand == "status":
-        memory_path = home / "memory.json"
-        if memory_path.exists():
-            data = json.loads(memory_path.read_text(encoding="utf-8"))
-            print(f"Memória ativa: {data}")
-        else:
-            print("Memória de longo prazo desativada (nenhum arquivo de memória).")
+        for target in ("memory", "user"):
+            result = store.list(target)
+            if not result.get("success"):
+                print(f"[{target}] {result.get('error', 'erro de leitura')}")
+                return 1
+            entries = result.get("entries", [])
+            print(f"{target.upper()}: {result.get('usage')} — {len(entries)} entrada(s)")
+            if entries:
+                for i, entry in enumerate(entries, 1):
+                    print(f"  {i}. {entry}")
     else:
         print("Subcomando inválido. Use: memory off | memory status")
         return 1
