@@ -92,10 +92,22 @@ async def setup_service(tmp_path, **kwargs):
 
 
 async def terminal(service, session_id="s1"):
+    # Um assinante que lê do passado pode ficar para trás do backlog se os
+    # eventos chegarem em rajada entre duas leituras; o contrato é resumível,
+    # então retomamos pelo último cursor visto — como o transporte web faz ao
+    # receber `sequence_gap` (kairos_web/runtime_transport.py). Sem isso o
+    # gap vaza como falha intermitente do teste, não do serviço.
     async with asyncio.timeout(3):
-        async for event in service.subscribe(session_id):
-            if event.kind == "turn_end":
-                return event
+        cursor = None
+        while True:
+            try:
+                async for event in service.subscribe(session_id, cursor):
+                    cursor = event.cursor
+                    if event.kind == "turn_end":
+                        return event
+            except RuntimeErrorInfo as error:
+                if error.code != "sequence_gap":
+                    raise
 
 
 @async_test
@@ -332,6 +344,38 @@ async def test_slow_subscriber_gets_resumable_gap_without_blocking_execution(tmp
         resumed = service.subscribe("s1", first.cursor)
         assert (await anext(resumed)).sequence > first.sequence
         await resumed.aclose()
+    finally:
+        await service.aclose()
+
+
+@async_test
+async def test_terminal_recovers_from_sequence_gap_without_losing_turn_end(tmp_path, monkeypatch):
+    # O flake do CI só disparava sob carga: o gap surgia entre duas leituras do
+    # helper e vazava como falha do teste. Aqui o gap é injetado uma vez para
+    # cobrir o mesmo caminho de forma determinística — o helper precisa
+    # retomar pelo cursor (contrato do transporte web) e ainda enxergar o
+    # `turn_end`, sem perder o terminal.
+    service, _store, runtime = await setup_service(tmp_path)
+    original = service.subscribe
+    calls = []
+
+    async def gap_once(session_id, cursor=None):
+        calls.append(cursor)
+        if len(calls) == 1:
+            raise RuntimeErrorInfo("sequence_gap", "assinante atrasado", True)
+        async for event in original(session_id, cursor):
+            yield event
+
+    monkeypatch.setattr(service, "subscribe", gap_once)
+    try:
+        await service.submit("s1", "hello", "key")
+        await runtime.started.wait()
+        await runtime.events.put({"kind": "text", "payload": {"itemId": "i1", "delta": "ha"}})
+        await runtime.events.put({"kind": "turn", "payload": {"state": "completed"}})
+        event = await terminal(service)
+        assert event.kind == "turn_end"
+        assert event.payload["state"] == "completed"
+        assert len(calls) == 2
     finally:
         await service.aclose()
 
