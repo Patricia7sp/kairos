@@ -929,3 +929,32 @@ frentes fechadas no mesmo lote, com a mesma regra: **efeito real ou ausência**.
   `test_memory_tool.py` (store, guardas, registro, despacho e CLI
   `kairos memory`) e **7** testes de integrações no vitest — todos verdes; Ruff e
   formato limpos. Sweep completo e ci.sh na linha dos lotes anteriores.
+
+#### Aplicação em serviço (2026-09-16)
+
+A autora autorizou a publicação ("pode publicar a imagem no kairos"): PR #63
+squash-mergeado em `6b6124e`, imagem construída e testada, publicada pelo
+procedimento privado de backup-verificado → troca de imagem → aceite read-only
+(2º lote; o 1º foi o PR #29/#31), com registro privado em
+`.local/share/kairos-production-backups/`.
+
+- **Publicação:** `healthy_verified` no backup `20260916T093545Z`
+  (`kairos-data.tar.gz` 86 MB, 4.264 arquivos, `integrity_check` ok, 10
+  checkpoints e 2 baselines comparados byte a byte); aplicação trocada para
+  `c010feb3…` (imagem do lote), anterior mantida como rollback; dados
+  preservados (21 sessões, 66 mensagens, 8 usos de modelo, 11 sessões de
+  runtime, 16 turns, 3.476 eventos); broker e keeper inalterados; runtime
+  `ready` + database `available` (schema 5, WAL) + privacy `deny`.
+- **Aceite pós-publicação (read-only, sem geração):** todas as 11 rotas API 200
+  (incluindo `/api/tools/toolsets`), `/api/env` 410, CLI `kairos insights` ==
+  API, `chat`/`mutating` consistentes em todas as ferramentas, Chromium nas
+  larguras 390/900/1400 com a rota `Integrações` renderizando sem erro de JS ou
+  overflow horizontal.
+- **Incidente pré-existente corrigido no caminho:** a imagem do worker de
+  sessões docker (`sha256:98125d…`, pin de `config.yaml`/`stack.env`) havia
+  sumido do daemon e deixava o `kairos-runtime-broker` irremediável
+  (`healthcheck.py`), sem relação com este lote. Recuperação deliberada: build
+  de `docker/external-sandbox` (base mutável → digest novo `8e52de…`), pin
+  atualizado em `config.yaml` + `stack.env` e container keeper recriado, tudo
+  **antes** do deploy (registro privado
+  `operations/worker-image-restore.json`).
