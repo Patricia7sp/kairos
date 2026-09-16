@@ -355,7 +355,7 @@ class SecondRunImprovementTests(unittest.TestCase):
         store.add(
             trigger=query,
             observation=error,
-            correction="kairos auth add --provider telegram --api-key <token>",
+            correction="configurar o token em Integracoes (web) via credential endpoint",
             source="usuario",
             status=ExperienceStatus.ATIVA,
             confidence=0.9,
@@ -365,8 +365,8 @@ class SecondRunImprovementTests(unittest.TestCase):
         ctx_rebuild = build_experience_context(query, self.home)
         self.assertIsNotNone(ctx_rebuild)
         assert ctx_rebuild is not None
-        self.assertIn("auth add", ctx_rebuild)
-        self.assertIn("api-key", ctx_rebuild)
+        self.assertIn("Integracoes", ctx_rebuild)
+        self.assertIn("credential", ctx_rebuild)
 
         # Passo 8-9: resultado positivo → confiança sobe
         items = store.list(status=ExperienceStatus.ATIVA)

@@ -3,7 +3,8 @@
 O canal de entrada (``inbound``) recebe mensagens do bot e leva ao agente pelo
 mesmo ``InteractionRouter`` das outras superfícies (web/terminal). ``config``
 gerencia apenas campos não-secretos em ``messaging.json``; o bot token vive no
-cofre (``kairos auth add --provider telegram --api-key <token>``).
+cofre e é gravado pela tela de Integrações (ou por
+``POST /api/messaging/telegram/credential``).
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ def _secret_summary(home: Path) -> str:
 
     if platform_has_secret(home, "telegram"):
         return "salvo no cofre"
-    return "ausente — defina com: kairos auth add --provider telegram --api-key <token>"
+    return "ausente — defina em Integrações (web) ou POST /api/messaging/telegram/credential"
 
 
 def _apply_config_edits(home: Path, args) -> list[str]:

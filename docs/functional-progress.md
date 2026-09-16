@@ -958,3 +958,31 @@ procedimento privado de backup-verificado → troca de imagem → aceite read-on
   atualizado em `config.yaml` + `stack.env` e container keeper recriado, tudo
   **antes** do deploy (registro privado
   `operations/worker-image-restore.json`).
+
+#### Canal de entrada, experiências operacionais e documentação (2026-09-16)
+
+Lote do PR #64 (branch `feat/telegram-inbound-experiencias`), a pedido da
+autora ("commit e depois docs").
+
+- **Canal de entrada Telegram:** long-poll `getUpdates` com offset persistido em
+  `inbound-telegram.json`, allowlist fail-closed, idempotência
+  `telegram:{update_id}`, `conversation_id=telegram:{chat_id}`, aprovações por
+  teclado inline, chunking ≤4000 caracteres, drenagem por
+  `.drain_request.json` e shutdown gracioso. CLI `telegram config|test|status|
+  run|stop` reais; `test` não alega envio ("nada foi enviado").
+- **Aprendizado operacional por experiência:** pacote `kairos_memory`
+  (`ExperienceStore`, `ExperienceStatus`, `build_experience_context`), store
+  JSON atômico, ajuste de confiança e auto-invalidação. CLI
+  `kairos memory experiences list|add|confirm|reject|invalidate|record`.
+- **Injeção opt-in por turno:** `run`/`chat --experiences` e
+  `telegram.inbound.experiences`; a experiência entra no conteúdo do turno
+  atual, nunca no system prompt nem em turnos passados (cache de prompt).
+- **Docs:** `docs/diagnostico-consolidado.md` (estado real CLI×web×canais e
+  divergências), `docs/plano-ferramentas.md` (proposta priorizada, sem
+  autorização) e `docs/uso-por-canal.md` (passo a passo, limites e dependências
+  externas).
+- **Correção de instrução enganosa:** o hint do segredo Telegram apontava para
+  `kairos auth add`, que não grava o cofre de plataforma (retorna
+  não-implementado). Passou a apontar a tela de Integrações / `POST
+  /api/messaging/telegram/credential`, que é o caminho real
+  (`save_platform_secret`).
