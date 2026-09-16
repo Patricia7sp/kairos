@@ -17,6 +17,7 @@ from kairos_state.connection import read_schema_version
 from kairos_state.cron_schema import CRON_SCHEMA_SQL
 from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
+from kairos_state.shares_schema import SHARES_SCHEMA_SQL
 
 __all__ = [
     "CANONICAL_TABLES",
@@ -75,6 +76,10 @@ def _v4_notepad_schema(conn: sqlite3.Connection) -> None:
     execute_schema(conn, NOTEPAD_SCHEMA_SQL)
 
 
+def _v5_shares_schema(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, SHARES_SCHEMA_SQL)
+
+
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
 #: transação. Rodar duas vezes não altera o resultado (RF-17): a versão
 #: registrada faz o segundo passe não encontrar degrau pendente.
@@ -83,6 +88,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(2, "sessões e journal durável de agent runtime", _v2_runtime_schema),
     Migration(3, "ledger durável de agendamentos", _v3_cron_schema),
     Migration(4, "notepad durável por job de agendamentos", _v4_notepad_schema),
+    Migration(5, "compartilhamento de conversas por link", _v5_shares_schema),
 )
 
 

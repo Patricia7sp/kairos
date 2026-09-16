@@ -806,7 +806,7 @@ describe("menu de ações da conversa", () => {
     expect(menus).toHaveLength(1);
     expect(menus[0]!.getAttribute("data-session-menu")).toBe("existing-session");
     expect([...root.querySelectorAll("[data-menu-action]")].map((b) => b.textContent))
-      .toEqual(["Renomear", "Arquivar", "Excluir"]);
+      .toEqual(["Renomear", "Compartilhar", "Arquivar", "Excluir"]);
     cleanup();
   });
 
@@ -925,6 +925,90 @@ describe("menu de ações da conversa", () => {
 
     expect(backend.requests.some((request) => request.method === "DELETE")).toBe(false);
     expect(root.querySelector('[data-session-menu="existing-session"]')).not.toBeNull();
+    cleanup();
+  });
+
+  it("compartilha a conversa pelo menu e permite revogar o link", async () => {
+    let shares: JsonRecord[] = [];
+    const { root, cleanup, backend } = await mountExisting({
+      sessions: [oldSession],
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [] },
+      overrides: (path, method, init) => {
+        if (path === "/api/sessions/existing-session/shares" && method === "POST") {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          const nova: JsonRecord = {
+            id: 9, session_id: "existing-session", created_at: 1, expires_at: body.expires_at ?? null,
+            revoked_at: null, active: true, url: "http://test/shared/segredo-token", token: "segredo-token",
+          };
+          shares = [nova];
+          return jsonResponse({ share: nova }, 201);
+        }
+        if (path === "/api/sessions/existing-session/shares" && method === "GET") {
+          return jsonResponse({ session_id: "existing-session", shares });
+        }
+        if (path === "/api/sessions/existing-session/shares/9" && method === "DELETE") {
+          shares = shares.map((share) => ({ ...share, active: false, revoked_at: 2 }));
+          return jsonResponse({ status: "revoked", id: 9 });
+        }
+        return undefined;
+      },
+    });
+
+    root.querySelector<HTMLButtonElement>('[data-menu-action="share"]')!.click();
+    const dlg = await vi.waitFor(() => {
+      const el = document.querySelector<HTMLDialogElement>(".k-dialog");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(dlg.textContent).toContain("Compartilhar conversa");
+    expect(dlg.textContent).toContain("leitura");
+    const expiracao = dlg.querySelector<HTMLSelectElement>("[data-share-expiry]");
+    expect(expiracao?.value).toBe("604800");
+
+    dlg.querySelector<HTMLButtonElement>("[data-share-criar]")!.click();
+    await vi.waitFor(() => {
+      expect(dlg.querySelector("[data-share-resultado]")!.textContent).toContain("Link criado");
+    });
+    const campo = dlg.querySelector<HTMLInputElement>("[data-share-resultado] input")!;
+    expect(campo.value).toContain("segredo-token");
+    expect(backend.requests).toContainEqual({
+      path: "/api/sessions/existing-session/shares", method: "POST", body: { expires_at: expect.any(Number) },
+    });
+    expect(dlg.querySelector("[data-share-lista]")!.textContent).toContain("ativo");
+
+    dlg.querySelector<HTMLButtonElement>("[data-revogar]")!.click();
+    await vi.waitFor(() => {
+      expect(dlg.querySelector("[data-share-lista]")!.textContent).toContain("revogado");
+    });
+    expect(backend.requests).toContainEqual({
+      path: "/api/sessions/existing-session/shares/9", method: "DELETE", body: undefined,
+    });
+    expect(dlg.querySelector("[data-revogar]")).toBeNull();
+    cleanup();
+  });
+
+  it("falha honesta quando criar o link não é possível", async () => {
+    const { root, cleanup } = await mountExisting({
+      sessions: [oldSession],
+      details: { "existing-session": detail(oldSession) },
+      messages: { "existing-session": [] },
+      overrides: (path, method) => {
+        if (path.startsWith("/api/sessions/existing-session/shares") && method === "GET") {
+          return jsonResponse({ session_id: "existing-session", shares: [] });
+        }
+        return undefined;
+      },
+    });
+
+    root.querySelector<HTMLButtonElement>('[data-menu-action="share"]')!.click();
+    const dlg = await vi.waitFor(() => document.querySelector<HTMLDialogElement>(".k-dialog")!);
+    expect(dlg).toBeTruthy();
+    // POST inesperada: o backend-teste lança; o diálogo mostra o erro na tela
+    dlg.querySelector<HTMLButtonElement>("[data-share-criar]")!.click();
+    await vi.waitFor(() => {
+      expect(dlg.querySelector("[data-share-resultado]")!.textContent).toContain("Falha ao criar o link");
+    });
     cleanup();
   });
 });

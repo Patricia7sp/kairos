@@ -2,6 +2,7 @@
 
 import { api } from "../api.js";
 import { ChatClient } from "../chat-client.js";
+import { icons } from "../icons.js";
 import { mergeSelectionParameters } from "../selection-parameters.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
@@ -129,6 +130,7 @@ const sessionsNavMarkup = (sessions) => `${sessions.map((session) => session.exe
       <summary aria-label="Opções da conversa ${esc(session.title || "sem título")}">⋯</summary>
       <ul role="menu" aria-label="Ações da conversa">
         <li><button type="button" role="menuitem" data-menu-action="rename">Renomear</button></li>
+        <li><button type="button" role="menuitem" data-menu-action="share">Compartilhar</button></li>
         <li><button type="button" role="menuitem" data-menu-action="archive">Arquivar</button></li>
         <li><button type="button" role="menuitem" data-menu-action="delete" class="k-chat__menu--perigo">Excluir</button></li>
       </ul>
@@ -613,6 +615,8 @@ export async function chatView(root, _route, { signal } = {}) {
       } else if (action === "archive") {
         await api.atualizarSessao(id, { archived: true });
         await reloadSessions();
+      } else if (action === "share") {
+        await abrirDialogoCompartilhamento(id);
       } else if (action === "delete") {
         const confirma = confirm("Excluir esta conversa? As mensagens serão apagadas e esta ação não pode ser desfeita.");
         if (!confirma) return;
@@ -724,4 +728,131 @@ export async function chatView(root, _route, { signal } = {}) {
   });
   updateComposer();
   return dispose;
+}
+
+const quandoRelogio = (value) => {
+  if (!value) return "—";
+  const data = new Date(value < 1e12 ? value * 1000 : value);
+  return Number.isNaN(data.getTime())
+    ? String(value)
+    : data.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+};
+
+async function abrirDialogoCompartilhamento(id) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "k-dialog";
+  dlg.innerHTML = `
+    <form method="dialog" class="k-dialog__head">
+      <div>
+        <h3>Compartilhar conversa</h3>
+        <span class="k-dialog__cat"><code>${esc(id)}</code></span>
+      </div>
+      <button class="k-btn k-btn--ghost" aria-label="Fechar">${icons.close}</button>
+    </form>
+    <div class="k-dialog__body">
+      <p class="k-det__desc">Um link de leitura permite ver a transcrição sem token de
+        sessão. Qualquer pessoa com o link acessa — revogue quando terminar.</p>
+      <form data-share-create class="k-field">
+        <label class="k-label" for="share-expiry">Expiração</label>
+        <select id="share-expiry" data-share-expiry class="k-select">
+          <option value="86400">1 dia</option>
+          <option value="604800" selected>7 dias</option>
+          <option value="2592000">30 dias</option>
+          <option value="31536000">1 ano</option>
+          <option value="0">Sem expiração</option>
+        </select>
+        <button class="k-btn k-btn--primary" type="submit" data-share-criar>Criar link</button>
+      </form>
+      <div data-share-resultado aria-live="polite" class="k-share__resultado"></div>
+      <h4>Links desta conversa</h4>
+      <div data-share-lista><div class="k-skeleton" style="height:80px"></div></div>
+    </div>`;
+  document.body.append(dlg);
+  dlg.showModal();
+  dlg.addEventListener("close", () => dlg.remove());
+
+  const resultado = dlg.querySelector("[data-share-resultado]");
+  const lista = dlg.querySelector("[data-share-lista]");
+
+  const recarregarLista = async () => {
+    if (!dlg.isConnected) return;
+    try {
+      const { shares = [] } = await api.compartilhamentosSessao(id);
+      if (!dlg.isConnected) return;
+      if (!shares.length) {
+        lista.innerHTML = "<p class='k-ses__vazio'>Nenhum link criado ainda.</p>";
+        return;
+      }
+      lista.innerHTML = `<ul class="k-share__lista">${shares.map((s) => `
+        <li>
+          <span class="k-share__meta">
+            Criado em ${esc(quandoRelogio(s.created_at))}
+            ${s.expires_at ? ` · expira ${esc(quandoRelogio(s.expires_at))}` : ""}
+            <span class="k-badge ${s.active ? "k-badge--ok" : ""}">
+              ${s.active ? "ativo" : s.revoked_at ? "revogado" : "expirado"}
+            </span>
+          </span>
+          ${s.active ? `<button type="button" class="k-btn k-btn--ghost"
+            data-revogar="${esc(String(s.id))}">Revogar</button>` : ""}
+        </li>`).join("")}</ul>`;
+      lista.querySelectorAll("[data-revogar]").forEach((botao) => {
+        botao.addEventListener("click", async () => {
+          botao.disabled = true;
+          try {
+            await api.revogarCompartilhamento(id, botao.dataset.revogar);
+            await recarregarLista();
+          } catch (e) {
+            botao.disabled = false;
+            lista.insertAdjacentHTML("afterbegin",
+              `<p class="k-error">Falha ao revogar: ${esc(e.message)}</p>`);
+          }
+        });
+      });
+    } catch (e) {
+      if (dlg.isConnected) lista.innerHTML = `<p class="k-error">${esc(e.message)}</p>`;
+    }
+  };
+
+  dlg.querySelector("[data-share-create]").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const botao = dlg.querySelector("[data-share-criar]");
+    botao.disabled = true;
+    const segundos = Number(dlg.querySelector("[data-share-expiry]").value);
+    const opcoes = segundos > 0 ? { expires_at: Date.now() / 1000 + segundos } : {};
+    try {
+      const { share } = await api.compartilharSessao(id, opcoes);
+      if (!dlg.isConnected) return;
+      const campo = document.createElement("input");
+      campo.className = "k-input";
+      campo.readOnly = true;
+      campo.value = share.url;
+      campo.setAttribute("aria-label", "Link de leitura da conversa");
+      const copiar = document.createElement("button");
+      copiar.type = "button";
+      copiar.className = "k-btn k-btn--ghost";
+      copiar.textContent = "Copiar";
+      copiar.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(share.url);
+          copiar.textContent = "Copiado";
+        } catch {
+          campo.select();
+        }
+      });
+      resultado.replaceChildren(
+        Object.assign(document.createElement("p"), {
+          textContent: "Link criado — leitura apenas, sem token de sessão.",
+        }),
+        campo,
+        copiar,
+      );
+      await recarregarLista();
+    } catch (e) {
+      resultado.innerHTML = `<p class="k-error">Falha ao criar o link: ${esc(e.message)}</p>`;
+    } finally {
+      botao.disabled = false;
+    }
+  });
+
+  void recarregarLista();
 }

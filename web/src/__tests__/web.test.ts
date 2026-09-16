@@ -359,4 +359,20 @@ describe("Chat principal", () => {
     expect(turnMarkup({ ...initialTurnState(), status: "streaming", text: "segunda" }))
       .toContain("data-active-turn");
   });
+
+  it("menu de conversa inclui Compartilhar, Arquivar e Excluir", () => {
+    const session = { id: "s1", title: "Mensagem", model: "gpt-test" };
+    const markup = chatShellMarkup({
+      providers: [{ id: "openai", configured: true }],
+      sessions: [session],
+      models: [{ id: "gpt-test", provider: "openai", name: "GPT", capabilities: { tools: false } }],
+      selection: { provider: "openai", model: "gpt-test" },
+      connected: true,
+    });
+    expect(markup).toContain('data-menu-action="share"');
+    expect(markup).toContain("Compartilhar");
+    expect(markup).toContain('data-menu-action="archive"');
+    expect(markup).toContain('data-menu-action="delete"');
+    expect(markup).toContain('data-menu-action="rename"');
+  });
 });

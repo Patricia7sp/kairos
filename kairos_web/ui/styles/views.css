@@ -329,6 +329,12 @@
 .k-chat__session-menu button { display: block; width: 100%; padding: var(--k-space-2) var(--k-space-3); border: 0; border-radius: var(--k-radius); background: transparent; color: var(--k-text); text-align: left; cursor: pointer; }
 .k-chat__session-menu button:hover { background: var(--k-surface-2); }
 .k-chat__session-menu button.k-chat__menu--perigo { color: var(--k-danger); }
+.k-share__resultado { display: flex; gap: var(--k-space-2); align-items: center; margin: var(--k-space-3) 0; }
+.k-share__resultado .k-input { flex: 1; min-width: 0; }
+.k-share__resultado p { flex-basis: 100%; }
+.k-share__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--k-space-2); }
+.k-share__lista li { display: flex; align-items: center; justify-content: space-between; gap: var(--k-space-3); }
+.k-share__meta { font-size: .85rem; color: var(--k-text-2); }
 .k-chat__conversation { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; min-width: 0; }
 .k-chat__messages { overflow-y: auto; padding: var(--k-space-5); }
 .k-chat-message { max-width: 78%; margin-bottom: var(--k-space-4); padding: var(--k-space-3) var(--k-space-4); border-radius: var(--k-radius-lg); background: var(--k-surface-2); }
