@@ -70,7 +70,10 @@ class Scheduler:
             report["recovered"] = self.store.recover()
             if report["recovered"]:
                 await record_service_event_async(
-                    self.home, "cron.unknown", results=report["recovered"]
+                    self.home,
+                    "cron.unknown",
+                    results=report["recovered"],
+                    meta={"origin": "cron", "call_type": "cron", "status": "recovered"},
                 )
             for candidate in self.store.list():
                 if candidate.get("monitor") is not None:
@@ -130,7 +133,16 @@ class Scheduler:
                             "unknown",
                             "Execução interrompida; efeitos anteriores desconhecidos.",
                         )
-                        await record_service_event_async(self.home, "cron.unknown")
+                        await record_service_event_async(
+                            self.home,
+                            "cron.unknown",
+                            meta={
+                                "origin": "cron",
+                                "call_type": "cron",
+                                "status": "unknown",
+                                "conversation_id": "cron-" + execution_id,
+                            },
+                        )
                     except Exception:  # noqa: BLE001 - preserve cancellation; next tick recovers the durable row
                         logger.error("could not persist interrupted scheduler execution")
                     raise
@@ -142,7 +154,16 @@ class Scheduler:
                     )
                     report["failed"] += 1
                     event_code = "cron.failed"
-                await record_service_event_async(self.home, event_code)
+                await record_service_event_async(
+                    self.home,
+                    event_code,
+                    meta={
+                        "origin": "cron",
+                        "call_type": "cron",
+                        "status": "completed" if event_code == "cron.completed" else "failed",
+                        "conversation_id": "cron-" + execution_id,
+                    },
+                )
                 report["executed"] += 1
             self.last_tick = now.isoformat()
             self.last_error = None
@@ -191,10 +212,29 @@ class Scheduler:
             self.store.record_suppressed_tick(job["id"], now=now)
             if decision.outcome is MonitorOutcome.NO_CHANGE:
                 report["suppressed"] += 1
-                await record_service_event_async(self.home, "cron.no_change")
+                await record_service_event_async(
+                    self.home,
+                    "cron.no_change",
+                    meta={
+                        "origin": "cron",
+                        "call_type": "monitor",
+                        "status": "no_change",
+                        "conversation_id": "cron-monitor-" + job["id"],
+                    },
+                )
             else:
                 report["source_errors"] += 1
-                await record_service_event_async(self.home, "cron.monitor_error", results=1)
+                await record_service_event_async(
+                    self.home,
+                    "cron.monitor_error",
+                    results=1,
+                    meta={
+                        "origin": "cron",
+                        "call_type": "monitor",
+                        "status": "monitor_error",
+                        "conversation_id": "cron-monitor-" + job["id"],
+                    },
+                )
             return None
         next_state = monitor_state_dict(decision.next_state, checked_at=now.isoformat())
         claimed = self.store.claim(job["id"], now, monitor_state=next_state)

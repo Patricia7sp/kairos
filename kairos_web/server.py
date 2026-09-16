@@ -106,7 +106,11 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     application.state.delivery_adapters = sorted(build_platform_adapters(home))
     try:
-        await record_service_event_async(home, "web.started")
+        await record_service_event_async(
+            home,
+            "web.started",
+            meta={"origin": "web", "call_type": "web", "status": "started"},
+        )
         yield
     finally:
         try:

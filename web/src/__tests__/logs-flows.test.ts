@@ -34,6 +34,8 @@ beforeEach(() => {
   controller = new AbortController();
   requests = [];
   respond = () => response(ready);
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.open = false; this.dispatchEvent(new Event("close")); } });
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
     const url = new URL(path, "http://localhost");
     requests.push({ url, signal: init?.signal });
@@ -68,6 +70,31 @@ describe("service event records", () => {
     expect(rows[1]!.textContent).toContain('<svg onload="alert(2)">');
     expect(root.querySelector("img, script, svg")).toBeNull();
     expect(root.textContent).toContain("Eventos dos serviços");
+  });
+
+  it("opens a detail dialog with code, counters and meta fields", async () => {
+    respond = () => response({ ...ready, events: [{ ...event,
+      meta: { origin: "web", call_type: "chat", status: "completed", duration_ms: 150,
+        conversation_id: "conv-001", tool: "web_search", error: "auth" },
+      counters: { api_calls: 2, results: 5 } }] });
+    await mount();
+    await vi.waitFor(() => expect(root.querySelectorAll("[data-log-event]")).toHaveLength(1));
+    root.querySelector<HTMLElement>("[data-log-event]")!.click();
+    await vi.waitFor(() => expect(document.querySelector("dialog")).not.toBeNull());
+    const dialog = document.querySelector("dialog")!;
+    expect(dialog.textContent).toContain("Chamada ao modelo concluída.");
+    expect(dialog.textContent).toContain("chat.completed");
+    expect(dialog.textContent).toContain("Chamadas ao modelo");
+    expect(dialog.textContent).toContain("Resultados");
+    expect(dialog.textContent).toContain("Origem");
+    expect(dialog.textContent).toContain("web");
+    expect(dialog.textContent).toContain("Duração");
+    expect(dialog.textContent).toContain("150 ms");
+    expect(dialog.textContent).toContain("Conversa");
+    expect(dialog.textContent).toContain("conv-001");
+    dialog.close();
+    await new Promise(done => setTimeout(done, 0));
+    expect(document.querySelector("dialog")).toBeNull();
   });
 
   it.each([

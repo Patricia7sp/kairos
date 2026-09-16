@@ -34,7 +34,7 @@ def test_search_loop_records_model_and_search_outcomes_without_content(
 
             monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
             envelope = InteractionEnvelope(
-                conversation_id="private-id",
+                conversation_id="conv-001",
                 source="web",
                 content="private-prompt",
                 web_search=True,

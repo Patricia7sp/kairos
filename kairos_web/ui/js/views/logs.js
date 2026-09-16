@@ -7,12 +7,17 @@ const services = { web: "Web", chat: "Chat", search: "Busca", cron: "Agendamento
 const levels = { info: "Informação", warning: "Atenção", error: "Erro" };
 const counters = { api_calls: "Chamadas ao modelo", input_tokens: "Tokens de entrada",
   output_tokens: "Tokens de saída", results: "Resultados" };
+const metaLabels = {
+  origin: "Origem", call_type: "Tipo", status: "Status",
+  duration_ms: "Duração", conversation_id: "Conversa",
+  tool: "Ferramenta", error: "Erro",
+};
 const timestamp = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Horário indisponível"
     : `${date.toLocaleString("pt-BR", { timeZone: "UTC" })} UTC`;
 };
-const eventMarkup = (event) => `<article class="k-card" data-log-event>
+const eventMarkup = (event, index) => `<article class="k-card" data-log-event data-log-event-index="${index}">
   <div class="k-skill__meta">
     <time datetime="${esc(event.timestamp)}">${esc(timestamp(event.timestamp))}</time>
     <span class="k-badge">${esc(services[event.service] || event.service)}</span>
@@ -24,6 +29,46 @@ const eventMarkup = (event) => `<article class="k-card" data-log-event>
       `${esc(counters[key] || key)}: ${esc(typeof value === "number" ? value.toLocaleString("pt-BR") : value)}`,
     ).join(" · ")}</p>` : ""}
 </article>`;
+
+let currentEvents = [];
+function abrirLogDetalhe(index) {
+  const event = currentEvents[index];
+  if (!event) return;
+  const dlg = document.createElement("dialog");
+  dlg.className = "k-dialog";
+  const metaHtml = Object.keys(event.meta || {}).length
+    ? `<h4>Metadados</h4><dl class="k-det__meta">${
+        Object.entries(event.meta).map(([key, value]) =>
+          `<div><dt>${esc(metaLabels[key] || key)}</dt><dd>${esc(
+            key === "duration_ms" ? `${value} ms` : value,
+          )}</dd></div>`,
+        ).join("")}</dl>` : "";
+  dlg.innerHTML = `
+    <form method="dialog" class="k-dialog__head">
+      <div>
+        <h3>${esc(event.message)}</h3>
+        <span class="k-dialog__cat">${esc(services[event.service] || event.service)} · ${esc(levels[event.level] || event.level)}</span>
+      </div>
+      <button class="k-btn k-btn--ghost" aria-label="Fechar">✕</button>
+    </form>
+    <div class="k-dialog__body">
+      <dl class="k-det__meta">
+        <div><dt>Horário</dt><dd>${esc(timestamp(event.timestamp))}</dd></div>
+        <div><dt>Código</dt><dd><code>${esc(event.code)}</code></dd></div>
+      </dl>
+      ${Object.keys(event.counters || {}).length ? `<h4>Contadores</h4>
+      <dl class="k-det__meta">${
+        Object.entries(event.counters).map(([key, value]) =>
+          `<div><dt>${esc(counters[key] || key)}</dt><dd>${esc(
+            typeof value === "number" ? value.toLocaleString("pt-BR") : value,
+          )}</dd></div>`,
+        ).join("")}</dl>` : ""}
+      ${metaHtml}
+    </div>`;
+  document.body.append(dlg);
+  dlg.showModal();
+  dlg.addEventListener("close", () => dlg.remove());
+}
 
 export async function logsView(root, _route, { signal } = {}) {
   const listeners = new AbortController();
@@ -85,8 +130,9 @@ export async function logsView(root, _route, { signal } = {}) {
         showError();
       } else {
         status.textContent = `${data.events.length} registro${data.events.length === 1 ? "" : "s"} exibido${data.events.length === 1 ? "" : "s"}.`;
+        currentEvents = data.events;
         content.innerHTML = data.events.length
-          ? `<div class="k-grid">${data.events.map(eventMarkup).join("")}</div>`
+          ? `<div class="k-grid">${data.events.map((event, index) => eventMarkup(event, index)).join("")}</div>`
           : '<div class="k-card k-empty"><h2>Nenhum registro encontrado</h2><p>Nenhum evento disponível para os filtros selecionados.</p></div>';
       }
     } catch (error) {
@@ -100,6 +146,10 @@ export async function logsView(root, _route, { signal } = {}) {
   };
   form.addEventListener("submit", (event) => { event.preventDefault(); void load(); }, { signal: listeners.signal });
   form.addEventListener("change", () => void load(), { signal: listeners.signal });
+  content.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-log-event]");
+    if (card) abrirLogDetalhe(Number(card.dataset.logEventIndex));
+  }, { signal: listeners.signal });
   void load();
   return dispose;
 }

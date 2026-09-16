@@ -22,6 +22,17 @@ _LOCK_TIMEOUT_SECONDS = 0.25
 _CURRENT = "service-events.jsonl"
 _ROTATED = "service-events.jsonl.1"
 _COUNTERS = frozenset({"api_calls", "input_tokens", "output_tokens", "results"})
+_META_STRING = {
+    "origin": 24,
+    "call_type": 32,
+    "status": 24,
+    "model": 128,
+    "conversation_id": 128,
+    "tool": 64,
+    "integration": 32,
+    "error": 96,
+}
+_META_INT = {"duration_ms": (0, 86_400_000)}
 _CATALOG = {
     "web.started": ("web", "info", "Serviço web iniciado."),
     "web.stopped": ("web", "info", "Serviço web encerrado."),
@@ -48,6 +59,27 @@ def _validated_counters(value: object) -> dict[str, int]:
     ):
         raise ValueError("invalid counter value")
     return dict(value)
+
+
+def _validated_meta(value: object) -> dict[str, str | int]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("invalid meta")
+    result: dict[str, str | int] = {}
+    for key, item in value.items():
+        if key in _META_STRING:
+            if not isinstance(item, str) or not item.strip() or len(item) > _META_STRING[key]:
+                raise ValueError("invalid meta string")
+            result[key] = item.strip()
+        elif key in _META_INT:
+            lowest, highest = _META_INT[key]
+            if type(item) is not int or not lowest <= item <= highest:
+                raise ValueError("invalid meta integer")
+            result[key] = item
+        else:
+            raise ValueError("invalid meta key")
+    return result
 
 
 def _private(info: os.stat_result, *, directory: bool = False) -> None:
@@ -143,11 +175,12 @@ def _write_all(descriptor: int, line: bytes) -> None:
     os.fsync(descriptor)
 
 
-def record_service_event(home: Path, code: str, **counters: int) -> bool:
+def record_service_event(home: Path, code: str, *, meta: object = None, **counters: int) -> bool:
     """Persist one approved event; rejected input and storage failures return False."""
     try:
         if not isinstance(code, str) or code not in _CATALOG:
             return False
+        validated_meta = _validated_meta(meta)
         record = {
             "timestamp": datetime.now(UTC)
             .isoformat(timespec="microseconds")
@@ -155,6 +188,8 @@ def record_service_event(home: Path, code: str, **counters: int) -> bool:
             "code": code,
             "counters": _validated_counters(counters),
         }
+        if validated_meta:
+            record["meta"] = validated_meta
         line = (json.dumps(record, separators=(",", ":")) + "\n").encode("utf-8")
         if len(line) > _MAX_LINE_BYTES:
             return False
@@ -165,7 +200,9 @@ def record_service_event(home: Path, code: str, **counters: int) -> bool:
         return False
 
 
-async def record_service_event_async(home: Path, code: str, **counters: int) -> bool:
+async def record_service_event_async(
+    home: Path, code: str, *, meta: object = None, **counters: int
+) -> bool:
     """Offload journal I/O; finish the reserved write before propagating cancellation."""
     # Local import keeps the synchronous journal independent during package boot.
     # This cleanup utility has no dependency on integration or observability.
@@ -175,7 +212,7 @@ async def record_service_event_async(home: Path, code: str, **counters: int) -> 
 
     async def persist() -> None:
         nonlocal written
-        written = await asyncio.to_thread(record_service_event, home, code, **counters)
+        written = await asyncio.to_thread(record_service_event, home, code, meta=meta, **counters)
 
     outcome = await run_persistent_cleanup(persist, task_name="kairos-service-event-write")
     if outcome.cancellation is not None:
@@ -198,8 +235,14 @@ def _public_record(line: bytes) -> dict[str, Any]:
     if len(line) > _MAX_LINE_BYTES or not line.endswith(b"\n"):
         raise ValueError("invalid journal line")
     record = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
-    if not isinstance(record, dict) or set(record) != {"timestamp", "code", "counters"}:
+    if (
+        not isinstance(record, dict)
+        or set(record) - {"timestamp", "code", "counters", "meta"}
+        or not {"timestamp", "code", "counters"} <= set(record)
+    ):
         raise ValueError("invalid journal record")
+    # Old journals stored no metadata; treat them as empty.
+    meta = _validated_meta(record.get("meta"))
     code, timestamp = record["code"], record["timestamp"]
     if not isinstance(code, str) or code not in _CATALOG:
         raise ValueError("invalid journal code")
@@ -215,6 +258,7 @@ def _public_record(line: bytes) -> dict[str, Any]:
         "service": service,
         "level": level,
         "message": message,
+        "meta": meta,
         "counters": _validated_counters(record["counters"]),
     }
 
