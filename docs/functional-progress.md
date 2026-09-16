@@ -993,3 +993,33 @@ autora ("commit e depois docs").
   (`sequence_gap` vazando pelo helper `terminal`). O helper passou a retomar
   pelo último cursor, como o transporte web, em PR #65 (`8b1be7f`), com teste
   determinístico que falha sem a correção.
+
+#### Aplicação em serviço do canal inbound + experiências (2026-09-16)
+
+Deploy autorizado pela autora ("pode fazer o deploy em producao") do commit
+publicado `33e7df048d16…` (PR #64 + fix #65) sobre a produção que rodava
+`6b6124e`. Sem mudança de schema (nenhuma migração em #64/#65), então apenas a
+imagem da aplicação foi trocada.
+
+- **Imagem:** construída no commit de deploy (`docker build
+  --provenance=false --sbom=false -t kairos:inbound-experiencias .`), ID
+  `sha256:c45a740d166a…`; smoke confirmou `kairos_memory` e
+  `kairos_gateway.inbound` importáveis.
+- **Publicação:** backup verificado `20260916T235206Z` (`kairos-data.tar.gz`
+  86 MB, 4.255 arquivos, `integrity_check` ok, 10 checkpoints e 2 baselines
+  conferidos byte a byte; `restore` idêntico ao `source`); app trocada para a
+  imagem acima, anterior `sha256:c010feb3…` mantida como rollback; broker e
+  keeper inalterados; dados preservados (21 sessões, 66 mensagens, 8 usos de
+  modelo, 11 sessões de runtime, 16 turns, 3.476 eventos); runtime `ready`,
+  database `available` (schema 5, WAL) e privacy `deny`.
+- **Aceite read-only (sem geração):** 11 rotas API 200 (inclusive
+  `/api/tools/toolsets`), `/api/env` 410, CLI `kairos insights` == API,
+  `chat`/`mutating` corretos e as 11 rotas navegadas em Chromium nas larguras
+  390/900/1400 sem erro de JS nem overflow.
+- **Verificação dirigida das capacidades novas:** `kairos memory experiences
+  list --json` responde sem erro (vazio) e `kairos telegram status --json`
+  traz o hint corrigido do segredo (tela de Integrações / `POST
+  /api/messaging/telegram/credential`), confirmando que o fix do hint está em
+  produção.
+- **Registro privado:** `.local/share/kairos-production-backups/operations/
+  latest-inbound-experiencias.json` (`status: healthy_verified`).
