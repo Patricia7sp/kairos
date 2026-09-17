@@ -40,10 +40,10 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 | Aprovação de ferramenta | terminal | modal na UI | keyboard inline | — |
 | Memória de longo prazo | `kairos memory status/off` | leitura | herdada | — |
 | Experiências (aprendizado) | ligadas por padrão (`--no-experiences` desliga) | — | `inbound.experiences` (padrão ligado) | — |
-| Gestão de experiências | `kairos memory experiences` | — | — | — |
+| Gestão de experiências | `kairos memory experiences` | tela **Experiências** (listar/confirmar/rejeitar/invalidar/registrar) | — | — |
 | Envio de mensagem | — | `/api/messaging/send` | `TelegramAdapter` | `WhatsAppAdapter` |
-| Config não-secreta | `kairos telegram config` | `/api/messaging/{platform}` | idem via CLI | CLI é placeholder |
-| Teste de conexão | `kairos telegram test` | `/api/messaging/{platform}/test` | verifica `getMe` | adapter verifica, CLI não |
+| Config não-secreta | `kairos telegram config` | `/api/messaging/{platform}` | idem via CLI | `kairos whatsapp config|status` |
+| Teste de conexão | `kairos telegram test` | `/api/messaging/{platform}/test` | verifica `getMe` | adapter verifica; CLI aciona |
 
 ## Terminal (CLI)
 
@@ -53,9 +53,11 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
   Telegram); `--no-experiences`/`"experiences": false` desligam. O contexto entra
   no **conteúdo do turno atual**, nunca no system prompt — reescrever o prefixo
   invalidaria o cache por conversa (Lei 1 em `kairos_integration.surfaces`).
-- **Telegram:** `kairos telegram config|test|status|run|stop`. O token vive no
-  cofre (`kairos auth add --provider telegram --api-key <token>`); `test` não
-  finge envio (imprime "nada foi enviado") e `status` lê o watermark real.
+- **Telegram:** `kairos telegram config|test|status|run|stop`. O token do bot
+  mora no cofre de plataforma, gravado pela tela de Integrações (ou
+  `POST /api/messaging/telegram/credential`) — `kairos auth add` não chama esse
+  cofre; `test` não finge envio (imprime "nada foi enviado") e `status` lê o
+  watermark real.
 - **Memória:** `kairos memory status|off` opera o toolset `memory`
   (`MEMORY.md`/`USER.md`); `kairos memory experiences list|add|confirm|reject|
   invalidate|record` opera o aprendizado (`kairos_memory`).
@@ -90,29 +92,44 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
   Cloud (Meta Graph v21.0), com `verify()` que confirma número/`phone_number_id`
   sem despachar mensagem.
 - **Entrada:** não existe. Não há polling nem webhook de recebimento.
-- **CLI `kairos whatsapp config|test`:** placeholder explícito — não altera
-  configuração nem promete envio ("Nenhum canal configurado; nada foi
-  enviado."). A configuração real é feita pela tela de integrações da web
-  (ou `PUT /api/messaging/whatsapp`).
+- **CLI `kairos whatsapp config|status|test`:** `config`/`status` gravam e leem
+  os campos não-secretos em `messaging.json` (`enabled`, `phone_number_id`,
+  `number_default`) e reportam a presença do token no cofre — sem ler o segredo.
+  `test` aciona `WhatsAppAdapter.verify` (confirma token e número sem despachar
+  mensagem) e nunca alega envio ("nada foi enviado"). O segredo continua
+  gravado pela tela de integrações (ou `POST /api/messaging/whatsapp/credential`).
+
+## Slack
+
+- **Saída real:** `kairos_gateway/adapters/slack.py` envia pela incoming webhook
+  (alvo `slack:#canal`), construído com `enabled` + URL no cofre.
+- **CLI `kairos slack config|status|test`:** `config`/`status` operam os campos
+  não-secretos em `messaging.json` (`enabled`, `channel_default`) e reportam a
+  presença da URL no cofre. `test` valida a **forma** da URL — a API entrante
+  do Slack não tem verificação sem envio — e nunca alega envio.
 
 ## Divergências conhecidas
 
-1. **WhatsApp CLI × web:** a tela web configura e testa de verdade; o comando
-   de terminal não. A assimetria é conhecida e não finge sucesso.
-2. **Experiências:** expostas no terminal e no Telegram; a web ainda não tem
-   tela para listar/confirmar — as experiências são gerenciadas só pela CLI.
+1. **Slack/WhatsApp CLI × web:** a web configura e testa de verdade (para o
+   Slack o teste é envio real); a CLI opera o mesmo `messaging.json`,
+   aciona `verify()` sem enviar (whatsapp) ou valida só a forma da URL
+   (slack). Nem uma nem outra finge sucesso.
+2. **Experiências:** expostas no terminal e no Telegram, e agora com tela no
+   painel (listar/confirmar/rejeitar/invalidar/registrar resultado) além da CLI.
 3. **Busca web no Telegram:** sempre ligada; no terminal é opt-in
    (`--web-search`).
-4. **Teste de conexão:** o `TelegramChannel.verify`/`WhatsAppAdapter.verify`
-   existem, mas a CLI do WhatsApp não os aciona; a CLI do Telegram aciona
-   `getMe`.
+4. **Teste de conexão:** `TelegramChannel.verify` (a CLI do telegram aciona
+   `getMe`); `WhatsAppAdapter.verify` (a CLI aciona); o Slack só valida a forma.
+5. **Webhook CLI × gateway:** o CLI `kairos webhook` passou a ler o mesmo
+   `messaging.json` que o gateway e a API usam (antes lia um `webhooks.json`
+   próprio que nada mais consumia).
 
 ## O que este documento não afirma
 
 - Não certifica geração bem-sucedida de nenhum modelo específico nem
   autenticação de contas de terceiros.
-- Não afirma canal de entrada WhatsApp, webhook de entrada Telegram,
-  tela web de experiências nem paridade total entre as CLIs.
+- Não afirma canal de entrada WhatsApp, webhook de entrada Telegram nem
+  paridade total entre as CLIs.
 - Números de teste não são congelados aqui; a fonte é a suíte local e o CI.
 
 ## Referências
