@@ -272,6 +272,17 @@ def test_mutating_tools_require_approval_read_only_do_not(chat_tools):
         assert not chat_tools.needs_tool_approval(name)
 
 
+def test_git_approval_distingue_subcomando(chat_tools):
+    assert not chat_tools.needs_tool_approval("git", {"subcommand": "status"})
+    assert not chat_tools.needs_tool_approval("git", {"subcommand": "diff"})
+    assert not chat_tools.needs_tool_approval("git", {"subcommand": "log"})
+    assert chat_tools.needs_tool_approval("git", {"subcommand": "commit"})
+    assert chat_tools.needs_tool_approval("git", '{"subcommand":"commit","message":"x"}')
+    # Sem argumentos, nada é mutação — o default é recusar comprometido? Não:
+    # sem subcomando o dispatch valida e recusa, mas não há aprovação pedida.
+    assert not chat_tools.needs_tool_approval("git")
+
+
 def test_denied_result_is_a_safe_error(chat_tools):
     result = chat_tools.denied_tool_result(call("{}", name="bash"))
     assert result.tool_call_id == "search-123"

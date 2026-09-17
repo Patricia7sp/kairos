@@ -974,9 +974,18 @@ autora ("commit e depois docs").
   (`ExperienceStore`, `ExperienceStatus`, `build_experience_context`), store
   JSON atômico, ajuste de confiança e auto-invalidação. CLI
   `kairos memory experiences list|add|confirm|reject|invalidate|record`.
-- **Injeção opt-in por turno:** `run`/`chat --experiences` e
-  `telegram.inbound.experiences`; a experiência entra no conteúdo do turno
-  atual, nunca no system prompt nem em turnos passados (cache de prompt).
+- **Injeção por turno (ligada por padrão):** terminal (`--no-experiences`
+  desliga) e `telegram.inbound.experiences` (padrão ligado); a experiência entra
+  no conteúdo do turno atual, nunca no system prompt nem em turnos passados
+  (cache de prompt).
+- **Tela web de experiências:** `kairos_web/experiences_api.py`
+  (`GET/POST /api/experiences`, `confirm`, `invalidate`, `DELETE`, `record`) e
+  view `Experiências` no painel — fecha a divergência #2 do diagnóstico.
+- **Ferramenta `git` gated:** `kairos_tools/git` expõe `status|diff|log|commit`
+  com endurecimento (argv sem shell, hooks/assinatura desligados, pathspecs
+  literais, env `GIT_*` esterilizado, paths relativos ao repo); toolset `git`
+  com requisito (git instalado); `needs_tool_approval` pede aprovação por turno
+  só nos subcomandos mutadores (`commit` hoje) — leitura flui.
 - **Docs:** `docs/diagnostico-consolidado.md` (estado real CLI×web×canais e
   divergências), `docs/plano-ferramentas.md` (proposta priorizada, sem
   autorização) e `docs/uso-por-canal.md` (passo a passo, limites e dependências

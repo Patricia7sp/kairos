@@ -545,6 +545,46 @@ class InboundExperienceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake.envelopes), 1)
         self.assertEqual(fake.envelopes[0].content, "oi")
 
+    async def test_ausencia_da_chave_liga_por_padrao(self):
+        import json
+
+        from kairos_memory import ExperienceStatus, ExperienceStore
+
+        ExperienceStore(self.home).add(
+            trigger="rede caiu",
+            observation="sem internet",
+            correction="restart no roteador",
+            status=ExperienceStatus.ATIVA,
+        )
+        (self.home / "messaging.json").write_text(
+            json.dumps(
+                {
+                    "telegram": {
+                        "enabled": True,
+                        "chat_id_default": "",
+                        "inbound": {
+                            "enabled": True,
+                            "allowed_user_ids": [AUTH_USER],
+                            "poll_interval_seconds": 1.0,
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        fake = FakeRouter()
+        chan = TelegramChannel(
+            FAKE_ACCOUNT, client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler()))
+        )
+        inbound = TelegramInbound(self.home, fake, token=FAKE_ACCOUNT, channel=chan)
+        await inbound._dispatch(
+            TelegramUpdate(
+                update_id=4, message_id=4, chat_id=CHAT, user_id=AUTH_USER, text="rede caiu"
+            )
+        )
+        self.assertEqual(len(fake.envelopes), 1)
+        self.assertIn("restart no roteador", fake.envelopes[0].content)
+
 
 if __name__ == "__main__":
     unittest.main()

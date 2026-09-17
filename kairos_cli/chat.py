@@ -63,7 +63,7 @@ async def run_chat(
     quiet: bool = False,
     idempotency_key: str | None = None,
     web_search: bool = False,
-    experiences: bool = False,
+    experiences: bool = True,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -121,7 +121,7 @@ async def _run_interactive(
     runtime_session: bool = False,
     web_search: bool = False,
     home: Path | None = None,
-    experiences: bool = False,
+    experiences: bool = True,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -163,7 +163,7 @@ async def _run_turn(
     runtime_session: bool = False,
     web_search: bool = False,
     home: Path | None = None,
-    experiences: bool = False,
+    experiences: bool = True,
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -246,12 +246,13 @@ async def _run_turn(
 
 
 def _augment_with_experiences(content: str, home: Path) -> str:
-    """Prefixa o turno atual com experiências ativas relevantes (opt-in).
+    """Prefixa o turno atual com experiências ativas relevantes (padrão ligado).
 
-    A injeção é deliberadamente local: vai no `content` enviado ao serviço,
-    nunca no system prompt nem em mensagens já persistidas. A "Lei 1" de
-    `kairos_integration.surfaces` trata o prefixo de prompt como cache sagrado
-    por conversa — reescrevê-lo a cada turno invalidaria o cache.
+    Desligue com `--no-experiences`. A injeção é deliberadamente local: vai no
+    `content` enviado ao serviço, nunca no system prompt nem em mensagens já
+    persistidas. A "Lei 1" de `kairos_integration.surfaces` trata o prefixo de
+    prompt como cache sagrado por conversa — reescrevê-lo a cada turno
+    invalidaria o cache.
     """
     from kairos_memory import build_experience_context
 

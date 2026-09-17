@@ -62,8 +62,9 @@ _INBOUND_FIELDS: dict[str, tuple[type | tuple[type, ...], bool]] = {
 }
 
 #: Campos do inbound cuja ausência é aceita — o padrão entra silenciosamente.
-#: ``experiences`` liga a injeção de experiências ativas por turno no canal.
-_INBOUND_OPTIONAL: frozenset[str] = frozenset({"experiences"})
+#: ``experiences`` liga a injeção de experiências ativas por turno no canal; a
+#: ausência da chave herda o padrão ligado (desligue explicitamente com ``false``).
+_INBOUND_OPTIONAL_DEFAULTS: dict[str, Any] = {"experiences": True}
 
 
 def _valid_inbound(value: Any) -> dict[str, Any]:
@@ -72,8 +73,8 @@ def _valid_inbound(value: Any) -> dict[str, Any]:
     validated: dict[str, Any] = {}
     for campo, (tipo, rango) in _INBOUND_FIELDS.items():
         if campo not in value:
-            if campo in _INBOUND_OPTIONAL:
-                validated[campo] = False
+            if campo in _INBOUND_OPTIONAL_DEFAULTS:
+                validated[campo] = _INBOUND_OPTIONAL_DEFAULTS[campo]
                 continue
             raise ValueError(f"configuração de inbound exige a chave '{campo}'")
         valor = value[campo]
@@ -114,7 +115,7 @@ def default_config() -> dict[str, dict[str, Any]]:
                 "enabled": False,
                 "allowed_user_ids": [],
                 "poll_interval_seconds": 2.0,
-                "experiences": False,
+                "experiences": True,
             },
         },
         "whatsapp": {"enabled": False, "phone_number_id": "", "number_default": ""},

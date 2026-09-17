@@ -108,6 +108,21 @@ export const api = {
     method: "POST", body: { name, url },
   }),
   removerEndpointWebhook: (name) => request(`/api/messaging/webhook/endpoints/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  experiencias: (filtros = {}) => {
+    const params = new URLSearchParams();
+    if (filtros.status) params.set("status", filtros.status);
+    if (filtros.scope) params.set("scope", filtros.scope);
+    if (filtros.includeAll) params.set("include_all", "true");
+    const sufixo = params.toString();
+    return request(`/api/experiences${sufixo ? "?" + sufixo : ""}`);
+  },
+  criarExperiencia: (body) => request("/api/experiences", { method: "POST", body }),
+  confirmarExperiencia: (id) => request(`/api/experiences/${encodeURIComponent(id)}/confirm`, { method: "POST" }),
+  invalidarExperiencia: (id) => request(`/api/experiences/${encodeURIComponent(id)}/invalidate`, { method: "POST" }),
+  removerExperiencia: (id) => request(`/api/experiences/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  registrarResultadoExperiencia: (id, success) => request(`/api/experiences/${encodeURIComponent(id)}/record`, {
+    method: "POST", body: { success },
+  }),
   quemSou: () => request("/api/auth/me"),
   logout:  () => request("/api/auth/logout", { method: "POST" }),
 

@@ -480,7 +480,7 @@ class InteractionService:
                 result = _tool_error(call.id, "ferramenta não habilitada para este turno")
             else:
                 executed_calls.append(call.id)
-                if needs_tool_approval(call.name):
+                if needs_tool_approval(call.name, call.arguments):
                     approval_id, future = self._open_approval(conversation_id)
                     yield InteractionEvent.tool_approval_request(approval_id, call, conversation_id)
                     decision = await self._await_approval(

@@ -18,13 +18,15 @@ não existe, está dito.
 kairos run "resuma o README"                 # one-shot, sessão cli-default
 kairos chat --session minha-conversa         # interativo; 'sair'/Ctrl+C encerra
 kairos chat --session s1 --web-search "..."  # liga busca web neste turno
-kairos chat --session s1 --experiences "..." # injeta experiências ativas
+kairos chat --session s1 "..."               # experiências ativas entram por padrão
+kairos chat --session s1 --no-experiences "..."  # desliga neste turno
 kairos run --provider openrouter --model acme/chat "..."   # override do turno
 ```
 
 - `--provider` e `--model` andam juntos; só um dos dois é erro de uso.
-- `--experiences` injeta as experiências **no conteúdo do turno atual**; sem
-  match, nada muda (ver `docs/diagnostico-consolidado.md`).
+- Experiências ativas relevantes são injetadas **no conteúdo do turno atual**
+  por padrão; sem match, nada muda (ver `docs/diagnostico-consolidado.md`).
+  Use `--no-experiences` para desligar.
 - `--json` emite NDJSON versionado (protocolo 1) para script.
 
 Gestão de memória e experiências:
@@ -100,16 +102,17 @@ kairos telegram stop     # grava o marcador de drenagem; o loop encerra com calm
   token, `run` falha fechado; sem allowlist, nada é atendido.
 - **Limite:** só long-poll; webhook de entrada não existe.
 
-### Experiências no canal (opcional)
+### Experiências no canal (ligadas por padrão)
+
+Cada turno recebido é prefixado com as experiências ativas relevantes (mesma
+regra do terminal); sem match, nada muda. Para desligar:
 
 ```bash
 kairos telegram config --inbound-enabled true ...   # ajuste os campos
-# no messaging.json, o bloco telegram.inbound aceita "experiences": true
+# no messaging.json, use "experiences": false no bloco telegram.inbound
 ```
 
-Com `experiences: true`, cada turno recebido é prefixado com as experiências
-ativas relevantes (mesma regra do `--experiences`). Candidatas e inválidas
-nunca são injetadas.
+Candidatas e inválidas nunca são injetadas.
 
 ## WhatsApp
 

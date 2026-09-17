@@ -268,7 +268,7 @@ class TelegramInbound:
         self._inbound_enabled: bool = inbound.get("enabled", False)
         self._allowed: frozenset[int] = frozenset(inbound.get("allowed_user_ids", []))
         self._poll_interval: float = float(inbound.get("poll_interval_seconds", 2.0))
-        self._experiences: bool = bool(inbound.get("experiences", False))
+        self._experiences: bool = bool(inbound.get("experiences", True))
         self._router = router
         resolved_token = token or platform_secret(self.home, "telegram")
         if not resolved_token:
@@ -412,11 +412,11 @@ class TelegramInbound:
         )
 
     def _augment(self, text: str) -> str:
-        """Prefixa o turno atual com experiências ativas (opt-in per inbound).
+        """Prefixa o turno atual com experiências ativas (ligado por padrão).
 
-        A injeção é local ao turno que está chegando — nunca altera o system
-        prompt de uma conversa já em andamento (Lei 1 de
-        `kairos_integration.surfaces`).
+        Desligue com ``telegram.inbound.experiences: false``. A injeção é local
+        ao turno que está chegando — nunca altera o system prompt de uma
+        conversa já em andamento (Lei 1 de `kairos_integration.surfaces`).
         """
         if not self._experiences or not text.strip():
             return text

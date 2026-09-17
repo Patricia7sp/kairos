@@ -601,7 +601,7 @@ def cmd_run(args) -> int:
                 quiet=getattr(args, "quiet", False),
                 idempotency_key=getattr(args, "idempotency_key", None),
                 web_search=getattr(args, "web_search", False),
-                experiences=getattr(args, "experiences", False),
+                experiences=getattr(args, "experiences", True),
             )
         )
     except ChatUsageError as exc:
