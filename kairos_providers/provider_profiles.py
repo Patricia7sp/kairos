@@ -13,6 +13,10 @@ import httpx
 __all__ = [
     "DEEPSEEK_PROFILE",
     "GROQ_PROFILE",
+    "MISTRAL_PROFILE",
+    "PERPLEXITY_PROFILE",
+    "TOGETHER_PROFILE",
+    "XAI_PROFILE",
     "OpenAICompatibleProfile",
     "custom_profile",
 ]
@@ -215,5 +219,38 @@ GROQ_PROFILE = OpenAICompatibleProfile(
     base_url="https://api.groq.com/openai/v1",
     models_url="https://api.groq.com/openai/v1/models",
     display_name="Groq",
+    trusted_remote=True,
+)
+
+MISTRAL_PROFILE = OpenAICompatibleProfile(
+    id="mistral",
+    base_url="https://api.mistral.ai/v1",
+    models_url="https://api.mistral.ai/v1/models",
+    display_name="Mistral AI",
+    trusted_remote=True,
+)
+
+XAI_PROFILE = OpenAICompatibleProfile(
+    id="xai",
+    base_url="https://api.x.ai/v1",
+    models_url="https://api.x.ai/v1/models",
+    display_name="xAI (Grok)",
+    trusted_remote=True,
+)
+
+TOGETHER_PROFILE = OpenAICompatibleProfile(
+    id="together",
+    base_url="https://api.together.xyz/v1",
+    models_url="https://api.together.xyz/v1/models",
+    display_name="Together AI",
+    trusted_remote=True,
+)
+
+PERPLEXITY_PROFILE = OpenAICompatibleProfile(
+    id="perplexity",
+    base_url="https://api.perplexity.ai",
+    models_url="https://api.perplexity.ai/models",
+    display_name="Perplexity",
+    tool_unsupported_models=frozenset({"sonar", "sonar-pro", "sonar-reasoning"}),
     trusted_remote=True,
 )

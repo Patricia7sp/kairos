@@ -1055,3 +1055,20 @@ PR #67 squash-mergeado em `e10a002` (slack/whatsapp config-status reais sobre
 aposentando o `webhooks.json` órfão). Merge verificado: `git diff HEAD~1..HEAD`
 sem remoções acidentais; suíte local 2.618 passados + os 9 jobs do CI verdes no
 PR. Ainda não aplicado em produção.
+
+### Registry canônico expandido (2026-09-17)
+
+Doze providers canônicos (antes oito), todos OpenAI-compatible exceto os
+nativos: **mistral**, **xai** (Grok), **together** e **perplexity** entram como
+perfis declarativos (`kairos_providers/provider_profiles.py`), registrados no
+gateway com rota de cobrança (`composition.py`) e com modelos curados de
+fallback (`curated_catalog.py`). Os cards da tela **Provedores** vêm de
+`list_descriptors()` e passam a listar os novos automaticamente (credencial →
+cofre, `test` via `discover_models`, refresh igual aos demais).
+
+- **Perplexity:** os modelos Sonar não têm tool calling — declarado em
+  `tool_unsupported_models` e nos modelos curados (`tools=False`); demais novos
+  anunciam `tools=True`.
+- **Contratos:** matriz de composição estendida (12), payload do painel
+  (`requires_credential`/`auth_methods` para os 4) e capacidade de ferramentas
+  por provider cobertos em testes.

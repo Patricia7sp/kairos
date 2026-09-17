@@ -19,11 +19,12 @@ def _model(
     *,
     kind: ModelKind = ModelKind.MODEL,
     stability: ModelStability = ModelStability.STABLE,
+    tools: bool = True,
 ) -> CatalogModel:
     return CatalogModel(
         ref=ProviderModelRef(provider, model, kind),
         display_name=display_name,
-        capabilities=ModelCapabilities(chat=True, tools=True),
+        capabilities=ModelCapabilities(chat=True, tools=tools),
         stability=stability,
         origins=frozenset({CatalogOrigin.CURATED}),
     )
@@ -49,6 +50,31 @@ _CURATED_MODELS = (
     _model("deepseek", "deepseek-v4-pro", "DeepSeek V4 Pro"),
     _model("deepseek", "deepseek-v4-flash", "DeepSeek V4 Flash"),
     _model("openrouter", "openrouter/free", "OpenRouter Free"),
+    _model("mistral", "mistral-large-latest", "Mistral Large"),
+    _model("mistral", "mistral-small-latest", "Mistral Small"),
+    _model("xai", "grok-4", "Grok 4"),
+    _model("xai", "grok-4-fast", "Grok 4 Fast"),
+    _model(
+        "together",
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "Llama 3.3 70B (Together)",
+    ),
+    _model(
+        "together",
+        "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+        "Llama 4 Maverick (Together)",
+        stability=ModelStability.PREVIEW,
+    ),
+    _model("together", "Qwen/Qwen2.5-72B-Instruct-Turbo", "Qwen 2.5 72B (Together)"),
+    _model("perplexity", "sonar-pro", "Sonar Pro", tools=False),
+    _model("perplexity", "sonar", "Sonar", tools=False),
+    _model(
+        "perplexity",
+        "sonar-reasoning",
+        "Sonar Reasoning",
+        stability=ModelStability.PREVIEW,
+        tools=False,
+    ),
     _model(
         "gemini",
         "antigravity",
