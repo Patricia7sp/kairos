@@ -1113,3 +1113,11 @@ falam com o agente; lista vazia = ninguém.
 - **Limite registrado:** aceite real do subscribe da Meta exige **URL pública**
   exposta ao WhatsApp (externo ao repositório); só texto é atendido (mesmo
   recorte do Telegram).
+
+### Merge do canal de entrada WhatsApp (2026-09-17)
+
+PR #69 squash-mergeado em `9b8a0cc` (webhook `GET/POST /api/inbound/whatsapp`,
+segredos de entrada por campo com merge, estado `inbound` na mensageria).
+Merge verificado: `git diff HEAD~1..HEAD` sem remoções acidentais; suíte local
+2.657 passados (39 pulados, estações com imagem ausente) + os 9 jobs do CI
+verdes no PR. Ainda não aplicado em produção.
