@@ -28,6 +28,38 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(doc["telegram"]["enabled"])
         self.assertEqual(doc["webhook"]["endpoints"], [])
         self.assertTrue(doc["telegram"]["inbound"]["experiences"])
+        self.assertFalse(doc["whatsapp"]["inbound"]["enabled"])
+        self.assertEqual(doc["whatsapp"]["inbound"]["allowed_phone_numbers"], [])
+
+    def test_whatsapp_inbound_suporta_telefones(self):
+        doc = default_config()
+        doc["whatsapp"]["inbound"]["enabled"] = True
+        doc["whatsapp"]["inbound"]["allowed_phone_numbers"] = ["+5511999888777", "5511900001111"]
+        save_config(self.tmp, doc)
+        reloaded = load_config(self.tmp)
+        self.assertTrue(reloaded["whatsapp"]["inbound"]["enabled"])
+        self.assertEqual(
+            reloaded["whatsapp"]["inbound"]["allowed_phone_numbers"],
+            ["+5511999888777", "5511900001111"],
+        )
+
+    def test_whatsapp_inbound_allowlist_nao_aceita_ids_numericos(self):
+        doc = default_config()
+        doc["whatsapp"]["inbound"]["allowed_phone_numbers"] = [1234]
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_whatsapp_inbound_rejeita_chave_desconhecida(self):
+        doc = default_config()
+        doc["whatsapp"]["inbound"]["poll_interval_seconds"] = 2.0
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_telegram_allowlist_continua_numerica(self):
+        doc = default_config()
+        doc["telegram"]["inbound"]["allowed_user_ids"] = ["1"]
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
 
     def test_inbound_experiences_ausente_herda_padrao_ligado(self):
         (self.tmp / "messaging.json").write_text(

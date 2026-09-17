@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Any
 
 from kairos_gateway.adapters.config import (
+    SECRET_KEYS,
     endpoints,
     load_config,
     platform_has_secret,
     platform_secret,
+    platform_secret_fields,
     vault_state,
 )
 from kairos_gateway.adapters.slack import SlackAdapter
@@ -142,6 +144,7 @@ def messaging_platforms(home: Path) -> list[dict[str, Any]]:
         tem_segredo = platform_has_secret(home, definition.name)
         needs = definition.needs_secret
         deliverable = enabled and (tem_segredo or not needs)
+        inbound = conf.get("inbound")
         result.append(
             {
                 "platform": definition.name,
@@ -153,6 +156,17 @@ def messaging_platforms(home: Path) -> list[dict[str, Any]]:
                 "secreto_dica": definition.credential_hint,
                 "campos": [{"key": field.key, "label": field.label} for field in definition.fields],
                 "valores": {field.key: conf.get(field.key) for field in definition.fields},
+                "inbound": {
+                    "enabled": bool(inbound.get("enabled", False)),
+                    "experiences": bool(inbound.get("experiences", True)),
+                    "campo_secreto": {
+                        campo: presente
+                        for campo, presente in platform_secret_fields(home, definition.name).items()
+                        if campo != SECRET_KEYS[definition.name]
+                    },
+                }
+                if isinstance(inbound, dict)
+                else None,
                 "vault": vault,
             }
         )

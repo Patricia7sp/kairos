@@ -6,7 +6,7 @@ Telegram e integração WhatsApp — e onde elas divergem. Ele não repete o
 README antigo nem herda conclusões não verificadas: cada linha abaixo tem
 origem em código e testes do repositório.
 
-Atualizado em 16/09/2026, sobre `main` (`99cb7f1`) + PR #64.
+Atualizado em 17/09/2026, sobre `main` (`0f62438`) + lote de canal de entrada WhatsApp.
 
 ## Método
 
@@ -24,7 +24,7 @@ Atualizado em 16/09/2026, sobre `main` (`99cb7f1`) + PR #64.
 | Terminal | `kairos run` / `kairos chat` | `InteractionService` | stdin / one-shot |
 | Web | FastAPI + SPA | `InteractionService` | HTTP/WS da própria sessão |
 | Telegram | long-poll `getUpdates` | `InteractionRouter` | mensagens do bot |
-| WhatsApp | Meta Graph (Cloud) | — | **não existe** (só saída) |
+| WhatsApp | Meta Graph (Cloud) | `InteractionRouter` | webhook `GET/POST /api/inbound/whatsapp` |
 
 Todas as superfícies de conversa passam pelo **mesmo router** de interação
 (`kairos_integration`). O que muda é o envelope: `source`, `web_search`,
@@ -34,12 +34,12 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 
 | Capacidade | Terminal | Web | Telegram | WhatsApp |
 |---|---|---|---|---|
-| Conversa com modelo | fato | fato | fato | — |
-| Busca web no turno | `--web-search` | interface | ligada (`web_search=True`) | — |
-| Ferramentas core | fato | fato | fato (`tools=True`) | — |
-| Aprovação de ferramenta | terminal | modal na UI | keyboard inline | — |
-| Memória de longo prazo | `kairos memory status/off` | leitura | herdada | — |
-| Experiências (aprendizado) | ligadas por padrão (`--no-experiences` desliga) | — | `inbound.experiences` (padrão ligado) | — |
+| Conversa com modelo | fato | fato | fato | fato |
+| Busca web no turno | `--web-search` | interface | ligada (`web_search=True`) | ligada (`web_search=True`) |
+| Ferramentas core | fato | fato | fato (`tools=True`) | fato (`tools=True`) |
+| Aprovação de ferramenta | terminal | modal na UI | keyboard inline | aviso honesto (sem botões, aponta o painel) |
+| Memória de longo prazo | `kairos memory status/off` | leitura | herdada | herdada |
+| Experiências (aprendizado) | ligadas por padrão (`--no-experiences` desliga) | — | `inbound.experiences` (padrão ligado) | `inbound.experiences` (padrão ligado) |
 | Gestão de experiências | `kairos memory experiences` | tela **Experiências** (listar/confirmar/rejeitar/invalidar/registrar) | — | — |
 | Envio de mensagem | — | `/api/messaging/send` | `TelegramAdapter` | `WhatsAppAdapter` |
 | Config não-secreta | `kairos telegram config` | `/api/messaging/{platform}` | idem via CLI | `kairos whatsapp config|status` |
@@ -91,7 +91,22 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 - **Saída real:** `kairos_gateway/adapters/whatsapp.py` envia texto pela API
   Cloud (Meta Graph v21.0), com `verify()` que confirma número/`phone_number_id`
   sem despachar mensagem.
-- **Entrada:** não existe. Não há polling nem webhook de recebimento.
+- **Entrada (webhook da Cloud API, `kairos_gateway/whatsapp_inbound.py`):**
+  `GET /api/inbound/whatsapp` (apertão de mão: devolve `hub.challenge` só com
+  `hub.mode=subscribe` + Verify Token correto) e `POST /api/inbound/whatsapp`
+  (valida `X-Hub-Signature-256` HMAC-SHA256 do corpo cru com o App Secret e
+  acusa `EVENT_RECEIVED`). A rota é pública (a Meta não tem sessão); a
+  segurança é a verificação do próprio canal — sem `app_secret`/`verify_token`
+  no cofre ou assinatura divergente, recusa (503/401), nada é processado.
+- O remetente é autenticado por `whatsapp.inbound.allowed_phone_numbers`
+  (E.164, normalizado em dígitos); lista vazia = ninguém (fail-closed). O turno
+  roda assíncrono após o ack, com dedupe por `wamid` (`whatsapp:{wamid}`) e
+  resposta chunkada em ≤4000 caracteres; aprovação de ferramenta é aviso
+  honesto apontando o painel (não há botões no WhatsApp).
+- Segredos de entrada: `POST/DELETE /api/messaging/whatsapp/inbound-secret`
+  gravam/removem `app_secret` e `verify_token` no cofre **preservando** o
+  `access_token` (merge). O estado aparece em `GET /api/messaging`
+  (`platforms[whatsapp].inbound.campo_secreto`).
 - **CLI `kairos whatsapp config|status|test`:** `config`/`status` gravam e leem
   os campos não-secretos em `messaging.json` (`enabled`, `phone_number_id`,
   `number_default`) e reportam a presença do token no cofre — sem ler o segredo.
@@ -127,17 +142,19 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 ## O que este documento não afirma
 
 - Não certifica geração bem-sucedida de nenhum modelo específico nem
-  autenticação de contas de terceiros.
-- Não afirma canal de entrada WhatsApp, webhook de entrada Telegram nem
-  paridade total entre as CLIs.
+  autenticação de contas de terceiros (ex.: aceite real do subscribe da Meta em
+  produção depende de URL pública exposta ao WhatsApp).
+- Não afirma webhook de entrada Telegram nem paridade total entre as CLIs.
 - Números de teste não são congelados aqui; a fonte é a suíte local e o CI.
 
 ## Referências
 
-- `kairos_gateway/inbound.py`, `kairos_cli/telegram.py`,
-  `kairos_cli/memory.py`, `kairos_web/messaging_api.py`.
+- `kairos_gateway/inbound.py`, `kairos_gateway/whatsapp_inbound.py`,
+  `kairos_cli/telegram.py`, `kairos_cli/memory.py`,
+  `kairos_web/messaging_api.py`, `kairos_web/inbound_api.py`.
 - `kairos_gateway/adapters/whatsapp.py`, `kairos_gateway/adapters/telegram.py`.
-- `tests/test_telegram_inbound.py`, `tests/test_experiences.py`,
+- `tests/test_telegram_inbound.py`, `tests/test_whatsapp_inbound.py`,
+  `tests/test_inbound_api.py`, `tests/test_experiences.py`,
   `tests/test_cli_chat.py`, `tests/test_messaging_api.py`.
 - `docs/uso-por-canal.md` (passo a passo) e `docs/plano-ferramentas.md`
   (proposta de expansão).
