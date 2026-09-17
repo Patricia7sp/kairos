@@ -113,10 +113,51 @@ def test_composition_registra_todos_os_providers(tmp_path):
         "deepseek",
         "gemini",
         "groq",
+        "mistral",
         "ollama",
         "openai",
         "openrouter",
+        "perplexity",
+        "together",
+        "xai",
     ]
+
+
+def test_provedores_canonicos_novos_expostos_com_credencial_de_api(tmp_path):
+    """Mistral, xAI, Together e Perplexity aparecem no painel e exigem chave no cofre."""
+    from kairos_web.provider_api import list_providers_payload
+
+    gateway = build_provider_gateway(tmp_path)
+    payload = list_providers_payload(gateway)
+    by_id = {item["id"]: item for item in payload["providers"]}
+
+    for provider, name in {
+        "mistral": "Mistral AI",
+        "xai": "xAI (Grok)",
+        "together": "Together AI",
+        "perplexity": "Perplexity",
+    }.items():
+        entry = by_id[provider]
+        assert entry["name"] == name
+        assert entry["requires_credential"] is True
+        assert entry["auth_methods"] == ["api_key"]
+        assert entry["configured"] is False
+
+
+def test_catalogo_curado_declara_ferramentas_por_provider(tmp_path):
+    """Perplexity (sonar) não anuncia tool calling; os demais novos anunciam."""
+    gateway = build_provider_gateway(tmp_path)
+    curated = {
+        model.ref.provider: model
+        for model in gateway.catalog.list_models()
+        if model.ref.provider in {"mistral", "xai", "together", "perplexity"}
+    }
+
+    assert curated["mistral"].capabilities.tools is True
+    assert curated["xai"].capabilities.tools is True
+    assert curated["together"].capabilities.tools is True
+    assert curated["perplexity"].capabilities.tools is False
+    assert all(CatalogOrigin.CURATED in model.origins for model in curated.values())
 
 
 def test_preparo_congela_rotas_de_billing_openrouter_e_custom(tmp_path, monkeypatch):

@@ -31,6 +31,10 @@ from kairos_providers.gateway import ProviderBillingMetadata, ProviderGateway
 from kairos_providers.provider_profiles import (
     DEEPSEEK_PROFILE,
     GROQ_PROFILE,
+    MISTRAL_PROFILE,
+    PERPLEXITY_PROFILE,
+    TOGETHER_PROFILE,
+    XAI_PROFILE,
     OpenAICompatibleProfile,
     custom_profile,
 )
@@ -218,6 +222,12 @@ def _billing_routes(
         "ollama": ProviderBillingMetadata("ollama", config.ollama_base_url, "local"),
         "deepseek": ProviderBillingMetadata("deepseek", DEEPSEEK_PROFILE.base_url, "credential"),
         "groq": ProviderBillingMetadata("groq", GROQ_PROFILE.base_url, "credential"),
+        "mistral": ProviderBillingMetadata("mistral", MISTRAL_PROFILE.base_url, "credential"),
+        "xai": ProviderBillingMetadata("xai", XAI_PROFILE.base_url, "credential"),
+        "together": ProviderBillingMetadata("together", TOGETHER_PROFILE.base_url, "credential"),
+        "perplexity": ProviderBillingMetadata(
+            "perplexity", PERPLEXITY_PROFILE.base_url, "credential"
+        ),
         "custom": ProviderBillingMetadata("custom", config.custom.base_url, "credential"),
         "openrouter": ProviderBillingMetadata(
             "openrouter", "https://openrouter.ai/api/v1", "credential"
@@ -258,6 +268,10 @@ def _register_adapters(
     )
     _register_compatible_adapter(registry, clients, DEEPSEEK_PROFILE)
     _register_compatible_adapter(registry, clients, GROQ_PROFILE)
+    _register_compatible_adapter(registry, clients, MISTRAL_PROFILE)
+    _register_compatible_adapter(registry, clients, XAI_PROFILE)
+    _register_compatible_adapter(registry, clients, TOGETHER_PROFILE)
+    _register_compatible_adapter(registry, clients, PERPLEXITY_PROFILE)
     _register_compatible_adapter(registry, clients, config.custom)
     registry.register(
         ProviderDescriptor("openrouter", "OpenRouter", ("api_key",)),

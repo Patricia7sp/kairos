@@ -12,9 +12,13 @@ REGISTERED_PROVIDER_IDS = (
     "deepseek",
     "gemini",
     "groq",
+    "mistral",
     "ollama",
     "openai",
     "openrouter",
+    "perplexity",
+    "together",
+    "xai",
 )
 
 
