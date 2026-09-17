@@ -1072,3 +1072,10 @@ cofre, `test` via `discover_models`, refresh igual aos demais).
 - **Contratos:** matriz de composição estendida (12), payload do painel
   (`requires_credential`/`auth_methods` para os 4) e capacidade de ferramentas
   por provider cobertos em testes.
+
+### Merge do registry canônico expandido (2026-09-17)
+
+PR #68 squash-mergeado em `ebb8b79` (mistral, xai, together e perplexity
+canônicos). Merge verificado: `git diff HEAD~1..HEAD` sem remoções acidentais;
+suíte local 2.624 passados + os 9 jobs do CI verdes no PR. Ainda não aplicado
+em produção.
