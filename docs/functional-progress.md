@@ -1032,3 +1032,11 @@ imagem da aplicação foi trocada.
   produção.
 - **Registro privado:** `.local/share/kairos-production-backups/operations/
   latest-inbound-experiencias.json` (`status: healthy_verified`).
+
+### Merge do P1 do plano de ferramentas (2026-09-17)
+
+PR #66 squash-mergeado em `bd2bb7a` (tela web de experiências, injeção por
+padrão no terminal e Telegram, ferramenta `git` gated por toolset com
+aprovação por subcomando). Merge verificado: `git diff HEAD~1..HEAD` sem
+remoções acidentais; suíte local 2.616 passados (39 pulados, estações com imagem
+ausente) + os 9 jobs do CI verdes no PR. Ainda não aplicado em produção.
