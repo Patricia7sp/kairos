@@ -1047,3 +1047,11 @@ padrão no terminal e Telegram, ferramenta `git` gated por toolset com
 aprovação por subcomando). Merge verificado: `git diff HEAD~1..HEAD` sem
 remoções acidentais; suíte local 2.616 passados (39 pulados, estações com imagem
 ausente) + os 9 jobs do CI verdes no PR. Ainda não aplicado em produção.
+
+### Merge da paridade CLI × gateway (2026-09-17)
+
+PR #67 squash-mergeado em `e10a002` (slack/whatsapp config-status reais sobre
+`messaging.json` + cofre, `test` acionando `verify()` sem envio, webhook
+aposentando o `webhooks.json` órfão). Merge verificado: `git diff HEAD~1..HEAD`
+sem remoções acidentais; suíte local 2.618 passados + os 9 jobs do CI verdes no
+PR. Ainda não aplicado em produção.
