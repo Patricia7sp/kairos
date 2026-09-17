@@ -55,6 +55,7 @@ from kairos_web.chat_transport import (
 )
 from kairos_web.cron_api import router as cron_router
 from kairos_web.experiences_api import router as experiences_router
+from kairos_web.inbound_api import router as inbound_router
 from kairos_web.logs_api import router as logs_router
 from kairos_web.message_metadata import public_message_accounting
 from kairos_web.messaging_api import router as messaging_router
@@ -150,6 +151,7 @@ app.include_router(settings_router)
 app.include_router(cron_router)
 app.include_router(messaging_router)
 app.include_router(experiences_router)
+app.include_router(inbound_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -252,7 +254,18 @@ def _revoke_ws_tickets() -> None:
 # container sondam, e não devolve nada além de "estou de pé".
 # `/api/auth/*` precisa ficar aberto pelo motivo óbvio: é onde se autentica, e
 # é o que a interface consulta para saber se deve mostrar a tela de login.
-_OPEN_PATHS = frozenset({"/api/health", "/api/auth/me", "/api/auth/login", "/api/auth/logout"})
+# `/api/inbound/whatsapp` é o webhook público da Cloud API da Meta: sem sessão
+# de navegador, e a segurança é do próprio canal (Verify Token + assinatura
+# HMAC-SHA256 do App Secret), nunca da sessão da interface.
+_OPEN_PATHS = frozenset(
+    {
+        "/api/health",
+        "/api/auth/me",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/inbound/whatsapp",
+    }
+)
 
 
 def _token_ok(supplied: str | None) -> bool:

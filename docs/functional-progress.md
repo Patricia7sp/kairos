@@ -1079,3 +1079,37 @@ PR #68 squash-mergeado em `ebb8b79` (mistral, xai, together e perplexity
 canônicos). Merge verificado: `git diff HEAD~1..HEAD` sem remoções acidentais;
 suíte local 2.624 passados + os 9 jobs do CI verdes no PR. Ainda não aplicado
 em produção.
+
+### Canal de entrada WhatsApp (webhook da Cloud API) (2026-09-17)
+
+O canal de entrada WhatsApp fecha o laço que a mensageria não tinha: `GET` e
+`POST /api/inbound/whatsapp` recebem os webhooks da Meta e submetem o texto ao
+mesmo `InteractionRouter` do Telegram/Web. Espelha o padrão fail-closed do
+Telegram — só remetentes em `whatsapp.inbound.allowed_phone_numbers` (E.164)
+falam com o agente; lista vazia = ninguém.
+
+- **Segurança do próprio canal:** rota pública sem sessão (a Meta não tem
+  cookie); o apertão de mão devolve `hub.challenge` só com Verify Token correto
+  e o `POST` é verificado por `X-Hub-Signature-256` (HMAC-SHA256 do corpo cru
+  com o App Secret) em tempo constante. Sem `app_secret`/`verify_token` no
+  cofre ou assinatura divergente, recusa (503/401) — nada é processado
+  (`kairos_gateway/whatsapp_inbound.py` + `kairos_web/inbound_api.py`).
+- **Sem efeito fingido:** sem adapter de envio (token/`phone_number_id`) o
+  turno não roda — não há efeitos sem canal de resposta. Aprovação de
+  ferramenta não tem botões no WhatsApp: aviso honesto apontando o painel,
+  nunca um "aprovado" falso.
+- **Entrega assíncrona:** ack `EVENT_RECEIVED` imediato (a Meta espera
+  resposta em segundos); dedupe por `wamid` em memória e idempotência
+  `whatsapp:{wamid}`; resposta chunkada ≤4000 caracteres; experiências via
+  `whatsapp.inbound.experiences` (padrão ligado).
+- **Segredos por campo:** `app_secret`/`verify_token` gravados por
+  `POST/DELETE /api/messaging/whatsapp/inbound-secret` com **merge** que
+  preserva o `access_token`; o estado (`campo_secreto`) aparece em
+  `GET /api/messaging` (`platforms[whatsapp].inbound`).
+- **Cobertura:** `tests/test_whatsapp_inbound.py` (20: assinatura, apertão de
+  mão, parsing, fail-closed, dedupe, chunk, aprovação) e
+  `tests/test_inbound_api.py` (9: rotas públicas, 503/401, merge de segredos) +
+  casos de config do bloco `whatsapp.inbound` em `test_messaging_config.py`.
+- **Limite registrado:** aceite real do subscribe da Meta exige **URL pública**
+  exposta ao WhatsApp (externo ao repositório); só texto é atendido (mesmo
+  recorte do Telegram).

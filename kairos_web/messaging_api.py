@@ -24,10 +24,12 @@ from kairos_gateway.adapters import (
 )
 from kairos_gateway.adapters.config import (
     add_webhook_endpoint,
+    drop_platform_inbound_fields,
     drop_platform_secret,
     load_config,
     remove_webhook_endpoint,
     save_config,
+    save_platform_inbound_field,
     save_platform_secret,
     webhook_endpoints,
 )
@@ -78,6 +80,14 @@ class SendBody(BaseModel):
     text: StrictStr
 
 
+class InboundSecretBody(BaseModel):
+    """Segredos do webhook de entrada do WhatsApp (merge no cofre)."""
+
+    model_config = ConfigDict(extra="forbid")
+    app_secret: StrictStr | None = None
+    verify_token: StrictStr | None = None
+
+
 @router.get("/messaging")
 def status(request: Request):
     return messaging_status(_home(request))
@@ -119,6 +129,54 @@ def remove_credential(platform: str, request: Request):
     _known(platform)
     try:
         return drop_platform_secret(_home(request), platform)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        from kairos_security.credentials import VaultLockedError
+
+        if isinstance(exc, VaultLockedError):
+            raise HTTPException(409, "cofre de credenciais bloqueado") from exc
+        raise HTTPException(503, "cofre de credenciais indisponível") from exc
+
+
+@router.post("/messaging/whatsapp/inbound-secret")
+def save_inbound_secret(body: InboundSecretBody, request: Request):
+    """Grava App Secret/Verify Token do webhook de entrada no cofre (merge).
+
+    Os campos são independentes: um POST grava os que vierem e preserva os já
+    salvos. O painel nunca recebe o valor de volta — só `saved` com os campos.
+    """
+    presentes = {
+        campo: valor
+        for campo, valor in (("app_secret", body.app_secret), ("verify_token", body.verify_token))
+        if valor
+    }
+    if not presentes:
+        raise HTTPException(422, "informe ao menos um de app_secret ou verify_token")
+    home = _home(request)
+    salvos: list[str] = []
+    for campo, valor in presentes.items():
+        try:
+            save_platform_inbound_field(home, "whatsapp", field=campo, secret=valor)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            from kairos_security.credentials import VaultLockedError
+
+            if isinstance(exc, VaultLockedError):
+                raise HTTPException(
+                    409, "cofre de credenciais bloqueado; desbloqueie ou inicialize"
+                ) from exc
+            raise HTTPException(503, "cofre de credenciais indisponível") from exc
+        salvos.append(campo)
+    return {"platform": "whatsapp", "saved": salvos}
+
+
+@router.delete("/messaging/whatsapp/inbound-secret")
+def remove_inbound_secret(request: Request):
+    """Remove os segredos de entrada; a credencial principal continua intacta."""
+    try:
+        return drop_platform_inbound_fields(_home(request), "whatsapp")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

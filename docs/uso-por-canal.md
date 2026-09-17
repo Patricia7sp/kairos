@@ -127,9 +127,22 @@ Candidatas e inválidas nunca são injetadas.
   em `messaging.json` (`enabled`, `phone_number_id`, `number_default`) e
   reportam a presença do token no cofre; `test` verifica token e número pela
   API Cloud sem enviar ("nada foi enviado").
-- **Entrada:** não existe. Não há polling nem webhook de recebimento.
-- **Dependências externas:** conta Meta Business, `phone_number_id` e token de
-  acesso. Sem eles o adapter não é construído.
+- **Entrada (webhook da Cloud API):** `GET/POST /api/inbound/whatsapp`.
+  Requisitos no `messaging.json` (`whatsapp.inbound`):
+  `enabled: true` e `allowed_phone_numbers` (E.164, só remetentes desta lista
+  falam com o agente — lista vazia = ninguém) e no cofre os segredos de
+  entrada: `app_secret` (valida `X-Hub-Signature-256`) e `verify_token`
+  (apertão de mão `hub.challenge`), gravados por
+  `POST /api/messaging/whatsapp/inbound-secret` (merge preserva o `access_token`).
+  O subscribe da Meta aponta para `https://<host>:443/api/inbound/whatsapp`
+  (rota pública, sem sessão — a segurança é a verificação do próprio canal).
+  Sem segredo ou com assinatura divergente, o webhook recusa (503/401) —
+  nada é processado. O turno roda assíncrono (ack `EVENT_RECEIVED` imediato) e
+  responde ao remetente; aprovação de ferramenta não tem botões no WhatsApp —
+  a recusa é honesta e aponta para o painel.
+- **Dependências externas:** conta Meta Business, `phone_number_id`, token de
+  acesso, `app_secret` + `verify_token` do app, e **URL pública** para o
+  webhook. Sem elas nada responde (adapter não construído; webhook recusa).
 
 ## Slack
 
@@ -160,7 +173,7 @@ em `docs/plano-ferramentas.md`.
 | Telegram inbound | fato (long-poll, fail-closed) |
 | Telegram webhook de entrada | não existe |
 | WhatsApp saída | fato (adapter) |
-| WhatsApp entrada | não existe |
+| WhatsApp entrada | fato (webhook Cloud API, fail-closed) |
 | WhatsApp CLI | config/status reais; test via `verify()` sem envio |
 | Slack CLI | config/status reais; test valida só a forma da URL |
 | Tela web de experiências | existe (Painel → Experiências) |

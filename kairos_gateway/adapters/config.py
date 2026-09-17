@@ -37,29 +37,56 @@ SECRET_KEYS: dict[str, str] = {
     "webhook": "",
 }
 
+#: Segredos de entrada (além da credencial principal) exigidos por cada
+#: plataforma com canal de entrada. O WhatsApp valida a assinatura do webhook
+#: com o App Secret e o apertão de mão do subscribe com o Verify Token.
+INBOUND_SECRET_KEYS: dict[str, tuple[str, ...]] = {
+    "whatsapp": ("app_secret", "verify_token"),
+}
+
 _PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook")
 
 #: Campos não-secretos aceitos por plataforma. Chave -> tipo Python.
 _FIELDS: dict[str, dict[str, type]] = {
     "telegram": {"enabled": bool, "chat_id_default": str, "inbound": dict},
-    "whatsapp": {"enabled": bool, "phone_number_id": str, "number_default": str},
+    "whatsapp": {
+        "enabled": bool,
+        "phone_number_id": str,
+        "number_default": str,
+        "inbound": dict,
+    },
     "slack": {"enabled": bool, "channel_default": str},
     "webhook": {"enabled": bool, "endpoints": list},
 }
 
 #: Campos opcionais com padrão — ausência não é erro; o padrão entra no merge.
-_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {"telegram": frozenset({"inbound"})}
-
-#: Esquema do canal de entrada (bloco ``inbound`` do Telegram).
-#:
-#: ``allowed_user_ids`` vazio significa **ninguém autorizado** (fail-closed):
-#: o canal de entrada só responde a remetentes vistos aqui.
-_INBOUND_FIELDS: dict[str, tuple[type | tuple[type, ...], bool]] = {
-    "enabled": (bool, False),
-    "allowed_user_ids": (list, False),
-    "poll_interval_seconds": ((int, float), True),
-    "experiences": (bool, False),
+_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
+    "telegram": frozenset({"inbound"}),
+    "whatsapp": frozenset({"inbound"}),
 }
+
+#: Esquema do canal de entrada por plataforma. Cada campo -> (tipo aceito,
+#: obrigatório). Plataformas de entrada diferentes têm regras de remetente
+#: diferentes: o Telegram autoriza por IDs numéricos, o WhatsApp por telefone.
+#:
+#: Listas de autorização vazias significam **ninguém autorizado** (fail-closed):
+#: o canal de entrada só responde a remetentes vistos na lista.
+_INBOUND_SCHEMAS: dict[str, dict[str, tuple[type | tuple[type, ...], bool]]] = {
+    "telegram": {
+        "enabled": (bool, False),
+        "allowed_user_ids": (list, False),
+        "poll_interval_seconds": ((int, float), True),
+        "experiences": (bool, False),
+    },
+    "whatsapp": {
+        "enabled": (bool, False),
+        "allowed_phone_numbers": (list, False),
+        "experiences": (bool, False),
+    },
+}
+
+#: Tipo dos itens da lista de autorização do remetente, por plataforma.
+_INBOUND_ALLOWLIST_ITEM: dict[str, type] = {"telegram": int, "whatsapp": str}
 
 #: Campos do inbound cuja ausência é aceita — o padrão entra silenciosamente.
 #: ``experiences`` liga a injeção de experiências ativas por turno no canal; a
@@ -67,26 +94,38 @@ _INBOUND_FIELDS: dict[str, tuple[type | tuple[type, ...], bool]] = {
 _INBOUND_OPTIONAL_DEFAULTS: dict[str, Any] = {"experiences": True}
 
 
-def _valid_inbound(value: Any) -> dict[str, Any]:
+def _valid_allowlist(platform: str, campo: str, valor: Any) -> None:
+    """Valida a lista de autorização do remetente (fail-closed: só ela manda)."""
+    item_tipo = _INBOUND_ALLOWLIST_ITEM[platform]
+    valido = isinstance(valor, list) and all(
+        isinstance(i, item_tipo) and not (item_tipo is int and isinstance(i, bool)) for i in valor
+    )
+    if valido:
+        return
+    if platform == "telegram":
+        raise ValueError(f"'{campo}' de inbound deve ser uma lista de IDs numéricos")
+    raise ValueError(f"'{campo}' de inbound deve ser uma lista de telefones no formato E.164")
+
+
+def _valid_inbound(platform: str, value: Any) -> dict[str, Any]:
+    if platform not in _INBOUND_SCHEMAS:
+        raise ValueError(f"plataforma '{platform}' não tem canal de entrada")
+    campos = _INBOUND_SCHEMAS[platform]
     if not isinstance(value, dict):
         raise ValueError("configuração de inbound deve ser um objeto")
     validated: dict[str, Any] = {}
-    for campo, (tipo, rango) in _INBOUND_FIELDS.items():
+    for campo, (tipo, rango) in campos.items():
         if campo not in value:
             if campo in _INBOUND_OPTIONAL_DEFAULTS:
                 validated[campo] = _INBOUND_OPTIONAL_DEFAULTS[campo]
                 continue
-            raise ValueError(f"configuração de inbound exige a chave '{campo}'")
+            raise ValueError(f"configuração de inbound de {platform} exige a chave '{campo}'")
         valor = value[campo]
         if tipo is bool:
             if not isinstance(valor, bool):
                 raise ValueError(f"'{campo}' de inbound deve ser booleano")
         elif tipo is list:
-            if not (
-                isinstance(valor, list)
-                and all(isinstance(i, int) and not isinstance(i, bool) for i in valor)
-            ):
-                raise ValueError(f"'{campo}' de inbound deve ser uma lista de IDs numéricos")
+            _valid_allowlist(platform, campo, valor)
         else:
             if not isinstance(valor, (int, float)) or isinstance(valor, bool):
                 raise ValueError(f"'{campo}' de inbound deve ser um número")
@@ -94,9 +133,11 @@ def _valid_inbound(value: Any) -> dict[str, Any]:
                 raise ValueError(f"'{campo}' de inbound deve ser segundos entre 0.5 e 300")
             valor = float(valor)
         validated[campo] = valor
-    extra = set(value) - set(_INBOUND_FIELDS)
+    extra = set(value) - set(campos)
     if extra:
-        raise ValueError(f"chaves desconhecidas em inbound: {', '.join(sorted(extra))}")
+        raise ValueError(
+            f"chaves desconhecidas em inbound de {platform}: {', '.join(sorted(extra))}"
+        )
     return validated
 
 
@@ -118,7 +159,12 @@ def default_config() -> dict[str, dict[str, Any]]:
                 "experiences": True,
             },
         },
-        "whatsapp": {"enabled": False, "phone_number_id": "", "number_default": ""},
+        "whatsapp": {
+            "enabled": False,
+            "phone_number_id": "",
+            "number_default": "",
+            "inbound": {"enabled": False, "allowed_phone_numbers": [], "experiences": True},
+        },
         "slack": {"enabled": False, "channel_default": ""},
         "webhook": {"enabled": False, "endpoints": []},
     }
@@ -144,7 +190,7 @@ def _validate_platform_config(name: str, value: Any) -> dict[str, Any]:
             raise ValueError(f"'{campo}' de {name} deve ser uma lista de endpoints")
         if tipo is dict:
             if campo == "inbound":
-                valor = _valid_inbound(valor)
+                valor = _valid_inbound(name, valor)
             else:
                 raise ValueError(f"'{campo}' de {name} tem esquema desconhecido")
         normalized[campo] = valor
@@ -253,19 +299,25 @@ def _secret_ref(platform: str) -> CredentialRef:
     return CredentialRef(platform, "primary")
 
 
-def platform_secret(home: Path, platform: str) -> str | None:
-    """Devolve o segredo salvo, ou `None` quando não há — nunca erros de cofre."""
-    if not SECRET_KEYS.get(platform):
+def _existing_secret_values(vault, ref: CredentialRef) -> dict[str, str]:
+    """Valores já salvos do segredo, ou vazio — nunca expõe erro de cofre."""
+    try:
+        return dict(vault.get(ref).reveal())
+    except CredentialNotFoundError:
+        return {}
+    except (VaultError, KeyError, ValueError, OSError):
+        return {}
+
+
+def platform_secret(home: Path, platform: str, *, field: str | None = None) -> str | None:
+    """Devolve o campo de segredo salvo, ou `None` quando não há — nunca erros."""
+    key = field or SECRET_KEYS.get(platform)
+    if not key:
         return None
     vault = build_credential_service(home)
     if vault.state is not VaultState.UNLOCKED:
         return None
-    try:
-        secret = vault.get(_secret_ref(platform))
-    except (VaultError, KeyError, ValueError, OSError):
-        return None
-    key = SECRET_KEYS[platform]
-    values = secret.reveal()
+    values = _existing_secret_values(vault, _secret_ref(platform))
     return values.get(key)
 
 
@@ -278,10 +330,13 @@ def save_platform_secret(home: Path, platform: str, secret: str) -> dict:
         raise ValueError("plataforma não aceita credencial")
     if not secret.strip():
         raise ValueError("segredo é obrigatório")
+    key = SECRET_KEYS[platform]
     vault = build_credential_service(home)
-    metadata = vault.put(
-        _secret_ref(platform), CredentialSecret({SECRET_KEYS[platform]: secret.strip()})
-    )
+    # Merge: outros campos de segredo da mesma plataforma (ex.: app_secret de
+    # entrada do WhatsApp) sobrevivem ao salvar o credencial principal.
+    valores = _existing_secret_values(vault, _secret_ref(platform))
+    valores[key] = secret.strip()
+    metadata = vault.put(_secret_ref(platform), CredentialSecret(valores))
     return {"platform": platform, "saved": True, "masked": metadata.masked_identifier}
 
 
@@ -293,6 +348,58 @@ def drop_platform_secret(home: Path, platform: str) -> dict:
         vault.delete(_secret_ref(platform))
     except CredentialNotFoundError:
         return {"platform": platform, "removed": False}
+    return {"platform": platform, "removed": True}
+
+
+def _platform_secret_fields(platform: str) -> tuple[str, ...]:
+    principal = SECRET_KEYS.get(platform, "")
+    extras = INBOUND_SECRET_KEYS.get(platform, ())
+    return tuple(campo for campo in (principal, *extras) if campo)
+
+
+def platform_secret_fields(home: Path, platform: str) -> dict[str, bool]:
+    """Presença, por campo, dos segredos da plataforma no cofre."""
+    return {
+        campo: platform_secret(home, platform, field=campo) is not None
+        for campo in _platform_secret_fields(platform)
+    }
+
+
+def save_platform_inbound_field(home: Path, platform: str, *, field: str, secret: str) -> dict:
+    """Salva um campo de segredo de entrada preservando os demais campos."""
+    if field not in INBOUND_SECRET_KEYS.get(platform, ()):
+        raise ValueError(f"plataforma '{platform}' não aceita o segredo de entrada '{field}'")
+    if not secret.strip():
+        raise ValueError("segredo é obrigatório")
+    vault = build_credential_service(home)
+    valores = _existing_secret_values(vault, _secret_ref(platform))
+    valores[field] = secret.strip()
+    metadata = vault.put(_secret_ref(platform), CredentialSecret(valores))
+    return {
+        "platform": platform,
+        "field": field,
+        "saved": True,
+        "masked": metadata.masked_identifier,
+    }
+
+
+def drop_platform_inbound_fields(home: Path, platform: str) -> dict:
+    """Remove todos os campos de entrada; limpa o registro quando restar só isso."""
+    campos = INBOUND_SECRET_KEYS.get(platform, ())
+    if not campos:
+        raise ValueError(f"plataforma '{platform}' não tem segredos de entrada")
+    vault = build_credential_service(home)
+    ref = _secret_ref(platform)
+    valores = _existing_secret_values(vault, ref)
+    for campo in campos:
+        valores.pop(campo, None)
+    if not valores:
+        try:
+            vault.delete(ref)
+        except CredentialNotFoundError:
+            pass
+    else:
+        vault.put(ref, CredentialSecret(valores))
     return {"platform": platform, "removed": True}
 
 
