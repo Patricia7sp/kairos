@@ -1,8 +1,8 @@
 # Uso por canal
 
 Passo a passo operacional de cada superfície do Kairos, com limites e
-dependências externas explícitos. Reflete o código de `main` + PR #64; onde algo
-não existe, está dito.
+dependências externas explícitos. Reflete o código de `main` (PRs #64 e #66);
+onde algo não existe, está dito.
 
 ## Pré-requisitos comuns
 
@@ -55,7 +55,9 @@ kairos web            # sobe o servidor e abre o navegador (ou --no-browser)
   `PUT /api/messaging/{platform}`, `POST|DELETE
   /api/messaging/{platform}/credential`, `POST /api/messaging/{platform}/test`,
   `GET|POST /api/messaging/webhook/endpoints`, `POST /api/messaging/send`.
-- **Limite:** não há tela para listar/confirmar experiências; use a CLI.
+- **Experiências:** o painel tem a tela **Experiências** (listar, confirmar,
+  rejeitar, invalidar e registrar resultado); a CLI continua equivalente
+  (`kairos memory experiences`).
 
 ## Telegram
 
@@ -121,11 +123,28 @@ Candidatas e inválidas nunca são injetadas.
   /api/messaging/whatsapp`) e o token via
   `POST /api/messaging/whatsapp/credential`; envie com `POST /api/messaging/send`
   ou pelo painel.
-- **CLI:** `kairos whatsapp config|test` são placeholder explícito — não alteram
-  configuração nem prometem envio.
+- **CLI:** `kairos whatsapp config|status` gravam e leem os campos não-secretos
+  em `messaging.json` (`enabled`, `phone_number_id`, `number_default`) e
+  reportam a presença do token no cofre; `test` verifica token e número pela
+  API Cloud sem enviar ("nada foi enviado").
 - **Entrada:** não existe. Não há polling nem webhook de recebimento.
 - **Dependências externas:** conta Meta Business, `phone_number_id` e token de
   acesso. Sem eles o adapter não é construído.
+
+## Slack
+
+```bash
+kairos slack config --enabled true --channel-default '#ops'
+kairos slack status   # enabled, canal padrão, presença da URL no cofre
+kairos slack test     # valida a forma da URL; nunca envia ("nada foi enviado")
+```
+
+- A URL do incoming webhook é gravada pela tela de Integrações (ou
+  `POST /api/messaging/slack/credential`); a CLI não altera segredos.
+- A API entrante do Slack não tem verificação sem envio: `test` confirma só a
+  forma da URL; validar a conexão de verdade é o envio de teste (painel).
+- **Dependências externas:** workspace Slack com incoming webhook criado num
+  canal. Sem `enabled` + URL no cofre, o adapter não é construído.
 
 ## Ferramentas por canal
 
@@ -142,8 +161,9 @@ em `docs/plano-ferramentas.md`.
 | Telegram webhook de entrada | não existe |
 | WhatsApp saída | fato (adapter) |
 | WhatsApp entrada | não existe |
-| WhatsApp CLI | placeholder explícito |
-| Tela web de experiências | não existe |
+| WhatsApp CLI | config/status reais; test via `verify()` sem envio |
+| Slack CLI | config/status reais; test valida só a forma da URL |
+| Tela web de experiências | existe (Painel → Experiências) |
 | Segredo de plataforma | só via web/API (`save_platform_secret`) |
 | `kairos auth add` | não implementado (retorna não-implementado) |
 

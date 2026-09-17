@@ -990,6 +990,13 @@ autora ("commit e depois docs").
   divergências), `docs/plano-ferramentas.md` (proposta priorizada, sem
   autorização) e `docs/uso-por-canal.md` (passo a passo, limites e dependências
   externas).
+- **CLI × gateway (paridade de superfície):** `kairos slack` e `kairos whatsapp`
+  ganharam `config|status` reais sobre o mesmo `messaging.json`/cofre que a web
+  usa (`enabled`, `channel_default`, `phone_number_id`, `number_default`), e
+  `test` passou a acionar o `verify()` do adapter sem enviar nem alegar envio
+  (placeholder explícito aposentado). `kairos webhook list|status` passou a ler
+  o `messaging.json` que o gateway e a API usam, aposentando o `webhooks.json`
+  órfão que nada mais consumia.
 - **Correção de instrução enganosa:** o hint do segredo Telegram apontava para
   `kairos auth add`, que não grava o cofre de plataforma (retorna
   não-implementado). Passou a apontar a tela de Integrações / `POST

@@ -408,19 +408,71 @@ class ExecucaoTests(unittest.TestCase):
             self.assertEqual(main(["gui", "start"]), 1)
             self.assertEqual(main(["update"]), 1)
 
-    def test_webhook_lista_endpoints_do_home(self):
+    def test_webhook_lista_endpoints_do_messaging_json(self):
         import contextlib
         import io
         import json
 
+        from kairos_gateway.adapters.config import save_config
+
         home = Path(self._tmp.name)
-        (home / "webhooks.json").write_text(
-            json.dumps(["https://exemplo.test/hook"]), encoding="utf-8"
+        save_config(
+            home,
+            {
+                "webhook": {
+                    "enabled": True,
+                    "endpoints": [{"name": "alerta", "url": "https://exemplo.test/hook"}],
+                }
+            },
         )
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             self.assertEqual(main(["webhook", "list", "--json"]), 0)
-        self.assertEqual(json.loads(buf.getvalue()), {"endpoints": ["https://exemplo.test/hook"]})
+        self.assertEqual(
+            json.loads(buf.getvalue()),
+            {"endpoints": [{"name": "alerta", "url": "https://exemplo.test/hook"}]},
+        )
+
+    def test_slack_config_persiste_no_messaging_json(self):
+        import json
+
+        from kairos_gateway.adapters.config import load_config
+
+        home = Path(self._tmp.name)
+        self.assertEqual(
+            main(["slack", "config", "--enabled", "true", "--channel-default", "#ops"]), 0
+        )
+        slack = load_config(home)["slack"]
+        self.assertTrue(slack["enabled"])
+        self.assertEqual(slack["channel_default"], "#ops")
+        self.assertEqual(
+            json.loads((home / "messaging.json").read_text(encoding="utf-8"))["slack"]["enabled"],
+            True,
+        )
+
+    def test_whatsapp_config_persiste_no_messaging_json(self):
+        from kairos_gateway.adapters.config import load_config
+
+        home = Path(self._tmp.name)
+        self.assertEqual(
+            main(
+                [
+                    "whatsapp",
+                    "config",
+                    "--enabled",
+                    "true",
+                    "--phone-number-id",
+                    "101010",
+                    "--number-default",
+                    "+5511999999999",
+                ]
+            ),
+            0,
+        )
+        whatsapp = load_config(home)["whatsapp"]
+        self.assertTrue(whatsapp["enabled"])
+        self.assertEqual(whatsapp["phone_number_id"], "101010")
+        self.assertEqual(whatsapp["number_default"], "+5511999999999")
 
     def test_approvals_test_devolve_codigo_por_veredito(self):
         self.assertEqual(main(["approvals", "test", "ls -la"]), 0)
@@ -450,7 +502,9 @@ class ExecucaoTests(unittest.TestCase):
             ["backup", "--json"],
             ["telegram", "test"],
             ["slack", "test"],
+            ["slack", "status"],
             ["whatsapp", "test"],
+            ["whatsapp", "status"],
             ["webhook", "status"],
             ["webhook", "list"],
             ["pairing", "list"],

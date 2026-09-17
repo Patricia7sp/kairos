@@ -280,6 +280,17 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("--allowed-ids", help="IDs Telegram autorizados, separados por vírgula")
         parser.add_argument("--poll-interval", type=float, help="segundos entre polls (0.5–300)")
         parser.add_argument("--chat-default", help="chat_id padrão para envio")
+    elif command == "slack" and subcommand == "config":
+        parser.add_argument(
+            "--enabled", choices=("true", "false"), help="ativa/desativa envio (outbound)"
+        )
+        parser.add_argument("--channel-default", help="canal padrão de envio (#canal)")
+    elif command == "whatsapp" and subcommand == "config":
+        parser.add_argument(
+            "--enabled", choices=("true", "false"), help="ativa/desativa envio (outbound)"
+        )
+        parser.add_argument("--phone-number-id", help="Phone Number ID (Meta Cloud API)")
+        parser.add_argument("--number-default", help="número padrão de envio (E.164)")
     elif command == "telegram" and subcommand == "stop":
         parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
     elif command == "import" and subcommand is None:
