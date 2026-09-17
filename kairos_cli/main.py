@@ -184,6 +184,8 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
     command: str, subcommand: str | None, parser
 ) -> None:
     """Argumentos específicos, onde o comando os exige."""
+    import argparse
+
     if command == "config" and subcommand == "show":
         parser.add_argument("key", nargs="?", help="chave pontilhada")
     elif command == "config" and subcommand == "set":
@@ -227,8 +229,9 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         )
         parser.add_argument(
             "--experiences",
-            action="store_true",
-            help="injeta experiências ativas como referência no turno atual (opt-in)",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="injeta experiências ativas como referência no turno atual (padrão: ligado)",
         )
         parser.add_argument(
             "--idempotency-key",

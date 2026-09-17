@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 from unittest.mock import AsyncMock
 
 import pytest
@@ -203,7 +204,7 @@ def test_tools_turn_exposes_chat_definitions_and_web_search_needs_flag(db, monke
     assert events[-1].kind == "turn_end"
     tools = {t["function"]["name"] for t in gateway.requests[0].tools}
     assert "web_search" not in tools
-    assert tools == {
+    expected = {
         "bash",
         "write_file",
         "edit_file",
@@ -213,6 +214,9 @@ def test_tools_turn_exposes_chat_definitions_and_web_search_needs_flag(db, monke
         "search_files",
         "web_extract",
     }
+    if shutil.which("git") is not None:
+        expected.add("git")
+    assert tools == expected
 
 
 def test_legacy_web_search_turn_only_exposes_web_search(db, monkeypatch):
@@ -249,3 +253,68 @@ def test_unsolicited_mutator_never_triggers_approval_or_execution(db, monkeypatc
     results = [e.tool_result for e in events if e.kind == "tool_result"]
     assert len(results) == 1 and results[0].is_error
     assert "não habilitada" in json.loads(results[0].content)["error"]
+
+
+def git_call(call_id, arguments):
+    return CanonicalToolCall(id=call_id, name="git", arguments=arguments)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git não instalado")
+def test_git_commit_pede_aprovacao_e_status_flui(db, monkeypatch):
+    executed = AsyncMock(return_value=InteractionToolResult("c1", '{"status":"ok"}'))
+    monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", executed)
+    gateway = RoundGateway(
+        [
+            mutator_round(
+                git_call("c1", '{"subcommand":"commit","message":"x"}'),
+                git_call("s1", '{"subcommand":"status"}'),
+            ),
+            answer_round(),
+        ]
+    )
+    service = make_service(db, gateway)
+    events = []
+
+    async def scenario():
+        driver = asyncio.create_task(collect_with(events, service, turn(tools=True)))
+        approval = await wait_for_kind(events, "tool_approval_request")
+        assert approval.tool_call.id == "c1"
+        service.decide_tool_approval(
+            approval_id=approval.tool_approval_id, session_id="search", decision="allow"
+        )
+        await asyncio.wait_for(driver, 5)
+
+    asyncio.run(scenario())
+    assert events[-1].kind == "turn_end"
+    # commit aprovado executa; status executa sem pedir aprovação.
+    assert executed.await_count == 2
+    calls = [call.args[0].name for call in executed.await_args_list]
+    assert calls == ["git", "git"]
+    approvals = [e for e in events if e.kind == "tool_approval_request"]
+    assert [a.tool_call.id for a in approvals] == ["c1"]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git não instalado")
+def test_git_commit_negado_nao_executa(db, monkeypatch):
+    executed = AsyncMock()
+    monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", executed)
+    gateway = RoundGateway(
+        [mutator_round(git_call("c1", '{"subcommand":"commit","message":"x"}')), answer_round()]
+    )
+    service = make_service(db, gateway)
+    events = []
+
+    async def scenario():
+        driver = asyncio.create_task(collect_with(events, service, turn(tools=True)))
+        approval = await wait_for_kind(events, "tool_approval_request")
+        service.decide_tool_approval(
+            approval_id=approval.tool_approval_id, session_id="search", decision="deny"
+        )
+        await asyncio.wait_for(driver, 5)
+
+    asyncio.run(scenario())
+    assert events[-1].kind == "turn_end"
+    executed.assert_not_awaited()
+    results = [e.tool_result for e in events if e.kind == "tool_result"]
+    assert len(results) == 1 and results[0].is_error
+    assert json.loads(results[0].content)["status"] == "denied"

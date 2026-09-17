@@ -39,7 +39,7 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 | Ferramentas core | fato | fato | fato (`tools=True`) | — |
 | Aprovação de ferramenta | terminal | modal na UI | keyboard inline | — |
 | Memória de longo prazo | `kairos memory status/off` | leitura | herdada | — |
-| Experiências (aprendizado) | `--experiences` (opt-in) | — | `inbound.experiences` (opt-in) | — |
+| Experiências (aprendizado) | ligadas por padrão (`--no-experiences` desliga) | — | `inbound.experiences` (padrão ligado) | — |
 | Gestão de experiências | `kairos memory experiences` | — | — | — |
 | Envio de mensagem | — | `/api/messaging/send` | `TelegramAdapter` | `WhatsAppAdapter` |
 | Config não-secreta | `kairos telegram config` | `/api/messaging/{platform}` | idem via CLI | CLI é placeholder |
@@ -49,7 +49,8 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 
 - `kairos run "..."` e `kairos chat --session ID` usam o mesmo serviço canônico;
   `run` cria a sessão `cli-default` quando não recebe `--session`.
-- **Experiências:** `--experiences` liga a injeção por turno. O contexto entra
+- **Experiências:** a injeção por turno está ligada por padrão (terminal e
+  Telegram); `--no-experiences`/`"experiences": false` desligam. O contexto entra
   no **conteúdo do turno atual**, nunca no system prompt — reescrever o prefixo
   invalidaria o cache por conversa (Lei 1 em `kairos_integration.surfaces`).
 - **Telegram:** `kairos telegram config|test|status|run|stop`. O token vive no

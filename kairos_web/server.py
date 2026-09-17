@@ -54,6 +54,7 @@ from kairos_web.chat_transport import (
     interaction_event_to_json,
 )
 from kairos_web.cron_api import router as cron_router
+from kairos_web.experiences_api import router as experiences_router
 from kairos_web.logs_api import router as logs_router
 from kairos_web.message_metadata import public_message_accounting
 from kairos_web.messaging_api import router as messaging_router
@@ -148,6 +149,7 @@ app.include_router(tools_router)
 app.include_router(settings_router)
 app.include_router(cron_router)
 app.include_router(messaging_router)
+app.include_router(experiences_router)
 
 
 @app.exception_handler(RequestValidationError)

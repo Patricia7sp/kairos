@@ -1,5 +1,6 @@
 """messaging.json — configuração não-secreta estrita e fail-closed."""
 
+import json
 import stat
 import tempfile
 import unittest
@@ -26,6 +27,33 @@ class ConfigTests(unittest.TestCase):
         doc = load_config(self.tmp)
         self.assertFalse(doc["telegram"]["enabled"])
         self.assertEqual(doc["webhook"]["endpoints"], [])
+        self.assertTrue(doc["telegram"]["inbound"]["experiences"])
+
+    def test_inbound_experiences_ausente_herda_padrao_ligado(self):
+        (self.tmp / "messaging.json").write_text(
+            json.dumps(
+                {
+                    "telegram": {
+                        "enabled": True,
+                        "chat_id_default": "",
+                        "inbound": {
+                            "enabled": True,
+                            "allowed_user_ids": [1],
+                            "poll_interval_seconds": 1.0,
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        doc = load_config(self.tmp)
+        self.assertTrue(doc["telegram"]["inbound"]["experiences"])
+
+    def test_inbound_experiences_false_desliga(self):
+        doc = default_config()
+        doc["telegram"]["inbound"]["experiences"] = False
+        save_config(self.tmp, doc)
+        self.assertFalse(load_config(self.tmp)["telegram"]["inbound"]["experiences"])
 
     def test_save_and_load_roundtrip(self):
         doc = default_config()

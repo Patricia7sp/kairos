@@ -31,6 +31,31 @@ TOOL_APPROVAL_TIMEOUT_SECONDS = 90.0
 #: Ferramentas que alteram o sistema hospedeiro e exigem aprovação por turno.
 MUTATING_TOOLS: frozenset[str] = frozenset({"bash", "write_file", "edit_file", "patch"})
 
+#: Subcomandos `git` que alteram o repositório e exigem aprovação por turno.
+#: `status`/`diff`/`log` são leitura e fluem sem prompt. A ferramenta expõe
+#: hoje só `commit`, mas a lista é o limite de segurança para os mutadores.
+GIT_MUTATING_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "commit",
+        "push",
+        "merge",
+        "rebase",
+        "reset",
+        "revert",
+        "cherry-pick",
+        "checkout",
+        "switch",
+        "clean",
+        "rm",
+        "mv",
+        "restore",
+        "stash",
+        "tag",
+        "apply",
+        "am",
+    }
+)
+
 #: Subconjunto core exposto ao Chat. Tudo fora daqui é recusado nomeado.
 CHAT_TOOLS: frozenset[str] = frozenset(
     {
@@ -43,6 +68,7 @@ CHAT_TOOLS: frozenset[str] = frozenset(
         "list_dir",
         "search_files",
         "web_extract",
+        "git",
     }
 )
 
@@ -99,7 +125,13 @@ def chat_tool_definitions(
     )
 
 
-def needs_tool_approval(name: str) -> bool:
+def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = None) -> bool:
+    if name == "git":
+        if isinstance(arguments, str):
+            parsed = _body_arguments(arguments)
+            arguments = parsed if parsed is not None else {}
+        subcommand = str((arguments or {}).get("subcommand", ""))
+        return subcommand in GIT_MUTATING_SUBCOMMANDS
     return name in MUTATING_TOOLS
 
 

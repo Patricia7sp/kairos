@@ -53,9 +53,9 @@ A coluna **valor** é uma hipótese a validar com uso real — não uma promessa
 
 | Candidata | Como entregar | Categoria / risco | Dependências | Custo de contexto | Aprovação | Valor hipotético |
 |---|---|---|---|---|---|---|
-| Tela web de experiências | estender web (etapa 1) | leitura / baixo | `kairos_memory` (existe) | nenhum | não | fechar a divergência #2 do diagnóstico |
-| `--experiences` por padrão no Telegram e chat | extensão (etapa 1) | leitura / baixo | `kairos_memory` | só quando há match | não | correções recorrentes sem reexplicar |
-| `git` (status/diff/log/commit) | ferramenta gated por `check_fn` (etapa 3) | mutadora / médio | repositório git | pequeno | sim (em `commit`) | operar o próprio repo com trilha |
+| ~~Tela web de experiências~~ **implementado** | estender web (etapa 1) | leitura / baixo | `kairos_memory` (existe) | nenhum | não | fechar a divergência #2 do diagnóstico |
+| ~~`--experiences` por padrão no Telegram e chat~~ **implementado** | extensão (etapa 1) | leitura / baixo | `kairos_memory` | só quando há match | não | correções recorrentes sem reexplicar |
+| ~~`git` (status/diff/log/commit)~~ **implementado** | ferramenta gated por `Toolset.requirement` + aprovação por subcomando (etapa 3) | mutadora / médio | repositório git | pequeno | sim (em `commit`/mutadores) | operar o próprio repo com trilha |
 
 ### P2 — dependem de decisão de produto
 
