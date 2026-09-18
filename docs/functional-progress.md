@@ -1196,3 +1196,14 @@ valida a saúde da stack no host. Guia completo em `docs/ci-cd-komodo.md`.
   com permissão na stack, acesso público do runner ao Core (ingress/Tailscale
   Funnel ou self-hosted runner no tailnet), secrets/variável do GitHub e a
   procedure/action do smoke no Komodo.
+
+### Merge do CI/CD no Komodo (2026-09-18)
+
+PR #71 squash-mergeado em `b111225` (job `deploy` no ci.yml,
+`scripts/komodo-deploy.sh` + `scripts/smoke-deploy.sh`, 12 testes contra
+servidor HTTP fake, guia `docs/ci-cd-komodo.md`). Merge verificado:
+`git diff HEAD~1..HEAD` sem remoções acidentais; suíte local 2.692 passados (14
+pulados, 26 deselected) + os 8 jobs do CI verdes no PR (o `deploy` skipa fora
+da main). Pipeline pronto; primeiro deploy automático depende do setup único
+(chave de API, acesso do runner ao Core, secrets/variable do GitHub e a
+procedure/action do smoke) — ver `docs/ci-cd-komodo.md`.
