@@ -23,6 +23,7 @@ from kairos_gateway.adapters import (
     messaging_status,
 )
 from kairos_gateway.adapters.config import (
+    INBOUND_SECRET_KEYS,
     add_webhook_endpoint,
     drop_platform_inbound_fields,
     drop_platform_secret,
@@ -81,11 +82,16 @@ class SendBody(BaseModel):
 
 
 class InboundSecretBody(BaseModel):
-    """Segredos do webhook de entrada do WhatsApp (merge no cofre)."""
+    """Segredos do webhook de entrada de uma plataforma (merge no cofre).
+
+    Cada plataforma aceita seu conjunto (``INBOUND_SECRET_KEYS``): o WhatsApp o
+    App Secret/Verify Token, o Telegram o secret token do webhook.
+    """
 
     model_config = ConfigDict(extra="forbid")
     app_secret: StrictStr | None = None
     verify_token: StrictStr | None = None
+    webhook_secret_token: StrictStr | None = None
 
 
 @router.get("/messaging")
@@ -139,25 +145,35 @@ def remove_credential(platform: str, request: Request):
         raise HTTPException(503, "cofre de credenciais indisponível") from exc
 
 
-@router.post("/messaging/whatsapp/inbound-secret")
-def save_inbound_secret(body: InboundSecretBody, request: Request):
-    """Grava App Secret/Verify Token do webhook de entrada no cofre (merge).
+@router.post("/messaging/{platform}/inbound-secret")
+def save_inbound_secret(platform: str, body: InboundSecretBody, request: Request):
+    """Grava os segredos do webhook de entrada no cofre (merge por plataforma).
 
     Os campos são independentes: um POST grava os que vierem e preserva os já
     salvos. O painel nunca recebe o valor de volta — só `saved` com os campos.
     """
-    presentes = {
-        campo: valor
-        for campo, valor in (("app_secret", body.app_secret), ("verify_token", body.verify_token))
-        if valor
+    aceitos = INBOUND_SECRET_KEYS.get(platform)
+    if aceitos is None:
+        raise HTTPException(422, f"plataforma '{platform}' não tem segredos de entrada")
+    mapa = {
+        "app_secret": body.app_secret,
+        "verify_token": body.verify_token,
+        "webhook_secret_token": body.webhook_secret_token,
     }
+    presentes = {campo: valor for campo, valor in mapa.items() if valor}
+    desconhecidos = set(presentes) - set(aceitos)
+    if desconhecidos:
+        raise HTTPException(
+            422,
+            f"campo(s) não aceitos por {platform}: {', '.join(sorted(desconhecidos))}",
+        )
     if not presentes:
-        raise HTTPException(422, "informe ao menos um de app_secret ou verify_token")
+        raise HTTPException(422, f"informe ao menos um de {', ou '.join(sorted(aceitos))}")
     home = _home(request)
     salvos: list[str] = []
     for campo, valor in presentes.items():
         try:
-            save_platform_inbound_field(home, "whatsapp", field=campo, secret=valor)
+            save_platform_inbound_field(home, platform, field=campo, secret=valor)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
@@ -169,14 +185,16 @@ def save_inbound_secret(body: InboundSecretBody, request: Request):
                 ) from exc
             raise HTTPException(503, "cofre de credenciais indisponível") from exc
         salvos.append(campo)
-    return {"platform": "whatsapp", "saved": salvos}
+    return {"platform": platform, "saved": salvos}
 
 
-@router.delete("/messaging/whatsapp/inbound-secret")
-def remove_inbound_secret(request: Request):
+@router.delete("/messaging/{platform}/inbound-secret")
+def remove_inbound_secret(platform: str, request: Request):
     """Remove os segredos de entrada; a credencial principal continua intacta."""
+    if platform not in INBOUND_SECRET_KEYS:
+        raise HTTPException(422, f"plataforma '{platform}' não tem segredos de entrada")
     try:
-        return drop_platform_inbound_fields(_home(request), "whatsapp")
+        return drop_platform_inbound_fields(_home(request), platform)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

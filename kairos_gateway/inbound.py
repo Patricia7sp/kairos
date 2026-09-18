@@ -28,6 +28,7 @@ import json
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
+from hmac import compare_digest
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,6 +41,7 @@ __all__ = [
     "TelegramChannel",
     "TelegramError",
     "TelegramInbound",
+    "TelegramUnauthorizedError",
     "build_telegram_inbound",
     "stop_telegram_inbound",
 ]
@@ -55,6 +57,10 @@ _PREFIX = "ka:"
 
 class TelegramError(Exception):
     """Erro de configuração ou autenticação no canal de entrada."""
+
+
+class TelegramUnauthorizedError(TelegramError):
+    """Webhook recusado: secret_token divergente ou ausente (fail-closed)."""
 
 
 class InteractionRouterProtocol(Protocol):
@@ -194,6 +200,25 @@ class TelegramChannel:
         username = result.get("username") or result.get("first_name") or "desconhecido"
         return {"ok": True, "bot": f"@{username}"}
 
+    async def set_webhook(
+        self, url: str, *, secret_token: str | None = None, drop_pending: bool = False
+    ) -> dict[str, Any]:
+        """Registra o endpoint do webhook e desativa o long-polling (getUpdates 409)."""
+        payload: dict[str, Any] = {
+            "url": url,
+            "allowed_updates": ["message", "callback_query"],
+            "drop_pending_updates": drop_pending,
+        }
+        if secret_token:
+            payload["secret_token"] = secret_token
+        return await self._post("setWebhook", **payload)
+
+    async def delete_webhook(self, drop_pending: bool = False) -> dict[str, Any]:
+        return await self._post("deleteWebhook", drop_pending_updates=drop_pending)
+
+    async def webhook_info(self) -> dict[str, Any]:
+        return await self._post("getWebhookInfo")
+
     async def send_text(
         self, chat_id: int, text: str, *, reply_markup: dict | None = None
     ) -> dict[str, Any]:
@@ -269,11 +294,18 @@ class TelegramInbound:
         self._allowed: frozenset[int] = frozenset(inbound.get("allowed_user_ids", []))
         self._poll_interval: float = float(inbound.get("poll_interval_seconds", 2.0))
         self._experiences: bool = bool(inbound.get("experiences", True))
+        mode = str(inbound.get("mode", "poll"))
+        if mode not in ("poll", "webhook"):
+            raise TelegramError("inbound.mode deve ser 'poll' ou 'webhook'")
+        self._mode: str = mode
         self._router = router
         resolved_token = token or platform_secret(self.home, "telegram")
         if not resolved_token:
             raise TelegramError("token do Telegram não configurado no cofre")
         self._channel = channel or TelegramChannel(resolved_token)
+        self._webhook_secret_token: str | None = platform_secret(
+            self.home, "telegram", field="webhook_secret_token"
+        )
         self._state = _InboundState.load(self.home)
         self._chat_locks: dict[str, asyncio.Lock] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -290,6 +322,14 @@ class TelegramInbound:
     def experiences_enabled(self) -> bool:
         return self._experiences
 
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def webhook_secret_token(self) -> str | None:
+        return self._webhook_secret_token
+
     # --- shutdown ---
 
     async def _shutdown_pending_tasks(self) -> None:
@@ -305,6 +345,11 @@ class TelegramInbound:
     # --- ciclo principal ---
 
     async def run(self) -> None:
+        if self._mode == "webhook":
+            raise TelegramError(
+                "inbound.mode é 'webhook' — o servidor web atende /api/inbound/telegram; "
+                "não use `kairos telegram run` (ou devolva o modo a 'poll')"
+            )
         if not self._inbound_enabled:
             raise TelegramError("canal de entrada desabilitado (inbound.enabled = false)")
         verify = await self._channel.verify()
@@ -342,6 +387,49 @@ class TelegramInbound:
             if offset - 1 > self._state.consumed:
                 self._state.consumed = offset - 1
                 self._state.persist(self.home)
+
+    # --- webhook (transporte alternativo ao long-poll) ---
+
+    def authorize_webhook(self, header_token: str | None) -> bool:
+        """Autoriza a entrega comparando o secret em tempo constante.
+
+        Fail-closed: sem segredo salvo no cofre ou header ausente a entrega é
+        recusada — o header nunca vaza pelo tempo da comparação.
+        """
+        expected = self._webhook_secret_token
+        if not expected or not header_token:
+            return False
+        return compare_digest(header_token.strip(), expected)
+
+    async def accept_webhook(self, raw_body: bytes | str, header_token: str | None) -> None:
+        """Valida e agenda o processamento de um ``update`` entregue por webhook.
+
+        Só aceita no modo ``webhook`` e com secret_token conferindo. Updates que
+        não descrevem mensagem/callback são acusados e descartados (o mesmo
+        recorte do long-poll). O processamento é em task: a entrega acusa rápido
+        e a idempotência por ``update_id`` segura retransmissão.
+        """
+        if self._mode != "webhook":
+            raise TelegramError(
+                "inbound.mode é 'poll' — webhook recusado (defina webhook no servidor "
+                "ou troque o modo)"
+            )
+        if not self.authorize_webhook(header_token):
+            raise TelegramUnauthorizedError(
+                "webhook não autorizado: X-Telegram-Bot-Api-Secret-Token ausente ou divergente"
+            )
+        try:
+            raw: dict[str, Any] = json.loads(raw_body)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(raw, dict):
+            return
+        update = _parse_update(raw)
+        if update is None:
+            return
+        task = asyncio.create_task(self._dispatch(update))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     # --- despacho por conversa ---
 

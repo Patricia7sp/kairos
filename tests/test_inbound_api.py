@@ -1,9 +1,11 @@
-"""Webhooks de entrada WhatsApp: rotas públicas verificadas pelo próprio canal.
+"""Webhooks de entrada: rotas públicas verificadas pelo próprio canal.
 
 `GET /api/inbound/whatsapp` responde o ``hub.challenge`` só com Verify Token
 correto; `POST` aceita ``EVENT_RECEIVED`` só com assinatura HMAC-SHA256 válida.
-Segredos reais via cofre (monkeypatch do serviço de credenciais, como o
-`test_messaging_api`), nenhuma rede.
+O `POST /api/inbound/telegram` só aceita no modo ``webhook`` e com
+`X-Telegram-Bot-Api-Secret-Token` conferindo. Segredos reais via cofre
+(monkeypatch do serviço de credenciais, como o `test_messaging_api`), nenhuma
+rede.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from kairos_gateway.inbound import TelegramInbound
 from kairos_gateway.service import SendResult
 from kairos_security.credentials.encrypted import EncryptedFileVault
 from kairos_security.credentials.keyring_backend import SystemKeyringVault
@@ -26,6 +29,10 @@ TEST_FILE = "senha-de-teste"
 APP_SECRET = "app-secret-webhook"  # noqa: S105 - fixture sintética de teste
 VERIFY_TOKEN = "verify-token-webhook"  # noqa: S105 - fixture sintética de teste
 PHONE = "5511999888777"
+TG_SECRET = "segredo-do-webhook-telegram"  # noqa: S105 - fixture sintética de teste
+TG_TOKEN = "tk-fake"  # noqa: S105 - fixture sintética de teste
+TG_USER = 777888999
+TG_CHAT = 987654321
 
 
 class _FakeWhatsAppAdapter:
@@ -51,6 +58,38 @@ class _FakeRouter:
         yield _FakeEvent("turn_end")
 
 
+class _FakeTelegramChannel:
+    def __init__(self) -> None:
+        self.sent: list[tuple[int, str]] = []
+
+    async def verify(self) -> dict:
+        return {"ok": True, "bot": "@teste"}
+
+    async def send_text(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> dict:
+        self.sent.append((chat_id, text))
+        return {"ok": True}
+
+    async def send_typing(self, chat_id: int) -> None:
+        return None
+
+    async def answer_callback(self, callback_query_id: str, text: str = "") -> None:
+        return None
+
+    async def set_webhook(
+        self, url: str, *, secret_token: str | None = None, drop_pending: bool = False
+    ) -> dict:
+        return {"ok": True}
+
+    async def delete_webhook(self, drop_pending: bool = False) -> dict:
+        return {"ok": True}
+
+    async def webhook_info(self) -> dict:
+        return {"url": ""}
+
+    async def get_updates(self, offset: int, *, poll_seconds: int = 30) -> list[dict]:
+        raise AssertionError("modo webhook não usa long-poll")
+
+
 class _DisabledKeyring:
     priority = 0.0
 
@@ -69,6 +108,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIROS_HOME", str(tmp_path))
     monkeypatch.setattr(app.state, "kairos_home", tmp_path, raising=False)
     monkeypatch.setattr(app.state, "whatsapp_inbound", None, raising=False)
+    monkeypatch.setattr(app.state, "telegram_inbound", None, raising=False)
     monkeypatch.setattr(app.state, "interaction_service", None, raising=False)
     vault_path = tmp_path / "credentials.vault"
     encrypted = EncryptedFileVault(vault_path, scrypt_n=2**10)
@@ -83,6 +123,12 @@ def home(tmp_path, monkeypatch):
         lambda _home: {"whatsapp": _FakeWhatsAppAdapter()},
     )
     monkeypatch.setattr("kairos_integration.build_interaction_router", lambda _home: _FakeRouter())
+    monkeypatch.setattr(
+        "kairos_web.inbound_api.build_telegram_inbound",
+        lambda _home, router=None: TelegramInbound(
+            _home, router or _FakeRouter(), token=TG_TOKEN, channel=_FakeTelegramChannel()
+        ),
+    )
     return tmp_path
 
 
@@ -271,4 +317,157 @@ def test_segredos_merge_preserva_credencial(home):
 
 def test_segredo_entrada_sem_campos_recusa(home):
     resp = _client().post("/api/messaging/whatsapp/inbound-secret", json={})
+    assert resp.status_code == 422
+
+
+def _habilitar_telegram(home, *, enabled: bool = True, mode: str = "webhook") -> None:
+    resp = _client().put(
+        "/api/messaging/telegram",
+        json={
+            "config": {
+                "enabled": True,
+                "chat_id_default": "",
+                "inbound": {
+                    "enabled": enabled,
+                    "allowed_user_ids": [TG_USER],
+                    "poll_interval_seconds": 1.0,
+                    "experiences": False,
+                    "mode": mode,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 200
+
+
+def _tg_payload() -> bytes:
+    return json.dumps(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 1,
+                "chat": {"id": TG_CHAT, "type": "private"},
+                "from": {"id": TG_USER},
+                "text": "oi",
+            },
+        }
+    ).encode()
+
+
+def test_telegram_modo_poll_recusa_fechado(home):
+    _habilitar_telegram(home, mode="poll")
+    resp = _client().post("/api/inbound/telegram", content=_tg_payload())
+    assert resp.status_code == 503
+
+
+def test_telegram_sem_secret_no_cofre_recusa(home):
+    _habilitar_telegram(home)
+    resp = _client().post("/api/inbound/telegram", content=_tg_payload())
+    assert resp.status_code == 401
+
+
+def test_telegram_secret_divergente_recusa(home):
+    _habilitar_telegram(home)
+    _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"webhook_secret_token": TG_SECRET},
+    )
+    resp = _client().post(
+        "/api/inbound/telegram",
+        content=_tg_payload(),
+        headers={"X-Telegram-Bot-Api-Secret-Token": "outro-segredo"},
+    )
+    assert resp.status_code == 401
+
+
+def test_telegram_enabled_sem_allowlist_nao_constroi_turno(home):
+    _habilitar_telegram(home)
+    resp = _client().put(
+        "/api/messaging/telegram",
+        json={
+            "config": {
+                "inbound": {
+                    "enabled": True,
+                    "allowed_user_ids": [],
+                    "poll_interval_seconds": 1.0,
+                    "mode": "webhook",
+                }
+            }
+        },
+    )
+    assert resp.status_code == 200
+    _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"webhook_secret_token": TG_SECRET},
+    )
+    resp = _client().post(
+        "/api/inbound/telegram",
+        content=_tg_payload(),
+        headers={"X-Telegram-Bot-Api-Secret-Token": TG_SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_telegram_receive_valido_acusa_ok(home):
+    _habilitar_telegram(home)
+    _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"webhook_secret_token": TG_SECRET},
+    )
+    resp = _client().post(
+        "/api/inbound/telegram",
+        content=_tg_payload(),
+        headers={"X-Telegram-Bot-Api-Secret-Token": TG_SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_telegram_rota_aberta_sem_sessao(home):
+    _habilitar_telegram(home)
+    _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"webhook_secret_token": TG_SECRET},
+    )
+    anon = TestClient(app)
+    resp = anon.post(
+        "/api/inbound/telegram",
+        content=_tg_payload(),
+        headers={"X-Telegram-Bot-Api-Secret-Token": TG_SECRET},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_telegram_segredo_entrada_merge_e_drop_no_painel(home):
+    _client().post("/api/messaging/telegram/credential", json={"secret": "tk-bot:ABC"})
+    r = _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"webhook_secret_token": TG_SECRET},
+    )
+    assert r.status_code == 200
+    assert r.json()["saved"] == ["webhook_secret_token"]
+    status = _client().get("/api/messaging").json()
+    telegram = next(p for p in status["platforms"] if p["platform"] == "telegram")
+    assert telegram["configured"] is True
+    assert telegram["inbound"]["campo_secreto"] == {"webhook_secret_token": True}
+    d = _client().delete("/api/messaging/telegram/inbound-secret")
+    assert d.status_code == 200
+    status2 = _client().get("/api/messaging").json()
+    telegram2 = next(p for p in status2["platforms"] if p["platform"] == "telegram")
+    assert telegram2["inbound"]["campo_secreto"] == {"webhook_secret_token": False}
+    assert telegram2["configured"] is True
+
+
+def test_telegram_segredo_entrada_rejeita_campo_de_outra_plataforma(home):
+    resp = _client().post(
+        "/api/messaging/telegram/inbound-secret",
+        json={"app_secret": "x"},
+    )
+    assert resp.status_code == 422
+
+
+def test_telegram_segredo_entrada_sem_campos_recusa(home):
+    resp = _client().post("/api/messaging/telegram/inbound-secret", json={})
     assert resp.status_code == 422

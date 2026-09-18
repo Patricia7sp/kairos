@@ -23,7 +23,7 @@ Atualizado em 17/09/2026, sobre `main` (`0f62438`) + lote de canal de entrada Wh
 |---|---|---|---|
 | Terminal | `kairos run` / `kairos chat` | `InteractionService` | stdin / one-shot |
 | Web | FastAPI + SPA | `InteractionService` | HTTP/WS da própria sessão |
-| Telegram | long-poll `getUpdates` | `InteractionRouter` | mensagens do bot |
+| Telegram | long-poll `getUpdates` ou webhook `POST /api/inbound/telegram` | `InteractionRouter` | mensagens do bot |
 | WhatsApp | Meta Graph (Cloud) | `InteractionRouter` | webhook `GET/POST /api/inbound/whatsapp` |
 
 Todas as superfícies de conversa passam pelo **mesmo router** de interação
@@ -53,7 +53,8 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
   Telegram); `--no-experiences`/`"experiences": false` desligam. O contexto entra
   no **conteúdo do turno atual**, nunca no system prompt — reescrever o prefixo
   invalidaria o cache por conversa (Lei 1 em `kairos_integration.surfaces`).
-- **Telegram:** `kairos telegram config|test|status|run|stop`. O token do bot
+- **Telegram:** `kairos telegram config|test|status|run|stop|webhook|webhook-off`.
+  O token do bot
   mora no cofre de plataforma, gravado pela tela de Integrações (ou
   `POST /api/messaging/telegram/credential`) — `kairos auth add` não chama esse
   cofre; `test` não finge envio (imprime "nada foi enviado") e `status` lê o
@@ -84,7 +85,15 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 - Saída chunkada em ≤4000 caracteres; indicator de digitação; drenagem via
   marcador (`kairos telegram stop`) com shutdown gracioso.
 - Comandos textuais: `/start` (ajuda) e `/status`.
-- **Limite:** só long-poll. Webhook de entrada não é usado.
+- **Webhook de entrada** (`telegram.inbound.mode = "webhook"`): a entrega sai do
+  long-poll para `POST /api/inbound/telegram` (rota pública sem sessão,
+  `_OPEN_PATHS`), autenticada pelo `X-Telegram-Bot-Api-Secret-Token` (comparação
+  em tempo constante com o `webhook_secret_token` do cofre). No modo `webhook` o
+  `kairos telegram run` recusa (a Bot API rejeita `getUpdates` com webhook
+  ativo) e no modo `poll` a rota recusa (503). `kairos telegram webhook <url>`
+  registra o webhook e grava o modo/URL; `webhook-off` cancela e volta a `poll`.
+  Turno assíncrono com ack `ok`, idempotência por `telegram:{update_id}` e a
+  mesma allowlist do long-poll.
 
 ## WhatsApp
 
@@ -143,8 +152,9 @@ Todas as superfícies de conversa passam pelo **mesmo router** de interação
 
 - Não certifica geração bem-sucedida de nenhum modelo específico nem
   autenticação de contas de terceiros (ex.: aceite real do subscribe da Meta em
-  produção depende de URL pública exposta ao WhatsApp).
-- Não afirma webhook de entrada Telegram nem paridade total entre as CLIs.
+  produção depende de URL pública exposta ao WhatsApp; o webhook do Telegram só
+  recebe updates de verdade com URL HTTPS pública e o servidor web rodando).
+- Não afirma paridade total entre as CLIs.
 - Números de teste não são congelados aqui; a fonte é a suíte local e o CI.
 
 ## Referências

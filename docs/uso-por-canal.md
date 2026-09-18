@@ -102,7 +102,38 @@ kairos telegram stop     # grava o marcador de drenagem; o loop encerra com calm
 - Respostas longas são fatiadas em ≤4000 caracteres.
 - **Dependências externas:** token do bot e IDs numéricos autorizados. Sem
   token, `run` falha fechado; sem allowlist, nada é atendido.
-- **Limite:** só long-poll; webhook de entrada não existe.
+- **Transporte:** o canal tem dois modos em `telegram.inbound.mode`:
+  - `poll` (padrão): long-polling com `kairos telegram run` (primeiro plano);
+  - `webhook`: o servidor web atende `POST /api/inbound/telegram` e o turno
+    roda fora do `run` — o long-poll fica desativado (a Bot API recusa
+    `getUpdates` enquanto webhook ativo).
+- **Limite:** webhook exige URL HTTPS pública e o servidor web rodando.
+
+#### Webhook de entrada (`inbound.mode = webhook`)
+
+```bash
+# 1. segredo do webhook no cofre (merge preserva o token do bot)
+curl -s -X POST http://127.0.0.1:9119/api/messaging/telegram/inbound-secret \
+  -H 'Content-Type: application/json' \
+  -d '{"webhook_secret_token":"<secreto>"}'
+
+# 2. habilita e aponta o Telegram para a URL pública do servidor de vocês
+kairos telegram config --inbound-enabled true --mode webhook
+kairos telegram webhook https://<host>/api/inbound/telegram
+```
+
+- A rota é pública (`_OPEN_PATHS`), sem sessão — a segurança é do canal: o
+  header `X-Telegram-Bot-Api-Secret-Token` tem de conferir com o segredo do
+  cofre (comparação em tempo constante). Sem segredo ou divergente → 503/401,
+  nada processado.
+- No modo `poll` o `POST /api/inbound/telegram` recusa (503, fail-closed); o
+  `kairos telegram run` recusa no modo `webhook`.
+- O turno roda assíncrono (ack `ok` imediato); a idempotência por
+  `telegram:{update_id}` segura retransmissão. Auth do remetente é a mesma
+  allowlist do long-poll.
+- `kairos telegram webhook-off [--drop-pending]` cancela o webhook e volta ao
+  modo `poll`; `kairos telegram status` mostra `inbound.mode`, `webhook_url` e
+  a presença do segredo.
 
 ### Experiências no canal (ligadas por padrão)
 
@@ -170,8 +201,8 @@ em `docs/plano-ferramentas.md`.
 
 | Item | Estado |
 |---|---|
-| Telegram inbound | fato (long-poll, fail-closed) |
-| Telegram webhook de entrada | não existe |
+| Telegram inbound | fato (long-poll ou webhook, fail-closed) |
+| Telegram webhook de entrada | fato (rope pública `POST /api/inbound/telegram`, `mode: webhook`) |
 | WhatsApp saída | fato (adapter) |
 | WhatsApp entrada | fato (webhook Cloud API, fail-closed) |
 | WhatsApp CLI | config/status reais; test via `verify()` sem envio |

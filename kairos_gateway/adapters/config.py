@@ -39,16 +39,23 @@ SECRET_KEYS: dict[str, str] = {
 
 #: Segredos de entrada (além da credencial principal) exigidos por cada
 #: plataforma com canal de entrada. O WhatsApp valida a assinatura do webhook
-#: com o App Secret e o apertão de mão do subscribe com o Verify Token.
+#: com o App Secret e o apertão de mão do subscribe com o Verify Token; o
+#: Telegram protege o webhook pelo `X-Telegram-Bot-Api-Secret-Token`.
 INBOUND_SECRET_KEYS: dict[str, tuple[str, ...]] = {
     "whatsapp": ("app_secret", "verify_token"),
+    "telegram": ("webhook_secret_token",),
 }
 
 _PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook")
 
 #: Campos não-secretos aceitos por plataforma. Chave -> tipo Python.
 _FIELDS: dict[str, dict[str, type]] = {
-    "telegram": {"enabled": bool, "chat_id_default": str, "inbound": dict},
+    "telegram": {
+        "enabled": bool,
+        "chat_id_default": str,
+        "webhook_url": str,
+        "inbound": dict,
+    },
     "whatsapp": {
         "enabled": bool,
         "phone_number_id": str,
@@ -61,7 +68,7 @@ _FIELDS: dict[str, dict[str, type]] = {
 
 #: Campos opcionais com padrão — ausência não é erro; o padrão entra no merge.
 _OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
-    "telegram": frozenset({"inbound"}),
+    "telegram": frozenset({"inbound", "webhook_url"}),
     "whatsapp": frozenset({"inbound"}),
 }
 
@@ -77,6 +84,9 @@ _INBOUND_SCHEMAS: dict[str, dict[str, tuple[type | tuple[type, ...], bool]]] = {
         "allowed_user_ids": (list, False),
         "poll_interval_seconds": ((int, float), True),
         "experiences": (bool, False),
+        #: transporte do canal: ``poll`` (long-polling, padrão) ou ``webhook``
+        #: (entrega via POST público no servidor web).
+        "mode": (str, False),
     },
     "whatsapp": {
         "enabled": (bool, False),
@@ -91,7 +101,7 @@ _INBOUND_ALLOWLIST_ITEM: dict[str, type] = {"telegram": int, "whatsapp": str}
 #: Campos do inbound cuja ausência é aceita — o padrão entra silenciosamente.
 #: ``experiences`` liga a injeção de experiências ativas por turno no canal; a
 #: ausência da chave herda o padrão ligado (desligue explicitamente com ``false``).
-_INBOUND_OPTIONAL_DEFAULTS: dict[str, Any] = {"experiences": True}
+_INBOUND_OPTIONAL_DEFAULTS: dict[str, Any] = {"experiences": True, "mode": "poll"}
 
 
 def _valid_allowlist(platform: str, campo: str, valor: Any) -> None:
@@ -122,16 +132,13 @@ def _valid_inbound(platform: str, value: Any) -> dict[str, Any]:
             raise ValueError(f"configuração de inbound de {platform} exige a chave '{campo}'")
         valor = value[campo]
         if tipo is bool:
-            if not isinstance(valor, bool):
-                raise ValueError(f"'{campo}' de inbound deve ser booleano")
+            _valid_bool(campo, valor)
         elif tipo is list:
             _valid_allowlist(platform, campo, valor)
+        elif tipo is str:
+            valor = _valid_text(campo, valor)
         else:
-            if not isinstance(valor, (int, float)) or isinstance(valor, bool):
-                raise ValueError(f"'{campo}' de inbound deve ser um número")
-            if rango and not 0.5 <= valor <= 300:
-                raise ValueError(f"'{campo}' de inbound deve ser segundos entre 0.5 e 300")
-            valor = float(valor)
+            valor = _valid_number(campo, valor, rango)
         validated[campo] = valor
     extra = set(value) - set(campos)
     if extra:
@@ -139,6 +146,27 @@ def _valid_inbound(platform: str, value: Any) -> dict[str, Any]:
             f"chaves desconhecidas em inbound de {platform}: {', '.join(sorted(extra))}"
         )
     return validated
+
+
+def _valid_bool(campo: str, valor: Any) -> None:
+    if not isinstance(valor, bool):
+        raise ValueError(f"'{campo}' de inbound deve ser booleano")
+
+
+def _valid_text(campo: str, valor: Any) -> str:
+    if not isinstance(valor, str):
+        raise ValueError(f"'{campo}' de inbound deve ser textual")
+    if campo == "mode" and valor not in ("poll", "webhook"):
+        raise ValueError("'mode' de inbound deve ser 'poll' ou 'webhook'")
+    return valor
+
+
+def _valid_number(campo: str, valor: Any, rango: bool) -> float:
+    if not isinstance(valor, (int, float)) or isinstance(valor, bool):
+        raise ValueError(f"'{campo}' de inbound deve ser um número")
+    if rango and not 0.5 <= valor <= 300:
+        raise ValueError(f"'{campo}' de inbound deve ser segundos entre 0.5 e 300")
+    return float(valor)
 
 
 @dataclass(frozen=True)
@@ -152,11 +180,13 @@ def default_config() -> dict[str, dict[str, Any]]:
         "telegram": {
             "enabled": False,
             "chat_id_default": "",
+            "webhook_url": "",
             "inbound": {
                 "enabled": False,
                 "allowed_user_ids": [],
                 "poll_interval_seconds": 2.0,
                 "experiences": True,
+                "mode": "poll",
             },
         },
         "whatsapp": {
