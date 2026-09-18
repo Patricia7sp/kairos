@@ -1157,3 +1157,12 @@ troca a latência do poll por URL HTTPS pública, na mesma família do WhatsApp.
   Suíte local completa **2.680 passados** (39 pulados).
 - **Limite registrado:** o webhook do Telegram só recebe updates reais com URL
   HTTPS pública e o servidor web rodando (externo ao repositório).
+
+### Merge do canal de entrada Telegram por webhook (2026-09-18)
+
+PR #70 squash-mergeado em `6c3ea6c` (inbound `mode=webhook` +
+`POST /api/inbound/telegram`, segredo `webhook_secret_token` no cofre,
+`inbound-secret` por plataforma, CLI `webhook`/`webhook-off`). Merge verificado:
+`git diff HEAD~1..HEAD` sem remoções acidentais; suíte local 2.680 passados (39
+pulados, estações com imagem ausente) + os 9 jobs do CI verdes no PR. Ainda não
+aplicado em produção.
