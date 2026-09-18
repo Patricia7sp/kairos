@@ -39,7 +39,7 @@ uv run ruff check . && uv run ruff format --check .
 ## CI local, igual ao remoto
 
 ```bash
-scripts/ci.sh          # os 8 jobs do CI em passos locais
+scripts/ci.sh          # os jobs de verificação do CI em passos locais
 scripts/ci.sh --fast   # pula o que exige Docker
 ```
 

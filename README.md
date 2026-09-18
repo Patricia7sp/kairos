@@ -149,13 +149,21 @@ A stack monta o `web-token` e a passphrase administrada a partir de arquivos;
 o token não é injetado no HTML. A porta permanece publicada **só** no endereço
 Tailscale do host, e a SPA autentica por cookie `httpOnly`.
 
+O deploy ficou automático: um job `deploy` no CI (`workflow_dispatch` na main
+ou push com todos os outros jobs verdes) chama a API do Komodo (`DeployStack` +
+poll do `Update`), e um smoke pós-deploy valida a saúde da stack no host. O
+funcionamento, o setup único (chave de API, secrets do GitHub, exposição do
+Core) e a documentação do smoke como action/procedure do Komodo estão em
+`docs/ci-cd-komodo.md`.
+
 ## CI
 
 `.github/workflows/ci.yml` roda oito jobs em paralelo: testes, ruff, shellcheck,
-hadolint, imagem+integração, frontends, gate de recall e `uv lock --check`.
-Actions fixadas por **SHA**, não por tag — tag é mutável. Fixar por SHA cobra
-o seu preço: um SHA que não existe derruba o job já no *Set up job*, com uma
-mensagem que não menciona o pin.
+hadolint, imagem+integração, frontends, gate de recall e `uv lock --check`. Na
+`main`, um nono job `deploy` dispara o DeployStack no Komodo atrás deles (ver
+`docs/ci-cd-komodo.md`). Actions fixadas por **SHA**, não por tag — tag é
+mutável. Fixar por SHA cobra o seu preço: um SHA que não existe derruba o job já
+no *Set up job*, com uma mensagem que não menciona o pin.
 
 `scripts/ci.sh` roda **exatamente os mesmos passos** localmente, o que troca um
 ciclo de minutos por um de segundos:

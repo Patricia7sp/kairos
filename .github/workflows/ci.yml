@@ -195,3 +195,29 @@ jobs:
       # resolve com `--frozen`. Barato de checar, caro de descobrir depois.
       - name: uv lock --check
         run: uv lock --check
+
+  # Pós-merge: com todos os jobs acima verdes na main, dispara o deploy da
+  # stack no Komodo (scripts/komodo-deploy.sh: DeployStack via API REST e poll
+  # do Update até Complete+success). Só roda na main — PRs não mexem em um
+  # ambiente que não é o deles. `workflow_dispatch` na main reproduz o mesmo
+  # passo (re-deploy manual, ex. após trocar segredos).
+  #
+  # Falha se os segredos não existirem (KOMODO_HOST / KOMODO_API_KEY): deploy
+  # sem gatilho não é sucesso silencioso, é erro de configuração barulhento.
+  # O runner do GitHub NÃO alcança rede privada (ex. Tailscale): o Core precisa
+  # estar numa URL pública — ver docs/ci-cd-komodo.md.
+  deploy:
+    name: Deploy no Komodo
+    needs: [tests, lint, shell, dockerfile, image, docker-sessions, frontend, evals, lockfile]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Disparar e acompanhar o deploy no Komodo
+        env:
+          KOMODO_HOST: ${{ secrets.KOMODO_HOST }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
+          KOMODO_STACK: ${{ vars.KOMODO_STACK || 'kairos' }}
+        run: scripts/komodo-deploy.sh
