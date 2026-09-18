@@ -17,8 +17,9 @@ a comentários novos.
 - **Fail closed.** Fronteiras de segurança do runtime (Docker, sandbox, aprovação)
   atestam o estado observado e recusam na divergência — nunca "aceitam apesar de".
 - **Gate de merge = CI verde.** Não existe branch protection; a disciplina é
-  manual e obrigatória: a suíte inteira local + os 8 jobs do CI verdes antes do
-  merge (quando aplicar, incluir *deselect*s/opt-ins).
+  manual e obrigatória: a suíte inteira local + os jobs de verificação do CI
+  verdes antes do merge (quando aplicar, incluir *deselect*s/opt-ins). O job
+  `deploy` é pós-merge — roda só na `main` (ver `docs/ci-cd-komodo.md`).
 - **Comportamento real, não snapshot.** Testes afirmam contratos/invariantes
   (como dois dados devem se relacionar), nunca congelam valores atuais (listas
   de modelos, contagens, versões de config).
@@ -112,6 +113,9 @@ docker build -f docker/external-sandbox/Dockerfile -t kairos:external-sandbox . 
 `.github/workflows/ci.yml` — um workflow, 8 jobs por ferramenta (não por
 superfície): testes, lint, shell, dockerfile, imagem+integração, frontends,
 gate de recall, `uv lock --check`. Actions fixadas por **SHA**, nunca por tag.
+Na `main`, um nono job `deploy` — atrás deles, só a main — chama a API do Komodo
+(`scripts/komodo-deploy.sh`); o smoke pós-deploy (`scripts/smoke-deploy.sh`)
+roda no host, como action/procedure do Komodo. Detalhes: `docs/ci-cd-komodo.md`.
 
 `scripts/ci.sh` roda exatamente os mesmos passos localmente; `--fast` pula o que
 exige Docker. Prefira ele a reproduzir o CI na mão.

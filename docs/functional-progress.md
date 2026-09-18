@@ -1166,3 +1166,33 @@ PR #70 squash-mergeado em `6c3ea6c` (inbound `mode=webhook` +
 `git diff HEAD~1..HEAD` sem remoções acidentais; suíte local 2.680 passados (39
 pulados, estações com imagem ausente) + os 9 jobs do CI verdes no PR. Ainda não
 aplicado em produção.
+
+### CI/CD: deploy automático no Komodo (2026-09-18)
+
+A `main` verde passou a **deployar sozinha**: um job `deploy` no
+`.github/workflows/ci.yml` — só na `main` (`push`/`workflow_dispatch`), `needs`
+os 8 jobs de verificação — chama a API REST do Komodo e um smoke pós-deploy
+valida a saúde da stack no host. Guia completo em `docs/ci-cd-komodo.md`.
+
+- **`scripts/komodo-deploy.sh`:** `POST /execute/DeployStack` com
+  `X-Api-Key`/`X-Api-Secret` e **poll** de `POST /read/GetUpdate` até
+  `Complete`+`success`. Fail-closed: sem `KOMODO_HOST`/`KOMODO_API_KEY`,
+  HTTP ≥400 ou Update com `success=false`/timeout → exit 1 barulhento com a
+  causa (logs do Update na falha). Segredos só por ambiente, nunca por argumento
+  nem impressos.
+- **`scripts/smoke-deploy.sh`:** `GET /api/health` (default
+  `http://127.0.0.1:9119/api/health`; `KAIROS_HEALTH_URL`/
+  `KAIROS_EXPECTED_STATUS` configuráveis) com fail-closed — rede, JSON ou
+  status divergentes = erro, para rodar como action/procedure do Komodo no host.
+- **Job `deploy`:** `if` `github.ref == main` + evento `push`/`workflow_dispatch`,
+  `timeout-minutes: 25`, segredos do repo (`KOMODO_HOST`, `KOMODO_API_KEY`,
+  `KOMODO_API_SECRET`) e nome da stack via variable `KOMODO_STACK` (default `kairos`).
+- **Cobertura:** `tests/test_komodo_deploy.py` (**12**: sucesso com polls,
+  falha do Update mostrando logs, timeout, 401, `KOMODO_API_KEY`/`KOMODO_HOST`
+  ausentes, smoke ok/divergente/fora do ar/JSON inválido/esperado customizado)
+  — rodam os scripts de verdade contra um servidor HTTP fake, sem tocar o
+  Komodo de produção.
+- **Setup único (externo ao repositório, documentado):** chave de API no Core
+  com permissão na stack, acesso público do runner ao Core (ingress/Tailscale
+  Funnel ou self-hosted runner no tailnet), secrets/variável do GitHub e a
+  procedure/action do smoke no Komodo.
