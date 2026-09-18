@@ -431,6 +431,8 @@ COMMANDS: tuple[Command, ...] = (
         _sub("status", "Estado do canal de entrada"),
         _sub("run", "Sobe o canal de entrada em primeiro plano"),
         _sub("stop", "Solicita drenagem e encerramento do canal"),
+        _sub("webhook", "Ativa o webhook de entrada apontando para a URL pública"),
+        _sub("webhook-off", "Desativa o webhook e volta ao long-poll"),
         status=Status.IMPLEMENTED,
         unit="providers-gateway",
     ),

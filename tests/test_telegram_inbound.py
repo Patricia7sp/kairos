@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 
@@ -22,6 +23,7 @@ from kairos_gateway.inbound import (
     TelegramChannel,
     TelegramError,
     TelegramInbound,
+    TelegramUnauthorizedError,
     TelegramUpdate,
     _chunk_text,
     _parse_update,
@@ -31,6 +33,7 @@ FAKE_ACCOUNT = "123456:ABC-DEF"
 CHAT = 987654321
 AUTH_USER = 111222333
 STRANGER = 999000111
+WEBHOOK_TOKEN = "segredo-do-webhook"  # noqa: S105 - fixture sintética de teste
 
 
 class FakeCall:
@@ -77,9 +80,21 @@ def make_handler(log: list[tuple[str, str, dict]] | None = None, *, extra: None 
             return httpx.Response(200, json={"ok": True})
         if request.url.path.endswith("/answerCallbackQuery"):
             return httpx.Response(200, json={"ok": True})
+        if request.url.path.endswith("/setWebhook"):
+            return httpx.Response(200, json={"ok": True, "result": True})
+        if request.url.path.endswith("/deleteWebhook"):
+            return httpx.Response(200, json={"ok": True, "result": True})
+        if request.url.path.endswith("/getWebhookInfo"):
+            return httpx.Response(200, json={"ok": True, "result": {"url": ""}})
         return httpx.Response(404, json={"ok": False, "description": "endpoint desconhecido"})
 
     return handler
+
+
+def webhook_secret_stub(home, platform: str, *, field: str | None = None):
+    if field == "webhook_secret_token":
+        return WEBHOOK_TOKEN
+    return FAKE_ACCOUNT
 
 
 def message_update(update_id: int, text: str, *, user_id: int = AUTH_USER) -> dict:
@@ -163,6 +178,46 @@ class ChannelTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TelegramError):
             await channel.verify()
 
+    async def test_set_webhook_envia_url_allowed_updates_e_secret(self):
+        log: list[tuple[str, str, dict]] = []
+        channel = TelegramChannel(
+            FAKE_ACCOUNT,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(log))),
+        )
+        result = await channel.set_webhook(
+            "https://exemplo.com/api/inbound/telegram", secret_token=WEBHOOK_TOKEN
+        )
+        self.assertTrue(result is True)
+        chamadas = [p for _, path, p in log if path.endswith("/setWebhook")]
+        self.assertEqual(len(chamadas), 1)
+        payload = chamadas[0]
+        self.assertEqual(payload["url"], "https://exemplo.com/api/inbound/telegram")
+        self.assertEqual(payload["secret_token"], WEBHOOK_TOKEN)
+        self.assertEqual(payload["allowed_updates"], ["message", "callback_query"])
+        self.assertFalse(payload["drop_pending_updates"])
+
+    async def test_delete_webhook_repassa_drop_pending(self):
+        log: list[tuple[str, str, dict]] = []
+        channel = TelegramChannel(
+            FAKE_ACCOUNT,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(log))),
+        )
+        await channel.delete_webhook(drop_pending=True)
+        chamadas = [p for _, path, p in log if path.endswith("/deleteWebhook")]
+        self.assertEqual(len(chamadas), 1)
+        self.assertTrue(chamadas[0]["drop_pending_updates"])
+
+    async def test_set_webhook_erro_vira_TelegramError(self):
+        def failing(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"ok": False, "description": "webhook não pode"})
+
+        channel = TelegramChannel(
+            FAKE_ACCOUNT,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(failing)),
+        )
+        with self.assertRaises(TelegramError):
+            await channel.set_webhook("https://exemplo.com/", secret_token=WEBHOOK_TOKEN)
+
 
 class InboundTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -180,6 +235,7 @@ class InboundTests(unittest.IsolatedAsyncioTestCase):
         enabled: bool = True,
         allowed: tuple[int, ...] = (AUTH_USER,),
         experiences: bool = False,
+        mode: str = "poll",
     ) -> None:
         save_config(
             self.home,
@@ -192,6 +248,7 @@ class InboundTests(unittest.IsolatedAsyncioTestCase):
                         "allowed_user_ids": list(allowed),
                         "poll_interval_seconds": 1.0,
                         "experiences": experiences,
+                        "mode": mode,
                     },
                 },
                 "whatsapp": {"enabled": False, "phone_number_id": "", "number_default": ""},
@@ -209,8 +266,9 @@ class InboundTests(unittest.IsolatedAsyncioTestCase):
         allowed: tuple[int, ...] = (AUTH_USER,),
         token: str | None = FAKE_ACCOUNT,
         experiences: bool = False,
+        mode: str = "poll",
     ) -> tuple[TelegramInbound, FakeRouter]:
-        self._write_config(enabled=enabled, allowed=allowed, experiences=experiences)
+        self._write_config(enabled=enabled, allowed=allowed, experiences=experiences, mode=mode)
         fake = router or FakeRouter()
         chan = channel or TelegramChannel(
             FAKE_ACCOUNT, client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler()))
@@ -428,6 +486,65 @@ class InboundTests(unittest.IsolatedAsyncioTestCase):
         inbound, _ = self._make(enabled=False)
         with self.assertRaises(TelegramError):
             await inbound.run()
+
+    async def test_run_recusa_no_modo_webhook(self):
+        inbound, _ = self._make(mode="webhook")
+        with self.assertRaises(TelegramError):
+            await inbound.run()
+
+    async def test_authorize_webhook_sem_secret_ou_header_recusa(self):
+        inbound, _ = self._make(mode="webhook")
+        self.assertFalse(inbound.authorize_webhook(None))
+        self.assertFalse(inbound.authorize_webhook(""))
+        self.assertFalse(inbound.authorize_webhook(WEBHOOK_TOKEN))
+
+    async def test_authorize_webhook_com_secret_compara_em_tempo_constante(self):
+        with patch("kairos_gateway.inbound.platform_secret", side_effect=webhook_secret_stub):
+            inbound, _ = self._make(mode="webhook")
+        self.assertTrue(inbound.authorize_webhook(WEBHOOK_TOKEN))
+        self.assertFalse(inbound.authorize_webhook("segredo-errado"))
+
+    async def test_accept_webhook_no_modo_poll_recusa_fechado(self):
+        with patch("kairos_gateway.inbound.platform_secret", side_effect=webhook_secret_stub):
+            inbound, _ = self._make()
+        with self.assertRaises(TelegramError):
+            await inbound.accept_webhook(b"{}", WEBHOOK_TOKEN)
+
+    async def test_accept_webhook_secret_divergente_recusa(self):
+        with patch("kairos_gateway.inbound.platform_secret", side_effect=webhook_secret_stub):
+            inbound, _ = self._make(mode="webhook")
+        with self.assertRaises(TelegramUnauthorizedError):
+            await inbound.accept_webhook(b"{}", "segredo-errado")
+
+    async def test_accept_webhook_despacha_turno_para_o_router(self):
+        log: list[tuple[str, str, dict]] = []
+        chan = TelegramChannel(
+            FAKE_ACCOUNT,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(log))),
+        )
+        with patch("kairos_gateway.inbound.platform_secret", side_effect=webhook_secret_stub):
+            inbound, fake = self._make(mode="webhook", channel=chan)
+            await inbound.accept_webhook(
+                json.dumps(message_update(50, "oi")).encode(), WEBHOOK_TOKEN
+            )
+            for _ in range(200):
+                if fake.envelopes:
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.01)
+        self.assertEqual(len(fake.envelopes), 1)
+        self.assertEqual(fake.envelopes[0].idempotency_key, "telegram:50")
+        envios = [p for _, path, p in log if path.endswith("/sendMessage")]
+        self.assertTrue(any("Sem resposta." in p.get("text", "") for p in envios))
+
+    async def test_accept_webhook_payload_irrelevante_descarta_sem_turno(self):
+        with patch("kairos_gateway.inbound.platform_secret", side_effect=webhook_secret_stub):
+            inbound, fake = self._make(mode="webhook")
+            await inbound.accept_webhook(b'{"update_id": 1}', WEBHOOK_TOKEN)
+            await inbound.accept_webhook(b"nao-e-json", WEBHOOK_TOKEN)
+            await inbound.accept_webhook(b"[1,2]", WEBHOOK_TOKEN)
+            await asyncio.sleep(0.05)
+        self.assertEqual(fake.envelopes, [])
 
     async def test_sem_token_no_cofre_erro_fechado(self):
         self._write_config()

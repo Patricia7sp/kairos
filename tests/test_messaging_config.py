@@ -87,6 +87,33 @@ class ConfigTests(unittest.TestCase):
         save_config(self.tmp, doc)
         self.assertFalse(load_config(self.tmp)["telegram"]["inbound"]["experiences"])
 
+    def test_telegram_inbound_mode_padrao_poll(self):
+        doc = load_config(self.tmp)
+        self.assertEqual(doc["telegram"]["inbound"]["mode"], "poll")
+
+    def test_telegram_inbound_mode_webhook_persiste(self):
+        doc = default_config()
+        doc["telegram"]["inbound"]["mode"] = "webhook"
+        save_config(self.tmp, doc)
+        self.assertEqual(load_config(self.tmp)["telegram"]["inbound"]["mode"], "webhook")
+
+    def test_telegram_inbound_mode_invalido_rejeita(self):
+        doc = default_config()
+        doc["telegram"]["inbound"]["mode"] = "carrier-pigeon"
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_telegram_webhook_url_opcional_e_nao_secreto(self):
+        doc = load_config(self.tmp)
+        self.assertEqual(doc["telegram"]["webhook_url"], "")
+        doc = default_config()
+        doc["telegram"]["webhook_url"] = "https://exemplo.com/api/inbound/telegram"
+        save_config(self.tmp, doc)
+        self.assertEqual(
+            load_config(self.tmp)["telegram"]["webhook_url"],
+            "https://exemplo.com/api/inbound/telegram",
+        )
+
     def test_save_and_load_roundtrip(self):
         doc = default_config()
         doc["telegram"]["enabled"] = True

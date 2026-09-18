@@ -1121,3 +1121,39 @@ segredos de entrada por campo com merge, estado `inbound` na mensageria).
 Merge verificado: `git diff HEAD~1..HEAD` sem remoções acidentais; suíte local
 2.657 passados (39 pulados, estações com imagem ausente) + os 9 jobs do CI
 verdes no PR. Ainda não aplicado em produção.
+
+### Canal de entrada Telegram por webhook (`inbound.mode`) (2026-09-18)
+
+O canal de entrada Telegram ganhou um **segundo transporte** além do
+long-poll: `telegram.inbound.mode = "webhook"` faz o servidor web atender
+`POST /api/inbound/telegram` e o turno rodar fora do `kairos telegram run` —
+troca a latência do poll por URL HTTPS pública, na mesma família do WhatsApp.
+
+- **Config (`kairos_gateway/adapters/config.py`):** `telegram.inbound.mode`
+  (`poll` padrão | `webhook`, fail-closed no desconhecido), campo não-secreto
+  `telegram.webhook_url` (opcional, só leitura/estado) e o segredo de entrada
+  `webhook_secret_token` agora no cofre (`INBOUND_SECRET_KEYS["telegram"]`).
+- **Webhook (`kairos_gateway/inbound.py` + `kairos_web/inbound_api.py`):**
+  `POST /api/inbound/telegram` (rota pública, `_OPEN_PATHS`) exige
+  `X-Telegram-Bot-Api-Secret-Token` conferindo com o cofre (comparação em tempo
+  constante). `accept_webhook` agenda o despacho assíncrono com ack `ok`; a
+  idempotência é por `telegram:{update_id}`; auth do remetente = mesma allowlist
+  do long-poll; updates irrelevantes/JSON malformado são acusados e descartados.
+  `run()` recusa no modo `webhook` (a Bot API rejeita `getUpdates` com webhook
+  ativo) e a rota recusa no modo `poll` — fail-closed dos dois lados.
+- **CLI:** `kairos telegram webhook <url>` registra o webhook (setWebhook com
+  `secret_token` e `allowed_updates`) e grava modo/URL; `webhook-off [--drop-pending]`
+  cancela e volta a `poll`; `config --mode poll|webhook`; `status` mostra modo,
+  URL e presença do segredo. `TelegramChannel.set_webhook/delete_webhook/
+  webhook_info` cobrem a Bot API.
+- **API de segredos (`kairos_web/messaging_api.py`):** os endpoints
+  `POST/DELETE /api/messaging/{platform}/inbound-secret` são agora por
+  plataforma (WhatsApp e Telegram) e rejeitam campo de outra plataforma (422);
+  o merge preserva a credencial principal.
+- **Cobertura:** +12 (`test_telegram_inbound.py`: set/deleteWebhook, authorize,
+  accept, run/poll) +14 (`test_inbound_api.py`: rota telegram 503/401/ok, rota
+  aberta, segredo por plataforma, campo de outra plataforma recusado) +5
+  (`test_messaging_config.py`: mode padrão/persistência/inválido, webhook_url).
+  Suíte local completa **2.680 passados** (39 pulados).
+- **Limite registrado:** o webhook do Telegram só recebe updates reais com URL
+  HTTPS pública e o servidor web rodando (externo ao repositório).

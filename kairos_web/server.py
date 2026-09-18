@@ -254,9 +254,10 @@ def _revoke_ws_tickets() -> None:
 # container sondam, e não devolve nada além de "estou de pé".
 # `/api/auth/*` precisa ficar aberto pelo motivo óbvio: é onde se autentica, e
 # é o que a interface consulta para saber se deve mostrar a tela de login.
-# `/api/inbound/whatsapp` é o webhook público da Cloud API da Meta: sem sessão
-# de navegador, e a segurança é do próprio canal (Verify Token + assinatura
-# HMAC-SHA256 do App Secret), nunca da sessão da interface.
+# `/api/inbound/whatsapp` e `/api/inbound/telegram` são webhooks públicos de
+# canais de entrada: sem sessão de navegador, e a segurança é do próprio canal
+# (WhatsApp: Verify Token + assinatura HMAC-SHA256 do App Secret; Telegram:
+# X-Telegram-Bot-Api-Secret-Token), nunca da sessão da interface.
 _OPEN_PATHS = frozenset(
     {
         "/api/health",
@@ -264,6 +265,7 @@ _OPEN_PATHS = frozenset(
         "/api/auth/login",
         "/api/auth/logout",
         "/api/inbound/whatsapp",
+        "/api/inbound/telegram",
     }
 )
 

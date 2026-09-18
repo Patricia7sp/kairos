@@ -1,11 +1,12 @@
-"""Webhooks públicos de canais de entrada: WhatsApp Cloud API.
+"""Webhooks públicos de canais de entrada: WhatsApp Cloud API e Telegram Bot API.
 
 Estas rotas ficam fora da autenticação de sessão (``_OPEN_PATHS``) de
-propósito: quem chama é a Meta, não a interface. A segurança é a do próprio
-canal — apertão de mão com o Verify Token e assinatura ``X-Hub-Signature-256``
-(HMAC-SHA256 do corpo cru com o App Secret) — e falha fechado: sem segredo no
-cofre o webhook recusa (503), assinatura divergente rejeita (401), e o acuse
-``EVENT_RECEIVED`` só sai após a validação.
+propósito: quem chama é a Meta ou o Telegram, não a interface. A segurança é a
+do próprio canal — o WhatsApp exige o apertão de mão com o Verify Token e a
+assinatura ``X-Hub-Signature-256`` (HMAC-SHA256 do corpo cru com o App Secret);
+o Telegram exige o ``X-Telegram-Bot-Api-Secret-Token`` — e falha fechado: sem
+segredo no cofre o webhook recusa (503), autenticação divergente rejeita (401),
+e o acuse ``EVENT_RECEIVED``/``ok`` só sai após a validação.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from kairos_gateway.inbound import TelegramError, TelegramUnauthorizedError, build_telegram_inbound
 from kairos_gateway.whatsapp_inbound import (
     WhatsAppConfigError,
     WhatsAppSignatureError,
@@ -36,6 +38,25 @@ def _whatsapp_inbound(request: Request):
             service = build_interaction_router(home)
         inbound = build_whatsapp_inbound(home, router=service)
         state.whatsapp_inbound = inbound
+    return inbound
+
+
+def _telegram_inbound(request: Request):
+    """Instância compartilhada, recriada quando o modo configurado mudar."""
+    from kairos_gateway.adapters.config import load_config
+    from kairos_integration import build_interaction_router
+    from kairos_web.server import _application_home
+
+    state = request.app.state
+    home = _application_home(request.app)
+    mode = str(load_config(home)["telegram"].get("inbound", {}).get("mode", "poll"))
+    inbound = getattr(state, "telegram_inbound", None)
+    if inbound is None or getattr(inbound, "mode", None) != mode:
+        service = getattr(state, "interaction_service", None)
+        if service is None:
+            service = build_interaction_router(home)
+        inbound = build_telegram_inbound(home, router=service)
+        state.telegram_inbound = inbound
     return inbound
 
 
@@ -70,3 +91,25 @@ async def whatsapp_receive(request: Request):
     except WhatsAppSignatureError as exc:
         raise HTTPException(401, str(exc)) from exc
     return PlainTextResponse("EVENT_RECEIVED")
+
+
+@router.post("/telegram", response_class=PlainTextResponse)
+async def telegram_receive(request: Request):
+    """Entrega do Telegram: secret_token conferido e ``update`` acusado.
+
+    Só aceita no modo ``webhook``; o processamento roda em task com a mesma
+    autenticação (allowlist) e idempotência do long-poll.
+    """
+    raw_body = await request.body()
+    header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    try:
+        inbound = _telegram_inbound(request)
+    except TelegramError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    try:
+        await inbound.accept_webhook(raw_body, header_token)
+    except TelegramUnauthorizedError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except TelegramError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return PlainTextResponse("ok")

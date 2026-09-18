@@ -279,7 +279,20 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         )
         parser.add_argument("--allowed-ids", help="IDs Telegram autorizados, separados por vírgula")
         parser.add_argument("--poll-interval", type=float, help="segundos entre polls (0.5–300)")
+        parser.add_argument(
+            "--mode",
+            choices=("poll", "webhook"),
+            help="transporte do canal: poll (long-poll) ou webhook (POST público)",
+        )
         parser.add_argument("--chat-default", help="chat_id padrão para envio")
+    elif command == "telegram" and subcommand == "webhook":
+        parser.add_argument(
+            "url", help="URL HTTPS pública do webhook (ex.: https://host/api/inbound/telegram)"
+        )
+    elif command == "telegram" and subcommand == "webhook-off":
+        parser.add_argument(
+            "--drop-pending", action="store_true", help="descarta updates pendentes"
+        )
     elif command == "slack" and subcommand == "config":
         parser.add_argument(
             "--enabled", choices=("true", "false"), help="ativa/desativa envio (outbound)"

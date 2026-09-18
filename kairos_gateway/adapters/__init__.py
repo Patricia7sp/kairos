@@ -159,6 +159,7 @@ def messaging_platforms(home: Path) -> list[dict[str, Any]]:
                 "inbound": {
                     "enabled": bool(inbound.get("enabled", False)),
                     "experiences": bool(inbound.get("experiences", True)),
+                    **({"mode": inbound["mode"]} if "mode" in inbound else {}),
                     "campo_secreto": {
                         campo: presente
                         for campo, presente in platform_secret_fields(home, definition.name).items()

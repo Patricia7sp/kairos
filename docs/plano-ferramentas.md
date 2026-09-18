@@ -5,7 +5,7 @@ ferramenta abaixo foi criada por este documento. A decisão de priorizar, adiar
 ou descartar cada linha pertence à usuária; implementar sem essa decisão viola a
 disciplina do projeto.
 
-Atualizado em 16/09/2026.
+Atualizado em 18/09/2026.
 
 ## Regra de footprint (do `AGENTS.md`)
 
@@ -61,8 +61,8 @@ A coluna **valor** é uma hipótese a validar com uso real — não uma promessa
 
 | Candidata | Como entregar | Categoria / risco | Dependências | Custo | Aprovação | Observação |
 |---|---|---|---|---|---|---|
-| Canal de entrada WhatsApp | estender gateway (etapa 1/4) | entrada / médio-alto | Cloud API + webhook público | — | — | exige endpoint exposto e verificação Meta |
-| Webhook de entrada Telegram | extensão do inbound (etapa 1) | entrada / médio | HTTPS público | — | — | hoje só long-poll; webhook troca latência por exposição |
+| ~~Canal de entrada WhatsApp~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio-alto | Cloud API + webhook público | — | — | `GET/POST /api/inbound/whatsapp`, fail-closed |
+| ~~Webhook de entrada Telegram~~ **implementado** | extensão do inbound (etapa 1) | entrada / médio | HTTPS público | — | — | `telegram.inbound.mode: webhook` + `POST /api/inbound/telegram` |
 | Calendário / lembretes | comando + skill (etapa 2) | mutadora / médio | provedor externo | — | sim | `kairos_cron` já agenda; falta a fonte externa |
 
 ### P3 — avaliar só com necessidade concreta
