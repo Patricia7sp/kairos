@@ -44,34 +44,65 @@ argumento — o valor não aparece em `ps` e o script não o imprime.
 
 ### 1. Chave de API no Komodo
 
-No Core, gere uma API key para um usuário com permissão de deploy na stack
-`kairos`. A chave pode ser key-only ou key+secret; se tiver secret, ele vai no
-`KOMODO_API_SECRET`.
+Uma API key do Komodo é **um par** `Key` + `Secret` (formato `K_…_K` /
+`S_…_S`), criado em *Settings → API Keys → New API Key*. O `Secret` é mostrado
+**uma única vez** — copie os dois. A autenticação REST usa os headers
+`X-Api-Key` e `X-Api-Secret` **juntos**; sem o secret a chamada é recusada
+("missing X-API-SECRET").
 
-Valide a chave e o alcance antes de configurar o GitHub:
+A chave não é "por stack" nem "por template": ela autentica **como o usuário
+para o qual foi criada** (herdando as permissões dele), e `DeployStack` exige
+`Execute` na Stack alvo. Uma chave do **admin** já cobre tudo; para menor
+privilégio, crie um *service user* com `Execute` apenas na stack `kairos` (e
+`Read` para o poll do update) e gere a chave para ele.
+
+> Não confunda com a **chave de onboarding** que o Komodo mostra ao conectar um
+> servidor (o `public key` do Core, `X-API-SIGNATURE`+`X-API-TIMESTAMP`). Esse é
+> um handshake de assinatura para parear o Periphery — **não** é uma chave REST e
+> não serve para o pipeline.
+
+A stack `kairos` **já é um recurso cadastrado** neste Komodo (server
+`hermesserver`, repo `Patricia7sp/kairos@main`). Não é preciso criar nada — só a
+chave.
+
+Validação **só-leitura** (host, auth e acesso à stack, sem publicar nada):
 
 ```sh
-curl -fsS -X POST https://SEU-CORE/execute/DeployStack \
+HOST=http://SEU-CORE
+# 1) autentica e devolve os dados do Core
+curl -fsS -X POST "$HOST/read/GetCoreInfo" \
   -H 'Content-Type: application/json' \
-  -H "X-Api-Key: SUA_CHAVE" \
-  -d '{"stack":"kairos"}'
+  -H "X-Api-Key: $KOMODO_API_KEY" \
+  -H "X-Api-Secret: $KOMODO_API_SECRET" \
+  -d '{}'
+# 2) resolve a stack kairos (precisa Read; admin tem)
+curl -fsS -X POST "$HOST/read/ListStacks" \
+  -H 'Content-Type: application/json' \
+  -H "X-Api-Key: $KOMODO_API_KEY" \
+  -H "X-Api-Secret: $KOMODO_API_SECRET" \
+  -d '{"query":{},"options":{"pagination":{"page":0,"per_page":50}}}'
 ```
 
-A resposta é um `Update` com `_id.$oid` (o id de acompanhamento). Um 401/403
-desta forma aponta para chave ou permissão erradas — corrija antes de seguir.
+Um 401/403 aponta para par key+secret errado ou usuário sem acesso — corrija
+antes de seguir. O passo único que só valida num deploy real é o *trigger*
+`DeployStack` (não há dry-run); ele é exatamente o que `komodo-deploy.sh`
+dispara.
 
 ### 2. Acesso do runner ao Core (obrigatório)
 
-Os runners do GitHub **não alcançam** rede privada (a stack publica só em
-`100.87.25.101:9119`, Tailscale). O `KOMODO_HOST` precisa ser uma URL que o
-runner atinja:
+Os runners `ubuntu-latest` do GitHub **não alcançam** rede privada (a stack e o
+Core publicam só em `100.87.25.101`, Tailscale). O `KOMODO_HOST` precisa ser uma
+URL que o runner atinja:
 
-- **Opção A (recomendada):** expor o Core por um ingress/reverse proxy público
-  com TLS (ex.: Tailscale Funnel + domínio), servindo as rotas `/execute` e
-  `/read`.
-- **Opção B:** rodar um self-hosted runner dentro do tailnet e apontar
-  `KOMODO_HOST` para `http://100.87.25.101:9120` local.
+- **Opção A:** expor o Core por um ingress/reverse proxy público com TLS (ex.:
+  Tailscale Funnel + domínio), servindo as rotas `/execute` e `/read` — mantém o
+  job no runner do GitHub.
+- **Opção B (em uso neste projeto):** rodar um self-hosted runner dentro do
+  tailnet e apontar `KOMODO_HOST` para `http://100.87.25.101:9120`.
 
+Por isso o job `deploy` do CI usa `runs-on: self-hosted`. **Registre o runner**
+para esta repo (`settings → Actions → Runners → New self-hosted runner`) antes
+de esperar o deploy — sem runner registrado o job fica pendurado em `Queued`.
 Sem isso o job falha com erro de configuração barulhento — deploy sem gatilho
 real não é fingido como sucesso.
 
@@ -92,9 +123,11 @@ O job do GitHub valida **que o deploy terminou com sucesso**, mas não que a
 stack responde — o smoke faz isso, e roda no host (a porta 9119 é Tailscale).
 No Komodo:
 
-- **Procedure (recomendado):** crie uma procedure que rode no host com o
-  processo `bash <clone-do-repositorio>/scripts/smoke-deploy.sh` (no caminho
-  do clone que o periphery mantém) e mande executá-la após um deploy terminado.
+- **Procedure (recomendado):** crie uma *production procedure* que rode no host
+  (`hermesserver`) com o processo `bash /etc/komodo/stacks/kairos/scripts/smoke-deploy.sh`
+  (o caminho do clone que o Periphery mantém), e a execute após um deploy
+  terminado. O smoke responde no host em `127.0.0.1:9119`; para usar o endereço
+  Tailscale, rode com `KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health`.
 - **Action (em container):** use uma imagem com `curl` + `python3` (ex.
   `python:3.11-alpine` mais `apk add curl`), `network: host`, e aponte
   `KAIROS_HEALTH_URL` para `http://100.87.25.101:9119/api/health`.
@@ -122,11 +155,30 @@ O script é o mesmo que o CI chama; dispará-lo à mão com o ambiente do GitHub
 reproduz o passo:
 
 ```sh
-KOMODO_HOST=https://SEU-CORE \
+KOMODO_HOST=http://100.87.25.101:9120 \
 KOMODO_API_KEY=SUA_CHAVE \
+KOMODO_API_SECRET=SUA_CHAVE_SECRET \
 KOMODO_STACK=kairos \
 bash scripts/komodo-deploy.sh
 ```
+
+## Estado verificado (2026-09-19)
+
+Validado contra o Core real, **sem** executar o deploy:
+
+- A stack `kairos` é recurso registrado (server `hermesserver`, repo
+  `Patricia7sp/kairos@main`, status `running`) — nada a criar.
+- API key `kairos-ci-deploy` criada e testada somente-leitura (`GetCoreInfo`,
+  `ListStacks`, `GetUpdate`): autentica como o admin e resolve a stack.
+- Formato do poll (`GetUpdate` → `status: Complete`, `success: True`,
+  `_id.$oid`) conferido contra o Core real — casa com o `komodo-deploy.sh`.
+- Segredos `KOMODO_API_KEY`, `KOMODO_API_SECRET`, `KOMODO_HOST` e a variável
+  `KOMODO_STACK=kairos` configurados no repositório.
+- `KOMODO_HOST=http://100.87.25.101:9120` (Opção B) — **exige o self-hosted
+  runner dentro do tailnet**; registre-o antes do primeiro `workflow_dispatch`.
+
+Ainda não verificado (exige runner registrado e primeiro disparo real): o
+*trigger* `DeployStack` (não há dry-run) e o smoke pós-deploy no host.
 
 Os testes (`tests/test_komodo_deploy.py`) rodam os dois scripts de verdade
 contra um servidor HTTP fake que imita a API do Komodo e o `/api/health` — não

@@ -204,13 +204,15 @@ jobs:
   #
   # Falha se os segredos não existirem (KOMODO_HOST / KOMODO_API_KEY): deploy
   # sem gatilho não é sucesso silencioso, é erro de configuração barulhento.
-  # O runner do GitHub NÃO alcança rede privada (ex. Tailscale): o Core precisa
-  # estar numa URL pública — ver docs/ci-cd-komodo.md.
+  # Este job roda em runner SELF-HOSTED dentro do tailnet: os runners
+  # ubuntu-latest do GitHub não alcançam rede privada (o Core publica só em
+  # 100.87.25.101:9120, Tailscale). Registrar o runner com `runs-on: self-hosted`
+  # nesta repo antes de esperar o deploy — ver docs/ci-cd-komodo.md.
   deploy:
     name: Deploy no Komodo
     needs: [tests, lint, shell, dockerfile, image, docker-sessions, frontend, evals, lockfile]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
