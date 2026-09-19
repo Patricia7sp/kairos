@@ -120,23 +120,36 @@ No *Settings → Secrets and variables → Actions* do repositório:
 ### 4. Smoke pós-deploy no Komodo
 
 O job do GitHub valida **que o deploy terminou com sucesso**, mas não que a
-stack responde — o smoke faz isso, e roda no host (a porta 9119 é Tailscale).
-No Komodo:
+stack responde — o smoke faz isso.
 
-- **Procedure (recomendado):** crie uma *production procedure* que rode no host
-  (`hermesserver`) com o processo `bash /etc/komodo/stacks/kairos/scripts/smoke-deploy.sh`
-  (o caminho do clone que o Periphery mantém), e a execute após um deploy
-  terminado. O smoke responde no host em `127.0.0.1:9119`; para usar o endereço
-  Tailscale, rode com `KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health`.
-- **Action (em container):** use uma imagem com `curl` + `python3` (ex.
-  `python:3.11-alpine` mais `apk add curl`), `network: host`, e aponte
-  `KAIROS_HEALTH_URL` para `http://100.87.25.101:9119/api/health`.
+> Fato verificado: o `/api/health` do kairos **não responde em `127.0.0.1:9119`**
+> — a porta 9119 é publicada só no IP do tailnet. Use
+> `http://100.87.25.101:9119/api/health`.
 
-O smoke também é executável na mão, de dentro do host:
+Implementação em uso (criada e validada no Core):
+
+- **Action `kairos-smoke`** (script TypeScript/deno que roda no **Core** =
+  host `hermesserver`): faz `fetch` em `http://100.87.25.101:9119/api/health`,
+  exige `HTTP 200` e `{"status":"ok"}`, e lança erro caso contrário.
+- **Procedure `kairos-smoke-deploy`**: um estágio com `RunAction kairos-smoke`.
+  Em sucesso deriva `Complete`/`success=true`; em falha, `Failed` com o log do
+  fetch — exatamente o tipo de sinal que o Update do job `deploy` carrega.
+
+Para disparar na mão (ou após deploy) — CLI/API:
 
 ```sh
-bash scripts/smoke-deploy.sh                                   # default 127.0.0.1:9119
-KAIROS_HEALTH_URL=http://127.0.0.1:9119/api/health bash scripts/smoke-deploy.sh
+curl -fsS -X POST $HOST/execute/RunProcedure \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $JWT" \
+  -d '{"procedure":"kairos-smoke-deploy"}'
+```
+
+Alternativa (repositório): rodar o `scripts/smoke-deploy.sh` no host com a URL
+forkada — **sempre** com `KAIROS_HEALTH_URL` explícito, o default
+`127.0.0.1:9119` **não alcança**:
+
+```sh
+KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health bash scripts/smoke-deploy.sh
 ```
 
 ## Como o deploy funciona
@@ -147,7 +160,8 @@ KAIROS_HEALTH_URL=http://127.0.0.1:9119/api/health bash scripts/smoke-deploy.sh
 3. O script pole `GetUpdate` (intervalo `KOMODO_POLL_INTERVAL`, default 10s) até
    `Complete`. Em `Complete`+`success=true` saí 0; em falha, imprime os logs do
    Update (a causa está lá — o Update não tem campo `error`) e saí 1.
-4. O smoke (action/procedure) confirma a saúde da stack no host.
+4. O smoke (`procedure kairos-smoke-deploy` → `RunAction kairos-smoke`, deno no
+   Core) confirma `{"status":"ok"}` do `/api/health` da stack no tailnet.
 
 ## Reprodução local e testes
 
@@ -164,8 +178,6 @@ bash scripts/komodo-deploy.sh
 
 ## Estado verificado (2026-09-19)
 
-Validado contra o Core real, **sem** executar o deploy:
-
 - A stack `kairos` é recurso registrado (server `hermesserver`, repo
   `Patricia7sp/kairos@main`, status `running`) — nada a criar.
 - API key `kairos-ci-deploy` criada e testada somente-leitura (`GetCoreInfo`,
@@ -174,11 +186,19 @@ Validado contra o Core real, **sem** executar o deploy:
   `_id.$oid`) conferido contra o Core real — casa com o `komodo-deploy.sh`.
 - Segredos `KOMODO_API_KEY`, `KOMODO_API_SECRET`, `KOMODO_HOST` e a variável
   `KOMODO_STACK=kairos` configurados no repositório.
-- `KOMODO_HOST=http://100.87.25.101:9120` (Opção B) — **exige o self-hosted
-  runner dentro do tailnet**; registre-o antes do primeiro `workflow_dispatch`.
+- `KOMODO_HOST=http://100.87.25.101:9120` (Opção B) com self-hosted runner
+  `hermesserver-kairos` **online** no tailnet.
+- **Deploy real executado** via CI (push `6a8857a`, run `35465683371`):
+  update `DeployStack` `6aaee895…` `Complete`/`success=true`; stack avançou
+  `deployed_hash = 6a8857a` (= main).
+- **Smoke validado**: `kairos-smoke-deploy` executada duas vezes, `Complete`/
+  `success=true`; stdout da action `kairos-smoke`:
+  `smoke kairos ok: {"status":"ok","app":"kairos","version":"0.1.0","ui_present":true}`.
 
-Ainda não verificado (exige runner registrado e primeiro disparo real): o
-*trigger* `DeployStack` (não há dry-run) e o smoke pós-deploy no host.
+Pendentes (opcionais, não bloqueiam): registrar o runner como serviço systemd
+(`sudo ./svc.sh install` no `~/actions-runner` — hoje auto-start via cron
+`@reboot`); opcionalmente ligar a procedure no salto automático da stack
+(`on_success_async`), para todo deploy disparar o smoke sem ação manual.
 
 Os testes (`tests/test_komodo_deploy.py`) rodam os dois scripts de verdade
 contra um servidor HTTP fake que imita a API do Komodo e o `/api/health` — não
