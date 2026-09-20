@@ -52,9 +52,13 @@ Uma API key do Komodo é **um par** `Key` + `Secret` (formato `K_…_K` /
 
 A chave não é "por stack" nem "por template": ela autentica **como o usuário
 para o qual foi criada** (herdando as permissões dele), e `DeployStack` exige
-`Execute` na Stack alvo. Uma chave do **admin** já cobre tudo; para menor
-privilégio, crie um *service user* com `Execute` apenas na stack `kairos` (e
-`Read` para o poll do update) e gere a chave para ele.
+`Execute` na Stack alvo. Aqui o deploy usa menor privilégio: um *service user*
+`kairos-ci` com permissão `Execute` na stack `kairos` (Execute inclui o `Read`
+do poll do `GetUpdate` sobre a mesma stack), e o par Key+Secret
+`kairos-ci-deploy` foi gerado **para esse service user**
+(`CreateApiKeyForServiceUser`), não para o admin. A chave do admin usada na
+primeira entrega foi **removida** depois que a troca foi validada por um deploy
+de pipeline.
 
 > Não confunda com a **chave de onboarding** que o Komodo mostra ao conectar um
 > servidor (o `public key` do Core, `X-API-SIGNATURE`+`X-API-TIMESTAMP`). Esse é
@@ -134,6 +138,18 @@ Implementação em uso (criada e validada no Core):
 - **Procedure `kairos-smoke-deploy`**: um estágio com `RunAction kairos-smoke`.
   Em sucesso deriva `Complete`/`success=true`; em falha, `Failed` com o log do
   fetch — exatamente o tipo de sinal que o Update do job `deploy` carrega.
+- **Smoke pós-deploy automático na stack (em uso):** a stack `kairos` tem
+  `post_deploy` (`SystemCommand`, `shell_mode: true`) que executa no **host**
+  (periphery) imediatamente após o `Compose Up` — um laço **shell-only**
+  (curl + `case`, até 60s) contra `http://100.87.25.101:9119/api/health`. Só
+  responde `{"status":"ok"}` deixa o Update terminar `Complete`/`success=true`;
+  se não responder, o Update termina `success=false` com o motivo no estágio
+  `Post Deploy`. O job `deploy` do CI depende apenas do poll do Update — o smoke
+  passa a ser condição do próprio deploy. A procedure acima continua disponível
+  para disparo manual.
+
+> Armadilha já corrigida: o `post_deploy` roda no **container do periphery**, que
+> **não tem `python3`** nem `jq` garantido. Fique em shell puro (curl + `case`/`grep`).
 
 Para disparar na mão (ou após deploy) — CLI/API:
 
@@ -160,8 +176,12 @@ KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health bash scripts/smoke-deploy
 3. O script pole `GetUpdate` (intervalo `KOMODO_POLL_INTERVAL`, default 10s) até
    `Complete`. Em `Complete`+`success=true` saí 0; em falha, imprime os logs do
    Update (a causa está lá — o Update não tem campo `error`) e saí 1.
-4. O smoke (`procedure kairos-smoke-deploy` → `RunAction kairos-smoke`, deno no
-   Core) confirma `{"status":"ok"}` do `/api/health` da stack no tailnet.
+4. Smoke: a stack roda o `post_deploy` automaticamente — um laço shell-only no
+   **host** (periphery) consulta `http://100.87.25.101:9119/api/health` até 60s;
+   só com `{"status":"ok"}` o Update termina `Complete`/`success=true` (falhou =
+   `success=false` com o motivo no estágio `Post Deploy`). A procedure
+   `kairos-smoke-deploy` (`RunAction kairos-smoke`, deno no Core) continua
+   disponível para disparo manual.
 
 ## Reprodução local e testes
 
@@ -176,29 +196,34 @@ KOMODO_STACK=kairos \
 bash scripts/komodo-deploy.sh
 ```
 
-## Estado verificado (2026-09-19)
+## Estado verificado (2026-09-20)
 
 - A stack `kairos` é recurso registrado (server `hermesserver`, repo
   `Patricia7sp/kairos@main`, status `running`) — nada a criar.
-- API key `kairos-ci-deploy` criada e testada somente-leitura (`GetCoreInfo`,
-  `ListStacks`, `GetUpdate`): autentica como o admin e resolve a stack.
-- Formato do poll (`GetUpdate` → `status: Complete`, `success: True`,
-  `_id.$oid`) conferido contra o Core real — casa com o `komodo-deploy.sh`.
-- Segredos `KOMODO_API_KEY`, `KOMODO_API_SECRET`, `KOMODO_HOST` e a variável
-  `KOMODO_STACK=kairos` configurados no repositório.
-- `KOMODO_HOST=http://100.87.25.101:9120` (Opção B) com self-hosted runner
-  `hermesserver-kairos` **online** no tailnet.
-- **Deploy real executado** via CI (push `6a8857a`, run `35465683371`):
-  update `DeployStack` `6aaee895…` `Complete`/`success=true`; stack avançou
-  `deployed_hash = 6a8857a` (= main).
-- **Smoke validado**: `kairos-smoke-deploy` executada duas vezes, `Complete`/
-  `success=true`; stdout da action `kairos-smoke`:
-  `smoke kairos ok: {"status":"ok","app":"kairos","version":"0.1.0","ui_present":true}`.
-
-Pendentes (opcionais, não bloqueiam): registrar o runner como serviço systemd
-(`sudo ./svc.sh install` no `~/actions-runner` — hoje auto-start via cron
-`@reboot`); opcionalmente ligar a procedure no salto automático da stack
-(`on_success_async`), para todo deploy disparar o smoke sem ação manual.
+- **Runner self-hosted `hermesserver-kairos`** (labels `self-hosted,linux,kairos`,
+  v2.337.0, `~/actions-runner`) registrado na repo e **online** no tailnet.
+  Gerenciado como serviço systemd **de usuário**
+  (`~/.config/systemd/user/actions.runner.kairos.service`, `systemctl --user
+  enable --now`; `Linger=yes` no host garante o boot sem login); o auto-start por
+  cron `@reboot` foi **removido**.
+- API key do pipeline = par `kairos-ci-deploy` **do service user `kairos-ci`**
+  (id `6aaf2b28…`, permissão `Execute` na stack `kairos`): autentica, resolve a
+  stack e executa `DeployStack`, **sem privilégios de admin**. A chave do admin
+  usada na primeira entrega foi deletada (`ListApiKeys` do admin = 0).
+- Segredos `KOMODO_API_KEY`/`KOMODO_API_SECRET` = par do service user,
+  `KOMODO_HOST=http://100.87.25.101:9120` (Opção B), variável
+  `KOMODO_STACK=kairos`.
+- **Deploy real pelo pipeline** (validação final, run `35479709833`): 10/10 jobs
+  verdes; update `DeployStack` executado **por `kairos-ci`**
+  (`6aaf2de5…`, `Complete`/`success=true`) com o estágio **`Post Deploy`**
+  `success=true` (`smoke pos-deploy ok`).
+- **Smoke pós-deploy automático validado** no caminho da stack: primeiro
+  comando usava `python3` e falhou (periphery não tem python3); substituído por
+  curl+`case` e revalidado. A procedure `kairos-smoke-deploy` (deno no Core)
+  permanece validada (`Complete`/`success=true`; `smoke kairos ok:
+  {"status":"ok",...}`).
+- Deploys via CI em `6a8857a`, `0976e68` e no commit de docs seguinte — sempre
+  com a stack terminando `deployed_hash == latest_hash`.
 
 Os testes (`tests/test_komodo_deploy.py`) rodam os dois scripts de verdade
 contra um servidor HTTP fake que imita a API do Komodo e o `/api/health` — não

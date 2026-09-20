@@ -1207,3 +1207,31 @@ pulados, 26 deselected) + os 8 jobs do CI verdes no PR (o `deploy` skipa fora
 da main). Pipeline pronto; primeiro deploy automático depende do setup único
 (chave de API, acesso do runner ao Core, secrets/variable do GitHub e a
 procedure/action do smoke) — ver `docs/ci-cd-komodo.md`.
+
+### CI/CD operacional no Komodo — runner, service user e smoke pós-deploy (2026-09-20)
+
+O setup único documentado em `docs/ci-cd-komodo.md` foi executado e validado em
+produção. Detalhes completos no guia; resumo não sensível:
+
+- **Runner self-hosted** no host do Core (`hermesserver`, tailnet), labels
+  `self-hosted,linux,kairos`, v2.337.0 em `~/actions-runner`, gerenciado como
+  serviço systemd **de usuário** (`~/.config/systemd/user/actions.runner.kairos.service`
+  via `systemctl --user`; `Linger=yes` garante o boot sem login) — substitui o
+  auto-start por cron `@reboot`, sem precisar de sudo. `KOMODO_HOST=
+  http://100.87.25.101:9120`.
+- **Service user `kairos-ci`** (id `6aaf2b28…`) com permissão `Execute` na stack
+  `kairos`, e chave própria `kairos-ci-deploy` gerada para ele; os GitHub secrets
+  `KOMODO_API_KEY/KOMODO_API_SECRET` apontam para esse par. A chave do **admin**
+  usada no lote inicial foi **removida** após a troca validada (menor privilégio).
+- **Smoke pós-deploy automático na stack:** `post_deploy` da stack `kairos`
+  (shell-only: curl + `case`, até 60s contra `http://100.87.25.101:9119/api/health`)
+  roda no host (periphery) logo após o `Compose Up`; o Update só termina
+  `Complete`/`success=true` com `{"status":"ok"}`. Armadilha registrada e
+  corrigida: o comando executa no **container do periphery**, que **não tem
+  `python3`** — a primeira versão (python) falhou e foi trocada por shell puro.
+- **Validação final pelo pipeline** (run `35479709833`): os 10 jobs verdes;
+  update `DeployStack` executado **por `kairos-ci`** (`6aaf2de5…`,
+  `Complete`/`success=true`) com `Post Deploy` `success=true` (`smoke pos-deploy
+  ok`); stack `deployed_hash == latest_hash` da `main`.
+- A procedure/action `kairos-smoke-deploy`/`kairos-smoke` (deno no Core)
+  permanece disponível para disparo manual do smoke.
