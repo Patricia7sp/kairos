@@ -1364,3 +1364,12 @@ o `Scheduler` e o serviço `main-kairos` roda o gateway, compartilhando
 - Validação local: suíte completa **2.699 testes + 5.801 subtestes** passados
   (39 pulados, 1 deselected runtime_live); `ruff check`/`format --check` limpos.
   Plano: `docs/superpowers/plans/2026-09-21-cron-entrega-externa.md`.
+
+### Merge do PR #73 — entrega externa do cron por canal (2026-09-21)
+
+PR #73 squash-mergeado em `e120004` (harness offline `test_cron_delivery_local_
+harness.py`, 2 testes de loopback, + docs). Merge verificado:
+`git diff HEAD~1..HEAD` sem remoções acidentais (3 arquivos, tudo do recorte).
+Suíte local **2.699 passados + 5.801 subtestes** (39 pulados, 1 deselected
+runtime_live) e os 9 jobs de verificação verdes no PR (deploy só na main).
+O deploy automático do pipeline Komodo publica o recorte a seguir.
