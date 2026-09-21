@@ -25,7 +25,7 @@ de delegação (`kairos_tools/policy.py`).
 ## Estado atual do toolset
 
 Ferramentas core registradas hoje (`kairos_tools/builtin.py`,
-`kairos_tools/memory.py`):
+`kairos_tools/memory.py`, `kairos_tools/git.py`, `kairos_tools/calendar.py`):
 
 | Ferramenta | Efeito | Mutadora |
 |---|---|---|
@@ -39,6 +39,8 @@ Ferramentas core registradas hoje (`kairos_tools/builtin.py`,
 | `patch` | patch fuzzy | sim |
 | `web_extract` | extrai URL | não |
 | `memory` | memória de longo prazo | sim |
+| `git` | status/diff/log/commit (toolset gated por repositório) | sim (nos mutadores) |
+| `calendar` | agenda local `.ics` (toolset gated por `calendar.source`) | sim (`add`/`rm`) |
 
 Infra já disponível e reutilizável: aprovação por turno (`kairos_tools/approval.py`),
 orçamento (`budget.py`), política (`policy.py`), paralelismo (`parallel.py`),
@@ -65,27 +67,27 @@ A coluna **valor** é uma hipótese a validar com uso real — não uma promessa
 | ~~Webhook de entrada Telegram~~ **implementado** | extensão do inbound (etapa 1) | entrada / médio | HTTPS público | — | — | `telegram.inbound.mode: webhook` + `POST /api/inbound/telegram` |
 | ~~Canal de entrada Slack~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio-alto | Events API + Signing Secret | — | — | `POST /api/inbound/slack`, assinatura `v0` + anti-replay, fail-closed |
 | ~~Canal de entrada webhook~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio | HTTPS público + token de ingestão | — | — | `POST /api/inbound/webhook`, token no cofre + fonte autorizada, fail-closed |
-| Calendário / lembretes | ferramenta gated por `check_fn` (etapa 3) | mutadora / médio | provedor externo (decisão abaixo) | — | sim | `kairos_cron` já entrega; falta a **fonte** externa |
+| ~~Calendário~~ **implementado — fonte local (opção 1)** | ferramenta gated por toolset + aprovação por subcomando (etapa 3) | mutadora / médio-baixo (sem rede externa) | arquivo `.ics` / diretório local (`calendar.source`) | — | sim (em `add`/`rm`) | `kairos_cron` entrega; **lembretes proativos** ficam como evolução à espera de uso |
 
-#### Calendário / lembretes — decisão de produto em aberto
+#### Calendário / lembretes — decisão fechada: fonte local (opção 1)
 
-`kairos_cron` já agenda e entrega; o que falta é a **fonte** (ler o calendário ou
-disparar o lembrete). Opções concretas, da menor para a maior dependência
-externa — nenhuma é implementada por este documento:
+Decisão da usuária em 2026-09-21: **opção 1 — fonte local**. A ferramenta
+`calendar` foi entregue via PR #77 (plano datado em
+`docs/superpowers/plans/2026-09-21-calendario-icnfonte-local.md`): lê e altera a
+agenda de um arquivo `.ics` (ou diretório de `.ics`, somente leitura) apontado
+por `calendar.source` em `<home>/config.yaml`, com toolset gated — a ferramenta
+só entra no request quando a fonte existe, mantendo o cinto estreito. Mutadores
+(`add`/`rm`) exigem aprovação por turno; `today`/`range` fluem.
 
-1. **Fonte local (CalDAV próprio ou arquivo `.ics` sincronizado)** — sem OAuth
-   público, servidor de vocês (ex.: Radicale/Nextcloud) ou um arquivo empurrado
-   pelo pipeline. Ferramenta gated por `check_fn` (etapa 3): só aparece quando a
-   fonte existe. Zero conta de terceiros; aprovação por turno nos mutadores.
-2. **Google Calendar API** — mais maduro, mas exige conta Google, OAuth de
-   credencial, escopo de leitura/escrita e rota de refresh em produção; cada
-   ação vira dependência externa autorizada explicitamente (token, conta).
-3. **Adiar para P3** — manter só o agendamento por `kairos_cron` enquanto não há
-   demanda observada; candidata só avança com uso real (critério 1 de decisão).
+Escopo honesto do v1: RRULE é lido e **marcado, não expandido**; datetimes
+flutuantes assumem fuso local do sistema, sinalizado por evento; arquivo
+corrompido é erro nomeado fail-closed (nenhum parcial silencioso); leituras
+exigem `limite` explícito (1–200). Zero conta de terceiros, zero rede.
 
-Se a opção 1 vencer, o caminho de entrega é a etapa 3 com `check_fn` no toolset:
-a ferramenta só entra no request quando o pré-requisito (fonte de calendário
-configurada) existe, mantendo o cinto estreito. A decisão pertence à usuária.
+Fica em aberto só a outra metade da candidata — **lembretes proativos** (entregar
+avisos pelo `kairos_cron` a partir do calendário). Ela não avança por plano:
+regride apenas com uso real observado (critério 1 de decisão). As opções 2
+(Google Calendar API) e 3 (adiar) foram descartadas ao escolher a fonte local.
 
 ### P3 — avaliar só com necessidade concreta
 
