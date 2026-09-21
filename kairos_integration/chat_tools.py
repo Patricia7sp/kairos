@@ -56,6 +56,10 @@ GIT_MUTATING_SUBCOMMANDS: frozenset[str] = frozenset(
     }
 )
 
+#: Subcomandos `calendar` que alteram a agenda local e exigem aprovação por
+#: turno. `today`/`range` são leitura e fluem sem prompt.
+CALENDAR_MUTATING_SUBCOMMANDS: frozenset[str] = frozenset({"add", "rm"})
+
 #: Subconjunto core exposto ao Chat. Tudo fora daqui é recusado nomeado.
 CHAT_TOOLS: frozenset[str] = frozenset(
     {
@@ -69,6 +73,7 @@ CHAT_TOOLS: frozenset[str] = frozenset(
         "search_files",
         "web_extract",
         "git",
+        "calendar",
     }
 )
 
@@ -132,6 +137,12 @@ def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = N
             arguments = parsed if parsed is not None else {}
         subcommand = str((arguments or {}).get("subcommand", ""))
         return subcommand in GIT_MUTATING_SUBCOMMANDS
+    if name == "calendar":
+        if isinstance(arguments, str):
+            parsed = _body_arguments(arguments)
+            arguments = parsed if parsed is not None else {}
+        subcommand = str((arguments or {}).get("subcommand", ""))
+        return subcommand in CALENDAR_MUTATING_SUBCOMMANDS
     return name in MUTATING_TOOLS
 
 

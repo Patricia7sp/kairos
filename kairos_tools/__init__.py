@@ -3,6 +3,7 @@
 from kairos_tools.approval import ApprovalContext, Decision, Layer, Verdict, resolve
 from kairos_tools.budget import ResultBudget, SpilloverResult, maybe_spill
 from kairos_tools.builtin import register_builtin_tools
+from kairos_tools.calendar import register_calendar_tool
 from kairos_tools.git import register_git_tool
 from kairos_tools.memory import MemoryStore, register_memory_tool
 from kairos_tools.parallel import Segment, SegmentKind, ToolCall, segment_batch
@@ -32,6 +33,7 @@ __all__ = [
     "delegate_block_reason",
     "maybe_spill",
     "register_builtin_tools",
+    "register_calendar_tool",
     "register_git_tool",
     "register_memory_tool",
     "registry",
