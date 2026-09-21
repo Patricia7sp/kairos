@@ -310,13 +310,24 @@ class ExecucaoTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 self.assertEqual(main(["import-agent", "--data", payload]), 1)
 
-    def test_uninstall_remove_home_de_verdade_e_falha_se_ausente(self):
+    def test_uninstall_sem_confirmacao_NAO_remove_e_confirmado_remove(self):
+        import contextlib
+        import io
+
         home = Path(self._tmp.name)
         marker = home / "state.db"
         marker.write_text("x", encoding="utf-8")
-        self.assertEqual(main(["uninstall"]), 0)
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["uninstall"]), 1)
+        self.assertTrue(home.exists())
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["uninstall", "--yes"]), 0)
         self.assertFalse(home.exists())
-        self.assertEqual(main(["uninstall"]), 1)
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["uninstall", "--yes"]), 1)
 
     def test_login_logout_persistem_no_auth_json(self):
         import json
@@ -343,51 +354,39 @@ class ExecucaoTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["console", "eval", "--expression", "__import__('os')"]), 1)
 
-    def test_skin_use_persiste_tema(self):
+    def test_skin_recusa_tema_sem_consumidor(self):
         from kairos_cli.config import load_config
 
-        self.assertEqual(main(["skin", "use", "--theme", "dark"]), 0)
-        self.assertEqual((load_config() or {}).get("ui", {}).get("theme"), "dark")
+        self.assertEqual(main(["skin", "use", "--theme", "dark"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertIsNone((load_config() or {}).get("ui", {}).get("theme"))
 
-    def test_prompt_size_set_get_persiste(self):
-        import contextlib
-        import io
+    def test_prompt_size_recusa_sem_consumidor(self):
+        from kairos_cli.config import load_config
 
-        self.assertEqual(main(["prompt-size", "set", "--size", "42"]), 0)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.assertEqual(main(["prompt-size", "get"]), 0)
-        self.assertIn("42", buf.getvalue())
+        self.assertEqual(main(["prompt-size", "set", "--size", "42"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertNotIn("prompt_size", load_config() or {})
 
-    def test_peer_add_list_remove_persiste(self):
-        self.assertEqual(main(["peer", "add", "--target", "p1"]), 0)
-        self.assertEqual(main(["peer", "remove", "--target", "p1"]), 0)
-        self.assertEqual(main(["peer", "remove", "--target", "p1"]), 1)
+    def test_peer_recusa_sem_consumidor(self):
+        self.assertEqual(main(["peer", "add", "--target", "p1"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertFalse((Path(self._tmp.name) / "peers.json").exists())
 
-    def test_pairing_revoke_exige_registro(self):
+    def test_pairing_recusa_sem_consumidor(self):
         import json
 
         home = Path(self._tmp.name)
         (home / "pairings.json").write_text(
             json.dumps({"active": ["u1"], "pending": []}), encoding="utf-8"
         )
-        self.assertEqual(main(["pairing", "revoke", "--target", "u1"]), 0)
-        self.assertEqual(main(["pairing", "revoke", "--target", "u1"]), 1)
+        self.assertEqual(main(["pairing", "revoke", "--target", "u1"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertEqual(
+            json.loads((home / "pairings.json").read_text(encoding="utf-8")),
+            {"active": ["u1"], "pending": []},
+        )
 
-    def test_pause_alterna_estado_real(self):
-        import contextlib
-        import io
-
-        self.assertEqual(main(["pause"]), 0)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.assertEqual(main(["pause", "status"]), 0)
-        self.assertIn("pausada", buf.getvalue())
-        self.assertEqual(main(["pause", "resume"]), 0)
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.assertEqual(main(["pause", "status"]), 0)
-        self.assertIn("ativa", buf.getvalue())
+    def test_pause_recusa_sem_efeito(self):
+        self.assertEqual(main(["pause"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertEqual(main(["pause", "status"]), ExitCode.NOT_IMPLEMENTED)
+        self.assertFalse((Path(self._tmp.name) / "autonomy.json").exists())
 
     def test_integracoes_test_nao_alegam_envio(self):
         import contextlib
@@ -399,14 +398,57 @@ class ExecucaoTests(unittest.TestCase):
                 self.assertEqual(main([cmd, "test"]), 0)
             self.assertIn("nada foi enviado", buf.getvalue())
 
-    def test_inicios_indisponiveis_falham_em_vez_de_fingir(self):
+    def test_inicios_indisponiveis_recusam_sem_fingir(self):
         import contextlib
         import io
 
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(main(["claw", "start"]), 1)
-            self.assertEqual(main(["gui", "start"]), 1)
-            self.assertEqual(main(["update"]), 1)
+        for argv in (["claw", "start"], ["gui", "start"], ["update"], ["console", "start"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(argv), ExitCode.NOT_IMPLEMENTED)
+
+    def test_verify_nao_alega_sucesso(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            code = main(["verify"])
+        self.assertEqual(code, ExitCode.NOT_IMPLEMENTED)
+        self.assertIn("executor de receitas", buf.getvalue())
+
+    def test_uninstall_confirmado_remove_o_home(self):
+        import contextlib
+        import io
+
+        home = Path(tempfile.mkdtemp())
+        (home / "state.db").write_bytes(b"x")
+        anterior = os.environ.get("KAIROS_HOME")
+        os.environ["KAIROS_HOME"] = str(home)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main(["uninstall", "--yes"])
+        finally:
+            if anterior is None:
+                os.environ.pop("KAIROS_HOME", None)
+            else:
+                os.environ["KAIROS_HOME"] = anterior
+            if home.exists():
+                import shutil
+
+                shutil.rmtree(home)
+        self.assertEqual(code, ExitCode.OK)
+        self.assertFalse(home.exists())
+
+    def test_uninstall_recusa_em_container_mesmo_com_yes(self):
+        import contextlib
+        import io
+
+        home = Path(self._tmp.name)
+        (home / "state.db").write_bytes(b"x")
+        (home / ".container-mode").write_text("mode=test\n", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["uninstall", "--yes"]), ExitCode.ERROR)
+        self.assertTrue((home / "state.db").is_file())
 
     def test_webhook_lista_endpoints_do_messaging_json(self):
         import contextlib

@@ -1744,6 +1744,32 @@ ocupado**.
 provedor e a contagem de credenciais, nunca o valor — e há teste que planta um
 `sk-NAO-VAZAR` e afirma que ele não sai.
 
+### D-CLI.9 — Comandos sem efeito recusam em vez de fingir
+
+Comandos que reportavam sucesso sem fazer nada eram bug proposital segundo a
+regra do projeto ("sem efeito real é pior que ausência"). O recorte de 2026-09-20
+apagou essas mentiras, usando apuração por consumidor real (grep em todo o
+código, fora de `kairos_cli/`):
+
+- **Estado fabricado → recusa 69** com mensagem que diz o que o efeito real
+  exigiria: `verify` (exige o executor de receitas do legado — detectar a receita
+  e rodar bootstrap/build/test + readiness; conferir dois arquivos não é
+  verificação), `acp status` (sem servidor; `kairos_acp` só tem primitivas),
+  `claw`/`gui` (`start` e `status`; subsistema não existe no build), `console
+  start` (o efeito real é `console eval`), `update` (na imagem o deploy vem do
+  pipeline; em dev, git), `hooks` (`hooks.json` não é lido; os hooks reais vivem
+  em `kairos_plugins` e são registrados por plugins no runtime), `skin`
+  (`ui.theme` sem consumidor), `prompt-size` (`prompt_size` sem consumidor),
+  `pause` (`autonomy.json` sem consumidor), `pairing`/`peer` (`pairings.json`/
+  `peers.json` sem consumidor). Nenhum comando saiu do registro nem perdeu
+  handler; a recusa informada É o comportamento entregue.
+- **`uninstall` fail-closed**: sem `--yes` não remove nada; dentro de container
+  recusa mesmo com `--yes` (o home é volume da stack; desinstalação é decisão de
+  operação). O efeito real permanece com `--yes`, fora de container.
+
+A diferença contra o `main` para comando **sem handler** (mensagem genérica +
+69) é esta: aqui o handler existe e a recusa carrega o diagnóstico específico.
+
 ### D-CLI.8 — O fast path é usado de verdade
 
 `--version` responde **sem montar a árvore de argparse**, e há teste em

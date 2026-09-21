@@ -7,6 +7,8 @@ import operator
 import sys
 from pathlib import Path
 
+from kairos_cli.handlers import ExitCode
+
 _OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -47,8 +49,13 @@ async def run_console(home: Path, args) -> int:
     subcommand = getattr(args, "console_command", None) or getattr(args, "subcommand", None)
 
     if subcommand == "start":
-        print("Console interativo indisponível neste modo; use `console eval --expression '2+2'`.")
-        return 1
+        print(
+            "kairos: console interativo não implementado — não há REPL de agente "
+            "para abrir. O efeito real deste comando é `console eval "
+            "--expression '2+2'`.",
+            file=sys.stderr,
+        )
+        return ExitCode.NOT_IMPLEMENTED
     if subcommand == "eval":
         expr = getattr(args, "expression", None)
         if not expr:
