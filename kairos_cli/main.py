@@ -361,6 +361,12 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument(
             "--no-browser", action="store_true", help="Não abre o navegador automaticamente"
         )
+    elif command == "uninstall" and subcommand is None:
+        parser.add_argument(
+            "--yes",
+            action="store_true",
+            help="Confirma a remoção do home (sem isto, o uninstall é recusa)",
+        )
 
 
 def _runtime_branch(parser, command, argparse) -> None:

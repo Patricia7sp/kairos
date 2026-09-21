@@ -1,7 +1,13 @@
-"""Comando `kairos claw` — automação de browser."""
+"""Comando `kairos claw` — automação de browser.
+
+**Recusa barulhenta.** Não há run-time de browser neste build — não existe
+"nenhuma tarefa em execução" verdadeiro, e não há o que iniciar.
+"""
 
 import sys
 from pathlib import Path
+
+from kairos_cli.handlers import ExitCode
 
 
 async def run_claw(home: Path, args) -> int:
@@ -9,11 +15,12 @@ async def run_claw(home: Path, args) -> int:
 
     subcommand = getattr(args, "claw_command", None) or getattr(args, "subcommand", None)
 
-    if subcommand == "start":
-        print("kairos: automação de browser indisponível neste modo.", file=sys.stderr)
-        return 1
-    if subcommand == "status":
-        print("Claw: nenhuma tarefa em execução.")
-        return 0
+    if subcommand in ("start", "status"):
+        print(
+            "kairos: claw (automação de browser) não implementado: não há run-time "
+            "de browser neste build para iniciar ou consultar.",
+            file=sys.stderr,
+        )
+        return ExitCode.NOT_IMPLEMENTED
     print("Subcomando inválido. Use: claw start | claw status")
     return 1

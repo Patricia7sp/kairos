@@ -1,36 +1,32 @@
-"""Comando `kairos verify` — verificação pós-edição de código."""
+"""Comando `kairos verify` — verificação pós-edição de código.
 
-import json
+**Recusa barulhenta, não falsa verificação.** O `verify` do legado detecta a
+receita do projeto (manifest), executa as fases bootstrap/build/test e testa a
+readiness de porta, registrando evidência. O executor de receitas não foi
+portado para o Kairos — conferir dois arquivos não é verificação, e alegar
+"Verificação concluída" por causa disso é exatamente o falso sucesso que a
+regra do projeto proíbe.
+"""
+
+import sys
 from pathlib import Path
+
+from kairos_cli.handlers import ExitCode
+
+
+def _motivo() -> str:
+    return (
+        ": o executor de receitas (bootstrap/build/test + readiness de porta) "
+        "que o verify do legado usa não foi portado. Detectar a receita em "
+        ".hermes/environment.json e rodar as fases reais é o efeito; conferir "
+        "dois arquivos não é verificação."
+    )
 
 
 async def run_verify(home: Path, args) -> int:
     home = Path(home)
-
-    # Verifica integridade do auth.json e configuração
-    auth_path = home / "auth.json"
-    config_path = Path.home() / ".config" / "kairos" / "config.yaml"
-
-    errors = []
-
-    if not auth_path.exists():
-        errors.append("auth.json não encontrado")
-    else:
-        try:
-            data = json.loads(auth_path.read_text(encoding="utf-8"))
-            if "credential_pool" not in data:
-                errors.append("auth.json com estrutura inválida")
-        except (json.JSONDecodeError, ValueError):
-            errors.append("auth.json inválido (JSON corrompido)")
-
-    if not config_path.exists():
-        errors.append("config.yaml não encontrado")
-
-    if errors:
-        print("Erros de verificação encontrados:")
-        for e in errors:
-            print(f"  - {e}")
-        return 1
-    else:
-        print("Verificação concluída: não foram encontrados problemas.")
-        return 0
+    print(
+        f"kairos: verify não implementado{_motivo()}",
+        file=sys.stderr,
+    )
+    return ExitCode.NOT_IMPLEMENTED
