@@ -12,10 +12,19 @@ from kairos_tools import builtin
 
 
 @pytest.fixture
-def chat_tools():
+def chat_tools(home_com_calendario):
     from kairos_integration import chat_tools
 
     return chat_tools
+
+
+@pytest.fixture
+def home_com_calendario(tmp_path, monkeypatch):
+    calendar = tmp_path / "agenda.ics"
+    calendar.write_text("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(f"calendar:\n  source: {calendar}\n", encoding="utf-8")
+    monkeypatch.setenv("KAIROS_HOME", str(tmp_path))
+    return tmp_path
 
 
 def call(arguments, *, name="web_search"):
