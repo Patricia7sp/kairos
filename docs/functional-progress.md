@@ -1326,3 +1326,16 @@ percorre o laço inteiro pelo caminho de produção.
   deselecionado (runtime_live) — os dois novos testes são offline (loopback)
   e rodam na suíte normal, sem opt-in.
 - `ruff check` e `ruff format --check` limpos no novo arquivo.
+
+### Merge do PR #72 — CLI honesta e teste local Telegram→Kairos (2026-09-21)
+
+PR #72 squash-mergeado em `a1e16c5` — os dois recortes acima juntos: **CLI
+honesta** (comandos sem efeito real recusam barulhento com exit 69 e apontam o
+efeito ausente; `uninstall` fail-closed com `--yes` e recusa em container;
+D-CLI.9) e o **harness local Telegram→Kairos** (Bot API + LLM fakes em loopback
+da stdlib, laço pelo caminho de produção). Merge verificado:
+`git diff HEAD~1..HEAD` sem remoções acidentais (20 arquivos, tudo do recorte).
+Suíte local **2.697 passados + 5.801 subtestes** (39 pulados, 1 deselected
+runtime_live) + os 9 jobs de verificação verdes no PR (o `deploy` roda só na
+main, pós-merge, via Komodo). Com o merge, o deploy automático do pipeline
+Komodo já publica este recorte.
