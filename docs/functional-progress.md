@@ -1457,3 +1457,32 @@ descartável e registrou o que NÃO foi certificado, sem efeito fingido.
   seguem como falha fechada (69).
 - CI revalidou tudo (recorte só de docs; 8 jobs de verificação). Plano:
   `docs/superpowers/plans/2026-09-21-aceite-operacional-superficies.md`.
+
+### Merge do PR #75 — aceite operacional de MCP, plugins, skills, TUI/desktop e perfis isolados (2026-09-21)
+
+PR #75 squash-mergeado em `31d93a2` (recorte só de docs: plano de aceite +
+seção acima). Merge verificado: `git diff HEAD~1..HEAD` sem remoções acidentais
+(2 arquivos, 121 inserções, nenhuma deleção). CI 10/10 verdes. Registro do
+incidente de infra: entre ~04:32 e ~11:55 UTC o GitHub Actions parou de
+provisionar runners — todos os jobs de todo run (PR, push e `workflow_dispatch`)
+falharam em ~3 s com zero steps e `runner_id: 0`, sem incidente no status
+público; o repo era **privado** e o plano pessoal não tem segundos de reprodutor
+próprio, consistente com esgotamento de cota de minutos de Ações. O repositório
+foi tornado **público**, os runs voltaram a provisionar e a run `pull_request`
+do PR (#35562873981, head `4f8be50ad7`) re-rodada passou. Suíte local na
+branch: 2.753 testes + 5.801 subtestes.
+
+### Merge do PR #76 — plano P2 refletido (2026-09-21)
+
+PR #76 squash-mergeado em `d5876e8` (recorte só de docs:
+`docs/plano-ferramentas.md`). Merge verificado via `git diff HEAD~1..HEAD`
+(1 arquivo, 24 inserções / 2 deleções, tudo do recorte). CI 10/10 verdes. O
+plano P2 fica com as entradas de Slack e webhook (item 2) fechadas como
+implementadas; resta a única candidata P2 — calendário/lembretes — com a
+decisão de produto formalizada **em aberto** (fonte local/`check_fn` vs Google
+Calendar vs adiar para P3); o documento segue sendo proposta, nada foi
+implementado por ele.
+
+Nota: os runs da main de 04:32 (merge do PR #74) falharam na indisponibilidade
+e **não publicaram** o recorte de canais no pipeline; o próximo deploy da main
+publica os itens 2–4 juntos.
