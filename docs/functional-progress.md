@@ -1504,3 +1504,17 @@ lido e **marcado, não expandido** (v1); mutação (`add`/`rm`) exige arquivo
 leitura; arquivo corrompido é erro nomeado fail-closed; flutuante assume fuso
 local sinalizado. Exigência explícita de `limite` (1–200) em leituras, sem
 defaults silenciosos.
+
+### Merge do PR #78 — decisão do calendário fechada no plano (2026-09-21)
+
+PR #78 squash-mergeado em `49adf2c` (só docs: `docs/plano-ferramentas.md`,
+24+/22-). Merge verificado via `git diff HEAD~1..HEAD` (1 arquivo, 24 inserções
+/ 22 deleções). CI 10/10 verdes — o run inicial falhou num teste de cancelamento
+(`test_runtime_service` — TimeoutError numa corrida de asyncio, sem relação com
+o PR de docs); re-run do job passou, confirmação de flake.
+
+Fecha o ciclo da candidata P2 "Calendário / lembretes": decisão **fonte local
+(opção 1)** escolhida pela usuária e v1 entregue (PR #77) passam a constar como
+implementado no plano; o `Estado atual do toolset` ganhou `git` e `calendar`
+(registrados mas ausentes da lista). Resta em aberto só a metade "lembretes
+proativos" — regride apenas com uso real observado.
