@@ -1373,3 +1373,41 @@ harness.py`, 2 testes de loopback, + docs). Merge verificado:
 Suíte local **2.699 passados + 5.801 subtestes** (39 pulados, 1 deselected
 runtime_live) e os 9 jobs de verificação verdes no PR (deploy só na main).
 O deploy automático do pipeline Komodo publica o recorte a seguir.
+
+## Continuação — paridade inbound/outbound dos canais (2026-09-21)
+
+Item 2 (conectores de canais): os quatro canais configuráveis (Telegram,
+WhatsApp, Slack, webhook) agora têm **entrada e saída**. O Slack só entregava
+(incoming webhook) e o webhook só postava (endpoints); este recorte fecha as
+duas lacunas com o mesmo fail-closed dos canais existentes, tudo offline.
+
+- **Slack entrada (Events API por webhook)** — `kairos_gateway/slack_inbound.py`
+  novo, espelhando o WhatsApp: rota pública `POST /api/inbound/slack`
+  (em `_OPEN_PATHS`); assinatura `X-Slack-Signature` `v0` (HMAC-SHA256 do corpo
+  cru com o Signing Secret) com anti-replay de 5 min pelo
+  `X-Slack-Request-Timestamp`; handshake `url_verification` devolve o desafio;
+  `event_callback` `message` sem `subtype` vira turno assíncrono; allowlist por
+  user ID (`U…`); resposta no canal da conversa (`slack:{channel}`). Sem
+  segredo/desabilitado → 503; assinatura/janela divergente → 401.
+- **Webhook entrada (ingestão por token)** — `kairos_gateway/webhook_inbound.py`
+  novo: rota pública `POST /api/inbound/webhook`; token de ingestão no cofre
+  (`X-Kairos-Webhook-Token`, comparação em tempo constante) + fonte autorizada
+  (`allowed_sources`; vazia = ninguém fala); corpo
+  `{"text", "source?", "reply_url?", "id?"}`; resposta volta pelo adapter
+  entrante para o `reply_url` (ou endpoint padrão); `id` opcional dá
+  idempotência. Sem token/desabilitado → 503; token divergente → 401.
+- Schema e painel: `slack.inbound`/`webhook.inbound` em `config.py`
+  (`_INBOUND_SCHEMAS`, `_INBOUND_ALLOWLIST_ITEM`, `default_config`);
+  `INBOUND_SECRET_KEYS` ganha `signing_secret`/`ingest_token`; `InboundSecretBody`
+  do painel grava/dropa os novos campos no cofre e o status expõe
+  `campo_secreto`.
+- Princípios mantidos: sem adapter de envio o turno não roda (nada de efeito
+  fingido); dedupe em memória; aprovação de ferramenta não tem botões — recusa
+  honesta aponta o painel.
+- Testes: `tests/test_slack_inbound.py` + `tests/test_webhook_inbound.py`
+  (35 unitários, fakes) + rotas/segredo/schema em `test_inbound_api.py` e
+  `test_messaging_config.py`. Suíte local completa **2.753 testes + 5.801
+  subtestes** passados (39 pulados, 1 deselected runtime_live);
+  `ruff check`/`format --check` limpos. Plano:
+  `docs/superpowers/plans/2026-09-21-canais-paridade-slack-webhook-inbound.md`;
+  `docs/uso-por-canal.md` documenta o uso dos dois canais de entrada.

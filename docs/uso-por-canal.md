@@ -190,6 +190,71 @@ kairos slack test     # valida a forma da URL; nunca envia ("nada foi enviado")
 - **Dependências externas:** workspace Slack com incoming webhook criado num
   canal. Sem `enabled` + URL no cofre, o adapter não é construído.
 
+### Entrada Slack (Events API, webhook)
+
+- Rota pública `POST /api/inbound/slack` (fora da sessão — segurança do canal).
+- Habilitar de verdade no `messaging.json`
+  (`slack.inbound.enabled: true`, `allowed_user_ids` = user IDs `U…`; lista vazia
+  = ninguém fala) e gravar o Signing Secret no cofre:
+
+  ```bash
+  curl -s -X POST http://localhost:8370/api/messaging/slack/inbound-secret \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"signing_secret":"<Signing Secret do seu app>"}'   # via API
+  ```
+
+- Verificação real: `X-Slack-Signature` (`v0`, HMAC-SHA256 do corpo cru com o
+  Signing Secret) + anti-replay pela janela de 5 min do
+  `X-Slack-Request-Timestamp`. O desafio `url_verification` devolve o
+  `challenge` no corpo; `event_callback` acusa `ok` e agenda o turno. Assinatura
+  divergente → 401; sem segredo no cofre ou canal desabilitado → 503.
+- A resposta volta pelo adapter entrante no canal da conversa
+  (`slack:{channel}` — DM ou canal). Sem webhook URL no cofre o turno não roda
+  (sem efeito fingido).
+- Aprovação de ferramenta não tem botões no Slack: a recusa é honesta e aponta
+  para o painel, nunca um "aprovado" falso.
+- **Configurar webhook no app do Slack:** Slack App → Event Subscriptions →
+  Request URL (o endpoint publica o `challenge` na verificação), subscribe a
+  `message.im`/`message.channels`; público alvo definido por
+  `allowed_user_ids`.
+
+## Webhook (genérico)
+
+Saída: o adapter `webhook` posta `{"text", "source": "kairos"}` num endpoint
+nomeado (`webhook:{nome}`) ou URL direta — gestão de endpoints na aba
+Integrações do painel.
+
+### Entrada webhook (ingestão por token)
+
+- Rota pública `POST /api/inbound/webhook` (fora da sessão — segurança própria).
+- Habilitar de verdade no `messaging.json`
+  (`webhook.inbound.enabled: true`, `allowed_sources` = nomes de fonte; lista
+  vazia = nenhuma fonte fala) e gravar o token de ingestão no cofre:
+
+  ```bash
+  curl -s -X POST http://localhost:8370/api/messaging/webhook/inbound-secret \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"ingest_token":"<token secreto do seu serviço>"}'   # via API
+  ```
+
+- Para falar com o agente, o serviço de vocês envia:
+
+  ```bash
+  curl -s -X POST http://localhost:8370/api/inbound/webhook \
+    -H "X-Kairos-Webhook-Token: <token>" \
+    -H "X-Kairos-Webhook-Source: sensor-x" \
+    -H 'Content-Type: application/json' \
+    -d '{"text":"temperatura alta","id":"opcional"}'
+  ```
+
+- Segurança dobrada fail-closed: token divergente → 401; sem token no cofre ou
+  canal desabilitado → 503; fonte fora de `allowed_sources` é ignorada (o acuse
+  `ok` é o envelope HTTP, não a resposta do turno).
+- A resposta volta pelo adapter entrante para `reply_url` do corpo (se vier) ou
+  para o endpoint padrão configurado. Sem endpoint configurado o turno não roda
+  (sem efeito fingido).
+- `id` opcional torna a entrega idempotente (janela de dedupe em memória).
+
 ## Ferramentas por canal
 
 Todas as superfícies de conversa compartilham o toolset core. Ferramentas
@@ -202,9 +267,13 @@ em `docs/plano-ferramentas.md`.
 | Item | Estado |
 |---|---|
 | Telegram inbound | fato (long-poll ou webhook, fail-closed) |
-| Telegram webhook de entrada | fato (rope pública `POST /api/inbound/telegram`, `mode: webhook`) |
+| Telegram webhook de entrada | fato (rota pública `POST /api/inbound/telegram`, `mode: webhook`) |
 | WhatsApp saída | fato (adapter) |
 | WhatsApp entrada | fato (webhook Cloud API, fail-closed) |
+| Slack saída | fato (adapter incoming webhook, `verify` só forma) |
+| Slack entrada | fato (Events API `POST /api/inbound/slack`, assinatura `v0` fail-closed) |
+| Webhook saída | fato (adapter, endpoints nomeados/URL direta) |
+| Webhook entrada | fato (ingestão `POST /api/inbound/webhook`, token no cofre + fonte autorizada) |
 | WhatsApp CLI | config/status reais; test via `verify()` sem envio |
 | Slack CLI | config/status reais; test valida só a forma da URL |
 | Tela web de experiências | existe (Painel → Experiências) |
