@@ -1486,3 +1486,21 @@ implementado por ele.
 Nota: os runs da main de 04:32 (merge do PR #74) falharam na indisponibilidade
 e **não publicaram** o recorte de canais no pipeline; o próximo deploy da main
 publica os itens 2–4 juntos.
+
+### Merge do PR #77 — calendário/lembretes (fonte local, gated) (2026-09-21)
+
+PR #77 squash-mergeado em `4324e01` — a etapa 3 do plano de ferramentas para a
+única candidata P2: ferramenta `calendar` lendo de **fonte local** `.ics`
+(`calendar.source` em `<home>/config.yaml`), sem conta de terceiros nem rede
+(opção 1 do plano, autorizada). Merge verificado via `git diff HEAD~1..HEAD`
+(8 arquivos, 1.451 inserções / 1 deleção — só o recorte: `kairos_tools/ics.py`,
+`kairos_tools/calendar.py`, `kairos_tools/__init__.py`,
+`kairos_integration/chat_tools.py`, testes e plano datado). CI 10/10 verdes.
+
+Escopo honesto documentado no plano datado
+(`docs/superpowers/plans/2026-09-21-calendario-icnfonte-local.md`): RRULE é
+lido e **marcado, não expandido** (v1); mutação (`add`/`rm`) exige arquivo
+único e aprovação por turno (`today`/`range` fluem); diretório é somente
+leitura; arquivo corrompido é erro nomeado fail-closed; flutuante assume fuso
+local sinalizado. Exigência explícita de `limite` (1–200) em leituras, sem
+defaults silenciosos.
