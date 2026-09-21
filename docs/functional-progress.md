@@ -1411,3 +1411,14 @@ duas lacunas com o mesmo fail-closed dos canais existentes, tudo offline.
   `ruff check`/`format --check` limpos. Plano:
   `docs/superpowers/plans/2026-09-21-canais-paridade-slack-webhook-inbound.md`;
   `docs/uso-por-canal.md` documenta o uso dos dois canais de entrada.
+
+### Merge do PR #74 — paridade inbound/outbound de Slack e webhook (2026-09-21)
+
+PR #74 squash-mergeado em `1b99a94` (recorte de canais: `slack_inbound.py` e
+`webhook_inbound.py` novos + schema/rotas/segredo + docs). Merge verificado:
+`git diff HEAD~1..HEAD` sem remoções acidentais (13 arquivos, tudo do recorte).
+CI 10/10 verdes — um job de sessões Docker deu flake (timing no journal de
+recuperação) e passou no re-run, domínio sem interseção com o recorte. Suíte
+local **2.753 testes + 5.801 subtestes** (39 pulados, 1 deselected
+runtime_live). O deploy automático do pipeline Komodo publica o recorte a
+seguir.
