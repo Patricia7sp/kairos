@@ -5,7 +5,7 @@ ferramenta abaixo foi criada por este documento. A decisão de priorizar, adiar
 ou descartar cada linha pertence à usuária; implementar sem essa decisão viola a
 disciplina do projeto.
 
-Atualizado em 18/09/2026.
+Atualizado em 21/09/2026.
 
 ## Regra de footprint (do `AGENTS.md`)
 
@@ -63,7 +63,29 @@ A coluna **valor** é uma hipótese a validar com uso real — não uma promessa
 |---|---|---|---|---|---|---|
 | ~~Canal de entrada WhatsApp~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio-alto | Cloud API + webhook público | — | — | `GET/POST /api/inbound/whatsapp`, fail-closed |
 | ~~Webhook de entrada Telegram~~ **implementado** | extensão do inbound (etapa 1) | entrada / médio | HTTPS público | — | — | `telegram.inbound.mode: webhook` + `POST /api/inbound/telegram` |
-| Calendário / lembretes | comando + skill (etapa 2) | mutadora / médio | provedor externo | — | sim | `kairos_cron` já agenda; falta a fonte externa |
+| ~~Canal de entrada Slack~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio-alto | Events API + Signing Secret | — | — | `POST /api/inbound/slack`, assinatura `v0` + anti-replay, fail-closed |
+| ~~Canal de entrada webhook~~ **implementado** | estender gateway (etapa 1/4) | entrada / médio | HTTPS público + token de ingestão | — | — | `POST /api/inbound/webhook`, token no cofre + fonte autorizada, fail-closed |
+| Calendário / lembretes | ferramenta gated por `check_fn` (etapa 3) | mutadora / médio | provedor externo (decisão abaixo) | — | sim | `kairos_cron` já entrega; falta a **fonte** externa |
+
+#### Calendário / lembretes — decisão de produto em aberto
+
+`kairos_cron` já agenda e entrega; o que falta é a **fonte** (ler o calendário ou
+disparar o lembrete). Opções concretas, da menor para a maior dependência
+externa — nenhuma é implementada por este documento:
+
+1. **Fonte local (CalDAV próprio ou arquivo `.ics` sincronizado)** — sem OAuth
+   público, servidor de vocês (ex.: Radicale/Nextcloud) ou um arquivo empurrado
+   pelo pipeline. Ferramenta gated por `check_fn` (etapa 3): só aparece quando a
+   fonte existe. Zero conta de terceiros; aprovação por turno nos mutadores.
+2. **Google Calendar API** — mais maduro, mas exige conta Google, OAuth de
+   credencial, escopo de leitura/escrita e rota de refresh em produção; cada
+   ação vira dependência externa autorizada explicitamente (token, conta).
+3. **Adiar para P3** — manter só o agendamento por `kairos_cron` enquanto não há
+   demanda observada; candidata só avança com uso real (critério 1 de decisão).
+
+Se a opção 1 vencer, o caminho de entrega é a etapa 3 com `check_fn` no toolset:
+a ferramenta só entra no request quando o pré-requisito (fonte de calendário
+configurada) existe, mantendo o cinto estreito. A decisão pertence à usuária.
 
 ### P3 — avaliar só com necessidade concreta
 
