@@ -85,13 +85,16 @@ class InboundSecretBody(BaseModel):
     """Segredos do webhook de entrada de uma plataforma (merge no cofre).
 
     Cada plataforma aceita seu conjunto (``INBOUND_SECRET_KEYS``): o WhatsApp o
-    App Secret/Verify Token, o Telegram o secret token do webhook.
+    App Secret/Verify Token, o Telegram o secret token do webhook, o Slack o
+    Signing Secret, e o webhook o token de ingestão.
     """
 
     model_config = ConfigDict(extra="forbid")
     app_secret: StrictStr | None = None
     verify_token: StrictStr | None = None
     webhook_secret_token: StrictStr | None = None
+    signing_secret: StrictStr | None = None
+    ingest_token: StrictStr | None = None
 
 
 @router.get("/messaging")
@@ -159,6 +162,8 @@ def save_inbound_secret(platform: str, body: InboundSecretBody, request: Request
         "app_secret": body.app_secret,
         "verify_token": body.verify_token,
         "webhook_secret_token": body.webhook_secret_token,
+        "signing_secret": body.signing_secret,
+        "ingest_token": body.ingest_token,
     }
     presentes = {campo: valor for campo, valor in mapa.items() if valor}
     desconhecidos = set(presentes) - set(aceitos)

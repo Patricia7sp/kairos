@@ -30,6 +30,10 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(doc["telegram"]["inbound"]["experiences"])
         self.assertFalse(doc["whatsapp"]["inbound"]["enabled"])
         self.assertEqual(doc["whatsapp"]["inbound"]["allowed_phone_numbers"], [])
+        self.assertFalse(doc["slack"]["inbound"]["enabled"])
+        self.assertEqual(doc["slack"]["inbound"]["allowed_user_ids"], [])
+        self.assertFalse(doc["webhook"]["inbound"]["enabled"])
+        self.assertEqual(doc["webhook"]["inbound"]["allowed_sources"], [])
 
     def test_whatsapp_inbound_suporta_telefones(self):
         doc = default_config()
@@ -100,6 +104,51 @@ class ConfigTests(unittest.TestCase):
     def test_telegram_inbound_mode_invalido_rejeita(self):
         doc = default_config()
         doc["telegram"]["inbound"]["mode"] = "carrier-pigeon"
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_slack_inbound_suporta_user_ids(self):
+        doc = default_config()
+        doc["slack"]["inbound"]["enabled"] = True
+        doc["slack"]["inbound"]["allowed_user_ids"] = ["U123ABC", "U456DEF"]
+        save_config(self.tmp, doc)
+        reloaded = load_config(self.tmp)
+        self.assertTrue(reloaded["slack"]["inbound"]["enabled"])
+        self.assertEqual(
+            reloaded["slack"]["inbound"]["allowed_user_ids"],
+            ["U123ABC", "U456DEF"],
+        )
+
+    def test_slack_inbound_rejeita_user_id_numerico(self):
+        doc = default_config()
+        doc["slack"]["inbound"]["allowed_user_ids"] = [123]
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_slack_inbound_rejeita_chave_desconhecida(self):
+        doc = default_config()
+        doc["slack"]["inbound"]["poll_interval_seconds"] = 2.0
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_webhook_inbound_suporta_fontes(self):
+        doc = default_config()
+        doc["webhook"]["inbound"]["enabled"] = True
+        doc["webhook"]["inbound"]["allowed_sources"] = ["sensor-x", "app-a"]
+        save_config(self.tmp, doc)
+        reloaded = load_config(self.tmp)
+        self.assertTrue(reloaded["webhook"]["inbound"]["enabled"])
+        self.assertEqual(reloaded["webhook"]["inbound"]["allowed_sources"], ["sensor-x", "app-a"])
+
+    def test_webhook_inbound_rejeita_fonte_numerica(self):
+        doc = default_config()
+        doc["webhook"]["inbound"]["allowed_sources"] = [9]
+        with self.assertRaises(ValueError):
+            save_config(self.tmp, doc)
+
+    def test_webhook_inbound_sem_chaves_estranhas(self):
+        doc = default_config()
+        doc["webhook"]["inbound"]["mode"] = "webhook"
         with self.assertRaises(ValueError):
             save_config(self.tmp, doc)
 

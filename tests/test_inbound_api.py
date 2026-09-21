@@ -3,9 +3,11 @@
 `GET /api/inbound/whatsapp` responde o ``hub.challenge`` só com Verify Token
 correto; `POST` aceita ``EVENT_RECEIVED`` só com assinatura HMAC-SHA256 válida.
 O `POST /api/inbound/telegram` só aceita no modo ``webhook`` e com
-`X-Telegram-Bot-Api-Secret-Token` conferindo. Segredos reais via cofre
-(monkeypatch do serviço de credenciais, como o `test_messaging_api`), nenhuma
-rede.
+`X-Telegram-Bot-Api-Secret-Token` conferindo. O `POST /api/inbound/slack`
+confere o desafio/evento só com assinatura ``v0`` (Signing Secret + anti-replay).
+O `POST /api/inbound/webhook` ingere só com o token no cofre e fonte autorizada.
+Segredos reais via cofre (monkeypatch do serviço de credenciais, como o
+`test_messaging_api`), nenhuma rede.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from typing import Any
 
 import pytest
@@ -37,6 +40,20 @@ TG_CHAT = 987654321
 
 class _FakeWhatsAppAdapter:
     name = "whatsapp"
+
+    def send(self, target: str, payload: str) -> SendResult:
+        return SendResult(ok=True)
+
+
+class _FakeSlackAdapter:
+    name = "slack"
+
+    def send(self, target: str, payload: str) -> SendResult:
+        return SendResult(ok=True)
+
+
+class _FakeWebhookAdapter:
+    name = "webhook"
 
     def send(self, target: str, payload: str) -> SendResult:
         return SendResult(ok=True)
@@ -109,6 +126,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(app.state, "kairos_home", tmp_path, raising=False)
     monkeypatch.setattr(app.state, "whatsapp_inbound", None, raising=False)
     monkeypatch.setattr(app.state, "telegram_inbound", None, raising=False)
+    monkeypatch.setattr(app.state, "slack_inbound", None, raising=False)
+    monkeypatch.setattr(app.state, "webhook_inbound", None, raising=False)
     monkeypatch.setattr(app.state, "interaction_service", None, raising=False)
     vault_path = tmp_path / "credentials.vault"
     encrypted = EncryptedFileVault(vault_path, scrypt_n=2**10)
@@ -120,7 +139,11 @@ def home(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "kairos_gateway.adapters.build_platform_adapters",
-        lambda _home: {"whatsapp": _FakeWhatsAppAdapter()},
+        lambda _home: {
+            "whatsapp": _FakeWhatsAppAdapter(),
+            "slack": _FakeSlackAdapter(),
+            "webhook": _FakeWebhookAdapter(),
+        },
     )
     monkeypatch.setattr("kairos_integration.build_interaction_router", lambda _home: _FakeRouter())
     monkeypatch.setattr(
@@ -471,3 +494,214 @@ def test_telegram_segredo_entrada_rejeita_campo_de_outra_plataforma(home):
 def test_telegram_segredo_entrada_sem_campos_recusa(home):
     resp = _client().post("/api/messaging/telegram/inbound-secret", json={})
     assert resp.status_code == 422
+
+
+SLACK_SECRET = "signing-secret-webhook"  # noqa: S105 - fixture sintética de teste
+SLACK_USER = "U123ABC"
+
+
+def _habilitar_slack(home, *, enabled: bool = True) -> None:
+    resp = _client().put(
+        "/api/messaging/slack",
+        json={
+            "config": {
+                "enabled": True,
+                "channel_default": "",
+                "inbound": {
+                    "enabled": enabled,
+                    "allowed_user_ids": [SLACK_USER],
+                    "experiences": False,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 200
+
+
+def _slack_signed(raw: bytes) -> dict[str, str]:
+    ts = str(int(time.time()))
+    base = f"v0:{ts}:{raw.decode()}"
+    digest = hmac.new(SLACK_SECRET.encode(), base.encode(), hashlib.sha256).hexdigest()
+    return {
+        "X-Slack-Request-Timestamp": ts,
+        "X-Slack-Signature": f"v0={digest}",
+    }
+
+
+def _slack_challenge() -> bytes:
+    return json.dumps(
+        {"type": "url_verification", "challenge": "desafio-slack-1", "team_id": "T111"}
+    ).encode()
+
+
+def _slack_event() -> bytes:
+    return json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": "Ev999",
+            "event_time": 1730000000,
+            "event": {
+                "type": "message",
+                "channel": "D555",
+                "user": SLACK_USER,
+                "text": "oi",
+                "ts": "1730000000.1",
+            },
+        }
+    ).encode()
+
+
+def test_slack_challenge_feliz_devolve_desafio(home):
+    _habilitar_slack(home)
+    _client().post("/api/messaging/slack/inbound-secret", json={"signing_secret": SLACK_SECRET})
+    raw = _slack_challenge()
+    resp = _client().post("/api/inbound/slack", content=raw, headers=_slack_signed(raw))
+    assert resp.status_code == 200
+    assert resp.text == "desafio-slack-1"
+
+
+def test_slack_sem_config_recusa_fechado(home):
+    raw = _slack_challenge()
+    resp = _client().post("/api/inbound/slack", content=raw, headers=_slack_signed(raw))
+    assert resp.status_code == 503
+
+
+def test_slack_sem_signing_secret_no_cofre_recusa(home):
+    _habilitar_slack(home)
+    raw = _slack_challenge()
+    resp = _client().post("/api/inbound/slack", content=raw, headers=_slack_signed(raw))
+    assert resp.status_code == 503
+
+
+def test_slack_assinatura_invalida_recusa(home):
+    _habilitar_slack(home)
+    _client().post("/api/messaging/slack/inbound-secret", json={"signing_secret": SLACK_SECRET})
+    raw = _slack_event()
+    resp = _client().post(
+        "/api/inbound/slack",
+        content=raw,
+        headers={
+            "X-Slack-Request-Timestamp": str(int(time.time())),
+            "X-Slack-Signature": f"v0={'0' * 64}",
+        },
+    )
+    assert resp.status_code == 401
+
+
+def test_slack_event_valido_acusa_ok(home):
+    _habilitar_slack(home)
+    _client().post("/api/messaging/slack/inbound-secret", json={"signing_secret": SLACK_SECRET})
+    raw = _slack_event()
+    resp = _client().post("/api/inbound/slack", content=raw, headers=_slack_signed(raw))
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_slack_rota_aberta_sem_sessao(home):
+    _habilitar_slack(home)
+    _client().post("/api/messaging/slack/inbound-secret", json={"signing_secret": SLACK_SECRET})
+    raw = _slack_challenge()
+    resp = TestClient(app).post("/api/inbound/slack", content=raw, headers=_slack_signed(raw))
+    assert resp.status_code == 200
+    assert resp.text == "desafio-slack-1"
+
+
+def test_slack_segredo_entrada_merge_e_drop_no_painel(home):
+    _client().post("/api/messaging/slack/credential", json={"secret": "https://hooks.slack.com/x"})
+    r = _client().post("/api/messaging/slack/inbound-secret", json={"signing_secret": SLACK_SECRET})
+    assert r.status_code == 200
+    assert r.json()["saved"] == ["signing_secret"]
+    status = _client().get("/api/messaging").json()
+    slack = next(p for p in status["platforms"] if p["platform"] == "slack")
+    assert slack["configured"] is True
+    assert slack["inbound"]["campo_secreto"] == {"signing_secret": True}
+    d = _client().delete("/api/messaging/slack/inbound-secret")
+    assert d.status_code == 200
+    status2 = _client().get("/api/messaging").json()
+    slack2 = next(p for p in status2["platforms"] if p["platform"] == "slack")
+    assert slack2["inbound"]["campo_secreto"] == {"signing_secret": False}
+    assert slack2["configured"] is True
+
+
+WH_TOKEN = "token-ingestao-api"  # noqa: S105 - fixture sintética de teste
+WH_FONTE = "sensor-x"
+
+
+def _habilitar_webhook(home, *, enabled: bool = True) -> None:
+    resp = _client().put(
+        "/api/messaging/webhook",
+        json={
+            "config": {
+                "enabled": True,
+                "endpoints": [{"name": "padrao", "url": "https://servico.test/resp"}],
+                "inbound": {
+                    "enabled": enabled,
+                    "allowed_sources": [WH_FONTE],
+                    "experiences": False,
+                },
+            }
+        },
+    )
+    assert resp.status_code == 200
+
+
+def _wh_body() -> bytes:
+    return json.dumps({"text": "oi", "source": WH_FONTE, "id": "w-1"}).encode()
+
+
+def test_webhook_sem_config_recusa_fechado(home):
+    resp = _client().post(
+        "/api/inbound/webhook", content=_wh_body(), headers={"X-Kairos-Webhook-Token": WH_TOKEN}
+    )
+    assert resp.status_code == 503
+
+
+def test_webhook_sem_token_no_cofre_recusa(home):
+    _habilitar_webhook(home)
+    resp = _client().post(
+        "/api/inbound/webhook", content=_wh_body(), headers={"X-Kairos-Webhook-Token": WH_TOKEN}
+    )
+    assert resp.status_code == 503
+
+
+def test_webhook_token_divergente_recusa(home):
+    _habilitar_webhook(home)
+    _client().post("/api/messaging/webhook/inbound-secret", json={"ingest_token": WH_TOKEN})
+    resp = _client().post(
+        "/api/inbound/webhook", content=_wh_body(), headers={"X-Kairos-Webhook-Token": "outro"}
+    )
+    assert resp.status_code == 401
+
+
+def test_webhook_valido_acusa_ok(home):
+    _habilitar_webhook(home)
+    _client().post("/api/messaging/webhook/inbound-secret", json={"ingest_token": WH_TOKEN})
+    resp = _client().post(
+        "/api/inbound/webhook", content=_wh_body(), headers={"X-Kairos-Webhook-Token": WH_TOKEN}
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_webhook_rota_aberta_sem_sessao(home):
+    _habilitar_webhook(home)
+    _client().post("/api/messaging/webhook/inbound-secret", json={"ingest_token": WH_TOKEN})
+    resp = TestClient(app).post(
+        "/api/inbound/webhook", content=_wh_body(), headers={"X-Kairos-Webhook-Token": WH_TOKEN}
+    )
+    assert resp.status_code == 200
+    assert resp.text == "ok"
+
+
+def test_webhook_segredo_entrada_merge_e_drop_no_painel(home):
+    r = _client().post("/api/messaging/webhook/inbound-secret", json={"ingest_token": WH_TOKEN})
+    assert r.status_code == 200
+    assert r.json()["saved"] == ["ingest_token"]
+    status = _client().get("/api/messaging").json()
+    webhook = next(p for p in status["platforms"] if p["platform"] == "webhook")
+    assert webhook["inbound"]["campo_secreto"] == {"ingest_token": True}
+    d = _client().delete("/api/messaging/webhook/inbound-secret")
+    assert d.status_code == 200
+    status2 = _client().get("/api/messaging").json()
+    webhook2 = next(p for p in status2["platforms"] if p["platform"] == "webhook")
+    assert webhook2["inbound"]["campo_secreto"] == {"ingest_token": False}

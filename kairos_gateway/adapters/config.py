@@ -40,10 +40,13 @@ SECRET_KEYS: dict[str, str] = {
 #: Segredos de entrada (além da credencial principal) exigidos por cada
 #: plataforma com canal de entrada. O WhatsApp valida a assinatura do webhook
 #: com o App Secret e o apertão de mão do subscribe com o Verify Token; o
-#: Telegram protege o webhook pelo `X-Telegram-Bot-Api-Secret-Token`.
+#: Telegram protege o webhook pelo `X-Telegram-Bot-Api-Secret-Token`; o Slack
+#: assina toda entrega com o Signing Secret; o webhook ingere por token.
 INBOUND_SECRET_KEYS: dict[str, tuple[str, ...]] = {
     "whatsapp": ("app_secret", "verify_token"),
     "telegram": ("webhook_secret_token",),
+    "slack": ("signing_secret",),
+    "webhook": ("ingest_token",),
 }
 
 _PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook")
@@ -62,19 +65,22 @@ _FIELDS: dict[str, dict[str, type]] = {
         "number_default": str,
         "inbound": dict,
     },
-    "slack": {"enabled": bool, "channel_default": str},
-    "webhook": {"enabled": bool, "endpoints": list},
+    "slack": {"enabled": bool, "channel_default": str, "inbound": dict},
+    "webhook": {"enabled": bool, "endpoints": list, "inbound": dict},
 }
 
 #: Campos opcionais com padrão — ausência não é erro; o padrão entra no merge.
 _OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
     "telegram": frozenset({"inbound", "webhook_url"}),
     "whatsapp": frozenset({"inbound"}),
+    "slack": frozenset({"inbound"}),
+    "webhook": frozenset({"inbound"}),
 }
 
 #: Esquema do canal de entrada por plataforma. Cada campo -> (tipo aceito,
-#: obrigatório). Plataformas de entrada diferentes têm regras de remetente
-#: diferentes: o Telegram autoriza por IDs numéricos, o WhatsApp por telefone.
+#: obrigatório). As plataformas de entrada têm regras de remetente diferentes:
+#: o Telegram autoriza por IDs numéricos, o WhatsApp por telefone E.164, o
+#: Slack por user ID (``U…``) e o webhook por nome de fonte.
 #:
 #: Listas de autorização vazias significam **ninguém autorizado** (fail-closed):
 #: o canal de entrada só responde a remetentes vistos na lista.
@@ -93,10 +99,25 @@ _INBOUND_SCHEMAS: dict[str, dict[str, tuple[type | tuple[type, ...], bool]]] = {
         "allowed_phone_numbers": (list, False),
         "experiences": (bool, False),
     },
+    "slack": {
+        "enabled": (bool, False),
+        "allowed_user_ids": (list, False),
+        "experiences": (bool, False),
+    },
+    "webhook": {
+        "enabled": (bool, False),
+        "allowed_sources": (list, False),
+        "experiences": (bool, False),
+    },
 }
 
 #: Tipo dos itens da lista de autorização do remetente, por plataforma.
-_INBOUND_ALLOWLIST_ITEM: dict[str, type] = {"telegram": int, "whatsapp": str}
+_INBOUND_ALLOWLIST_ITEM: dict[str, type] = {
+    "telegram": int,
+    "whatsapp": str,
+    "slack": str,
+    "webhook": str,
+}
 
 #: Campos do inbound cuja ausência é aceita — o padrão entra silenciosamente.
 #: ``experiences`` liga a injeção de experiências ativas por turno no canal; a
@@ -114,7 +135,11 @@ def _valid_allowlist(platform: str, campo: str, valor: Any) -> None:
         return
     if platform == "telegram":
         raise ValueError(f"'{campo}' de inbound deve ser uma lista de IDs numéricos")
-    raise ValueError(f"'{campo}' de inbound deve ser uma lista de telefones no formato E.164")
+    if platform == "whatsapp":
+        raise ValueError(f"'{campo}' de inbound deve ser uma lista de telefones no formato E.164")
+    if platform == "slack":
+        raise ValueError(f"'{campo}' de inbound deve ser uma lista de user IDs do Slack (U…)")
+    raise ValueError(f"'{campo}' de inbound deve ser uma lista de nomes de fonte")
 
 
 def _valid_inbound(platform: str, value: Any) -> dict[str, Any]:
@@ -195,8 +220,16 @@ def default_config() -> dict[str, dict[str, Any]]:
             "number_default": "",
             "inbound": {"enabled": False, "allowed_phone_numbers": [], "experiences": True},
         },
-        "slack": {"enabled": False, "channel_default": ""},
-        "webhook": {"enabled": False, "endpoints": []},
+        "slack": {
+            "enabled": False,
+            "channel_default": "",
+            "inbound": {"enabled": False, "allowed_user_ids": [], "experiences": True},
+        },
+        "webhook": {
+            "enabled": False,
+            "endpoints": [],
+            "inbound": {"enabled": False, "allowed_sources": [], "experiences": True},
+        },
     }
 
 
