@@ -1422,3 +1422,38 @@ recuperação) e passou no re-run, domínio sem interseção com o recorte. Suí
 local **2.753 testes + 5.801 subtestes** (39 pulados, 1 deselected
 runtime_live). O deploy automático do pipeline Komodo publica o recorte a
 seguir.
+
+### Aceite operacional — MCP, plugins, skills, TUI/desktop e perfis isolados (2026-09-21)
+
+Item 3 da sequência. As cinco superfícies existem como **camadas de componente**
+sem consumidor vivo em runtime — decisão de desenho registrada (`docs/decisoes.md`
+Tarefas 9–19; o worker desliga plugins/skill_search, não há processo MCP/TUI/
+Desktop). O aceite exercitou as **entradas executáveis reais** em home
+descartável e registrou o que NÃO foi certificado, sem efeito fingido.
+
+- Suítes reais: Python `test_tui_host.py` + `test_mcp.py` + `test_plugins.py` +
+  `test_skills.py` + `test_cli_surface.py` + `test_web.py` — **267 testes + 5.132
+  subtestes verdes**; TUI vitest **17/17**; Desktop vitest **18/18**;
+  `tsc --noEmit` limpo nas duas.
+- CLI (24 execuções observadas, `bash /tmp/kairos-aceite-cli.sh`): `mcp list`,
+  `plugins list` (vazio/semeado), `skills list`, seed `sync_bundled_skills`
+  (4 skills de primeiro nível — o catálogo tem 201 embarcadas em 31 categorias
+  aninhadas; o seed varre só filhos diretos, limitação honesta), `sync status`
+  (4 rastreadas), `profile show|list` e `.profile-name`. Recusas fail-closed
+  **69 sem efeito**: `mcp remove|test`, `plugins install|remove|update`,
+  `skills add|install|remove|tap`, `profile delete`, `gui start|status`,
+  `hooks list|use --hook`; `kairos tui` não existe.
+- Web skills (TestClient, app real, home descartável): **10/10** — 401 sem
+  token, 201 skills listadas com categorias, leitura builtin aninhada, PUT na
+  raiz do usuário (arquivo real), travessia `..` → 400 e nada fora do home,
+  toggle escreve `skills-disabled.json` de verdade.
+- Contrato de plugins (script descartável): **9/9** — manifesto v2
+  ACTIVE / DISABLED_MISSING_ENV (com o que falta), kind desconhecido coagido
+  para standalone, hook inexistente recusa, HookRegistry run-all com plugin
+  quebrado isolado, storage isolado em `<home>/plugin-data/`.
+- Não certificado (e não fingido): consumidor runtime de MCP/plugins/skills não
+  existe; `kairos mcp serve` não foi portado (as 2 ferramentas não-publicadas
+  exigem a IPC de aprovação primeiro); instalação de plugins e tap de skills
+  seguem como falha fechada (69).
+- CI revalidou tudo (recorte só de docs; 8 jobs de verificação). Plano:
+  `docs/superpowers/plans/2026-09-21-aceite-operacional-superficies.md`.
