@@ -1339,3 +1339,28 @@ Suíte local **2.697 passados + 5.801 subtestes** (39 pulados, 1 deselected
 runtime_live) + os 9 jobs de verificação verdes no PR (o `deploy` roda só na
 main, pós-merge, via Komodo). Com o merge, o deploy automático do pipeline
 Komodo já publica este recorte.
+
+## Continuação — entrega externa do cron por canal (2026-09-21)
+
+Blueprints (T-11) e a entrega pelo ledger do gateway (T-10) já estavam na main;
+o que faltava do ponto "entrega a canais" era **exercitar o caminho de entrega
+externa inteiro** — o que em produção atravessa dois processos: o dashboard roda
+o `Scheduler` e o serviço `main-kairos` roda o gateway, compartilhando
+`state.db`. Sem rede externa, graças ao mesmo padrão do harness de entrada
+(servidores de loopback, fmt da stdlib, monkeypatch do endpoint do transporte).
+
+- `tests/test_cron_delivery_local_harness.py` novo (2 testes offline):
+  - **Laço feliz da entrega externa**: job com `delivery: telegram:CHAT` roda o
+    turno pelo caminho real (`build_interaction_service` + LLM fake SSE sem
+    `tool_calls`), a obrigação `cron-<execution>` nasce no ledger com o texto
+    exato do turno; o `GatewayService` com o `TelegramAdapter` real (construído
+    do mesmo home: `messaging.json` + cofre) drena `1` obrigação e o bot fake
+    recebe `sendMessage` com `chat_id` e texto exatos; ledger confirma
+    (`delivered == 1`).
+  - **Fail-closed sem adapter**: `telegram` habilitado mas sem segredo no cofre
+    → `build_platform_adapters` não constrói adapter; o gateway não finge:
+    `delivered == 0`, a obrigação permanece `pending` e **nenhum** `sendMessage`
+    chega ao canal fake.
+- Validação local: suíte completa **2.699 testes + 5.801 subtestes** passados
+  (39 pulados, 1 deselected runtime_live); `ruff check`/`format --check` limpos.
+  Plano: `docs/superpowers/plans/2026-09-21-cron-entrega-externa.md`.
