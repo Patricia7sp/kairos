@@ -79,12 +79,11 @@ Essa incompatibilidade não bloqueia o trabalho nas funcionalidades independente
   estão publicados via PR #28.
 - `/api/logs` real e aposentadoria explícita de `/api/env` implementados no lote
   de registros abaixo, já publicado via PR #27. `/api/cron/jobs` usa armazenamento real.
-- A CLI declara **50 comandos**. Após implementar `model`, `logs`, `insights`, `debug`
-  e `monitoring`, **24** ainda não têm handler:
-  acp, backup, claw, console, dump, gui, hooks, import-agent, import,
-  login, logout, memory, pairing, pause, peer, prompt-size, setup,
-  skin, slack, uninstall, update, verify, webhook, whatsapp. Há também subcomandos
-  pendentes dentro dos grupos com handler. Esses comandos retornam 69.
+- A CLI declara **50 comandos** e tem handler para todos (teste de superfície).
+  O recorte "CLI honesta" (2026-09-20, descrito adiante) converteu os que
+  alegavam sucesso sem efeito em **recusa barulhenta (69)**; `uninstall` ficou
+  fail-closed (`--yes`; recusa em container). Nenhum comando mantém estado
+  fabricado.
 - Registry canônico possui oito provedores: anthropic, custom, deepseek, gemini, groq,
   ollama, openai e openrouter. Não confundir isso com os 36 previstos originalmente.
 - Gateway tem protocolo de adaptadores/entrega, mas não integra as 23 plataformas
@@ -1235,3 +1234,95 @@ produção. Detalhes completos no guia; resumo não sensível:
   ok`); stack `deployed_hash == latest_hash` da `main`.
 - A procedure/action `kairos-smoke-deploy`/`kairos-smoke` (deno no Core)
   permanece disponível para disparo manual do smoke.
+
+## Continuação — CLI honesta: efeito real ou recusa barulhenta (2026-09-20)
+
+Recorte das pendências de CLI: comandos que **alegavam sucesso sem efeito** (ou
+destruíam sem salvaguarda) deixaram de fingir. Regra aplicada (AGENTS.md): estado
+fabricado (exit 0) é bug proposital; recusar barulhento com `ExitCode.
+NOT_IMPLEMENTED` (69) é melhor que fingir. Nenhum comando saiu do registro; todos
+mantêm handler e `Status.IMPLEMENTED` — a recusa informada é a divergência
+deliberada entregue (registrada em `docs/decisoes.md`, D-CLI.9).
+
+### O que mudou
+
+- **Estado fabricado → recusa 69**, com mensagem que aponta o efeito real
+  ausente. A apuração por consumidor (grep em todo o código, fora de
+  `kairos_cli/`) confirmou que o estado gravado/lido não tem consumidor:
+  - `verify`: alegava "Verificação concluída" por achar dois arquivos (com
+    caminho errado) — o `verify` real exige o executor de receitas do legado
+    (bootstrap/build/test + readiness de porta), não portado.
+  - `acp status` (sem servidor ACP; `kairos_acp` só tem primitivas de protocolo),
+    `claw` (`start`/`status`; sem run-time de browser), `gui` (`start`/`status`;
+    sem app desktop), `console start` (o efeito real é `console eval`),
+    `update` (deploy via pipeline Komodo na imagem; git em dev).
+  - `hooks` (`hooks.json` não é lido; hooks reais vivem em `kairos_plugins` e são
+    registrados por plugins no runtime), `skin` (`ui.theme` sem consumidor; a web
+    usa CSS próprio), `prompt-size` (`prompt_size` sem consumidor; o endpoint
+    `/api/ops/prompt-size` do painel não está registrado), `pause`
+    (`autonomy.json` não é lido; não há atividade autônoma a pausar),
+    `pairing`/`peer` (`pairings.json`/`peers.json` não são lidos; gateway sem
+    pareamento/peer).
+- **`uninstall` fail-closed**: exige `--yes` (sem ele, imprime o que seria
+  removido e recusa com erro) e recusa dentro de container (o home é volume da
+  stack; a desinstalação é decisão de operação, fora do container). O efeito real
+  permanece com `--yes`.
+- `acp help` e `console eval` continuam informacionais/reais (exit 0).
+
+### Validação
+
+- Suíte local: **2.695 testes + 5.801 subtestes** passaram, 39 pulados, 1
+  deselecionado (runtime_live). Regressões em `tests/test_cli_surface.py`
+  atualizadas para afirmar a recusa (69) e a ausência de escrita dos arquivos
+  fabricados; novos testes: `verify` não alega sucesso, `uninstall` sem `--yes`
+  não remove, `uninstall --yes` remove um home real, `uninstall` recusa em
+  container mesmo com `--yes` (`.container-mode` presente).
+- `scripts/ci.sh --fast` completo: tudo passou (ruff, format, shellcheck,
+  hadolint/stub, frontends, lock, testes).
+
+## Continuação — teste local Telegram→Kairos com Bot API fake (2026-09-21)
+
+A pedido da operação, a conexão Telegram→Kairos ganhou um **harness local sem
+nenhuma rede real**: o teste sobe dois servidores de loopback na stdlib
+(`http.server`), imitando a Bot API do Telegram e um LLM OpenAI-compatible, e
+percorre o laço inteiro pelo caminho de produção.
+
+### O que cobre (`tests/test_telegram_local_harness.py`)
+
+- **Servidor fake `api.telegram.org`**: `getMe`/`getUpdates`/`sendMessage`/
+  `sendChatAction`/`answerCallbackQuery`, servindo exatamente um `update`
+  autenticado (long-poll com `offset` respeitado — a mesma regra da API real).
+- **Servidor fake LLM**: `GET /v1/models` (descoberta → snapshot do catálogo)
+  e `POST /v1/chat/completions` em SSE com resposta determinística e **sem
+  `tool_calls`** (portanto sem depender de execução de ferramentas nem de
+  socket do runtime).
+- **Canal de entrada real**: `TelegramInbound` com `InteractionRouter` real
+  (`build_interaction_router`), gateway de provedores real e adapter `custom`
+  (`OpenAICompatibleAdapter`) apontado para o LLM fake via
+  `provider_settings.custom.base_url`. O único ponto "fingido" é o endpoint do
+  provedor (stub determinístico), por monkeypatch de
+  `kairos_gateway.inbound._TELEGRAM_API` — o transporte, a autenticação pela
+  lista de `allowed_user_ids`, o envio chunkado e a persistência do high-water
+  mark são o código de produção.
+- **Home descartável com cofre real**: vault encriptado com passphrase sintética
+  (`KAIROS_DISABLE_KEYRING=1` + `KAIROS_VAULT_PASSPHRASE_FILE`), token de bot
+  fake via `save_platform_secret` e chave fake do provider `custom` no mesmo
+  cofre — o mesmo caminho de credencial da CLI e da web, sem nenhuma credencial
+  real.
+
+### O que cobre o teste
+
+- **Laço feliz**: mensagem de um usuário autorizado vira turno do agente, o
+  provedor fake responde em SSE, e o bot fake recebe um `sendMessage` com a
+  resposta determinística (chat_id e texto exatos); `consumed` avança no
+  arquivo `inbound-telegram.json` e o `getMe` de verificação acontece.
+- **Fail-closed**: um usuário fora de `allowed_user_ids` não vira turno — o
+  bot fake não recebe `sendMessage` nem o LLM fake é chamado; o `consumed`
+  avança (o update é aceito no poll e ignorado pelo cinto estreito).
+
+### Validação
+
+- Suíte local: **2.697 testes + 5.801 subtestes** passaram, 39 pulados, 1
+  deselecionado (runtime_live) — os dois novos testes são offline (loopback)
+  e rodam na suíte normal, sem opt-in.
+- `ruff check` e `ruff format --check` limpos no novo arquivo.
