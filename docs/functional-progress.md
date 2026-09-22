@@ -1550,3 +1550,41 @@ A metade "lembretes proativos" da candidata P2 **fechou**: regride apenas com
 uso real observado (job de agenda + `.ics` reais). Próximo passo do plano:
 v2 do calendário com RRULE **expandido** via `python-dateutil` (passo 3) e,
 em seguida, ferramentas via MCP de terceiros (passo 4).
+
+### Merge do PR #80 — calendário v2: RRULE expandido na janela consultada
+
+- **`feat(calendar)` steps 3 do plano de ferramentas.** `python-dateutil`
+  promovida a dependência **direta** (`>=2.9.0.post0`, já transitiva via
+  `croniter` — o `uv.lock` só subiu o status; nada de novo no grafo).
+- `kairos_tools/calendar.py`: `occurrences_in_window()` expande a recorrência
+  **dentro da janela consultada** — ancorada em `DTSTART`, honra
+  `FREQ`/`INTERVAL`/`COUNT`/`UNTIL`/`BYDAY` via `dateutil.rrule`; nunca
+  materializa a série inteira (janela-bounded). Teto de 5.000 ocorrências por
+  evento na janela ⇒ `IcsParseError` fail-closed ("refine o intervalo"), nunca
+  truncamento silencioso de lembrete. `today`/`range` devolvem **cada
+  ocorrência**; `_serialize_event` emite `"recorrencia": "expandida"` + o
+  `rrule` cru no lugar do marcador v1. RRULE inválido ⇒ `success: False`
+  fail-closed, mesmo tom de arquivo corrompido.
+- `kairos_cron/calendar_monitor.py`: usa a mesma expansão — a janela lista as
+  ocorrências e o monitor lembra **uma vez por ocorrência** (chave
+  `start_utc|uid` já distinguia dias distintos). Um evento diário lembra todos
+  os dias, não só na DTSTART.
+- Escopo honesto documentado (docstrings + `docs/plano-ferramentas.md`):
+  `EXDATE`/`RECURRENCE-ID` continuam fora — a expansão honra só o `RRULE` do
+  VEVENT; mutação continua escrevendo evento único (criar recorrência via
+  ferramenta não é deste lote).
+- Testes: 6 novos (expansão na janela futura, DTSTART também aparece, `today`
+  pega ocorrência recorrente, `COUNT` finito não estoura, RRULE inválido
+  fail-closed, e no monitor: lembrete por ocorrência em dias seguidos +
+  `check_calendar_monitor` expandindo na janela). Validação local: suíte
+  completa **2.820 aprovados / 39 skips / 1 deselect / 5.806 subtests**; Ruff,
+  formato, `uv lock --check` e `scripts/ci.sh --fast` verdes. Plano datado:
+  `docs/superpowers/plans/2026-09-22-calendar-rrule-v2.md`.
+- Pós-merge: `git diff HEAD~1..HEAD` = 13 arquivos, 355+/47–, **0 remoções
+  acidentais** (linhas removidas = marcador v1, `_matches`/`_window_match`,
+  docstrings antigos e reordenamento em `SOURCES.txt`).
+
+Com isso a candidata P2 calendário está **fechada por completo**: ferramenta +
+lembretes proativos + recorrência. Próximo passo do plano: **passo 4 — P3,
+ferramentas por MCP de terceiros** (decisão da usuária de 2026-09-22, junto com
+a do `python-dateutil` deste lote).
