@@ -1,11 +1,14 @@
 """Fronteira assíncrona do Chat para o ferramental core, com aprovação por turno.
 
 O Chat expõe um subconjunto deliberado do registro — as ferramentas core que
-fazem sentido numa conversa (WS-2). Ferramentas **mutadoras** (bash,
-write_file, edit_file, patch) exigem aprovação explícita por chamada antes de
-executar; o gate de decisão vive no serviço de interação, que emite
-``tool_approval_request`` e aguarda a decisão. Nunca despachamos ferramentas de
-runtime ou de terceiros aqui.
+fazem sentido numa conversa (WS-2), mais as ferramentas MCP de terceiros
+(prefixo `mcp__`, passo 4 do plano de ferramentas). Ferramentas **mutadoras**
+(bash, write_file, edit_file, patch) exigem aprovação explícita por chamada
+antes de executar; o gate de decisão vive no serviço de interação, que emite
+``tool_approval_request`` e aguarda a decisão. Ferramenta MCP de terceiros é
+**sempre** tratada como mutadora (schema de terceiro não permite inferir
+mutação — fail-closed: aprovação por turno). Nunca despachamos as ferramentas
+de runtime (git/calendar internos, blueprints) aqui.
 """
 
 from __future__ import annotations
@@ -110,6 +113,16 @@ def _definition_name(definition: Mapping[str, Any]) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _is_chat_tool(name: str) -> bool:
+    """Allowlist estática + as ferramentas MCP de terceiros (prefixo `mcp__`).
+
+    A allowlist é fixa para o core; o MCP é dinâmico por servidor configurado,
+    então a admissão é por prefixo — o que **não** afrouxa a aprovação: toda
+    chamada `mcp__*` é tratada como mutadora (`needs_tool_approval`).
+    """
+    return name in CHAT_TOOLS or name.startswith("mcp__")
+
+
 def chat_tool_definitions(
     *,
     web_search_enabled: bool = True,
@@ -125,12 +138,16 @@ def chat_tool_definitions(
         dict(definition)
         for definition in source
         if isinstance(definition, Mapping)
-        and _definition_name(definition) in CHAT_TOOLS
+        and _is_chat_tool(_definition_name(definition) or "")
         and (web_search_enabled or _definition_name(definition) != "web_search")
     )
 
 
 def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = None) -> bool:
+    if name.startswith("mcp__"):
+        # Schema de terceiro não permite inferir mutação: fail-closed. Toda
+        # chamada MCP exige aprovação por turno (decisão do passo 4).
+        return True
     if name == "git":
         if isinstance(arguments, str):
             parsed = _body_arguments(arguments)
@@ -239,7 +256,7 @@ async def execute_chat_tool(
     execute: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> InteractionToolResult:
     """Valida a chamada, executa a ferramenta e serializa com limites rígidos."""
-    if call.name not in CHAT_TOOLS:
+    if call.name != "web_search" and not _is_chat_tool(call.name):
         return _error(call, "unsupported_tool")
     if call.name == "web_search":
         return await execute_web_search(call)

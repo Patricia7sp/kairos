@@ -11,6 +11,7 @@ from kairos_mcp.client import (
     truncate_mcp_text_result,
     validate_server_config,
 )
+from kairos_mcp.runtime import McpRuntimeError, fetch_tool_manifests, invoke_tool
 from kairos_mcp.server import (
     AUTHENTICATION_RATIONALE,
     SERVER_TOOLS,
@@ -26,9 +27,12 @@ __all__ = [
     "UNPUBLISHED_TOOLS",
     "EventBridge",
     "MCPServerConfig",
+    "McpRuntimeError",
     "SchemaCache",
     "Transport",
     "UnsafeServerConfig",
+    "fetch_tool_manifests",
+    "invoke_tool",
     "mcp_available",
     "namespaced_tool_name",
     "server_tool_names",

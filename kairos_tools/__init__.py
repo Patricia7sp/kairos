@@ -5,6 +5,7 @@ from kairos_tools.budget import ResultBudget, SpilloverResult, maybe_spill
 from kairos_tools.builtin import register_builtin_tools
 from kairos_tools.calendar import register_calendar_tool
 from kairos_tools.git import register_git_tool
+from kairos_tools.mcp_tools import register_mcp_tools, server_configs, sync_mcp_servers
 from kairos_tools.memory import MemoryStore, register_memory_tool
 from kairos_tools.parallel import Segment, SegmentKind, ToolCall, segment_batch
 from kairos_tools.policy import (
@@ -35,10 +36,13 @@ __all__ = [
     "register_builtin_tools",
     "register_calendar_tool",
     "register_git_tool",
+    "register_mcp_tools",
     "register_memory_tool",
     "registry",
     "resolve",
     "sandbox_allows",
     "segment_batch",
+    "server_configs",
+    "sync_mcp_servers",
     "tool_error",
 ]

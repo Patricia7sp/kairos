@@ -124,6 +124,12 @@ class NamespaceTests(unittest.TestCase):
         self.assertNotIn("/", nome)
         self.assertNotIn(" ", nome)
 
+    def test_a_spec_manda_o_delimitador_DUPLO(self):
+        """`mcp__<servidor>__<ferramenta>` — com um único `_` o separador
+        colidiria com nomes de ferramenta que contenham `_`."""
+        self.assertEqual(namespaced_tool_name("github", "search"), "mcp__github__search")
+        self.assertEqual(namespaced_tool_name("gh", "list_issues"), "mcp__gh__list_issues")
+
 
 class SchemaCacheTests(unittest.TestCase):
     def setUp(self):
