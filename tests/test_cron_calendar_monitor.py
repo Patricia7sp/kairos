@@ -35,8 +35,12 @@ NOW = datetime(2026, 9, 12, 12, tzinfo=UTC)
 UID = "evento-1"
 
 
-def _vevent(uid: str, dtstart: str, summary: str) -> str:
-    return f"BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTART:{dtstart}\r\nSUMMARY:{summary}\r\nEND:VEVENT\r\n"
+def _vevent(uid: str, dtstart: str, summary: str, *, rrule: str | None = None) -> str:
+    regra = f"\r\nRRULE:{rrule}" if rrule else ""
+    return (
+        f"BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTART:{dtstart}{regra}\r\n"
+        f"SUMMARY:{summary}\r\nEND:VEVENT\r\n"
+    )
 
 
 def _vcalendar(*vevents: str) -> str:
@@ -173,6 +177,61 @@ def test_primeiro_evento_na_janela_dispara_e_suprime_o_proximo(tmp_path):
     assert service2.envelopes == []
     assert store.get(job["id"])["repeat"]["completed"] == 1
     assert store.get(job["id"])["monitor_state"]["remindidos"] == estado["remindidos"]
+
+
+def test_check_calendar_monitor_expande_recorrencia_na_janela(tmp_path):
+    inicio = (NOW + timedelta(minutes=30)).strftime("%Y%m%dT%H%M%SZ")
+    source = tmp_path / "agenda.ics"
+    source.write_text(
+        _vcalendar(_vevent(UID, inicio, "Diário", rrule="FREQ=DAILY")), encoding="utf-8"
+    )
+    _write_calendar(tmp_path, str(source))
+    primeiro = check_calendar_monitor(tmp_path, {"type": "calendar"}, None, NOW)
+    assert primeiro.outcome is MonitorOutcome.FIRST_RUN
+    assert [e.start for e in primeiro.window_events] == [NOW + timedelta(minutes=30)]
+
+    segundo_dia = check_calendar_monitor(
+        tmp_path,
+        {"type": "calendar"},
+        primeiro.next_state,
+        NOW + timedelta(days=1),
+    )
+    assert segundo_dia.outcome is MonitorOutcome.CHANGED
+    assert [e.start for e in segundo_dia.window_events] == [NOW + timedelta(days=1, minutes=30)]
+    assert segundo_dia.run_agent is True
+
+
+def test_recorrencia_diaria_lembra_por_ocorrencia(tmp_path):
+    inicio = (NOW + timedelta(minutes=60)).strftime("%Y%m%dT%H%M%SZ")
+    source = tmp_path / "agenda.ics"
+    source.write_text(
+        _vcalendar(_vevent(UID, inicio, "Diário", rrule="FREQ=DAILY")), encoding="utf-8"
+    )
+    _write_calendar(tmp_path, str(source))
+    store = JobStore(tmp_path)
+    job = _calendar_job(store, tmp_path, janela_min=120)
+    make_due(store, job["id"], NOW)
+    service = Service()
+    report = asyncio.run(Scheduler(tmp_path, service).tick(now=NOW))
+    assert report["executed"] == 1
+    assert len(store.get(job["id"])["monitor_state"]["remindidos"]) == 1
+
+    service2 = Service()
+    make_due(store, job["id"], NOW + timedelta(minutes=10))
+    report2 = asyncio.run(Scheduler(tmp_path, service2).tick(now=NOW + timedelta(minutes=10)))
+    assert report2["executed"] == 0
+    assert report2["suppressed"] == 1
+
+    service3 = Service()
+    segundo_dia = NOW + timedelta(days=1)
+    make_due(store, job["id"], segundo_dia)
+    report3 = asyncio.run(Scheduler(tmp_path, service3).tick(now=segundo_dia))
+    assert report3["executed"] == 1
+    assert report3["suppressed"] == 0
+    assert len(service3.envelopes) == 1
+    estado = store.get(job["id"])["monitor_state"]
+    assert len(estado["remindidos"]) == 1
+    assert estado["remindidos"][0].startswith("2026-09-13")
 
 
 def test_evento_fora_da_janela_suprime_sem_disparar(tmp_path):

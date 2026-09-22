@@ -105,7 +105,7 @@ def test_duracao_vira_fim():
     assert event.end == datetime(2026, 9, 21, 11, 30, tzinfo=UTC)
 
 
-def test_rrule_e_marcado_mas_nao_expandido():
+def test_rrule_e_guardado_cru_pelo_parser():
     [event] = parse_ics(
         _vcalendar(
             _vevent(

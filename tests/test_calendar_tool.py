@@ -14,12 +14,15 @@ UID_A = "08df1a2e-d0a6-4d2a-8b89-d589600f5824"
 UID_B = "78feb8c9-10af-4cdc-9d40-19d2b0c7e0b1"
 
 
-def _vevent(uid: str, dtstart: str, summary: str, *, dtend: str | None = None) -> str:
+def _vevent(
+    uid: str, dtstart: str, summary: str, *, dtend: str | None = None, rrule: str | None = None
+) -> str:
     extra = f"\r\nDTEND:{dtend}" if dtend else ""
+    regra = f"\r\nRRULE:{rrule}" if rrule else ""
     return (
         "BEGIN:VEVENT\r\n"
         f"UID:{uid}\r\n"
-        f"DTSTART:{dtstart}{extra}\r\n"
+        f"DTSTART:{dtstart}{extra}{regra}\r\n"
         f"SUMMARY:{summary}\r\n"
         "END:VEVENT\r\n"
     )
@@ -176,9 +179,14 @@ def test_arquivo_corrompido_fecha_sem_parcial(home):
     assert result["arquivos_com_erro"]
 
 
-def test_recorrencia_e_marcada_mas_nao_expandida(home):
-    base = _vevent(UID_A, "20260921T100000Z", "Diário").replace(
-        "END:VEVENT", "RRULE:FREQ=DAILY\r\nEND:VEVENT"
+def _recorrencia(base: str, rrule: str) -> str:
+    return base.replace("END:VEVENT", f"RRULE:{rrule}\r\nEND:VEVENT")
+
+
+def test_recorrencia_e_expandida_na_janela(home):
+    base = _recorrencia(
+        _vevent(UID_A, "20260921T100000Z", "Diário", dtend="20260921T103000Z"),
+        "FREQ=DAILY;INTERVAL=2",
     )
     source = home / "agenda.ics"
     source.write_text(_vcalendar(base), encoding="utf-8")
@@ -189,19 +197,78 @@ def test_recorrencia_e_marcada_mas_nao_expandida(home):
         ate="2026-09-30T00:00:00Z",
         limite=50,
     )
-    # A recorrência existe, mas v1 não expande — a janela futura fica vazia de
-    # forma honesta: nenhuma ocorrência inventada, nenhuma mentira.
+    # INTERVAL=2 a partir de 21/09: 21, 23, 25, 27, 29 — a janela futura pega 29.
     assert result["success"] is True
-    assert result["count"] == 0
-    base_window = calendar_tool(
+    assert result["count"] == 1
+    assert result["total_no_intervalo"] == 1
+    [evento] = result["eventos"]
+    assert evento["titulo"] == "Diário"
+    assert evento["inicio"] == "2026-09-29T10:00:00+00:00"
+    assert evento["fim"] == "2026-09-29T10:30:00+00:00"
+    assert evento["recorrencia"] == "expandida"
+    assert evento["rrule"] == "FREQ=DAILY;INTERVAL=2"
+
+
+def test_recorrencia_dtstart_tambem_aparece_expandida(home):
+    base = _recorrencia(_vevent(UID_A, "20260921T100000Z", "Diário"), "FREQ=DAILY")
+    source = home / "agenda.ics"
+    source.write_text(_vcalendar(base), encoding="utf-8")
+    _write_calendar(home, str(source))
+    result = calendar_tool(
         subcommand="range",
         desde="2026-09-21T00:00:00Z",
         ate="2026-09-22T00:00:00Z",
         limite=50,
     )
-    [evento] = base_window["eventos"]
-    assert evento["recorrencia"] == "rrule-nao-expandida"
-    assert "não expandida" in evento["observacao"]
+    [evento] = result["eventos"]
+    assert evento["inicio"] == "2026-09-21T10:00:00+00:00"
+    assert evento["recorrencia"] == "expandida"
+
+
+def test_today_pega_ocorrencia_recorrente(home):
+    base = _recorrencia(_vevent(UID_A, "20260921T100000Z", "Diário"), "FREQ=DAILY")
+    source = home / "agenda.ics"
+    source.write_text(_vcalendar(base), encoding="utf-8")
+    _write_calendar(home, str(source))
+    result = calendar_tool(subcommand="today", now="2026-09-22T12:00:00Z", limite=50)
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["eventos"][0]["inicio"] == "2026-09-22T10:00:00+00:00"
+
+
+def test_recorrencia_count_finito_nao_estoura(home):
+    base = _recorrencia(_vevent(UID_A, "20260921T100000Z", "Sprints"), "FREQ=DAILY;COUNT=3")
+    source = home / "agenda.ics"
+    source.write_text(_vcalendar(base), encoding="utf-8")
+    _write_calendar(home, str(source))
+    result = calendar_tool(
+        subcommand="range",
+        desde="2026-09-21T00:00:00Z",
+        ate="2026-09-30T00:00:00Z",
+        limite=50,
+    )
+    assert result["success"] is True
+    assert [evento["inicio"] for evento in result["eventos"]] == [
+        "2026-09-21T10:00:00+00:00",
+        "2026-09-22T10:00:00+00:00",
+        "2026-09-23T10:00:00+00:00",
+    ]
+
+
+def test_rrule_invalido_fecha_sem_parcial(home):
+    base = _recorrencia(_vevent(UID_A, "20260921T100000Z", "Quebrada"), "FREQ=")
+    source = home / "agenda.ics"
+    source.write_text(_vcalendar(base), encoding="utf-8")
+    _write_calendar(home, str(source))
+    result = calendar_tool(
+        subcommand="range",
+        desde="2026-09-21T00:00:00Z",
+        ate="2026-09-22T00:00:00Z",
+        limite=50,
+    )
+    assert result["success"] is False
+    assert "fail-closed" in result["error"]
+    assert "recorrência inválida" in result["erro"]
 
 
 def test_add_grava_evento_no_arquivo(home):

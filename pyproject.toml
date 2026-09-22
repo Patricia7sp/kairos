@@ -12,6 +12,9 @@ dependencies = [
     "httpx>=0.28.1",
     "keyring>=25",
     "pyyaml>=6",
+    # Expansão de RRULE no calendário (passo 3 do plano de ferramentas).
+    # Hoje transitiva via croniter; promovida a direta para ser contrato nosso.
+    "python-dateutil>=2.9.0.post0",
     "uvicorn>=0.52.4",
     "websockets>=17.0.1",
 ]
