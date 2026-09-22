@@ -97,8 +97,19 @@ regride apenas com uso real observado (critério 1 de decisão). As opções 2
 | Candidata | Como entregar | Risco | Por que adiar |
 |---|---|---|---|
 | Execução de código isolada por sessão | sandbox externa (etapa 3/4) | alto | a sandbox já existe para runtime; abrir para turno comum amplia superfície |
-| Ferramentas por MCP de terceiros | MCP (etapa 4) | variável | custo de contexto e confiança; instalar caso a caso |
 | Geração de imagem/arquivo | ferramenta nova (etapa 5) | alto | footprint e dependência de terceiro; sem demanda registrada |
+
+#### MCP de terceiros — entregue (decisão de 2026-09-22)
+
+A candidata **Ferramentas por MCP de terceiros** (era a terceira linha da tabela
+acima) avançou com decisão da usuária em 2026-09-22 e foi entregue via PR #81
+(plano datado em `docs/superpowers/plans/2026-09-22-mcp-terceiros.md`): servidores
+MCP stdio configurados em `mcp_servers` no `<home>/config.yaml` têm suas
+ferramentas registradas no toolset `mcp` com namespace `mcp__<servidor>__<ferramenta>`
+da spec — runtime cliente **stdio em stdlib** (zero dependência nova), boot sem
+spawn via cache de schema, e **toda** chamada `mcp__*` exige aprovação por turno
+(fail-closed: schema de terceiro não permite inferir mutação). Transportes
+http/sse são recusados barulhentos, não silenciosos.
 
 ## Critérios de decisão
 
