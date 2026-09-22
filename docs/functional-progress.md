@@ -1588,3 +1588,52 @@ Com isso a candidata P2 calendário está **fechada por completo**: ferramenta +
 lembretes proativos + recorrência. Próximo passo do plano: **passo 4 — P3,
 ferramentas por MCP de terceiros** (decisão da usuária de 2026-09-22, junto com
 a do `python-dateutil` deste lote).
+
+### Merge do PR #81 — passo 4: ferramentas de terceiros por MCP (P3)
+
+- **Candidata P3 do plano de ferramentas entregue:** consumidor MCP com cinto
+  estreito — servidores em `mcp_servers` (chave top-level, ref. MCP-02) no
+  `<home>/config.yaml` expõem ferramentas no turno com namespace da spec
+  `mcp__<servidor>__<ferramenta>` (delimitador duplo) e **aprovação por turno
+  obrigatória para toda** chamada `mcp__*` (fail-closed: schema de terceiro não
+  permite inferir mutação).
+- Runtime cliente **stdio em stdlib, zero dependência nova**
+  (`kairos_mcp/runtime.py`): `subprocess.Popen` + JSON-RPC 2.0 (1 linha por
+  mensagem), leitura crua do fd com `select` + `os.read` (sem double-buffer de
+  wrapper textual), `_StderrSink` drenando stderr, sessão **por chamada** com
+  encerramento limpo terminate→kill→join (nunca zombie), paginação de
+  `tools/list` (teto 10 páginas), resposta a requisições do servidor com
+  `-32601`, blocos não-textuais viram descritores honestos (`[bloco MCP image
+  — <uri>]`), `isError` do servidor ⇒ erro nomeado fail-closed, resultado pelo
+  `truncate_mcp_text_result` no teto rígido (acima do spillover, T-21).
+- Toolset `mcp` gated e honesto (`kairos_tools/mcp_tools.py`): sem `mcp_servers`
+  válido ⇒ **zero ferramentas** (fail-closed). Boot lê o cache de schema
+  (`<home>/mcp/`) **sem spawn**; cache ausente sincroniza no registro (nunca
+  sob pytest nem `KAIROS_MCP_OFFLINE=1`); `sync_mcp_servers(home)` é o on-ramp
+  explícito com relatório; servidor configurado que falha ⇒ zero ferramentas
+  daquele server + log, nunca "sucesso sem efeito". Transportes http/sse são
+  recusados barulhentos. `_load_config` blindado (interpretador YAML que lança
+  `ValueError`/`RecursionError` em config venenosa não derruba mais o import
+  em subprocessos como o `healthcheck` do broker).
+- Chat (`kairos_integration/chat_tools.py`): `_is_chat_tool` = allowlist
+  estática **ou** prefixo `mcp__`; `needs_tool_approval("mcp__*") is True`
+  sempre; docstring atualizada (nunca despachamos runtime/git/calendar
+  internos nem blueprints no Chat).
+- Testes com **servidor MCP fake real** (`tests/fake_mcp_server.py`, stdio
+  JSON-RPC de verdade — nenhum mock de transporte): sync pelo pipe, registro
+  sem spawn via cache, paginação (`KAIROS_FAKE_MCP_PAGES`), notificações e
+  requisição do servidor não interrompem a resposta, stderr ruidoso drenado,
+  bloco não-textual, `isError`, servidor que morre no `tools/call`, recusa no
+  `initialize`, config inválida/sem config não expõe nada, transporte não-stdio
+  recusado barulhento, aprovação `mcp__*` sempre no Chat.
+- Validação local: suíte completa **2.837 aprovados / 39 skips / 1 deselect /
+  5.806 subtests**; Ruff, formato, `uv lock --check` e `scripts/ci.sh --fast`
+  verdes. Plano datado: `docs/superpowers/plans/2026-09-22-mcp-terceiros.md`.
+- Pós-merge: `git diff HEAD~1..HEAD` = 12 arquivos, 1233+/9–, **0 remoções
+  acidentais** (linhas removidas = decisões provisórias do plano alinhadas ao
+  desenho final e `resources`/`instructions` fora do escopo no plano).
+
+Com isso a candidata P3 "ferramentas por MCP de terceiros" está **entregue**.
+Próximo passo natural do plano: T-28 (mail/email/lembretes por canais) e a
+candidata restante do P3 (execução de código isolada por sessão) seguem na
+fila, regredindo apenas com uso real observado.
