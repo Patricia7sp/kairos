@@ -3,8 +3,9 @@
 Subconjunto deliberado e honesto: `VCALENDAR` + `VEVENT`, com dobramento de
 linhas (folding), parâmetros `TZID`/`ENCODING`, escapes RFC, `DTSTART`/`DTEND`/
 `DURATION`, `SUMMARY`/`DESCRIPTION`/`LOCATION`/`STATUS`/`UID` e `RRULE`
-**marcado, não expandido** (decisão de escopo v1 — uma ocorrência base, nunca
-silencioso).
+**guardado cru, não expandido aqui** — a expansão por janela é da camada de
+consulta (`kairos_tools.calendar`), o parser marca, não mente. `EXDATE` e
+`RECURRENCE-ID` ficam fora do escopo (metadados, não evento).
 
 Fail-closed: um arquivo estruturalmente inválido (VEVENT sem `END`, VEVENT sem
 `DTSTART` parseável) é um **erro nomeado** — nunca leitura parcial silenciosa.
@@ -44,7 +45,8 @@ class IcsEvent:
     status: str | None
     start: datetime
     end: datetime | None
-    #: RRULE cru, quando presente — v1 não expande, a chamada marca a limitação.
+    #: RRULE cru, quando presente. O parser guarda; quem expande é a camada
+    #: de consulta (kairos_tools.calendar), nunca por causa, sempre por janela.
     recurrence: str | None = None
     #: Flags de interpretação: `tzid` (não resolvível), `fuso` (local-assumido).
     flags: tuple[tuple[str, str], ...] = ()

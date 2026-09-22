@@ -7,9 +7,11 @@ há uma ocorrência na janela `[agora, agora+janela]` que ainda não foi lembrad
 o conjunto de ocorrências lembradas fica no `monitor_state` do job (campo
 `remindidos`), persistido no mesmo storage que executa o turno.
 
-Limites honestos do v1: recorrência (RRULE) não é expandida — o monitor
-avisa a ocorrência de DTSTART uma vez; a expansão será entregue no passo 2b
-(v2 do calendar). Tick sem novidade ⇒ `suppressed`, sem custo de modelo.
+Recorrência (RRULE) é **expandida na janela** (mesma função da ferramenta):
+cada ocorrência tem chave própria (`start_utc|uid`) e é lembrada uma vez — um
+evento diário lembra em todos os dias. `EXDATE`/`RECURRENCE-ID` não são
+honrados (escopo documentado na ferramenta). Tick sem novidade ⇒
+`suppressed`, sem custo de modelo.
 
 O módulo importa `MonitorOutcome` de `kairos_cron.monitor` no topo (ciclo
 quebrado: `monitor` importa `calendar_monitor` somente dentro de funções).
@@ -21,8 +23,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from kairos_cron.monitor import MonitorOutcome
-from kairos_tools.calendar import calendar_source, read_events
-from kairos_tools.ics import IcsEvent
+from kairos_tools.calendar import calendar_source, occurrences_in_window, read_events
+from kairos_tools.ics import IcsEvent, IcsParseError
 
 #: Tipo de monitor registrado no cron.
 MONITOR_TYPE = "calendar"
@@ -179,12 +181,6 @@ def _key_start_expired(key: str, now_utc: datetime) -> bool:
     return dt < now_utc
 
 
-def _window_match(event: IcsEvent, now_utc: datetime, window: timedelta) -> bool:
-    """Verifica se o início do evento cai na janela ``[now, now+window)``."""
-    start_utc = _to_utc(event.start)
-    return now_utc <= start_utc < now_utc + window
-
-
 # ---------------------------------------------------------------------------
 # Decisão
 # ---------------------------------------------------------------------------
@@ -245,9 +241,17 @@ def check_calendar_monitor(
             next_state=_state_dict(previous, checked_at=now.isoformat()),
             run_agent=False,
         )
+    try:
+        in_window = occurrences_in_window(events, now_utc, now_utc + window)
+    except IcsParseError:
+        return CalendarDecision(
+            outcome=MonitorOutcome.SOURCE_ERROR,
+            next_state=_state_dict(previous, checked_at=now.isoformat()),
+            run_agent=False,
+        )
 
     candidates = sorted(
-        [e for e in events if _window_match(e, now_utc, window)],
+        in_window,
         key=lambda e: (_to_utc(e.start), e.uid or ""),
     )
     keys = {_occurrence_key(e) for e in candidates}

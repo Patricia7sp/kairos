@@ -59,6 +59,7 @@ kairos_cli/whatsapp.py
 kairos_container/__init__.py
 kairos_cron/__init__.py
 kairos_cron/blueprints.py
+kairos_cron/calendar_monitor.py
 kairos_cron/delivery.py
 kairos_cron/dispatch.py
 kairos_cron/jobs.py
@@ -87,7 +88,10 @@ kairos_gateway/capability.py
 kairos_gateway/delivery.py
 kairos_gateway/inbound.py
 kairos_gateway/service.py
+kairos_gateway/slack_inbound.py
 kairos_gateway/stream_events.py
+kairos_gateway/webhook_inbound.py
+kairos_gateway/whatsapp_inbound.py
 kairos_gateway/adapters/__init__.py
 kairos_gateway/adapters/config.py
 kairos_gateway/adapters/slack.py
@@ -225,8 +229,11 @@ kairos_tools/__init__.py
 kairos_tools/approval.py
 kairos_tools/budget.py
 kairos_tools/builtin.py
+kairos_tools/calendar.py
 kairos_tools/file_patch.py
 kairos_tools/file_search.py
+kairos_tools/git.py
+kairos_tools/ics.py
 kairos_tools/memory.py
 kairos_tools/parallel.py
 kairos_tools/policy.py
@@ -239,6 +246,8 @@ kairos_tui_host/supervisor.py
 kairos_web/__init__.py
 kairos_web/chat_transport.py
 kairos_web/cron_api.py
+kairos_web/experiences_api.py
+kairos_web/inbound_api.py
 kairos_web/logs_api.py
 kairos_web/message_metadata.py
 kairos_web/messaging_api.py
@@ -271,6 +280,7 @@ kairos_web/ui/js/views/chat.js
 kairos_web/ui/js/views/cron.js
 kairos_web/ui/js/views/dashboard.js
 kairos_web/ui/js/views/em-breve.js
+kairos_web/ui/js/views/experiencias.js
 kairos_web/ui/js/views/ferramentas.js
 kairos_web/ui/js/views/integracoes.js
 kairos_web/ui/js/views/login.js
@@ -293,6 +303,7 @@ tests/test_async_cleanup.py
 tests/test_async_service_event_producers.py
 tests/test_broker_healthcheck.py
 tests/test_builtin_tools.py
+tests/test_calendar_tool.py
 tests/test_chat_metadata_api.py
 tests/test_chat_parity.py
 tests/test_chat_search_loop.py
@@ -316,7 +327,9 @@ tests/test_credential_migration.py
 tests/test_credential_vault.py
 tests/test_cron.py
 tests/test_cron_blueprints.py
+tests/test_cron_calendar_monitor.py
 tests/test_cron_delivery.py
+tests/test_cron_delivery_local_harness.py
 tests/test_cron_limit_surfaces.py
 tests/test_cron_limits.py
 tests/test_cron_monitors.py
@@ -334,6 +347,7 @@ tests/test_docker_sessions_integration.py
 tests/test_domain.py
 tests/test_evals.py
 tests/test_experiences.py
+tests/test_experiences_api.py
 tests/test_external_sandbox.py
 tests/test_external_sandbox_integration.py
 tests/test_file_patch_tool.py
@@ -343,7 +357,10 @@ tests/test_gateway_service.py
 tests/test_gemini_native_adapter.py
 tests/test_gemini_thought_signatures.py
 tests/test_generation_settings.py
+tests/test_git_tool.py
 tests/test_i18n.py
+tests/test_ics_parse.py
+tests/test_inbound_api.py
 tests/test_initial_chat_selection.py
 tests/test_integration.py
 tests/test_interaction_admission.py
@@ -358,6 +375,7 @@ tests/test_interaction_router.py
 tests/test_interaction_selection.py
 tests/test_interaction_service.py
 tests/test_interaction_turn_ownership.py
+tests/test_komodo_deploy.py
 tests/test_legacy_removal.py
 tests/test_local_diagnostics.py
 tests/test_machines.py
@@ -407,9 +425,11 @@ tests/test_security_audit.py
 tests/test_service_event_producers.py
 tests/test_service_events.py
 tests/test_skills.py
+tests/test_slack_inbound.py
 tests/test_spa_chat_contract.py
 tests/test_state.py
 tests/test_telegram_inbound.py
+tests/test_telegram_local_harness.py
 tests/test_tools.py
 tests/test_tools_inventory.py
 tests/test_tui_host.py
@@ -426,3 +446,5 @@ tests/test_web_runtime_api.py
 tests/test_web_runtime_transport.py
 tests/test_web_search_tool.py
 tests/test_web_session_history.py
+tests/test_webhook_inbound.py
+tests/test_whatsapp_inbound.py

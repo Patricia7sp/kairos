@@ -7,10 +7,10 @@ configurado em `<home>/config.yaml` e o caminho existir no disco); o gate de
 mutação é por subcomando no Chat (`needs_tool_approval`) — `add`/`rm` pedem
 aprovação por turno, `today`/`range` fluem sem prompt (mesmo padrão do `git`).
 
-Limitações honestas do v1: recorrência (RRULE) é lida e marcada, **não
-expandida** (só a ocorrência de `DTSTART`); diretório é leitura — mutação exige
-arquivo único; datetimes flutuantes são comparados como fuso local do sistema
-(sinalizado por evento).
+Limitações honestas: recorrência (RRULE) é **expandida na janela consultada**
+(cada ocorrência vira evento; `EXDATE`/`RECURRENCE-ID` ficam fora do escopo);
+diretório é leitura — mutação exige arquivo único; datetimes flutuantes são
+comparados como fuso local do sistema (sinalizado por evento).
 """
 
 from __future__ import annotations
@@ -19,9 +19,12 @@ import os
 import re
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from dateutil.rrule import rrulestr
 
 from kairos_security.credentials.io import secure_atomic_write_text
 from kairos_tools.ics import (
@@ -41,6 +44,10 @@ MAX_LIMIT = 200
 MAX_TITLE_CHARS = 200
 MAX_DESCRIPTION_CHARS = 4000
 MAX_DURATION_MINUTES = 30 * 24 * 60
+
+#: Teto de ocorrências expandidas **por evento na janela**. Estourou ⇒ erro
+#: fail-closed ("refine o intervalo"), nunca truncamento silencioso de lembrete.
+_MAX_EXPANDED_PER_EVENT = 5000
 
 _ISO_RE = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})"
@@ -138,8 +145,8 @@ def _serialize_event(event: IcsEvent) -> dict[str, Any]:
     if event.status:
         out["status"] = event.status
     if event.recurrence:
-        out["recorrencia"] = "rrule-nao-expandida"
-        out["observacao"] = "recorrência não expandida (v1): só a ocorrência de DTSTART"
+        out["recorrencia"] = "expandida"
+        out["rrule"] = event.recurrence
     fuso = event.flag("fuso")
     if fuso:
         out["fuso"] = fuso
@@ -151,10 +158,47 @@ def _serialize_event(event: IcsEvent) -> dict[str, Any]:
     return out
 
 
-def _matches(event: IcsEvent, start_utc: datetime, end_utc: datetime) -> bool:
-    e_start = _to_utc(event.start)
-    e_end = _to_utc(event.end) if event.end is not None else e_start
-    return e_start < end_utc and e_end > start_utc
+def _shift_occurrence(event: IcsEvent, start: datetime) -> IcsEvent:
+    """Cópia do evento com o início da ocorrência; duração e metadados fiéis."""
+    if event.end is None:
+        return replace(event, start=start)
+    return replace(event, start=start, end=start + (event.end - event.start))
+
+
+def occurrences_in_window(
+    events: list[IcsEvent], window_start: datetime, window_end: datetime
+) -> list[IcsEvent]:
+    """Ocorrências cujo início cai em ``[window_start, window_end)`` (UTC).
+
+    Eventos sem RRULE passam quando a janela pega o início. Recorrentes são
+    expandidos **dentro da janela** (nunca a série inteira materializada): cada
+    ocorrência vira uma cópia do evento com ``start``/``end`` deslocados.
+    Expansão é ancorada no ``DTSTART`` e honra `FREQ`/`INTERVAL`/`COUNT`/
+    `UNTIL`/`BYDAY` etc. via `dateutil.rrule`; `EXDATE`/`RECURRENCE-ID` não
+    são honrados (escopo documentado). RRULE inválido ou além do teto de
+    ``_MAX_EXPANDED_PER_EVENT`` ⇒ ``IcsParseError`` — fail-closed, nunca
+    parcial, nunca truncamento silencioso.
+    """
+    expanded: list[IcsEvent] = []
+    for event in events:
+        if not event.recurrence:
+            if window_start <= _to_utc(event.start) < window_end:
+                expanded.append(event)
+            continue
+        try:
+            rule = rrulestr(event.recurrence, dtstart=_to_utc(event.start))
+            starts = [
+                dt for dt in rule.between(window_start, window_end, inc=True) if dt < window_end
+            ]
+        except (ValueError, TypeError) as exc:
+            raise IcsParseError(f"recorrência inválida ({event.recurrence!r}): {exc}") from exc
+        if len(starts) > _MAX_EXPANDED_PER_EVENT:
+            raise IcsParseError(
+                "recorrência gera mais de "
+                f"{_MAX_EXPANDED_PER_EVENT} ocorrências na janela — refine o intervalo"
+            )
+        expanded.extend(_shift_occurrence(event, start) for start in starts)
+    return expanded
 
 
 def read_events(source: Path) -> tuple[list[IcsEvent], list[dict[str, Any]]]:
@@ -228,7 +272,14 @@ def _run_query(
             "fonte corrompida — leitura recusada (fail-closed), nenhum parcial devolvido",
             arquivos_com_erro=problems,
         )
-    matched = [event for event in events if _matches(event, window_start, window_end)]
+    try:
+        matched = occurrences_in_window(events, window_start, window_end)
+    except IcsParseError as exc:
+        return _error(
+            "fonte inválida (recorrência) — leitura recusada (fail-closed), "
+            "nenhum parcial devolvido",
+            erro=str(exc),
+        )
     matched.sort(key=lambda event: (_to_utc(event.start), event.uid or ""))
     truncated = len(matched) > limite
     serialized = [_serialize_event(event) for event in _bounded(matched, limite)]
@@ -423,7 +474,8 @@ def register_calendar_tool(reg: ToolRegistry | None = None) -> None:
                     "Lê e altera a agenda local (arquivo .ics ou diretório de .ics "
                     "sincronizado, configurado em calendar.source). today e range "
                     "são leitura; add e rm alteram o arquivo e exigem aprovação do "
-                    "usuário. Recorrência (RRULE) é marcada, não expandida no v1."
+                    "usuário. Recorrência (RRULE) é expandida dentro da janela "
+                    "consultada; EXDATE/RECURRENCE-ID não são honrados."
                 ),
                 "parameters": {
                     "type": "object",

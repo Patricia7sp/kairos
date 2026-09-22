@@ -79,10 +79,13 @@ por `calendar.source` em `<home>/config.yaml`, com toolset gated — a ferrament
 só entra no request quando a fonte existe, mantendo o cinto estreito. Mutadores
 (`add`/`rm`) exigem aprovação por turno; `today`/`range` fluem.
 
-Escopo honesto do v1: RRULE é lido e **marcado, não expandido**; datetimes
-flutuantes assumem fuso local do sistema, sinalizado por evento; arquivo
-corrompido é erro nomeado fail-closed (nenhum parcial silencioso); leituras
-exigem `limite` explícito (1–200). Zero conta de terceiros, zero rede.
+Escopo honesto da leitura: RRULE é **expandido dentro da janela consultada**
+(`today`/`range` e o monitor de calendário listam cada ocorrência; `EXDATE`/
+`RECURRENCE-ID` ficam fora do escopo — a expansão honra só o `RRULE` do
+VEVENT); datetimes flutuantes assumem fuso local do sistema, sinalizado por
+evento; arquivo corrompido ou `RRULE` inválido é erro nomeado fail-closed
+(nenhum parcial silencioso); leituras exigem `limite` explícito (1–200). Zero
+conta de terceiros, zero rede.
 
 Fica em aberto só a outra metade da candidata — **lembretes proativos** (entregar
 avisos pelo `kairos_cron` a partir do calendário). Ela não avança por plano:
