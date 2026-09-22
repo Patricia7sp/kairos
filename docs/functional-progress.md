@@ -1518,3 +1518,35 @@ Fecha o ciclo da candidata P2 "Calendário / lembretes": decisão **fonte local
 implementado no plano; o `Estado atual do toolset` ganhou `git` e `calendar`
 (registrados mas ausentes da lista). Resta em aberto só a metade "lembretes
 proativos" — regride apenas com uso real observado.
+
+### Merge do PR #79 — monitor de calendário no cron (2026-09-22)
+
+PR #79 squash-mergeado em `b9fd444` — a segunda metade da candidata P2:
+lembretes proativos via `kairos_cron`, monitor de tipo `calendar` que lê o
+`.ics` da fonte local **em processo** (sem shell) e dispara turno só com evento
+novo na janela. Merge verificado via `git diff HEAD~1..HEAD` (17 arquivos,
+1.113 inserções / 51 deleções, sem remoções acidentais). CI 10/10 verdes no PR.
+
+- Núcleo em `kairos_cron/calendar_monitor.py`: `check_calendar_monitor` é
+  fail-closed (fonte ausente/corrompida ⇒ `SOURCE_ERROR`, nunca "mudança");
+  janela padrão 120 min (máx. 1440); lembrança única por evento/UID via estado
+  `{remindidos, last_changed_at, last_checked_at}`; bloco injetado no prompt ao
+  início do turno (`## Agenda próxima …`), batido no GPT depois do notepad.
+- Baseado nos monitores de fonte do tipo `script` (PR anterior): `monitor.py`
+  e `jobs.py` ficaram kind-aware (`validate_monitor_state`/`default_monitor_state`
+  com default `"script"`, lote existente intacto), power um tick suprimido não
+  reserva ocorrência nem grava no ledger.
+- Superfícies: CLI `cron create --monitor-calendar [--window-minutes N]`,
+  subcomando `monitor-calendar-set`, `monitor-run` despacha por tipo; API
+  `MonitorSet {type, script, janela_min}` e `PUT /api/cron/jobs/{id}/monitor`;
+  painel com `monitorInfo` genérica e calendar read-only; blueprint
+  `agenda-lembrete` (catálogo 12→13, teste virou piso `>= 12`).
+- Validação local: suíte completa **2.814 aprovados / 39 skips (imagem) /
+  1 deselect (runtime_live) / 5.806 subtests**; Ruff, formato, tipos e
+  `scripts/ci.sh --fast` verdes (inclui tsc+vitest dos frontends).
+  Plano datado: `docs/superpowers/plans/2026-09-22-lembretes-monitor-calendario.md`.
+
+A metade "lembretes proativos" da candidata P2 **fechou**: regride apenas com
+uso real observado (job de agenda + `.ics` reais). Próximo passo do plano:
+v2 do calendário com RRULE **expandido** via `python-dateutil` (passo 3) e,
+em seguida, ferramentas via MCP de terceiros (passo 4).
