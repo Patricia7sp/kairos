@@ -77,17 +77,24 @@ class Scheduler:
                 )
             for candidate in self.store.list():
                 if candidate.get("monitor") is not None:
-                    claimed = await self.run_monitor(candidate, now, report)
+                    monitor = candidate["monitor"]
+                    if monitor.get("type") == "calendar":
+                        claimed = await self.run_calendar_monitor(candidate, now, report)
+                    else:
+                        claimed = await self.run_monitor(candidate, now, report)
                 else:
-                    claimed = self.store.claim(candidate["id"], now)
+                    plain = self.store.claim(candidate["id"], now)
+                    claimed = (plain[0], plain[1], None) if plain is not None else None
                 if claimed is None:
                     continue
-                job, execution_id = claimed
+                job, execution_id, prompt_block = claimed
                 self.store.running(execution_id)
                 content = job["prompt"]
                 notepad_section = render_notepad_section(self.home, job["id"])
                 if notepad_section:
                     content = notepad_section + content
+                if prompt_block:
+                    content = content + "\n\n" + prompt_block
                 envelope = InteractionEnvelope(
                     conversation_id="cron-" + execution_id, source="cron", content=content
                 )
@@ -191,12 +198,15 @@ class Scheduler:
         due = job.get("next_run_at")
         return bool(due) and timestamp(due) <= now
 
-    async def run_monitor(self, job: dict, now: datetime, report: dict) -> tuple[dict, str] | None:
+    async def run_monitor(
+        self, job: dict, now: datetime, report: dict
+    ) -> tuple[dict, str, str | None] | None:
         """Roda a fonte do monitor e decide se o agente roda.
 
         A fonte roda **primeiro**, em thread própria; só para tick suprimido
         (``no_change``/`source_error`) a agenda avança sem consumir orçamento
-        nem criar ocorrência no ledger.
+        nem criar ocorrência no ledger. O terceiro elemento do retorno é um
+        bloco extra de prompt (diffs etc.), ou ``None``.
         """
         from kairos_cron.source import run_script
 
@@ -241,7 +251,59 @@ class Scheduler:
         if claimed is None:
             return None
         report["monitored"] += 1
-        return claimed
+        return claimed[0], claimed[1], None
+
+    async def run_calendar_monitor(
+        self, job: dict, now: datetime, report: dict
+    ) -> tuple[dict, str, str] | None:
+        """Monitor de calendário: decide pela agenda local e injeta o bloco.
+
+        A leitura é em processo (mesmo parser da ferramenta `calendar`); o
+        estado persistido guarda as ocorrências já lembradas. Tick sem
+        novidade na janela ⇒ suppressed, sem custo de modelo e sem ledger.
+        """
+        from kairos_cron.calendar_monitor import (
+            check_calendar_monitor,
+            render_calendar_reminder,
+        )
+
+        if not self._monitor_due(job, now):
+            return None
+        decision = check_calendar_monitor(self.home, job["monitor"], job.get("monitor_state"), now)
+        if decision.outcome in (MonitorOutcome.NO_CHANGE, MonitorOutcome.SOURCE_ERROR):
+            self.store.record_suppressed_tick(job["id"], now=now)
+            if decision.outcome is MonitorOutcome.NO_CHANGE:
+                report["suppressed"] += 1
+                await record_service_event_async(
+                    self.home,
+                    "cron.no_change",
+                    meta={
+                        "origin": "cron",
+                        "call_type": "monitor",
+                        "status": "no_change",
+                        "conversation_id": "cron-monitor-" + job["id"],
+                    },
+                )
+            else:
+                report["source_errors"] += 1
+                await record_service_event_async(
+                    self.home,
+                    "cron.monitor_error",
+                    results=1,
+                    meta={
+                        "origin": "cron",
+                        "call_type": "monitor",
+                        "status": "monitor_error",
+                        "conversation_id": "cron-monitor-" + job["id"],
+                    },
+                )
+            return None
+        claimed = self.store.claim(job["id"], now, monitor_state=decision.next_state)
+        if claimed is None:
+            return None
+        report["monitored"] += 1
+        block = render_calendar_reminder(decision.window_events)
+        return claimed[0], claimed[1], block
 
     async def run(self, *, interval: float = 60) -> None:
         while True:

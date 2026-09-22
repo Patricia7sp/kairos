@@ -12,7 +12,12 @@ from uuid import uuid4
 
 from kairos_cron.delivery import validate_delivery
 from kairos_cron.lifecycle_guard import check_gateway_lifecycle
-from kairos_cron.monitor import default_monitor_state, validate_monitor, validate_monitor_state
+from kairos_cron.monitor import (
+    default_monitor_state,
+    monitor_type,
+    validate_monitor,
+    validate_monitor_state,
+)
 from kairos_cron.schedule import compute_next_run
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 from kairos_state import connect, migrate
@@ -118,7 +123,7 @@ class JobStore:
         if job.get("monitor") is not None:
             validate_monitor(job["monitor"])
         if job.get("monitor_state") is not None:
-            validate_monitor_state(job["monitor_state"])
+            validate_monitor_state(job["monitor_state"], kind=monitor_type(job))
         if job.get("delivery") is not None:
             # Só a forma é revalidada na leitura: a adequação do adapter é
             # decisão dinâmica do dispatcher no momento da entrega.
@@ -157,7 +162,8 @@ class JobStore:
                 raise ValueError("monitor exige agendamento recorrente")
             monitor = validate_monitor(monitor)
         delivery = validate_delivery(delivery)
-        check_gateway_lifecycle(prompt, monitor["script"] if monitor is not None else None)
+        script = monitor["script"] if monitor is not None and monitor["type"] == "script" else None
+        check_gateway_lifecycle(prompt, script)
         times = _repeat_limit(schedule["kind"], times)
         next_run = (
             schedule["run_at"]
@@ -176,7 +182,9 @@ class JobStore:
             "created_at": now.isoformat(),
             "last_run_at": None,
             "monitor": monitor,
-            "monitor_state": default_monitor_state() if monitor is not None else None,
+            "monitor_state": (
+                default_monitor_state(monitor["type"]) if monitor is not None else None
+            ),
         }
         if delivery is not None:
             job["delivery"] = delivery
@@ -195,7 +203,22 @@ class JobStore:
             if job["schedule"]["kind"] == "once":
                 raise ValueError("monitor exige agendamento recorrente")
             job["monitor"] = monitor
-            job["monitor_state"] = default_monitor_state()
+            job["monitor_state"] = default_monitor_state(monitor["type"])
+            self._write(document)
+            return job
+
+    def set_calendar_monitor(self, job_id: str, janela_min: int | None = None) -> dict:
+        from kairos_cron.calendar_monitor import DEFAULT_WINDOW_MINUTES
+
+        window = DEFAULT_WINDOW_MINUTES if janela_min is None else janela_min
+        monitor = validate_monitor({"type": "calendar", "janela_min": window})
+        with credential_file_lock(self.path):
+            document = self._read()
+            job = self._find(document, job_id)
+            if job["schedule"]["kind"] == "once":
+                raise ValueError("monitor exige agendamento recorrente")
+            job["monitor"] = monitor
+            job["monitor_state"] = default_monitor_state(monitor["type"])
             self._write(document)
             return job
 
@@ -306,8 +329,8 @@ class JobStore:
             if "monitor" not in job:
                 raise KeyError("agendamento não monitorado")
             if job.get("monitor_state") is None:
-                job["monitor_state"] = default_monitor_state()
-            state = validate_monitor_state(job["monitor_state"])
+                job["monitor_state"] = default_monitor_state(monitor_type(job))
+            state = validate_monitor_state(job["monitor_state"], kind=monitor_type(job))
             state["last_checked_at"] = now.isoformat()
             job["monitor_state"] = state
             if job["enabled"] and not job["paused"] and job["next_run_at"] is not None:
@@ -361,7 +384,7 @@ class JobStore:
                 else compute_next_run(job["schedule"], now.isoformat())
             )
             if created and monitor_state is not None:
-                job["monitor_state"] = validate_monitor_state(monitor_state)
+                job["monitor_state"] = validate_monitor_state(monitor_state, kind=monitor_type(job))
             self._write(document)
             return (job, execution_id) if created else None
 

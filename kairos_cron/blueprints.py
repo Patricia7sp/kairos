@@ -471,6 +471,48 @@ CATALOG: list[AutomationBlueprint] = [
         ],
         tags=("daily", "curiosity"),
     ),
+    AutomationBlueprint(
+        key="agenda-lembrete",
+        title="Lembrete da agenda",
+        description="Avisa antes de um compromisso da agenda local (.ics): o "
+        "agente só roda quando um evento entra na janela de lembretes e "
+        "escreve o lembrete — sem custo nos ticks sem novidade.",
+        category="general",
+        # Cadência da checagem da agenda; o disparo real é a entrada de um
+        # evento na janela (monitor calendar), não o cron em si. Cinco campos:
+        # "*/N * * * *" = a cada N minutos no campo de minutos.
+        schedule_template="*/{interval_min} * * * *",
+        prompt_template=(
+            "Escreva um lembrete breve e acionável sobre o(s) evento(s) da "
+            "agenda abaixo, no tom {tom}. Uma mensagem curta."
+        ),
+        slots=[
+            BlueprintSlot(
+                name="interval_min",
+                type="enum",
+                label="Checar a agenda a cada",
+                default="5",
+                options=("5", "10", "15"),
+                help="minutos entre checagens da agenda",
+            ),
+            BlueprintSlot(
+                name="janela_min",
+                type="text",
+                label="Antecedência do lembrete (min)",
+                default="120",
+                help="minutos antes do início; 1–1440",
+            ),
+            BlueprintSlot(
+                name="tom",
+                type="enum",
+                label="Tom",
+                default="natural",
+                options=("natural", "formal", "brincalhão"),
+            ),
+            _DELIVER,
+        ],
+        tags=("reminder", "calendar"),
+    ),
 ]
 
 _CATALOG_BY_KEY = {r.key: r for r in CATALOG}
@@ -712,6 +754,18 @@ def fill_blueprint(blueprint: AutomationBlueprint, values: dict[str, Any]) -> di
     schedule = _resolve_schedule(blueprint, resolved)
     prompt = blueprint_seed_prompt(blueprint, resolved)
 
+    monitor = None
+    raw_jawela = resolved.get("janela_min")
+    if raw_jawela is not None:
+        from kairos_cron.calendar_monitor import MAX_WINDOW_MINUTES
+
+        window_raw = str(raw_jawela).strip()
+        if not window_raw.isdigit() or not 1 <= int(window_raw) <= MAX_WINDOW_MINUTES:
+            raise BlueprintFillError(
+                f"janela_min={raw_jawela!r} inválido — inteiro entre 1 e {MAX_WINDOW_MINUTES}"
+            )
+        monitor = {"type": "calendar", "janela_min": int(window_raw)}
+
     deliver = str(resolved.get("deliver", "")).strip() or "local"
     delivery = None
     if deliver not in ("local", "origin"):
@@ -721,5 +775,6 @@ def fill_blueprint(blueprint: AutomationBlueprint, values: dict[str, Any]) -> di
         "name": blueprint.title,
         "prompt": prompt,
         "schedule": {"kind": "cron", "expr": schedule},
+        "monitor": monitor,
         "delivery": delivery,
     }

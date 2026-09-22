@@ -128,11 +128,17 @@ export async function cronView(root, _route, { signal } = {}) {
   const monitorInfo = (job) => {
     if (!job.monitor) return "";
     const state = job.monitor_state || {};
+    const monitor = job.monitor;
+    const isCalendar = monitor.type === "calendar";
+    const summary = isCalendar
+      ? `Monitor de calendário · janela de ${esc(monitor.janela_min)} min`
+      : `Comando de fonte: <code>${esc(monitor.script)}</code>`;
+    const testAction = isCalendar ? "" : `<button class="k-btn k-btn--ghost" data-monitor-test="${esc(job.id)}">Testar fonte</button>`;
     return `<div class="k-monitor">
-      <p><strong>Monitor</strong> · <code>${esc(job.monitor.script)}</code></p>
+      <p><strong>Monitor</strong> · ${summary}</p>
       <p>Última verificação: ${esc(date(state.last_checked_at))} · Última mudança: ${esc(date(state.last_changed_at))}</p>
       <div class="k-actions">
-        <button class="k-btn k-btn--ghost" data-monitor-test="${esc(job.id)}">Testar fonte</button>
+        ${testAction}
         <button class="k-btn k-btn--ghost" data-monitor-remove="${esc(job.id)}">Remover monitor</button>
       </div>
     </div>`;

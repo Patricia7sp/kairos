@@ -16,7 +16,9 @@ def command(args, home):
                 {
                     "id": job["id"],
                     "name": job["name"],
+                    "tipo": job.get("monitor", {}).get("type", "script"),
                     "script": job.get("monitor", {}).get("script"),
+                    "janela_min": job.get("monitor", {}).get("janela_min"),
                     "proxima": job.get("next_run_at"),
                 }
                 for job in store.list()

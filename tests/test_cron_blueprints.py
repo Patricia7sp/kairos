@@ -47,8 +47,10 @@ class CatalogoTests(unittest.TestCase):
             f"chaves duplicadas: {[k for k in keys if keys.count(k) > 1]}",
         )
 
-    def test_catalog_has_twelve_blueprints(self):
-        self.assertEqual(len(CATALOG), 12)
+    def test_catalog_has_at_least_twelve_blueprints(self):
+        # Piso, não fotografia: o catálogo só cresce; cada blueprint novo
+        # deve ter as quatro superfícies e o fill validado pelos testes acima.
+        self.assertGreaterEqual(len(CATALOG), 12)
 
     def test_all_categories_are_known(self):
         valid = {"daily", "weekly", "email", "general"}
