@@ -137,10 +137,13 @@ def validate_server_config(cfg: MCPServerConfig) -> None:
 def namespaced_tool_name(server: str, tool: str) -> str:
     """Nome estável e sem colisão no registry.
 
+    Namespace com delimitador **duplo** — `mcp__<servidor>__<ferramenta>` — como
+    fixa a spec (`_reversa_sdd/mcp/`, passo 4 do plano de ferramentas): com um
+    único `_` um nome de ferramenta que contenha `_` colidiria com o separador.
     Dois servidores podem expor `search`; sem namespace, o segundo
     silenciosamente sobrescreveria o primeiro.
     """
-    limpo = "".join(c if (c.isalnum() or c == "_") else "_" for c in f"{server}_{tool}")
+    limpo = "".join(c if (c.isalnum() or c == "_") else "_" for c in f"{server}__{tool}")
     return f"mcp__{limpo}"
 
 

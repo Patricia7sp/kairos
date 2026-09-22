@@ -116,6 +116,7 @@ kairos_integration/surfaces.py
 kairos_integration/turn_ownership.py
 kairos_mcp/__init__.py
 kairos_mcp/client.py
+kairos_mcp/runtime.py
 kairos_mcp/server.py
 kairos_memory/__init__.py
 kairos_memory/py.typed
@@ -234,6 +235,7 @@ kairos_tools/file_patch.py
 kairos_tools/file_search.py
 kairos_tools/git.py
 kairos_tools/ics.py
+kairos_tools/mcp_tools.py
 kairos_tools/memory.py
 kairos_tools/parallel.py
 kairos_tools/policy.py
@@ -380,6 +382,7 @@ tests/test_legacy_removal.py
 tests/test_local_diagnostics.py
 tests/test_machines.py
 tests/test_mcp.py
+tests/test_mcp_tool_integration.py
 tests/test_memory_tool.py
 tests/test_messaging_adapters.py
 tests/test_messaging_api.py
