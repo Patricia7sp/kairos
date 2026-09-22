@@ -99,9 +99,20 @@ def _cron_args(subcommand: str, parser) -> None:
             type=int,
             help="Limite de ocorrências (1–1000000); falhas também contam. Sem opção: ilimitado em recorrentes",
         )
-        parser.add_argument(
+        monitor_group = parser.add_mutually_exclusive_group()
+        monitor_group.add_argument(
             "--monitor",
             help="Comando da fonte que decide se o agente roda (exige agendamento recorrente)",
+        )
+        monitor_group.add_argument(
+            "--monitor-calendar",
+            action="store_true",
+            help="Monitor de calendário: lembra os eventos que entram na janela (exige agendamento recorrente)",
+        )
+        parser.add_argument(
+            "--window-minutes",
+            type=int,
+            help="Janela de lembretes em minutos (1–1440; padrão 120), para --monitor-calendar",
         )
         parser.add_argument(
             "--deliver",
@@ -110,6 +121,13 @@ def _cron_args(subcommand: str, parser) -> None:
     elif subcommand == "monitor-set":
         parser.add_argument("job_id")
         parser.add_argument("script", help="Comando da fonte, sem shell")
+    elif subcommand == "monitor-calendar-set":
+        parser.add_argument("job_id")
+        parser.add_argument(
+            "--window-minutes",
+            type=int,
+            help="Janela de lembretes em minutos (1–1440; padrão 120)",
+        )
     elif subcommand in (
         "pause",
         "resume",

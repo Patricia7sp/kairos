@@ -21,6 +21,7 @@ __all__ = [
     "evaluate",
     "monitor_state_dict",
     "monitor_state_from_job",
+    "monitor_type",
     "output_hash",
     "validate_monitor",
     "validate_monitor_state",
@@ -66,23 +67,48 @@ class MonitorDecision:
     run_agent: bool
 
 
+def monitor_type(job: dict) -> str:
+    """Tipo de monitor de um job (default ``script`` quando não há monitor)."""
+    monitor = job.get("monitor")
+    if not isinstance(monitor, dict):
+        return "script"
+    return monitor.get("type", "script")
+
+
 def validate_monitor(monitor: object) -> dict:
     """Valida a configuração de fonte de um job antes da persistência.
 
-    Hoje só o tipo ``script`` existe; a forma é estrita para que um campo
-    novo nunca seja aceito em silêncio. A fonte é executada sem shell, com
-    orçamentos fixos (ver ``kairos_cron.source``).
+    Tipos aceitos: ``script`` (executado sem shell — ver ``kairos_cron.source``)
+    e ``calendar`` (lido em processo — ver ``kairos_cron.calendar_monitor``).
+    A forma é estrita para que um campo novo nunca seja aceito em silêncio.
     """
-    if not isinstance(monitor, dict) or set(monitor) != {"type", "script"}:
+    if not isinstance(monitor, dict):
         raise ValueError("monitor inválido")
-    if monitor["type"] != "script":
+    monitor_type_value = monitor.get("type")
+    if monitor_type_value == "calendar":
+        from kairos_cron.calendar_monitor import validate_calendar_monitor
+
+        return validate_calendar_monitor(monitor)
+    if monitor_type_value != "script":
         raise ValueError("tipo de monitor não suportado")
+    if set(monitor) != {"type", "script"}:
+        raise ValueError("monitor inválido")
     validate_script(monitor["script"])
     return {"type": "script", "script": monitor["script"].strip()}
 
 
-def validate_monitor_state(state: object) -> dict:
-    """Estado persistido de um monitor: hash, último marco e última verificação."""
+def validate_monitor_state(state: object, kind: str = "script") -> dict:
+    """Estado persistido de um monitor, conforme o tipo.
+
+    ``script``: hash, último marco e última verificação. ``calendar``: chaves
+    de ocorrências lembradas e marcos (ver ``kairos_cron.calendar_monitor``).
+    """
+    if kind == "calendar":
+        from kairos_cron.calendar_monitor import validate_calendar_state
+
+        if not isinstance(state, dict):
+            raise ValueError("estado de monitor inválido")
+        return validate_calendar_state(state)
     if not isinstance(state, dict) or set(state) != {
         "last_output_hash",
         "last_changed_at",
@@ -99,7 +125,11 @@ def validate_monitor_state(state: object) -> dict:
     return dict(state)
 
 
-def default_monitor_state() -> dict:
+def default_monitor_state(kind: str = "script") -> dict:
+    if kind == "calendar":
+        from kairos_cron.calendar_monitor import default_calendar_state
+
+        return default_calendar_state()
     return {"last_output_hash": None, "last_changed_at": None, "last_checked_at": None}
 
 
@@ -108,7 +138,7 @@ def monitor_state_from_job(job: dict) -> MonitorState:
     raw = job.get("monitor_state")
     if raw is None:
         return MonitorState()
-    validated = validate_monitor_state(raw)
+    validated = validate_monitor_state(raw, kind=monitor_type(job))
     return MonitorState(
         last_output_hash=validated["last_output_hash"],
         last_changed_at=validated["last_changed_at"],

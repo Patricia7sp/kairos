@@ -8,7 +8,7 @@ from kairos_cron.jobs import JobStore
 from kairos_cron.scheduler import Scheduler
 
 
-def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; mantidos num handler
+def command(  # noqa: PLR0912, PLR0915 - subcomandos de cron são cascata de dispatch; mantidos num handler
     args, home
 ):
     from kairos_cli.handlers import _emit
@@ -22,9 +22,19 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
             schedule = {"kind": "interval", "minutes": args.every}
         else:
             schedule = {"kind": "cron", "expr": args.expr}
-        monitor = (
-            {"type": "script", "script": args.monitor} if getattr(args, "monitor", None) else None
-        )
+        if getattr(args, "window_minutes", None) is not None and not getattr(
+            args, "monitor_calendar", False
+        ):
+            raise ValueError("--window-minutes só faz sentido com --monitor-calendar")
+        if getattr(args, "monitor_calendar", False):
+            monitor = {
+                "type": "calendar",
+                "janela_min": getattr(args, "window_minutes", None),
+            }
+        elif getattr(args, "monitor", None):
+            monitor = {"type": "script", "script": args.monitor}
+        else:
+            monitor = None
         delivery = {"target": args.deliver} if getattr(args, "deliver", None) else None
         result = store.create(
             name=args.name,
@@ -45,6 +55,8 @@ def command(  # noqa: PLR0912 - subcomandos de cron são cascata de dispatch; ma
         result = {"executions": store.history(args.job_id)}
     elif sub == "monitor-set":
         result = store.set_monitor(args.job_id, args.script)
+    elif sub == "monitor-calendar-set":
+        result = store.set_calendar_monitor(args.job_id, getattr(args, "window_minutes", None))
     elif sub == "monitor-clear":
         result = store.clear_monitor(args.job_id)
     elif sub == "monitor-show":
@@ -167,16 +179,37 @@ def show_monitor(store, job_id: str) -> dict:
 def run_monitor_now(store, job_id: str, home):
     """Executa a fonte de um monitor uma vez, sem tocar em agenda nem estado.
 
-    Usa `JobStore` apenas para ler o comando; a execução é isolada (ver
-    `kairos_cron.source`). Resultado conta como teste da fonte, não como tick.
+    Usa `JobStore` apenas para ler a configuração; a execução é isolada (ver
+    `kairos_cron.source`). Para o monitor de calendário, a leitura final (decisão
+    de janela) é o teste da fonte, sem persistir nada. Resultado conta como
+    teste da fonte, não como tick.
     """
-    from kairos_cron.monitor import decide_for_source, monitor_state_from_job
+    from datetime import UTC, datetime
 
     job = store.get(job_id)
     if "monitor" not in job:
         raise KeyError("agendamento não monitorado")
+
+    if job["monitor"].get("type") == "calendar":
+        from kairos_cron.calendar_monitor import check_calendar_monitor
+
+        decision = check_calendar_monitor(
+            home, job["monitor"], job.get("monitor_state"), datetime.now(UTC)
+        )
+        return {
+            "ok": decision.outcome.value != "source_error",
+            "erro": ""
+            if decision.outcome.value != "source_error"
+            else "fonte de calendário indisponível",
+            "detalhe": "",
+            "bytes_saida": 0,
+            "decisao": decision.outcome.value,
+            "eventos_na_janela": len(decision.window_events),
+        }
+
     import asyncio
 
+    from kairos_cron.monitor import decide_for_source, monitor_state_from_job
     from kairos_cron.source import run_script
 
     def source_result():

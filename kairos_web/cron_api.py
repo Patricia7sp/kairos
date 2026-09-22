@@ -40,9 +40,11 @@ class PauseJob(BaseModel):
     paused: StrictBool
 
 
-class MonitorJob(BaseModel):
+class MonitorSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    script: StrictStr
+    type: str = "script"
+    script: StrictStr | None = None
+    janela_min: StrictInt | None = Field(default=None, ge=1, le=1440)
 
 
 class NotepadValue(BaseModel):
@@ -184,8 +186,15 @@ def get_monitor(job_id: str, request: Request):
 
 
 @router.put("/jobs/{job_id}/monitor")
-def set_monitor(job_id: str, payload: MonitorJob, request: Request):
-    return operate(lambda: store(request).set_monitor(job_id, payload.script))
+def set_monitor(job_id: str, payload: MonitorSet, request: Request):
+    def _set():
+        if payload.type == "calendar":
+            return store(request).set_calendar_monitor(job_id, payload.janela_min)
+        if payload.script is None:
+            raise ValueError("script é obrigatório para monitor de script")
+        return store(request).set_monitor(job_id, payload.script)
+
+    return operate(_set)
 
 
 @router.delete("/jobs/{job_id}/monitor")
@@ -200,14 +209,30 @@ async def run_monitor_source(job_id: str, request: Request):
 
     async def execute():
         import asyncio
-
-        from kairos_cron.monitor import decide_for_source, monitor_state_from_job
-        from kairos_cron.source import run_script
+        from datetime import UTC, datetime
 
         jobs = store(request)
         job = jobs.get(job_id)
         if "monitor" not in job:
             raise KeyError(job_id)
+        if job["monitor"].get("type") == "calendar":
+            from kairos_cron.calendar_monitor import check_calendar_monitor
+
+            decision = check_calendar_monitor(
+                jobs.home, job["monitor"], job.get("monitor_state"), datetime.now(UTC)
+            )
+            failed = decision.outcome.value == "source_error"
+            return {
+                "ok": not failed,
+                "error": "fonte de calendário indisponível" if failed else "",
+                "detail": "",
+                "output_chars": 0,
+                "decision": decision.outcome.value,
+                "window_events": len(decision.window_events),
+            }
+        from kairos_cron.monitor import decide_for_source, monitor_state_from_job
+        from kairos_cron.source import run_script
+
         result = await asyncio.to_thread(run_script, job["monitor"]["script"], home=jobs.home)
         decision = decide_for_source(monitor_state_from_job(job), result)
         return {

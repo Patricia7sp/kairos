@@ -180,6 +180,10 @@ COMMANDS: tuple[Command, ...] = (
         _sub("status", "Estado do scheduler"),
         _sub("tick", "Força um tick"),
         _sub("monitor-set", "Define a fonte de monitor de um job"),
+        _sub(
+            "monitor-calendar-set",
+            "Define o monitor de calendário (janela de lembretes) de um job",
+        ),
         _sub("monitor-clear", "Remove o monitor de um job"),
         _sub("monitor-show", "Mostra o monitor e o estado de verificação"),
         _sub("monitor-run", "Executa a fonte do monitor uma vez"),

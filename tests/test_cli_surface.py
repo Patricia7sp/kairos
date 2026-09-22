@@ -115,6 +115,7 @@ class ArvoreTests(unittest.TestCase):
                 "monitor-clear",
                 "monitor-show",
                 "monitor-run",
+                "monitor-calendar-set",
                 "notepad",
                 "blueprint",
             },

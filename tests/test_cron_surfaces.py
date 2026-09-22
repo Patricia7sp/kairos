@@ -406,7 +406,7 @@ def test_web_lifespan_stops_ticker_and_closes_service_even_if_journal_write_fail
 def test_cli_blueprint_list_show_and_create_are_real(home, capsys):
     assert main(["cron", "blueprint", "list", "--json"]) == 0
     catalog = json.loads(capsys.readouterr().out)
-    assert len(catalog["blueprints"]) == 12
+    assert len(catalog["blueprints"]) == 13
     keys = {b["key"] for b in catalog["blueprints"]}
     assert "morning-brief" in keys and "important-mail" in keys
 
@@ -482,7 +482,7 @@ def test_api_blueprint_list_show_require_auth_and_are_real(home):
     assert TestClient(app).get("/api/cron/blueprints").status_code == 401
     catalog = client.get("/api/cron/blueprints")
     assert catalog.status_code == 200
-    assert len(catalog.json()["blueprints"]) == 12
+    assert len(catalog.json()["blueprints"]) == 13
 
     assert TestClient(app).get("/api/cron/blueprints/morning-brief").status_code == 401
     entry = client.get("/api/cron/blueprints/morning-brief")

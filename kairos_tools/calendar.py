@@ -66,7 +66,7 @@ def _load_config(home: Path) -> Mapping[str, Any]:
     return config if isinstance(config, Mapping) else {}
 
 
-def _configured_source(home: Path) -> Path | None:
+def calendar_source(home: Path) -> Path | None:
     config = _load_config(home)
     raw = config.get("calendar", {})
     if not isinstance(raw, Mapping):
@@ -82,7 +82,7 @@ def _configured_source(home: Path) -> Path | None:
 
 def _calendar_available() -> bool:
     """Requisito do toolset: fonte configurada **e** presente no disco."""
-    source = _configured_source(_home())
+    source = calendar_source(_home())
     return source is not None and source.exists()
 
 
@@ -157,7 +157,7 @@ def _matches(event: IcsEvent, start_utc: datetime, end_utc: datetime) -> bool:
     return e_start < end_utc and e_end > start_utc
 
 
-def _read_events(source: Path) -> tuple[list[IcsEvent], list[dict[str, Any]]]:
+def read_events(source: Path) -> tuple[list[IcsEvent], list[dict[str, Any]]]:
     if source.is_dir():
         files = sorted(p for p in source.iterdir() if p.is_file() and p.suffix.lower() == ".ics")
     else:
@@ -193,7 +193,7 @@ def _run_query(
     if type(limite) is not int or not 1 <= limite <= MAX_LIMIT:
         return _error(f"limite deve ser inteiro obrigatório entre 1 e {MAX_LIMIT}")
 
-    source = _configured_source(_home())
+    source = calendar_source(_home())
     if source is None:
         return _error("fonte de calendário não configurada (calendar.source)")
     if not source.exists():
@@ -222,7 +222,7 @@ def _run_query(
         if window_start > window_end:
             return _error("desde deve ser anterior ou igual a ate")
 
-    events, problems = _read_events(source)
+    events, problems = read_events(source)
     if problems:
         return _error(
             "fonte corrompida — leitura recusada (fail-closed), nenhum parcial devolvido",
@@ -285,7 +285,7 @@ def _event_end(
 
 
 def _resolve_write_source() -> tuple[Path | None, dict[str, Any] | None]:
-    source = _configured_source(_home())
+    source = calendar_source(_home())
     if source is None:
         return None, _error("fonte de calendário não configurada (calendar.source)")
     if not source.exists():
@@ -388,7 +388,7 @@ def calendar_tool(
     """Lê e altera a agenda local (.ics). add/rm alteram o arquivo e exigem aprovação."""
     if subcommand not in _ALLOWED_SUBCOMMANDS:
         return _error(f"subcomando não suportado: {subcommand}")
-    source = _configured_source(_home())
+    source = calendar_source(_home())
     if source is None:
         return _error("fonte de calendário não configurada (calendar.source)")
     if not source.exists():
