@@ -326,6 +326,44 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("--reason", default="manual", help="Motivo registrado no marcador")
     elif command == "import" and subcommand is None:
         parser.add_argument("--data", help="Dados JSON a importar")
+    elif command == "verify" and subcommand is None:
+        parser.add_argument(
+            "--path", help="Raiz do projeto a verificar (padrão: diretório corrente)"
+        )
+        parser.add_argument(
+            "--save",
+            action="store_true",
+            help="Grava a receita detectada no manifesto e continua",
+        )
+        parser.add_argument(
+            "--detect-only",
+            action="store_true",
+            help="Apenas detecta/imprime a receita e sai (não executa fases)",
+        )
+        parser.add_argument(
+            "--phase",
+            action="append",
+            choices=("bootstrap", "build", "test", "start"),
+            help="Seleciona fases (repetível); sem isto, roda bootstrap/build/test + start",
+        )
+        parser.add_argument(
+            "--timeout",
+            type=float,
+            default=600.0,
+            help="Segundos por fase de comando (padrão: 600)",
+        )
+        parser.add_argument(
+            "--ready-timeout",
+            type=float,
+            default=60.0,
+            help="Segundos de espera pela readiness (padrão: 60)",
+        )
+        parser.add_argument(
+            "--skip-start", action="store_true", help="Não sobe o app nem testa a readiness"
+        )
+        parser.add_argument(
+            "--port", type=int, help="Override da porta do start (padrão: a da receita ou 8000)"
+        )
     elif command == "import-agent" and subcommand is None:
         parser.add_argument("--data", help="Dados JSON do agente a importar")
     elif command == "login" and subcommand is None:
