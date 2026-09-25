@@ -1777,6 +1777,29 @@ subprocesso afirmando que `argparse` não entra em `sys.modules`. A guarda de
 leveza criada na Tarefa 15 só tem sentido se alguém de fato usar o módulo
 antes dos imports pesados; este é esse uso.
 
+### D-MCP.11 — `kairos mcp serve` stdio puro, sem o pacote `mcp`
+
+O legado (`mcp_serve.py`) sobrescrevia o `mcp.server.MCPServer` do pacote
+`mcp`; no Kairos o pacote é **opcional** (o cliente é stdlib e a imagem não o
+carrega). O servidor espelha o transporte do cliente (`kairos_mcp/runtime.py`):
+JSON-RPC 2.0, uma mensagem por linha UTF-8, versão `2024-11-05`. Sem o pacote,
+preservam-se a leveza da imagem e a simetria com o cliente — um servidor stdio
+é uma tarefa de transporte, não de framework.
+
+**`attachments_list` deixa de ser publicada.** No legado extraía blocos
+não-textuais das mensagens; no Kairos nada persiste anexo — o inbound não
+armazena mídia e `messages` guarda só conteúdo textual. Publicar seria reportar
+sucesso sem efeito (sempre `0 anexos`); a ferramenta vai para
+`UNPUBLISHED_TOOLS` com o motivo, mesmo padrão das `permissions_*`.
+
+**`events_poll` é pull com cursor, sem long-poll.** `events_wait` do legado não
+é portado: custaria um thread de espera no servidor stdio para um consumidor
+que não o usa. `messages_send` envia agora via adapter e grava a obrigação no
+ledger durável antes — o mesmo caminho do painel (`kairos_web/messaging_api.
+py`) — e só reporta `delivered` com a confirmação do adapter. Autenticação
+segue ausente e escrita (`AUTHENTICATION_RATIONALE`): transporte stdio,
+fronteira = OS, e transporte remoto futuro exige revisar antes de existir.
+
 ---
 
 ## Tarefa 08 — Ferramentas core (extensão)

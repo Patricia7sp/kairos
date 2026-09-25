@@ -51,6 +51,11 @@ UNPUBLISHED_TOOLS: dict[str, str] = {
         "aprovado, e nada aprovou. Publicar exige a IPC primeiro, e ela "
         "pertence ao gateway."
     ),
+    "attachments_list": (
+        "No Kairos nada persiste anexo: o inbound não armazena mídia e "
+        "`messages` guarda só conteúdo textual. Publicar seria reportar "
+        "sucesso sem efeito (sempre `0 anexos`). D-MCP.11."
+    ),
 }
 
 #: O que o servidor de fato expõe.
@@ -58,7 +63,6 @@ SERVER_TOOLS: tuple[str, ...] = (
     "conversations_list",
     "conversation_read",
     "messages_send",
-    "attachments_list",
     "events_poll",
     "platforms_list",
     "session_info",
