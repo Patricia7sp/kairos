@@ -789,11 +789,9 @@ def cmd_update(args) -> int:
 
 
 def cmd_verify(args) -> int:
-    import asyncio
-
     from kairos_cli.verify import run_verify
 
-    return asyncio.run(run_verify(_home(), args))
+    return run_verify(args)
 
 
 def cmd_pairing(args) -> int:
