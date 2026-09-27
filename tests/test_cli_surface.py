@@ -24,8 +24,9 @@ REPO = Path(__file__).resolve().parent.parent
 
 #: Comandos que nascem no Kairos e não têm correspondente no legado.
 #: `token` existe porque o painel precisava de um caminho para a credencial
-#: que não passasse por variável de ambiente nem por log.
-PROPRIOS_DO_KAIROS = frozenset({"runtime", "token", "telegram"})
+#: que não passasse por variável de ambiente nem por log; `email` e `remind`
+#: nascem do lote de e-mail/lembretes (canal de saída + agenda única).
+PROPRIOS_DO_KAIROS = frozenset({"runtime", "token", "telegram", "email", "remind"})
 
 
 class ArvoreTests(unittest.TestCase):
@@ -168,6 +169,7 @@ class ParserTests(unittest.TestCase):
             "console.eval": ("console", "eval", "--expression", "1+1"),
             "skin.use": ("skin", "use", "--theme", "dark"),
             "hooks.use": ("hooks", "use", "--hook", "pre-turn"),
+            "remind": ("remind", "30m", "lembrete de teste"),
         }
         for c in COMMANDS:
             with self.subTest(cmd=c.name):
@@ -399,6 +401,17 @@ class ExecucaoTests(unittest.TestCase):
                 self.assertEqual(main([cmd, "test"]), 0)
             self.assertIn("nada foi enviado", buf.getvalue())
 
+    def test_email_test_recusa_DESABILITADO_como_falha(self):
+        """E-mail exige SMTP de verdade: sem habilitar + segredo no cofre, o
+        teste recusa com código de falha (não finge conexão)."""
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(main(["email", "test"]), 1)
+        self.assertIn("nada foi enviado", buf.getvalue())
+
     def test_inicios_indisponiveis_recusam_sem_fingir(self):
         import contextlib
         import io
@@ -561,6 +574,10 @@ class ExecucaoTests(unittest.TestCase):
             ["hooks", "list"],
             ["pause", "status"],
             ["prompt-size", "get"],
+            ["email", "status"],
+            ["email", "config"],
+            ["gateway", "send", "email:x@x", "oi"],
+            ["remind", "30m", "lembrete de teste"],
         ):
             with self.subTest(argv=argv):
                 self.assertIn(main(argv), (ExitCode.OK, ExitCode.NOT_IMPLEMENTED))

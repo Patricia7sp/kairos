@@ -216,7 +216,8 @@ class ConfigTests(unittest.TestCase):
         save_config(self.tmp, default_config())
         plataformas = messaging_platforms(self.tmp)
         self.assertEqual(
-            {p["platform"] for p in plataformas}, {"telegram", "whatsapp", "slack", "webhook"}
+            {p["platform"] for p in plataformas},
+            {"telegram", "whatsapp", "slack", "webhook", "email"},
         )
         telegram = next(p for p in plataformas if p["platform"] == "telegram")
         self.assertFalse(telegram["deliverable"])

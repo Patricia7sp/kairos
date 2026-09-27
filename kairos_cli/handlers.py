@@ -425,6 +425,31 @@ def cmd_sync(args) -> int:
     return ExitCode.NOT_IMPLEMENTED
 
 
+def _gateway_send(args, as_json: bool) -> int:
+    """`kairos gateway send TARGET TEXTO` — standalone sender (o `hermes send`
+    do legado): a mesma cadeia durável do painel, recusa honesta (69) quando a
+    plataforma não está entregável em vez de fingir envio."""
+    from kairos_gateway.direct_send import DeliveryTargetError, send_now
+
+    alvo = getattr(args, "target", "").strip()
+    bruto = getattr(args, "texto", "")
+    texto = " ".join(bruto).strip() if isinstance(bruto, (list, tuple)) else str(bruto).strip()
+    if not alvo or not texto:
+        _emit({"erro": "gateway send exige TARGET (plataforma:destino) e TEXTO"}, as_json=as_json)
+        return ExitCode.USAGE
+    try:
+        resultado = send_now(_home(), alvo, texto)
+    except DeliveryTargetError as exc:
+        _emit({"erro": str(exc)}, as_json=as_json)
+        print(f"kairos gateway send: {exc}", file=sys.stderr)
+        return ExitCode.NOT_IMPLEMENTED
+    except (ValueError, OSError) as exc:
+        _emit({"erro": f"envio inválido: {exc}"}, as_json=as_json)
+        return ExitCode.USAGE
+    _emit(resultado, as_json=as_json)
+    return ExitCode.OK if resultado["delivered"] else ExitCode.ERROR
+
+
 def cmd_gateway(args) -> int:
     """O serviço longo. É ele que define a vida do container."""
     import logging
@@ -436,6 +461,9 @@ def cmd_gateway(args) -> int:
     )
     as_json = getattr(args, "json", False)
     sub = getattr(args, "gateway_command", None)
+
+    if sub == "send":
+        return _gateway_send(args, as_json)
 
     if sub == "stop":
         # Não há canal HTTP de controle (design.md): a drenagem é um arquivo.
@@ -876,6 +904,18 @@ def cmd_memory(args) -> int:
     return asyncio.run(run_memory(_home(), args))
 
 
+def cmd_email(args) -> int:
+    from kairos_cli.email import run_email
+
+    return run_email(_home(), args)
+
+
+def cmd_remind(args) -> int:
+    from kairos_cli.remind import run_remind
+
+    return run_remind(_home(), args)
+
+
 HANDLERS = {
     "backup": cmd_backup,
     "debug": cmd_debug,
@@ -928,4 +968,6 @@ HANDLERS = {
     "login": cmd_login,
     "logout": cmd_logout,
     "memory": cmd_memory,
+    "email": cmd_email,
+    "remind": cmd_remind,
 }

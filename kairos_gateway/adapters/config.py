@@ -35,6 +35,7 @@ SECRET_KEYS: dict[str, str] = {
     "whatsapp": "access_token",
     "slack": "api_url",
     "webhook": "",
+    "email": "smtp_password",
 }
 
 #: Segredos de entrada (além da credencial principal) exigidos por cada
@@ -49,7 +50,7 @@ INBOUND_SECRET_KEYS: dict[str, tuple[str, ...]] = {
     "webhook": ("ingest_token",),
 }
 
-_PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook")
+_PLATFORMS: tuple[str, ...] = ("telegram", "whatsapp", "slack", "webhook", "email")
 
 #: Campos não-secretos aceitos por plataforma. Chave -> tipo Python.
 _FIELDS: dict[str, dict[str, type]] = {
@@ -67,6 +68,15 @@ _FIELDS: dict[str, dict[str, type]] = {
     },
     "slack": {"enabled": bool, "channel_default": str, "inbound": dict},
     "webhook": {"enabled": bool, "endpoints": list, "inbound": dict},
+    "email": {
+        "enabled": bool,
+        "smtp_host": str,
+        "smtp_port": int,
+        "tls": bool,
+        "from_addr": str,
+        "address_default": str,
+        "subject_default": str,
+    },
 }
 
 #: Campos opcionais com padrão — ausência não é erro; o padrão entra no merge.
@@ -230,6 +240,15 @@ def default_config() -> dict[str, dict[str, Any]]:
             "endpoints": [],
             "inbound": {"enabled": False, "allowed_sources": [], "experiences": True},
         },
+        "email": {
+            "enabled": False,
+            "smtp_host": "",
+            "smtp_port": 587,
+            "tls": True,
+            "from_addr": "",
+            "address_default": "",
+            "subject_default": "Kairos",
+        },
     }
 
 
@@ -245,6 +264,8 @@ def _validate_platform_config(name: str, value: Any) -> dict[str, Any]:
         valor = value[campo]
         if tipo is bool and not isinstance(valor, bool):
             raise ValueError(f"'{campo}' de {name} deve ser booleano")
+        if tipo is int and (not isinstance(valor, int) or isinstance(valor, bool)):
+            raise ValueError(f"'{campo}' de {name} deve ser inteiro")
         if tipo is str and not isinstance(valor, str):
             raise ValueError(f"'{campo}' de {name} deve ser textual")
         if tipo is list and (
