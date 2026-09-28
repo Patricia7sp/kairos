@@ -274,6 +274,12 @@ def cmd_mcp(args) -> int:
             as_json=args.json,
         )
         return ExitCode.OK
+    if args.mcp_command == "serve":
+        # Import tardio: o servidor carrega o gateway (adapters de plataforma);
+        # `mcp list` não deve pagar esse custo.
+        from kairos_mcp.serve import serve_stdio
+
+        return serve_stdio(_home())
     return ExitCode.NOT_IMPLEMENTED
 
 

@@ -264,6 +264,7 @@ COMMANDS: tuple[Command, ...] = (
         "Servidores Model Context Protocol",
         _sub("list", "Servidores configurados"),
         _sub("remove", "Remove um servidor"),
+        _sub("serve", "Sobe o servidor stdio MCP em primeiro plano"),
         _sub("test", "Testa a conexão com um servidor"),
         status=Status.IMPLEMENTED,
         unit="mcp",
