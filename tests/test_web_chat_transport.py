@@ -642,3 +642,91 @@ def test_websocket_persiste_no_mesmo_home_que_rest_le(
     assert (app_home / "state.db").exists()
     assert not (environment_home / "state.db").exists()
     assert gateway.closed
+
+
+def test_sessao_agent_runtime_sem_host_recusa_nomeada_e_NAO_degrada_para_model(
+    tmp_path: Path,
+) -> None:
+    """Fronteira fail-closed do turno de agent runtime na web.
+
+    Roteador real + `RuntimeClient` real apontando para um socket que não
+    existe: a sessão `agent_runtime` devolve erro nomeado (`unavailable`) e o
+    websocket fecha em 1012 — o turno NUNCA cai para o modo model.
+    """
+    import asyncio
+
+    from runtime_support import runtime_session
+    from starlette.websockets import WebSocketDisconnect
+
+    from kairos_integration.router import InteractionRouter
+    from kairos_runtime import RuntimeClient
+    from kairos_state import connect, initialize_schema
+    from kairos_state.repositories.runtime import RuntimeRepository
+
+    class ModelQueNaoPodeSerChamado:
+        def __init__(self) -> None:
+            self.envelopes = []
+
+        async def stream(self, envelope):
+            self.envelopes.append(envelope)
+            return
+            yield
+
+        async def aclose(self):
+            return None
+
+    home = tmp_path / "home"
+    home.mkdir()
+    project = home / "project"
+    project.mkdir()
+    model_service = ModelQueNaoPodeSerChamado()
+    router = InteractionRouter(
+        home,
+        model_service,
+        RuntimeClient(home / "run" / "runtime.sock"),
+    )
+    db = connect(home / "state.db")
+    try:
+        initialize_schema(db)
+        RuntimeRepository(db).create_session(
+            runtime_session(project, "runtime-session"),
+            "test",
+            allowed_directories=(str(project),),
+        )
+    finally:
+        db.close()
+
+    state = server.app.state
+    previous = getattr(state, "interaction_service", None)
+    had_previous = hasattr(state, "interaction_service")
+    state.interaction_service = router
+    erro = None
+    codigo = None
+    try:
+        with (
+            TestClient(server.app, headers={server.TOKEN_HEADER: server.SESSION_TOKEN}) as client,
+            client.websocket_connect("/ws/chat") as ws,
+        ):
+            ws.send_json(
+                {
+                    "type": "message",
+                    "protocol": 1,
+                    "session_id": "runtime-session",
+                    "content": "rode o teste",
+                    "idempotency_key": "chave-duravel",
+                }
+            )
+            erro = ws.receive_json()
+            with pytest.raises(WebSocketDisconnect) as raised:
+                ws.receive_json()
+            codigo = raised.value.code
+    finally:
+        if had_previous:
+            state.interaction_service = previous
+        elif hasattr(state, "interaction_service"):
+            del state.interaction_service
+        asyncio.run(router.aclose())
+
+    assert erro == {"error": public_error("unavailable")}
+    assert codigo == 1012
+    assert model_service.envelopes == []

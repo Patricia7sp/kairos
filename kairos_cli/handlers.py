@@ -214,6 +214,7 @@ def cmd_approvals(args) -> int:
             yolo=args.yolo,
             user_deny=tuple(args.deny or ()),
             allowlist=tuple(args.allow or ()),
+            isolated_backend=args.isolated_backend,
         )
     )
     _emit(

@@ -48,12 +48,23 @@ class InteractionRouter:
             return
         self._validate_runtime_envelope(envelope)
         assert envelope.idempotency_key is not None
-        turn_id = await self.runtime_client.submit(
+        client = self.runtime_client
+        missing = [name for name in ("submit", "subscribe") if not hasattr(client, name)]
+        if missing:
+            # Fail-closed: sem os recursos do host de runtime, a sessão de
+            # agent runtime NÃO cai para o modo model nem explode em
+            # AttributeError — recusa nomeada, e o requisitante decide.
+            raise RuntimeErrorInfo(
+                "unavailable",
+                f"host de runtime indisponível (sem {' e '.join(missing)})",
+                False,
+            )
+        turn_id = await client.submit(
             envelope.conversation_id, envelope.content, envelope.idempotency_key
         )
         if on_runtime_accepted is not None:
             on_runtime_accepted(turn_id)
-        async for event in self.runtime_client.subscribe(envelope.conversation_id):
+        async for event in client.subscribe(envelope.conversation_id):
             if event.turn_id != turn_id:
                 continue
             yield event
@@ -102,6 +113,8 @@ class InteractionRouter:
         self._closed = True
         results = []
         for resource in (self.model_service, self.runtime_client):
+            if resource is None:
+                continue
             try:
                 await resource.aclose()
             except BaseException as exc:  # noqa: BLE001 - fecha ambos recursos próprios

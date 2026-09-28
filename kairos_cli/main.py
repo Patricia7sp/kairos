@@ -219,6 +219,11 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("--yolo", action="store_true")
         parser.add_argument("--deny", action="append", metavar="GLOB")
         parser.add_argument("--allow", action="append", metavar="GLOB")
+        parser.add_argument(
+            "--isolated-backend",
+            action="store_true",
+            help="avalia como se o comando rodasse em backend atestado (Camada 1: o sandbox é a fronteira)",
+        )
     elif command in ("run", "chat"):
         parser.add_argument("prompt", nargs="*", help="a mensagem")
         parser.add_argument("-q", "--quiet", action="store_true")
