@@ -1,4 +1,4 @@
-"""Adapters de plataforma da mensageria: Telegram, WhatsApp, Slack e Webhook.
+"""Adapters de plataforma da mensageria: Telegram, WhatsApp, Slack, Webhook e Email.
 
 Cada adapter implementa o `PlatformAdapter` do gateway (`name` + `send`) e
 expõe `verify()` para o painel distinguir "configurado" de "respondendo".
@@ -25,6 +25,7 @@ from kairos_gateway.adapters.config import (
     platform_secret_fields,
     vault_state,
 )
+from kairos_gateway.adapters.email_adapter import EmailAdapter
 from kairos_gateway.adapters.slack import SlackAdapter
 from kairos_gateway.adapters.telegram import TelegramAdapter
 from kairos_gateway.adapters.webhook import WebhookAdapter
@@ -92,6 +93,22 @@ PLATFORMS: tuple[Platform, ...] = (
         credential_hint="",
         fields=(),
     ),
+    Platform(
+        name="email",
+        label="E-mail",
+        needs_secret=True,
+        credential_label="Senha SMTP",
+        credential_hint="Senha do SMTP (app password se o provedor exigir); "
+        "o usuário de autenticação é o 'from_addr'.",
+        fields=(
+            ConfigField("smtp_host", "Servidor SMTP"),
+            ConfigField("smtp_port", "Porta SMTP"),
+            ConfigField("tls", "STARTTLS"),
+            ConfigField("from_addr", "Remetente (usuário SMTP)"),
+            ConfigField("address_default", "Destino padrão (alvo home)"),
+            ConfigField("subject_default", "Assunto padrão"),
+        ),
+    ),
 )
 
 
@@ -125,6 +142,22 @@ def build_platform_adapters(home: Path) -> dict[str, PlatformAdapter]:
     web = doc.get("webhook", {})
     if web.get("enabled") and (mapa := endpoints(home)):
         adapters["webhook"] = WebhookAdapter(mapa)
+
+    email = doc.get("email", {})
+    if (
+        email.get("enabled")
+        and email.get("smtp_host")
+        and email.get("from_addr")
+        and (password := platform_secret(home, "email"))
+    ):
+        adapters["email"] = EmailAdapter(
+            email["smtp_host"],
+            port=email.get("smtp_port") or 587,
+            tls=email.get("tls", True),
+            from_addr=email["from_addr"],
+            password=password,
+            subject_default=email.get("subject_default") or "Kairos",
+        )
 
     return adapters
 

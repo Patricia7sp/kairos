@@ -208,6 +208,14 @@ def _configure_vault(
         save_platform_secret(home, "telegram", telegram_token)
 
 
+def _configure_vault_email(home: Path, passphrase_file: Path) -> None:
+    passphrase_file.write_text("senha-mestra-teste\n", encoding="utf-8")
+    passphrase_file.chmod(0o600)
+    service = build_credential_service(home)
+    service.put(CredentialRef("custom", "primary"), CredentialSecret({"api_key": FAKE_LLM_KEY}))
+    save_platform_secret(home, "email", "senha-smtp-teste")
+
+
 def _configure_home(home: Path, llm_url: str) -> None:
     from kairos_gateway.adapters.config import load_config, save_config
 
@@ -233,6 +241,34 @@ def _configure_home(home: Path, llm_url: str) -> None:
                 "experiences": False,
                 "mode": "poll",
             },
+        }
+    )
+    save_config(home, doc)
+
+
+def _configure_home_email(home: Path, llm_url: str, sink) -> None:
+    from kairos_gateway.adapters.config import load_config, save_config
+
+    update_config_document(
+        home,
+        lambda document: document.update(
+            {
+                "provider": "custom",
+                "model": LLM_MODEL,
+                "provider_settings": {"custom": {"base_url": f"{llm_url}/v1"}},
+            }
+        ),
+    )
+    doc = load_config(home)
+    doc["email"].update(
+        {
+            "enabled": True,
+            "smtp_host": sink.host,
+            "smtp_port": sink.port,
+            "tls": False,
+            "from_addr": "kairos@test",
+            "address_default": "destino@test",
+            "subject_default": "Kairos",
         }
     )
     save_config(home, doc)
@@ -309,6 +345,60 @@ def test_cron_entrega_externa_telegram_percorre_o_caminho_de_producao(tmp_path, 
         if gateway_conn is not None:
             gateway_conn.close()
         bot.shutdown()
+        llm.shutdown()
+
+
+def test_cron_entrega_externa_email_percorre_o_caminho_de_producao(tmp_path, monkeypatch):
+    """Job com ``delivery`` para e-mail: turno real → obrigação no ledger →
+    gateway drena para o adapter real sobre um servidor SMTP em loopback — a
+    mensagem chega ao destinatário de verdade (fio SMTP, sem mock)."""
+    from smtp_sink import SmtpSink
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    passphrase = tmp_path / "passphrase"
+    monkeypatch.setenv("KAIROS_DISABLE_KEYRING", "1")
+    monkeypatch.setenv("KAIROS_VAULT_PASSPHRASE_FILE", str(passphrase))
+    _configure_vault_email(home, passphrase)
+
+    llm = _LocalServer(_FakeState())
+    gateway_conn = None
+    try:
+        with SmtpSink() as sink:
+            _configure_home_email(home, llm.url(), sink)
+
+            store = JobStore(home)
+            store.create(
+                name="Relatório diário",
+                prompt="Gere o relatório diário.",
+                schedule={"kind": "once", "run_at": NOW.isoformat()},
+                delivery={"target": "email:destino@test"},
+            )
+
+            asyncio.run(_run_cron_turn(home))
+
+            pendentes = _pending(home)
+            assert len(pendentes) == 1, "o turno completado deveria ter gerado uma obrigação"
+            assert pendentes[0].target == "email:destino@test"
+
+            gateway_conn = connect(home / "state.db")
+            migrate(gateway_conn)
+            svc = GatewayService(home, conn=gateway_conn)
+            for adapter in build_platform_adapters(home).values():
+                svc.register_adapter(adapter)
+            assert "email" in cast(list, svc.status()["adapters"])
+
+            entregues = svc.tick()
+
+            assert entregues == 1
+            assert svc.ledger.counts_by_state()["delivered"] == 1
+            assert len(sink.capturadas) == 1, "o sink SMTP não recebeu a entrega do cron"
+            recebida = sink.capturadas[0]["data"]
+            assert "destino@test" in sink.capturadas[0]["rcpt"]
+            assert CRON_REPLY in recebida
+    finally:
+        if gateway_conn is not None:
+            gateway_conn.close()
         llm.shutdown()
 
 

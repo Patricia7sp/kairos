@@ -1802,6 +1802,73 @@ subprocesso afirmando que `argparse` não entra em `sys.modules`. A guarda de
 leveza criada na Tarefa 15 só tem sentido se alguém de fato usar o módulo
 antes dos imports pesados; este é esse uso.
 
+### D-T28.1 — E-mail entra só como canal de saída; IMAP não é portado
+
+O bloqueio "T-28 — mail/email/lembretes por canais" é costura de três eixos no
+`_reversa_sdd`: e-mail como plataforma de entrega, lembrete como agenda `once`
+e entrega por canais via ledger durável. No `data-dictionary.md`, `email`
+aparece em `_KNOWN_DELIVERY_PLATFORMS` — **plataforma de entrega**, e a spec é
+silenciosa sobre fonte de entrada. O legado tinha um adapter SMTP que narrava
+a entrega como se puxasse da caixa, e dependia de `EMAIL_HOME_ADDRESS` (env
+var não documentada).
+
+Decisões:
+
+- O Kairos implementa **o canal de saída** (`EmailAdapter` em stdlib —
+  `smtplib` + `EmailMessage`), nada de IMAP/POP3: especular protocolo que a
+  spec não define seria dívida em vez de cobertura. O blueprint `important-mail`
+  mantém texto honesto: "não há caixa de entrada acoplada; conecte uma e
+  descreva o protocolo" (agenda) em vez de fingir que puxa.
+- Sem env var: o alvo home é `address_default` na config não-secreta, e quem
+  testa/envia por padrão resolve `email:{address_default}` — a superfície
+  decide o alvo, o adapter nunca. `EMAIL_HOME_ADDRESS` não existe aqui.
+- Usuário SMTP = `from_addr`; a senha SMTP mora no cofre
+  (`smtp_password`), nunca em `messaging.json`.
+
+### D-T28.2 — `verify()` conecta de verdade e nunca envia
+
+Provar autenticação SMTP exige enviar (AUTH só responde dentro de MAIL/‌DATA).
+Então `verify()` faz conexão + EHLO reais e reporta `never sent`; a superfície
+`kairos email test` tem dois modos honestos: sem alvo, só verifica e imprime
+"nada foi enviado"; com alvo (ou alvo home), envia um teste de verdade. O teste
+de `slack/telegram/whatsapp test` segue o mesmo contrato — o trio também nunca
+finge envio.
+
+### D-T28.3 — A recusa é um efeito: 69 com diagnóstico, não lembrete mudo
+
+`kairos gateway send` e `kairos remind --deliver` são os primeiros usuários do
+**enviador pontual** (`kairos_gateway.direct_send`): a obrigação nasce no
+ledger **antes** do adapter, ACK confirma, falha transitória devolve à fila
+para o gateway reentregar, falha permanente abandona com rastro. É a mesma
+cadeia do painel (`POST /api/messaging/send`) — um único caminho de entrega,
+não dois.
+
+Plataforma pedida mas não entregável (desabilitada ou sem segredo no cofre)
+é `ExitCode.NOT_IMPLEMENTED` (69) com o motivo, não um pedido que "foi pra
+fila". Perguntar por um canal que não existe e seguir como se estivesse
+agendado seria o "reportar sucesso sem fazer nada" que o projeto recusa.
+
+### D-T28.4 — Lembrete é agenda `once` com formato do produto, não comando a mais
+
+O `data-dictionary.md` fala de entradas `"30m"`, `"2h"`, `"2026-02-03T14:00"`
+com `kind=once` + `run_at` ISO. O scheduler Kairos já executa `once`; faltava a
+superfície que traduz o texto e cria o job: `kairos remind QUANDO MENSAGEM...`.
+`parse_when` aceita `30m/2h/1d` (daqui a), ISO com fuso, ISO sem fuso e `HH:MM`
+(todos na hora local do processo), recusa cron de cinco campos ("isso é
+`kairos cron create --expr`") e recusa horário no passado — um lembrete que já
+deveria ter tocado não nasce disparado.
+
+### D-T28.5 — A prova do e-mail é o fio SMTP, não o mock
+
+O teste do `EmailAdapter` sobe um **servidor SMTP mínimo em socket puro**
+(`tests/smtp_sink.py`) em loopback: HELO/EHLO, AUTH PLAIN, MAIL FROM, RCPT TO,
+DATA, QUIT. Um `send` que devolve `ok=True` teve o corpo recebido de verdade
+pelo sink; `verify` deixa o sink sem mensagens; recusas (`RCPT → 550`,
+`AUTH → 535`) caem nos ramos temporário/permanente do `SendResult`. O harness
+do cron (`test_cron_delivery_local_harness.py`) ganhou o mesmo fio para a
+cadeia completa: turno real → obrigação no ledger → `GatewayService` real → o
+sink recebe o relatório. Nenhuma rede externa, nenhuma biblioteca mockada.
+
 ### D-MCP.11 — `kairos mcp serve` stdio puro, sem o pacote `mcp`
 
 O legado (`mcp_serve.py`) sobrescrevia o `mcp.server.MCPServer` do pacote

@@ -10,13 +10,12 @@ em `messaging.json`. O painel nunca devolve o segredo — só `configured`.
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StrictStr
 
+from kairos_cron.delivery import DeliveryTargetError
 from kairos_gateway.adapters import (
     PLATFORMS,
     build_platform_adapters,
@@ -34,9 +33,6 @@ from kairos_gateway.adapters.config import (
     save_platform_secret,
     webhook_endpoints,
 )
-from kairos_state import connect
-from kairos_state.migrations import migrate
-from kairos_state.repositories.ledger import LedgerRepository
 
 router = APIRouter(prefix="/api")
 
@@ -222,7 +218,7 @@ def test_platform(platform: str, body: TestBody, request: Request):
     adapter = adapters.get(platform)
     if adapter is None:
         raise HTTPException(400, "plataforma não está entregável: habilite-a e salve a credencial")
-    alvo = body.target or _default_test_target(platform)
+    alvo = body.target or _default_test_target(platform, _home(request))
 
     if alvo:
         from kairos_gateway.service import SendResult
@@ -241,12 +237,18 @@ def test_platform(platform: str, body: TestBody, request: Request):
     return {"ok": verified["ok"], "sent": False, "message": verified.get("message", "")}
 
 
-def _default_test_target(platform: str) -> str | None:
-    """Slack/Webhook testam com envio real; as demais esperam destino opcional."""
+def _default_test_target(platform: str, home: Path | None = None) -> str | None:
+    """Slack/Webhook testam com envio real; email envia ao alvo home quando
+    definido; as demais esperam destino opcional."""
     if platform == "slack":
         return "slack:"
     if platform == "webhook":
         return "webhook:"
+    if platform == "email" and home is not None:
+        from kairos_gateway.adapters.config import load_config
+
+        alvo_home = load_config(home).get("email", {}).get("address_default", "")
+        return f"email:{alvo_home}" if alvo_home else None
     return None
 
 
@@ -305,63 +307,14 @@ def send_message(body: SendBody, request: Request):
 
     Sucesso confirma a obrigação; falha transitória deixa `pending` para o
     gateway reentregar; falha permanente abandona. Nenhum efeito sem rastro.
+    A cadeia é a compartilhada (`kairos_gateway.direct_send`) — a mesma do
+    CLI `kairos gateway send`, sem segundo caminho de entrega.
     """
-    home = _home(request)
-    adapters = build_platform_adapters(home)
+    from kairos_gateway.direct_send import send_now
 
-    plataforma, separador, destino = body.target.partition(":")
-    if not separador or not plataforma or not destino:
-        raise HTTPException(422, "target deve ser plataforma:destino")
-    if plataforma not in _PLATFORM_NAMES and plataforma != "webhook":
-        raise HTTPException(400, "plataforma desconhecida ou não configurada")
-    adapter = adapters.get(plataforma)
-    if adapter is None:
-        raise HTTPException(400, "plataforma não está entregável: habilite-a e salve a credencial")
-
-    obligation_id = uuid.uuid4().hex
-    db = connect(home / "state.db")
     try:
-        migrate(db)
-        repo = LedgerRepository(db)
-        repo.record(obligation_id, body.target, body.text)
-        pid, started = _pid(), _started_at()
-        if not repo.claim(obligation_id, pid=pid, started_at=started):
-            return {"delivered": False, "pending": True, "obligation_id": obligation_id}
-        from kairos_gateway.service import SendResult
-
-        try:
-            resultado = adapter.send(body.target, body.text)
-        except (httpx.HTTPError, OSError, ValueError, KeyError):
-            resultado = SendResult(ok=False, retryable=True, error_kind="excecao")
-        if resultado.ok:
-            repo.confirm(obligation_id)
-            return {"delivered": True, "pending": False, "obligation_id": obligation_id}
-        if resultado.retryable:
-            repo.release(obligation_id)
-            return {
-                "delivered": False,
-                "pending": True,
-                "obligation_id": obligation_id,
-                "detail": f"falha temporária ({resultado.error_kind})",
-            }
-        repo.abandon(obligation_id)
-        return {
-            "delivered": False,
-            "pending": False,
-            "obligation_id": obligation_id,
-            "detail": f"falha permanente ({resultado.error_kind})",
-        }
-    finally:
-        db.close()
-
-
-def _pid() -> int:
-    import os
-
-    return os.getpid()
-
-
-def _started_at() -> int:
-    import time
-
-    return int(time.time())
+        return send_now(_home(request), body.target, body.text)
+    except DeliveryTargetError as exc:
+        raise HTTPException(400, str(exc) or "plataforma não está entregável") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc) or "target inválido") from exc

@@ -417,6 +417,45 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument(
             "--no-browser", action="store_true", help="Não abre o navegador automaticamente"
         )
+    elif command == "email" and subcommand in ("config", "status", "test"):
+        if subcommand == "config":
+            parser.add_argument(
+                "--enabled", choices=("true", "false"), help="ativa/desativa o canal de saída"
+            )
+            parser.add_argument("--smtp-host", help="servidor SMTP (ex.: smtp.gmail.com)")
+            parser.add_argument("--smtp-port", type=int, help="porta SMTP (padrão: 587)")
+            parser.add_argument(
+                "--tls", choices=("true", "false"), help="usa STARTTLS (padrão: true)"
+            )
+            parser.add_argument("--from-addr", help="remetente (e usuário SMTP)")
+            parser.add_argument("--address-default", help="destino padrão (alvo home)")
+            parser.add_argument("--subject-default", help="assunto padrão das mensagens")
+        elif subcommand == "test":
+            parser.add_argument(
+                "destinatario", nargs="?", help="destino do teste (padrão: alvo home)"
+            )
+    elif command == "remind":
+        parser.add_argument("quando", help="quando: '30m', '2h', '1d', '14:00' ou ISO com fuso")
+        parser.add_argument(
+            "mensagem",
+            nargs="+",
+            help="texto do lembrete (junta-se os termos com espaço)",
+        )
+        parser.add_argument(
+            "-d",
+            "--deliver",
+            nargs="?",
+            const="__email_home__",
+            metavar="TARGET",
+            help="entrega ao alvo plataforma:destino; sem valor, usa o alvo home do email",
+        )
+    elif command == "gateway" and subcommand == "send":
+        parser.add_argument("target", help="alvo plataforma:destino (ex.: email:o@x.com)")
+        parser.add_argument(
+            "texto",
+            nargs="+",
+            help="mensagem a enviar (junta-se os termos com espaço)",
+        )
     elif command == "uninstall" and subcommand is None:
         parser.add_argument(
             "--yes",

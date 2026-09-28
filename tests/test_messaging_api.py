@@ -52,6 +52,11 @@ def home(tmp_path, monkeypatch):
         lambda _home: {"telegram": _FakeAdapter()},
         raising=False,
     )
+    monkeypatch.setattr(
+        "kairos_gateway.adapters.build_platform_adapters",
+        lambda _home: {"telegram": _FakeAdapter()},
+        raising=False,
+    )
     return tmp_path
 
 
@@ -59,13 +64,18 @@ def _client():
     return TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
 
 
-def test_messaging_status_returns_four_platforms(home):
+def test_messaging_status_returns_each_platform(home):
     resp = _client().get("/api/messaging")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body["platforms"]) == 4
-    assert body["platforms"][0]["platform"] == "telegram"
-    assert "vault" in body["platforms"][0]
+    assert {p["platform"] for p in body["platforms"]} == {
+        "telegram",
+        "whatsapp",
+        "slack",
+        "webhook",
+        "email",
+    }
+    assert any("vault" in p for p in body["platforms"])
 
 
 def test_put_config_updates_file(home):
