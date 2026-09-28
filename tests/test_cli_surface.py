@@ -407,15 +407,26 @@ class ExecucaoTests(unittest.TestCase):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(argv), ExitCode.NOT_IMPLEMENTED)
 
-    def test_verify_nao_alega_sucesso(self):
+    def test_verify_agora_tem_efeito_real_e_recusa_projeto_nao_reconhecido(self):
+        """O `verify` saiu da fila de recusa 69 (D-CLI.9) e virou executor real.
+
+        Sem receita reconhecível, a recusa é honesta e aponta o manifesto —
+        nunca sucesso inventado; com uma receita fake mínima, o efeito é o
+        exit code das fases reais."""
         import contextlib
         import io
 
-        buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            code = main(["verify"])
-        self.assertEqual(code, ExitCode.NOT_IMPLEMENTED)
-        self.assertIn("executor de receitas", buf.getvalue())
+        projeto = Path(tempfile.mkdtemp())
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                code = main(["verify", "--path", str(projeto)])
+            self.assertEqual(code, ExitCode.ERROR)
+            self.assertIn("Nenhum projeto reconhecível", buf.getvalue())
+        finally:
+            import shutil
+
+            shutil.rmtree(projeto, ignore_errors=True)
 
     def test_uninstall_confirmado_remove_o_home(self):
         import contextlib

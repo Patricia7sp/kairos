@@ -1744,6 +1744,31 @@ ocupado**.
 provedor e a contagem de credenciais, nunca o valor — e há teste que planta um
 `sk-NAO-VAZAR` e afirma que ele não sai.
 
+### D-CLI.10 — `kairos verify` com efeito real e executor sem shell
+
+O `verify` saiu da recusa honesta da D-CLI.9 para virar executor real
+(receita detectada estaticamente ou por manifesto, fases bootstrap/build/test
+e smoke de readiness de porta). Decisões deliberadas do port:
+
+- **Manifesto em `.kairos/environment.json`** (não `.hermes/…`): namespace do
+  próprio projeto; um reparo de receita é decisão do usuário no checkout
+  verificado.
+- **Sem executor de shell.** A proposta inicial portava o `shell=True` do
+  legado (ferramenta de dev rodando comandos do próprio checkout). O gate de
+  segurança do repo não cede: SEC-SRC-004 classifica o shell como HIGH e o
+  teste de repositório exige zero achados severos — fail closed > portar 1:1.
+  O executor usa `shlex.split` e **recusa barulhento** comandos com
+  metacaracteres que não honra fielmente (`&&`, `;`, `|`, `<`, `>`, globs,
+  `$`, backtick, `~`; `$`/backtick também em aspas duplas), marcando a fase
+  com `unsupported` no JSON e explicando no relatório humano. Receitas com
+  encadeamento viraram uma passada por comando.
+- **Sem ledger de evidência** (`verification_evidence`): sem consumidor no
+  Kairos — a evidência é o `--json` + exit code.
+- **Sem `_merge_project_facts_commands`**: a camada de project facts não
+  existe no Kairos; o detector cobre o mesmo terreno.
+- **stdlib puro na detecção** (json/re/dataclasses/shlex), mesmo custo de
+  boot que o resto da CLI.
+
 ### D-CLI.9 — Comandos sem efeito recusam em vez de fingir
 
 Comandos que reportavam sucesso sem fazer nada eram bug proposital segundo a
