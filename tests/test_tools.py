@@ -59,6 +59,22 @@ class CadeiaDeAprovacaoTests(unittest.TestCase):
 
     # -- a propriedade central --------------------------------------------
 
+    def test_T27_backend_isolado_passa_por_cima_de_tudo_camada_1(self):
+        """A camada 1 (`CONTAINER_SKIP`) precede a hardline: em backend
+        atestado o sandbox é a fronteira — pedir aprovação por comando dentro
+        dele seria teatro. É o contrato explorado pelo `approvals test
+        --isolated-backend`."""
+        d = resolve(self.ctx("rm -rf /", isolated_backend=True, user_deny=("rm *",), yolo=False))
+        self.assertEqual(d.verdict, Verdict.ALLOW)
+        self.assertEqual(d.layer, Layer.CONTAINER_SKIP)
+        self.assertLess(Layer.CONTAINER_SKIP, Layer.HARDLINE)
+        self.assertNotIn("rm", d.reason)
+
+    def test_T27_sem_backend_isolado_hardline_permanece(self):
+        d = resolve(self.ctx("rm -rf /"))
+        self.assertEqual(d.verdict, Verdict.DENY)
+        self.assertEqual(d.layer, Layer.HARDLINE)
+
     def test_T27_deny_do_usuario_fica_ACIMA_do_bypass_de_yolo(self):
         """A trava de regressão da ordem das camadas 4 e 5.
 

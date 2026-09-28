@@ -16,8 +16,20 @@ async def _run(args):
         args.project, image=args.image, writable=args.writable, sandbox=args.sandbox
     )
     try:
+        limits = None
+        if args.config_home is not None:
+            from ..execution import load_execution_limits
+
+            limits = load_execution_limits(args.config_home)
         async with worker:
-            result = await worker.execute(args.command, timeout_ms=args.timeout_ms)
+            result = await worker.execute(args.command, timeout_ms=args.timeout_ms, limits=limits)
+            limits_report = None
+            if limits is not None:
+                limits_report = {
+                    "timeout_seconds": limits.timeout_seconds,
+                    "max_stdout_bytes": limits.max_stdout_bytes,
+                    "max_stderr_bytes": limits.max_stderr_bytes,
+                }
             report = {
                 "experimental": True,
                 "image_id": worker.policy.image_id,
@@ -26,6 +38,7 @@ async def _run(args):
                 "inner_sandbox": worker.sandbox,
                 "kernel": worker.evidence,
                 "command": result,
+                "code_execution": limits_report,
             }
     except BaseException:
         if worker._owned:
@@ -47,6 +60,12 @@ def main():
         help="habilita a sandbox interna (bwrap via codex sandbox) com perfis de runtime",
     )
     parser.add_argument("--timeout-ms", type=int, default=5000)
+    parser.add_argument(
+        "--config-home",
+        type=Path,
+        default=None,
+        help="home do Kairos com config.yaml; aplica code_execution.* aos limites da execução",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command[:1] == ["--"]:

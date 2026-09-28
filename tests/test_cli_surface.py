@@ -7,6 +7,7 @@ percorrida"*.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -549,6 +550,27 @@ class ExecucaoTests(unittest.TestCase):
     def test_a_negacao_do_usuario_vence_o_yolo_pela_LINHA_DE_COMANDO(self):
         self.assertEqual(main(["approvals", "test", "rm -rf build", "--deny", "rm *", "--yolo"]), 3)
         self.assertEqual(main(["approvals", "test", "rm -rf build", "--yolo"]), 0)
+
+    def test_isolated_backend_acende_a_CAMADA_1_mesmo_para_hardline(self):
+        self.assertEqual(main(["approvals", "test", "rm -rf /"]), 3)
+        self.assertEqual(main(["approvals", "test", "rm -rf /", "--isolated-backend"]), 0)
+
+    def test_isolated_backend_no_subprocesso_real_relata_CONTAINER_SKIP(self):
+        exe = REPO / ".venv" / "bin" / "kairos"
+        if not exe.is_file():
+            self.skipTest("venv sem o executável instalado")
+        r = subprocess.run(
+            [str(exe), "approvals", "test", "rm -rf /", "--isolated-backend", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(r.stdout)
+        self.assertEqual(payload["veredito"], "allow")
+        self.assertIn("CONTAINER_SKIP", payload["camada"])
+        self.assertIn("sandbox é a fronteira", payload["motivo"])
 
     def test_os_comandos_implementados_rodam_sem_levantar(self):
         for argv in (

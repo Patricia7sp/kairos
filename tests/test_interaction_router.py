@@ -270,3 +270,70 @@ def test_router_reports_unavailable_when_model_service_cannot_decide(tmp_path: P
         router.decide_tool_approval(approval_id="a1", session_id="s1", decision="allow")
     assert raised.value.code == "unavailable"
     asyncio.run(router.aclose())
+
+
+class FailingRuntimeClient(FakeRuntimeClient):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__()
+        self._code = code
+        self._message = message
+
+    async def submit(self, session_id, content, idempotency_key):
+        del session_id, content, idempotency_key
+        raise RuntimeErrorInfo(self._code, self._message, True)
+
+
+def _create_runtime_session(tmp_path: Path, session_id: str) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    from runtime_support import runtime_session
+
+    from kairos_state.repositories.runtime import RuntimeRepository
+
+    with connect(tmp_path / "state.db") as db:
+        initialize_schema(db)
+        RuntimeRepository(db).create_session(
+            runtime_session(project, session_id),
+            "test",
+            allowed_directories=(str(project),),
+        )
+
+
+@async_test
+async def test_runtime_indisponivel_fecha_nomeado_e_NAO_cai_para_o_model(
+    tmp_path: Path,
+) -> None:
+    router, model, _runtime = make_router(tmp_path)
+    _create_runtime_session(tmp_path, "runtime-session")
+    router.runtime_client = FailingRuntimeClient("unavailable", "host de runtime indisponível")
+    envelope = InteractionEnvelope(
+        "runtime-session", "test", "execute", idempotency_key="durable-key"
+    )
+
+    with pytest.raises(RuntimeErrorInfo) as raised:
+        await anext(router.stream(envelope))
+
+    assert raised.value.code == "unavailable"
+    assert raised.value.message == "host de runtime indisponível"
+    assert model.envelopes == []
+    await router.aclose()
+
+
+@async_test
+async def test_sem_runtime_client_fecha_nomeado_em_vez_de_attributeerror(
+    tmp_path: Path,
+) -> None:
+    model = FakeModelService()
+    router = InteractionRouter(tmp_path, model, None)
+    _create_runtime_session(tmp_path, "runtime-session")
+    envelope = InteractionEnvelope(
+        "runtime-session", "test", "execute", idempotency_key="durable-key"
+    )
+
+    with pytest.raises(RuntimeErrorInfo) as raised:
+        await anext(router.stream(envelope))
+
+    assert raised.value.code == "unavailable"
+    assert "host de runtime indisponível" in raised.value.message
+    assert model.envelopes == []
+    await router.aclose()

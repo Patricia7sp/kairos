@@ -18,6 +18,7 @@ from typing import Any
 from kairos_providers._async_cleanup import run_persistent_cleanup
 
 from ..codex_rpc import CodexRpc
+from ..execution import ExecutionLimits
 from ..supervisor import EXPECTED_CODEX_VERSION, CodexSupervisor
 from .snapshot import snapshot_project
 from .worker_policy import ENVIRONMENT, IMAGE_ENV_KEYS, LABEL, WorkerPolicy
@@ -209,26 +210,45 @@ class DockerWorker:
         if evidence != expected:
             raise ValueError("isolamento de kernel divergente; worker recusado")
 
-    async def execute(self, command: list[str], *, timeout_ms: int = 5000) -> dict[str, Any]:
-        """Run argv inside the attested boundary, without a model/API call."""
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_ms: int = 5000,
+        limits: ExecutionLimits | None = None,
+    ) -> dict[str, Any]:
+        """Run argv inside the attested boundary, without a model/API call.
+
+        `limits` (P3, `code_execution.*` do config.yaml) rege o timeout e o teto
+        de bytes do `command/exec`. Quando fornecido, `timeout_ms` e o cap
+        explícito são ignorados em favor do limite configurado; `None` preserva
+        o comportamento histórico (5000 ms / 64 KiB). O cap do fio é único —
+        aplica `max_stdout_bytes` (ver `kairos_runtime/execution.py`).
+        """
         if self._closing or self._closed or self._rpc is None or not self._owned:
             raise RuntimeError("worker não está ativo")
+        if limits is None:
+            effective_timeout_ms = timeout_ms
+            output_bytes_cap = 65536
+        else:
+            effective_timeout_ms = limits.timeout_seconds * 1000
+            output_bytes_cap = limits.max_stdout_bytes
         if (
             not command
             or any(not isinstance(arg, str) or "\0" in arg for arg in command)
-            or type(timeout_ms) is not int
-            or not 1 <= timeout_ms <= 30000
+            or type(effective_timeout_ms) is not int
+            or not 1 <= effective_timeout_ms <= 300000
         ):
             raise ValueError("comando ou timeout inválido")
         try:
-            async with asyncio.timeout(timeout_ms / 1000 + 5):
+            async with asyncio.timeout(effective_timeout_ms / 1000 + 5):
                 result = await self._rpc.call(
                     "command/exec",
                     {
                         "command": command,
                         "cwd": "/workspace",
-                        "timeoutMs": timeout_ms,
-                        "outputBytesCap": 65536,
+                        "timeoutMs": effective_timeout_ms,
+                        "outputBytesCap": output_bytes_cap,
                         "sandboxPolicy": dict(EXTERNAL_POLICY),
                     },
                 )

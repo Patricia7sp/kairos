@@ -1944,6 +1944,49 @@ deriva/leitura herdadas do legado.
 
 ---
 
+## Sandbox de execução por sessão — a fronteira verdadeira (P3)
+
+### D-RT.1 — A allowlist de 7 da spec não é gate de execução do runtime
+
+**Divergência.** `SANDBOX_ALLOWED_TOOLS` (web_search, web_extract, read_file,
+write_file, search_files, patch, terminal) em `kairos_tools/policy.py` fica
+como rastreabilidade da spec, sem consumidor de produção. O caminho de execução
+isolada por sessão (`execution_kind=agent_runtime`) roda o Codex dentro do
+container atestado; as ferramentas que o agente executa lá são as **nativas do
+Codex** (command/exec e afins), regidas pela atestação do worker — não as
+ferramentas do toolset. A allowlist real do caminho de modelo (turno comum) é
+`CHAT_TOOLS`, sob o gate de aprovação por turno (`needs_tool_approval`).
+Registrar 7 nomes como "execução no sandbox" seria reportar sucesso sem efeito.
+`sandbox_allows()` permanece exportada como consulta de intenção para
+superfícies futuras (delegated-exec), sem alegar bloqueio hoje.
+
+### D-RT.2 — Aprovação no runtime é o on-request do Codex; Camada 1 é diagnóstico
+
+A cadeia de 7 camadas (`kairos_tools/approval.py`) rege o caminho de modelo. No
+caminho de agent runtime, a aprovação é o pedido `on-request` do próprio Codex
+com reviewer humano — a fronteira é o container atestado. A Camada 1
+(`CONTAINER_SKIP`, "backend isolado: o sandbox é a fronteira") só tinha
+consumidor de teste; `kairos approvals test --isolated-backend` a torna
+alcançável como diagnóstico honesto: avaliar como o comando seria tratado
+dentro de um backend atestado. Não alega que o caminho de turno dispara a
+camada — quem roda no runtime está sujeito ao container, não à cadeia.
+
+### D-RT.3 — Limites `code_execution.*` na fronteira que o Kairos controla
+
+**Divergência.** A spec lista `code_execution.*` (timeout 300 s, 50 chamadas,
+50 KB stdout, 10 KB stderr). Implementado em `kairos_runtime/execution.py`,
+**fail-closed**: config malformado levanta — no projeto, silêncio aqui seria
+fingir que a fronteira tem limites que não tem. Aplicado a `DockerWorker.
+execute`, a execução pontual que o Kairos injeta no sandbox atestado (o
+executor experimental e avaliações offline). Os `command/exec` internos do
+Codex não passam por esse executor; são regidos pela atestação do container
+(memória/pids/cpu/no-new-privs). `max_tool_calls` (50) e `max_stderr_bytes`
+(10 KB) ficam como contrato rastreável — não há despacho de ferramentas
+contável no executor atual — e o teto único do fio (`outputBytesCap`) aplica
+`max_stdout_bytes`.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
