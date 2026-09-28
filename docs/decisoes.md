@@ -1985,6 +1985,23 @@ Codex não passam por esse executor; são regidos pela atestação do container
 contável no executor atual — e o teto único do fio (`outputBytesCap`) aplica
 `max_stdout_bytes`.
 
+### D-RT.4 — Turno comum: sandbox só para `bash`/`terminal`, sem fallback para o host
+
+**Escopo deliberado** (lote P3, Opção 2, recorte com a usuária em 2026-09-28):
+o turno comum passa a executar `bash`/`terminal` num worker Docker atestado
+(`DockerWorker`) **somente quando** `config.yaml → chat.sandboxed_bash: true`.
+Fronteira por construção: rede `none` (atestada), `Mounts == []` (política do
+`WorkerPolicy`), `/workspace` **vazio por sessão** — o `InteractionEnvelope` do
+turno comum não carrega projeto, e não há mount do host; o `bash` sandboxed
+**não vê os arquivos do host** (o acesso a arquivos continua pelos tools de
+arquivo aprovados, no host). `cwd` só dentro de `/workspace` (fora →
+`invalid_arguments`, nunca chamada no host). Um worker ativo por conversa,
+criado lazy, reutilizado entre turnos; worker falho (autofechado pelo
+`execute` em erro) é descartado. Indisponibilidade (docker ausente, falha de
+fábrica) é **erro nomeado `unavailable`** — nunca degradação para o host.
+Aprovação por turno do `bash` inalterada (`MUTATING_TOOLS`). Os demais
+`CHAT_TOOLS` (arquivos, web, git, calendar, `mcp__*`) permanecem no host.
+
 ---
 
 ## Ainda em aberto

@@ -1782,3 +1782,37 @@ registrada como rastreabilidade — D-RT.1).
 ### Merge do PR #85 — fronteira de execução por sessão (P3) (2026-09-28)
 
 Merge squash `5fe6d4f`; verificado o diff do merge sem remoções.
+
+## Entrega do lote — sandbox do turno comum (P3, Opção 2, 2026-09-28)
+
+Recorte confirmado com a usuária em 2026-09-28: **só `bash`/`terminal`** do
+turno comum dentro do worker Docker atestado por sessão; nada mais muda de
+superfície.
+
+- `kairos_integration/chat_sandbox.py`: `ChatBashSandbox` por serviço, um
+  worker atestado por conversa (lazy, reutilizado entre turnos; worker falho
+  autofechado não é reutilizado). `bash`/`terminal` (via `SANDBOX_ALIASES`) →
+  `worker.execute(["/bin/sh","-c",command], cwd, limits)`; outros nomes
+  delegam ao `registry.dispatch`, no host, inalterado.
+- Opt-in `config.yaml → chat.sandboxed_bash: true`, com parse fail-closed
+  (`parse_chat_sandbox_config`; não-bool → `ValueError`) ligado na composição
+  (`build_chat_sandbox`). `kairos config check` valida só o YAML — o gate real
+  é o parse no caminho de composição.
+- **Sem fallback para o host**: sandbox indisponível (docker ausente, falha de
+  fábrica) é erro nomeado `unavailable` (`is_error=True`); o host só executa
+  `bash` quando a chave está off.
+- `DockerWorker.execute` ganhou `cwd` (default `/workspace`, validado sem
+  escape) — aditivo; `timeout` efetivo do bash = `min(timeout_arg,
+  code_execution.timeout_seconds)`; `cwd` fora de `/workspace` →
+  `invalid_arguments`.
+- Aprovação por turno do `bash` inalterada (`MUTATING_TOOLS`); turno completo
+  com sandbox ativo e com sandbox indisponível cobertos por teste.
+- Tests: 15 novos em `tests/test_chat_sandbox.py` (contrato do despacho com
+  worker-double, ciclo de vida, gate fail-closed, indisponibilidade sem
+  fallback host) + integração Docker offline em
+  `tests/test_external_sandbox_integration.py` (bash/terminal no container
+  atestado, host intacto, worker por conversa removido após `aclose`).
+- Decisão **D-RT.4** em `docs/decisoes.md`; plano datado:
+  `docs/superpowers/plans/2026-09-28-p3-sandbox-turno-comum.md`. Validação:
+  suíte completa **2962 passed, 41 skipped, 1 deselected**, Ruff, `ruff format
+  --check`, `scripts/ci.sh --fast`.
