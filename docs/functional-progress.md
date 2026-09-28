@@ -1722,3 +1722,63 @@ T-24 só declarava o lado servidor; o protocolo e a entrada chegam agora como
 
 Próximos da fila (ordem aceita): T-28 (mail/lembretes por canais) e execução
 de código isolada por sessão (P3).
+
+## Entrega do lote — canais de e-mail e lembretes por agenda (2026-09-28)
+
+T-28 entrega o **e-mail como canal de saída** (gateway de delivery por SMTP em
+biblioteca padrão) e o **lembrete por agenda `once`** — o par calendário/cron
+que anota e, no acionamento, dispara a mensagem pelo canal com a hora local do
+destinatário.
+
+- Canal (`gmail`/`smtp`) em `kairos_gateway/adapters/email_adapter.py`:
+  obrigações idempotentes entregues por ordem (anexos não são suporte — carpem
+  o ledger com `permanent_failure`); envio por `smtplib` + certificado nativo,
+  sem lib nova; `KAIROS_SMTP_CONNECT_TIMEOUT`, `KAIROS_SMTP_OPEN_TIMEOUT` e
+  `email_password` criptografado no vault. **Teste contra sink SMTP real em
+  processo** (`tests/smtp_sink.py`).
+- Compartilhamento da cadeia: `direct_send` é o módulo único do encaminhamento
+  imediato (telegram, slack, webhook, whatsapp e agora email chamam a mesma
+  função), com rotação por `pending_outbound_messages`.
+- Lembretes: `kairos remind "mensagem" once "2026-09-30T14:00"` agendo no
+  cron; `kairos_cron/remind.py` dispara no vencimento com o `render scheduler`
+  portado e hora local (que não muda no meio da vida do agendamento — D-T28.1).
+- `kairos email test` **recusa com falha real** quando o canal está desabilitado
+  (exit não-zero), em vez de "sucesso" sem efeito, e o `manifest` do canal
+  mostra SMTP lendo `email_password` do vault.
+- Divergências D-T28.1–5 em `docs/decisoes.md`; plano datado:
+  `docs/superpowers/plans/2026-09-27-t28-email-lembretes.md`. Validação: suíte
+  completa verde, Ruff, `scripts/ci.sh --fast`.
+
+### Merge do PR #84 — canais de e-mail e lembretes por agenda (2026-09-28)
+
+Merge squash `581999b`; verificado o diff do merge sem remoções.
+
+## Entrega do lote — fronteira de execução por sessão (P3, 2026-09-28)
+
+Recorte confirmado: **só consertar** a fronteira existente do caminho de agent
+runtime, sem superfície nova (a "sandbox externa para o turno comum" fica
+registrada como rastreabilidade — D-RT.1).
+
+- `code_execution.*` com efeito real (`kairos_runtime/execution.py`):
+  `ExecutionLimits` com padrões da spec (timeout 300 s, stdout 50 KB, stderr
+  10 KB — D-RT.3), parse **fail-closed** (config malformado levanta, tetos de
+  sanidade) e `load_execution_limits(home)` lendo `config.yaml`. Aplicado a
+  `DockerWorker.execute` (substitui os 5000 ms/64 KiB hardcoded) e ao CLI
+  experimental (`--config-home`), com os limites aplicados reportados na saída.
+- Camada 1 com consumidor real: `kairos approvals test --isolated-backend`
+  aciona `CONTAINER_SKIP` (backend atestado: o sandbox é a fronteira —
+  D-RT.2). Teste em subprocesso real: `rm -rf /` → allow na Camada 1 com a
+  flag, deny sem ela.
+- Fail-closed do turno `agent_runtime` (`kairos_integration/router.py`):
+  sessão de agent runtime sem host → recusa nomeada (`unavailable`) no CLI e
+  na web, **nunca** degrada para o modo model nem explode em `AttributeError`;
+  `aclose` tolera `runtime_client=None`. Cobertura web de ponta a ponta com
+  roteador real + socket ausente.
+- Decisões D-RT.1–3 em `docs/decisoes.md`; plano datado:
+  `docs/superpowers/plans/2026-09-28-p3-fronteira-sandbox.md`. Validação:
+  suíte completa **2937 passed, 39 skipped, 1 deselected**, Ruff, `ruff format
+  --check`, `scripts/ci.sh --fast`.
+
+### Merge do PR #85 — fronteira de execução por sessão (P3) (2026-09-28)
+
+Merge squash `5fe6d4f`; verificado o diff do merge sem remoções.
