@@ -1744,6 +1744,31 @@ ocupado**.
 provedor e a contagem de credenciais, nunca o valor — e há teste que planta um
 `sk-NAO-VAZAR` e afirma que ele não sai.
 
+### D-CLI.10 — `kairos verify` com efeito real e executor sem shell
+
+O `verify` saiu da recusa honesta da D-CLI.9 para virar executor real
+(receita detectada estaticamente ou por manifesto, fases bootstrap/build/test
+e smoke de readiness de porta). Decisões deliberadas do port:
+
+- **Manifesto em `.kairos/environment.json`** (não `.hermes/…`): namespace do
+  próprio projeto; um reparo de receita é decisão do usuário no checkout
+  verificado.
+- **Sem executor de shell.** A proposta inicial portava o `shell=True` do
+  legado (ferramenta de dev rodando comandos do próprio checkout). O gate de
+  segurança do repo não cede: SEC-SRC-004 classifica o shell como HIGH e o
+  teste de repositório exige zero achados severos — fail closed > portar 1:1.
+  O executor usa `shlex.split` e **recusa barulhento** comandos com
+  metacaracteres que não honra fielmente (`&&`, `;`, `|`, `<`, `>`, globs,
+  `$`, backtick, `~`; `$`/backtick também em aspas duplas), marcando a fase
+  com `unsupported` no JSON e explicando no relatório humano. Receitas com
+  encadeamento viraram uma passada por comando.
+- **Sem ledger de evidência** (`verification_evidence`): sem consumidor no
+  Kairos — a evidência é o `--json` + exit code.
+- **Sem `_merge_project_facts_commands`**: a camada de project facts não
+  existe no Kairos; o detector cobre o mesmo terreno.
+- **stdlib puro na detecção** (json/re/dataclasses/shlex), mesmo custo de
+  boot que o resto da CLI.
+
 ### D-CLI.9 — Comandos sem efeito recusam em vez de fingir
 
 Comandos que reportavam sucesso sem fazer nada eram bug proposital segundo a
@@ -1843,6 +1868,29 @@ pelo sink; `verify` deixa o sink sem mensagens; recusas (`RCPT → 550`,
 do cron (`test_cron_delivery_local_harness.py`) ganhou o mesmo fio para a
 cadeia completa: turno real → obrigação no ledger → `GatewayService` real → o
 sink recebe o relatório. Nenhuma rede externa, nenhuma biblioteca mockada.
+
+### D-MCP.11 — `kairos mcp serve` stdio puro, sem o pacote `mcp`
+
+O legado (`mcp_serve.py`) sobrescrevia o `mcp.server.MCPServer` do pacote
+`mcp`; no Kairos o pacote é **opcional** (o cliente é stdlib e a imagem não o
+carrega). O servidor espelha o transporte do cliente (`kairos_mcp/runtime.py`):
+JSON-RPC 2.0, uma mensagem por linha UTF-8, versão `2024-11-05`. Sem o pacote,
+preservam-se a leveza da imagem e a simetria com o cliente — um servidor stdio
+é uma tarefa de transporte, não de framework.
+
+**`attachments_list` deixa de ser publicada.** No legado extraía blocos
+não-textuais das mensagens; no Kairos nada persiste anexo — o inbound não
+armazena mídia e `messages` guarda só conteúdo textual. Publicar seria reportar
+sucesso sem efeito (sempre `0 anexos`); a ferramenta vai para
+`UNPUBLISHED_TOOLS` com o motivo, mesmo padrão das `permissions_*`.
+
+**`events_poll` é pull com cursor, sem long-poll.** `events_wait` do legado não
+é portado: custaria um thread de espera no servidor stdio para um consumidor
+que não o usa. `messages_send` envia agora via adapter e grava a obrigação no
+ledger durável antes — o mesmo caminho do painel (`kairos_web/messaging_api.
+py`) — e só reporta `delivered` com a confirmação do adapter. Autenticação
+segue ausente e escrita (`AUTHENTICATION_RATIONALE`): transporte stdio,
+fronteira = OS, e transporte remoto futuro exige revisar antes de existir.
 
 ---
 

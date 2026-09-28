@@ -1637,3 +1637,88 @@ Com isso a candidata P3 "ferramentas por MCP de terceiros" está **entregue**.
 Próximo passo natural do plano: T-28 (mail/email/lembretes por canais) e a
 candidata restante do P3 (execução de código isolada por sessão) seguem na
 fila, regredindo apenas com uso real observado.
+
+## Entrega do lote — executor real do `kairos verify` (2026-09-25)
+
+O `verify` saiu da recusa honesta (D-CLI.9) para efeito real, encerrando a
+promessa daquele recorte: detecta a receita, roda fases e prova readiness.
+
+- Executor baseado na receita (`kairos_cli/verify_recipe.py`): `Recipe` com
+  `to_dict`/`from_dict` tolerante (aliases do legado), detecção por kind na
+  ordem do legado (package.json → Python django/fastapi/flask/genérico → Go →
+  Rust → Maven → Gradle → Makefile → compose), `detect_package_manager` por
+  lockfile, inferência de porta do comando de start, manifesto em
+  `.kairos/environment.json` (`load_manifest` tolerante a corrompido,
+  `save_manifest` com envelope versionado, `load_or_detect` — manifesto vence
+  a detecção).
+- Executor de fases (`kairos_cli/verify_runner.py`): `PhaseResult`/
+  `ReadinessResult`/`VerifyResult` (com `ok` e `to_dict`), tail 2000,
+  timeout por fase, stop-on-failure, poll de readiness (HTTPError = serviço de
+  pé), teardown do grupo (`start_new_session` + killpg — subprocessos do dev
+  server não ficam órfãos).
+- **Sem shell (D-CLI.10)**: o gate SEC-SRC-004 (auditoria de segurança do
+  repo, HIGH, teste de repositório exige zero achados severos) derrubou o
+  port 1:1 do `shell=True`. Execução via `shlex.split` com recusa barulhenta
+  (`UnsupportedCommand`) para metacaracteres que o executor não honra —
+  melhor recusar que executar errado (fail closed).
+- Comando (`kairos_cli/verify.py` + `main.py` + `handlers.py`): raiz
+  `--path`/cwd, não-diretório → 2, sem receita → 1 apontando o manifesto,
+  `--json` em linha única com shape `{ok, recipe, source, phases, readiness,
+  unsupported}`, `--save`, `--detect-only`, `--phase` (bootstrap/build/
+  test/start), `--timeout`, `--ready-timeout`, `--skip-start`, `--port`.
+  Relatório humano com PASS/FALHA/TIMEOUT/RECUSADO.
+- Testes em subprocesso real (sem mock de transporte): `tests/test_verify_
+  recipe.py` (detecção por kind + pacote manager, manifesto roundtrip/
+  corrompido/prioridade, aliases), `tests/test_verify_runner.py` (fases com
+  true/false/timeout, readiness com `http.server` + porta que não responde +
+  verificação de porta devolvida ao SO, recusas de metacaractere), `tests/
+  test_cli_verify.py` (projeto fake Makefile, shape do JSON, exits 0/1/2).
+  `test_verify_nao_alega_sucesso` virou `test_verify_agora_tem_efeito_real_.
+  _e_recusa_projeto_nao_reconhecido`.
+- Fora de escopo (registrado no plano): `kairos_tools` intacto (verify é CLI
+  de dev), sem storage novo, ausência de receita = recusa honesta que ensina
+  o manifesto.
+- Validação local: suíte completa verde (2.884 aprovados no recorte/suíte
+  com auditoria + 39 skips + 1 deselect + 5.806 subtests), Ruff + `ruff
+  format --check` e 132 testes do recorte verdes. Plano datado:
+  `docs/superpowers/plans/2026-09-25-verify-executor.md`, divergência
+  registrada como D-CLI.10 em `docs/decisoes.md`.
+
+Próximos da fila (ordem aceita): `kairos mcp serve`, T-28 (mail/lembretes por
+canais) e execução de código isolada por sessão (P3).
+
+## Entrega do lote — servidor MCP `kairos mcp serve` (2026-09-25)
+
+T-24 só declarava o lado servidor; o protocolo e a entrada chegam agora como
+`kairos mcp serve` — servidor **stdio puro em stdlib**, sem o pacote `mcp`
+(D-MCP.11), espelhando o que o cliente `kairos_mcp/runtime.py` já consome
+(JSON-RPC 2.0, uma mensagem por linha UTF-8, `2024-11-05`).
+
+- Contrato (`kairos_mcp/serve.py`): primeiro plano, stdin/stdout dedicados a
+  JSON-RPC apenas, encerra 0 no EOF; `initialize` → `notifications/initialized`
+  → `tools/list` → `tools/call`; requisição desconhecida `-32601`, notificação
+  descartada, JSON inválido `-32700`.
+- Ferramentas com dono real, nunca sucesso inventado: `conversations_list`
+  (sessões `hidden=0`, busca textual como a tela, filtro `platform` honesto),
+  `conversation_read` (transcrição em ordem, conteúdo truncado a 2000),
+  `session_info` (seleção de modelo/contagens/custo/tags), `conversation_search`
+  (SearchIndex FTS5→trigram→CJK→LIKE), `events_poll` (EventBridge com baseline
+  por sessão; cursor = id global de mensagem), `messages_send` (envia agora via
+  adapter e **grava a obrigação no ledger durável** — `record` → `claim` →
+  adapter → `confirm`/`release`/`abandon` — plataforma não entregável é recusa
+  honesta, não entrega fingida), `platforms_list`. **`attachments_list` não é
+  publicada** (nada persiste anexo no Kairos → publicar seria sucesso sem
+  efeito; vai a `UNPUBLISHED_TOOLS`); `events_wait` (long-poll) não portado.
+- Comando (`commands.py`/`handlers.py`): `kairos mcp serve` sai de
+  inexistente para primeiro plano; o próprio druk da sessão CLI herda a
+  superfície das conversas do Kairos.
+- Testes (`tests/test_mcp_serve.py`): processo real em subprocesso
+  (stdio de verdade, sem mock de transporte), shape do `tools/list`,
+  recusa honesta de plataforma não entregável, `initialize`/erros JSON-RPC,
+  fim limpo no EOF.
+- Divergências D-MCP.11 em `docs/decisoes.md`; plano datado:
+  `docs/superpowers/plans/2026-09-25-mcp-serve.md`. Validação local do lote:
+  suíte completa verde, Ruff + `ruff format --check`, `scripts/ci.sh --fast`.
+
+Próximos da fila (ordem aceita): T-28 (mail/lembretes por canais) e execução
+de código isolada por sessão (P3).
