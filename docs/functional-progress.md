@@ -1637,3 +1637,52 @@ Com isso a candidata P3 "ferramentas por MCP de terceiros" está **entregue**.
 Próximo passo natural do plano: T-28 (mail/email/lembretes por canais) e a
 candidata restante do P3 (execução de código isolada por sessão) seguem na
 fila, regredindo apenas com uso real observado.
+
+## Entrega do lote — executor real do `kairos verify` (2026-09-25)
+
+O `verify` saiu da recusa honesta (D-CLI.9) para efeito real, encerrando a
+promessa daquele recorte: detecta a receita, roda fases e prova readiness.
+
+- Executor baseado na receita (`kairos_cli/verify_recipe.py`): `Recipe` com
+  `to_dict`/`from_dict` tolerante (aliases do legado), detecção por kind na
+  ordem do legado (package.json → Python django/fastapi/flask/genérico → Go →
+  Rust → Maven → Gradle → Makefile → compose), `detect_package_manager` por
+  lockfile, inferência de porta do comando de start, manifesto em
+  `.kairos/environment.json` (`load_manifest` tolerante a corrompido,
+  `save_manifest` com envelope versionado, `load_or_detect` — manifesto vence
+  a detecção).
+- Executor de fases (`kairos_cli/verify_runner.py`): `PhaseResult`/
+  `ReadinessResult`/`VerifyResult` (com `ok` e `to_dict`), tail 2000,
+  timeout por fase, stop-on-failure, poll de readiness (HTTPError = serviço de
+  pé), teardown do grupo (`start_new_session` + killpg — subprocessos do dev
+  server não ficam órfãos).
+- **Sem shell (D-CLI.10)**: o gate SEC-SRC-004 (auditoria de segurança do
+  repo, HIGH, teste de repositório exige zero achados severos) derrubou o
+  port 1:1 do `shell=True`. Execução via `shlex.split` com recusa barulhenta
+  (`UnsupportedCommand`) para metacaracteres que o executor não honra —
+  melhor recusar que executar errado (fail closed).
+- Comando (`kairos_cli/verify.py` + `main.py` + `handlers.py`): raiz
+  `--path`/cwd, não-diretório → 2, sem receita → 1 apontando o manifesto,
+  `--json` em linha única com shape `{ok, recipe, source, phases, readiness,
+  unsupported}`, `--save`, `--detect-only`, `--phase` (bootstrap/build/
+  test/start), `--timeout`, `--ready-timeout`, `--skip-start`, `--port`.
+  Relatório humano com PASS/FALHA/TIMEOUT/RECUSADO.
+- Testes em subprocesso real (sem mock de transporte): `tests/test_verify_
+  recipe.py` (detecção por kind + pacote manager, manifesto roundtrip/
+  corrompido/prioridade, aliases), `tests/test_verify_runner.py` (fases com
+  true/false/timeout, readiness com `http.server` + porta que não responde +
+  verificação de porta devolvida ao SO, recusas de metacaractere), `tests/
+  test_cli_verify.py` (projeto fake Makefile, shape do JSON, exits 0/1/2).
+  `test_verify_nao_alega_sucesso` virou `test_verify_agora_tem_efeito_real_.
+  _e_recusa_projeto_nao_reconhecido`.
+- Fora de escopo (registrado no plano): `kairos_tools` intacto (verify é CLI
+  de dev), sem storage novo, ausência de receita = recusa honesta que ensina
+  o manifesto.
+- Validação local: suíte completa verde (2.884 aprovados no recorte/suíte
+  com auditoria + 39 skips + 1 deselect + 5.806 subtests), Ruff + `ruff
+  format --check` e 132 testes do recorte verdes. Plano datado:
+  `docs/superpowers/plans/2026-09-25-verify-executor.md`, divergência
+  registrada como D-CLI.10 em `docs/decisoes.md`.
+
+Próximos da fila (ordem aceita): `kairos mcp serve`, T-28 (mail/lembretes por
+canais) e execução de código isolada por sessão (P3).
