@@ -88,7 +88,7 @@ def db(tmp_path):
     connection.close()
 
 
-def make_service(db, gateway, *, event_home=None):
+def make_service(db, gateway, *, event_home=None, chat_sandbox=None):
     catalog = ModelCatalog()
     catalog.merge(
         [
@@ -112,6 +112,7 @@ def make_service(db, gateway, *, event_home=None):
         sessions=SessionRepository(db),
         messages=MessageRepository(db),
         usage=UsageRepository(db),
+        chat_sandbox=chat_sandbox,
     )
 
 
@@ -185,7 +186,7 @@ def test_disabled_search_never_executes_and_closes_unsolicited_calls(db, monkeyp
 
 def test_round_budget_stops_repeated_searches_with_durable_errors(db, monkeypatch):
     async def scenario():
-        async def search(call):
+        async def search(call, execute=None):
             return InteractionToolResult(call.id, '{"results":[]}')
 
         mock = AsyncMock(side_effect=search)
@@ -207,7 +208,7 @@ def test_cancel_search_completes_pending_tool_history_without_followup(db, monke
     async def scenario():
         started, cancelled = asyncio.Event(), asyncio.Event()
 
-        async def search(call):
+        async def search(call, execute=None):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -233,7 +234,7 @@ def test_cancel_search_completes_pending_tool_history_without_followup(db, monke
 
 def test_eight_calls_allow_final_answer_but_remove_tool_definitions(db, monkeypatch):
     async def scenario():
-        async def search(call):
+        async def search(call, execute=None):
             return InteractionToolResult(call.id, '{"results":[]}')
 
         mock = AsyncMock(side_effect=search)

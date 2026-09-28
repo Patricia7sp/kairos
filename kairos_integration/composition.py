@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from kairos_integration.admission import InteractionAdmissionGate
+from kairos_integration.chat_sandbox import ChatBashSandbox, parse_chat_sandbox_config
 from kairos_integration.interaction_contract import InteractionEnvelope, InteractionEvent
 from kairos_integration.interaction_service import InteractionService
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
@@ -117,6 +118,7 @@ class ComposedInteractionService(InteractionService):
         self.gateway = gateway
         self._turn_composition = current
         self._connection = connection
+        self._chat_sandbox = kwargs.get("chat_sandbox")
         self._close = AsyncCleanupCoordinator(task_name="kairos-interaction-service-close")
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
@@ -214,6 +216,11 @@ class ComposedInteractionService(InteractionService):
             await self.gateway.aclose()
         except BaseException as exc:  # noqa: BLE001 - tenta o banco mesmo sob cancelamento
             errors.append(exc)
+        if self._chat_sandbox is not None:
+            try:
+                await self._chat_sandbox.aclose()
+            except BaseException as exc:  # noqa: BLE001 - agrega falha de shutdown do sandbox
+                errors.append(exc)
         if usage_flushed:
             try:
                 self._connection.close()
@@ -243,6 +250,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
     connection = connect(home / "state.db")
     gateway = None
     persistence = None
+    chat_sandbox = None
     try:
         migrate(connection)
         gateway = build_provider_gateway(home)
@@ -252,6 +260,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
         profile_configs = config.get("profiles", {})
         if not isinstance(profile_configs, Mapping):
             profile_configs = {}
+        chat_sandbox = build_chat_sandbox(home, config)
         return ComposedInteractionService(
             home=home,
             connection=connection,
@@ -267,6 +276,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             usage=persistence.usage,
             persistence=persistence,
             turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
+            chat_sandbox=chat_sandbox,
         )
     except BaseException as build_error:
         cleanup_errors: list[BaseException] = []
@@ -280,6 +290,11 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
                 _run_async_cleanup(persistence.aclose)
             except BaseException as exc:  # noqa: BLE001 - agrega cleanup do worker SQLite
                 cleanup_errors.append(exc)
+        if chat_sandbox is not None:
+            try:
+                _run_async_cleanup(chat_sandbox.aclose)
+            except BaseException as exc:  # noqa: BLE001 - agrega cleanup do sandbox de chat
+                cleanup_errors.append(exc)
         try:
             connection.close()
         except Exception as exc:  # noqa: BLE001 - agrega falha ao fechar SQLite
@@ -290,6 +305,24 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
                 [build_error, *cleanup_errors],
             ) from None
         raise
+
+
+def build_chat_sandbox(home: Path, config: Mapping[str, Any]) -> ChatBashSandbox | None:
+    """Abre a sandbox do turno comum somente por opt-in fail-closed.
+
+    `chat.sandboxed_bash: true` em config.yaml. Config malformada (seção `chat`
+    não-mapeamento ou flag não-booleana) levanta `ValueError` — nunca cala para
+    o default; `code_execution.*` malformado também levanta por
+    `load_execution_limits`.
+    """
+    chat_section = config.get("chat")
+    if chat_section is None:
+        return None
+    if not isinstance(chat_section, Mapping):
+        raise ValueError("chat deve ser um mapeamento em config.yaml")
+    if not parse_chat_sandbox_config(chat_section.get("sandboxed_bash")):
+        return None
+    return ChatBashSandbox(home)
 
 
 def build_interaction_router(home: Path) -> InteractionRouter:

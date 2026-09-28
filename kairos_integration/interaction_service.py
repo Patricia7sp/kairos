@@ -60,6 +60,7 @@ from kairos_providers.gateway import (
     ProviderGateway,
 )
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_tools.registry import registry
 
 __all__ = ["InteractionService"]
 
@@ -166,6 +167,7 @@ class InteractionService:
         turn_lease_sleep: Callable[[float], Awaitable[None]] | None = None,
         admission: InteractionAdmissionGate | None = None,
         event_home: Path | None = None,
+        chat_sandbox: Any | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -180,6 +182,7 @@ class InteractionService:
         self._admission = admission
         self._event_home = event_home
         self._tool_approvals: dict[str, tuple[str, asyncio.Future[str]]] = {}
+        self._chat_sandbox = chat_sandbox
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -480,6 +483,17 @@ class InteractionService:
                 result = _tool_error(call.id, "ferramenta não habilitada para este turno")
             else:
                 executed_calls.append(call.id)
+                sandbox = self._chat_sandbox
+
+                def dispatch(
+                    name: str,
+                    arguments: dict[str, Any] | None = None,
+                    sandbox=sandbox,
+                ) -> Any:
+                    if sandbox is None:
+                        return registry.dispatch(name, arguments)
+                    return sandbox.dispatch(conversation_id, name, arguments)
+
                 if needs_tool_approval(call.name, call.arguments):
                     approval_id, future = self._open_approval(conversation_id)
                     yield InteractionEvent.tool_approval_request(approval_id, call, conversation_id)
@@ -489,12 +503,12 @@ class InteractionService:
                     if decision != "allow":
                         result = denied_tool_result(call)
                     else:
-                        result = await execute_chat_tool(call)
+                        result = await execute_chat_tool(call, execute=dispatch)
                     await self._observe_tool(
                         call, result, conversation_id=conversation_id, source=source
                     )
                 else:
-                    result = await execute_chat_tool(call)
+                    result = await execute_chat_tool(call, execute=dispatch)
                     await self._observe_tool(
                         call, result, conversation_id=conversation_id, source=source
                     )

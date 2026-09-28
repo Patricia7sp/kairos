@@ -27,7 +27,7 @@ def test_search_loop_records_model_and_search_outcomes_without_content(
                 connection, RoundGateway([tool_round("s1"), answer_round()]), event_home=tmp_path
             )
 
-            async def search(_call):
+            async def search(_call, execute=None):
                 return InteractionToolResult(
                     "s1", '{"results":[{"snippet":"private-result"}]}', is_error=search_failed
                 )

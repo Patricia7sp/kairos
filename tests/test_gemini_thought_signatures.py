@@ -89,7 +89,7 @@ def test_real_gemini_parallel_and_sequential_rounds_preserve_signatures_after_re
             return response(next_parts)
         return response([{"text": "Completed with preserved reasoning context."}])
 
-    async def search(call):
+    async def search(call, execute=None):
         return InteractionToolResult(call.id, '{"results":[]}')
 
     monkeypatch.setattr("kairos_integration.interaction_service.execute_chat_tool", search)
