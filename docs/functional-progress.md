@@ -1686,3 +1686,39 @@ promessa daquele recorte: detecta a receita, roda fases e prova readiness.
 
 Próximos da fila (ordem aceita): `kairos mcp serve`, T-28 (mail/lembretes por
 canais) e execução de código isolada por sessão (P3).
+
+## Entrega do lote — servidor MCP `kairos mcp serve` (2026-09-25)
+
+T-24 só declarava o lado servidor; o protocolo e a entrada chegam agora como
+`kairos mcp serve` — servidor **stdio puro em stdlib**, sem o pacote `mcp`
+(D-MCP.11), espelhando o que o cliente `kairos_mcp/runtime.py` já consome
+(JSON-RPC 2.0, uma mensagem por linha UTF-8, `2024-11-05`).
+
+- Contrato (`kairos_mcp/serve.py`): primeiro plano, stdin/stdout dedicados a
+  JSON-RPC apenas, encerra 0 no EOF; `initialize` → `notifications/initialized`
+  → `tools/list` → `tools/call`; requisição desconhecida `-32601`, notificação
+  descartada, JSON inválido `-32700`.
+- Ferramentas com dono real, nunca sucesso inventado: `conversations_list`
+  (sessões `hidden=0`, busca textual como a tela, filtro `platform` honesto),
+  `conversation_read` (transcrição em ordem, conteúdo truncado a 2000),
+  `session_info` (seleção de modelo/contagens/custo/tags), `conversation_search`
+  (SearchIndex FTS5→trigram→CJK→LIKE), `events_poll` (EventBridge com baseline
+  por sessão; cursor = id global de mensagem), `messages_send` (envia agora via
+  adapter e **grava a obrigação no ledger durável** — `record` → `claim` →
+  adapter → `confirm`/`release`/`abandon` — plataforma não entregável é recusa
+  honesta, não entrega fingida), `platforms_list`. **`attachments_list` não é
+  publicada** (nada persiste anexo no Kairos → publicar seria sucesso sem
+  efeito; vai a `UNPUBLISHED_TOOLS`); `events_wait` (long-poll) não portado.
+- Comando (`commands.py`/`handlers.py`): `kairos mcp serve` sai de
+  inexistente para primeiro plano; o próprio druk da sessão CLI herda a
+  superfície das conversas do Kairos.
+- Testes (`tests/test_mcp_serve.py`): processo real em subprocesso
+  (stdio de verdade, sem mock de transporte), shape do `tools/list`,
+  recusa honesta de plataforma não entregável, `initialize`/erros JSON-RPC,
+  fim limpo no EOF.
+- Divergências D-MCP.11 em `docs/decisoes.md`; plano datado:
+  `docs/superpowers/plans/2026-09-25-mcp-serve.md`. Validação local do lote:
+  suíte completa verde, Ruff + `ruff format --check`, `scripts/ci.sh --fast`.
+
+Próximos da fila (ordem aceita): T-28 (mail/lembretes por canais) e execução
+de código isolada por sessão (P3).
