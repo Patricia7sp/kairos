@@ -214,19 +214,27 @@ class DockerWorker:
         self,
         command: list[str],
         *,
+        cwd: str = "/workspace",
         timeout_ms: int = 5000,
         limits: ExecutionLimits | None = None,
     ) -> dict[str, Any]:
         """Run argv inside the attested boundary, without a model/API call.
 
-        `limits` (P3, `code_execution.*` do config.yaml) rege o timeout e o teto
-        de bytes do `command/exec`. Quando fornecido, `timeout_ms` e o cap
-        explícito são ignorados em favor do limite configurado; `None` preserva
-        o comportamento histórico (5000 ms / 64 KiB). O cap do fio é único —
-        aplica `max_stdout_bytes` (ver `kairos_runtime/execution.py`).
+        `cwd` resolve dentro do `/workspace` (sem escape); o container não
+        exporta caminhos do host. `limits` (P3, `code_execution.*` do
+        config.yaml) rege o timeout e o teto de bytes do `command/exec`. Quando
+        fornecido, `timeout_ms` e o cap explícito são ignorados em favor do
+        limite configurado; `None` preserva o comportamento histórico (5000 ms /
+        64 KiB). O cap do fio é único — aplica `max_stdout_bytes` (ver
+        `kairos_runtime/execution.py`).
         """
         if self._closing or self._closed or self._rpc is None or not self._owned:
             raise RuntimeError("worker não está ativo")
+        if not isinstance(cwd, str) or not cwd:
+            raise ValueError("cwd inválido")
+        normalized_cwd = os.path.normpath(cwd)
+        if normalized_cwd != "/workspace" and not normalized_cwd.startswith("/workspace/"):
+            raise ValueError("cwd fora do /workspace")
         if limits is None:
             effective_timeout_ms = timeout_ms
             output_bytes_cap = 65536
@@ -246,7 +254,7 @@ class DockerWorker:
                     "command/exec",
                     {
                         "command": command,
-                        "cwd": "/workspace",
+                        "cwd": normalized_cwd,
                         "timeoutMs": effective_timeout_ms,
                         "outputBytesCap": output_bytes_cap,
                         "sandboxPolicy": dict(EXTERNAL_POLICY),

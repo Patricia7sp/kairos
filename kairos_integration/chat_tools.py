@@ -19,6 +19,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from kairos_integration.chat_sandbox import ChatSandboxError
 from kairos_integration.interaction_contract import InteractionToolResult
 from kairos_providers.adapter_contract import CanonicalToolCall
 from kairos_tools import builtin
@@ -268,6 +269,10 @@ async def execute_chat_tool(
         value = dispatch(call.name, arguments)
         if asyncio.iscoroutine(value):
             value = await value
+    except ChatSandboxError as exc:
+        # Falha da fronteira atestada: sandbox indisponível ou resposta inválida
+        # — erro nomeado, nunca degradação silenciosa para o host.
+        return _error(call, exc.status)
     except TypeError:
         return _error(call, "invalid_arguments")
     except Exception:

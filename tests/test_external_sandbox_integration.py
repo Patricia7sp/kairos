@@ -207,6 +207,53 @@ def test_cancellation_removes_worker_and_detached_processes(tmp_path):
     asyncio.run(scenario())
 
 
+def test_chat_bash_sandbox_runs_in_attested_worker(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.yaml").write_text("code_execution:\n  timeout_seconds: 30\n", encoding="utf-8")
+    sentinel = tmp_path / "host-secret"
+    sentinel.write_text("synthetic host sentinel")
+
+    async def scenario():
+        from kairos_integration.chat_sandbox import ChatBashSandbox
+
+        sandbox = ChatBashSandbox(home)
+        try:
+            result = await sandbox.dispatch("conv", "terminal", {"command": "pwd && id -u"})
+        finally:
+            await sandbox.aclose()
+        assert result["success"] is True, result
+        assert "/workspace" in result["stdout"]
+        assert "10000" in result["stdout"]
+        assert str(sentinel) not in result["stdout"]
+
+    asyncio.run(scenario())
+
+
+def test_chat_bash_sandbox_workers_are_per_conversation_and_removed(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    workers = []
+
+    async def scenario():
+        from kairos_integration.chat_sandbox import ChatBashSandbox
+
+        sandbox = ChatBashSandbox(home)
+        try:
+            for conv, marker in (("a", "one"), ("b", "two")):
+                result = await sandbox.dispatch(conv, "bash", {"command": f"echo {marker}"})
+                assert result["success"] is True, result
+                assert marker in result["stdout"]
+            workers.extend(sandbox._workers.values())
+            assert len(workers) == 2
+        finally:
+            await sandbox.aclose()
+
+    asyncio.run(scenario())
+    for worker in workers:
+        assert_removed(worker)
+
+
 def test_server_timeout_removes_worker_even_when_rpc_returns_normally(tmp_path):
     async def scenario():
         worker = DockerWorker(tmp_path, image=IMAGE, writable=True)
