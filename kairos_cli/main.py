@@ -581,6 +581,11 @@ def main(argv: list[str] | None = None) -> int:
         return ExitCode.OK
 
     if not args.command:
+        if not getattr(args, "json", False):
+            from kairos_cli.shell import run_shell, should_open_shell
+
+            if should_open_shell():
+                return run_shell()
         parser.print_help()
         return ExitCode.USAGE
 

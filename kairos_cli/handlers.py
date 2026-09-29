@@ -170,8 +170,58 @@ def cmd_config(args) -> int:
             return ExitCode.ERROR
         print("config.yaml válido")
         return ExitCode.OK
+    if sub == "set":
+        return _config_set(args, caminho)
+    if sub == "edit":
+        return _config_edit(caminho)
 
     return ExitCode.NOT_IMPLEMENTED
+
+
+def _config_set(args, caminho: Path) -> int:
+    from kairos_cli.config import load_config, parse_cli_value, save_config, set_config_value
+
+    if not args.key or not args.value:
+        print("kairos: config set exige KEY e VALUE", file=sys.stderr)
+        return ExitCode.USAGE
+    valor = parse_cli_value(args.value)
+    cfg = load_config()
+    set_config_value(cfg, args.key, valor)
+    save_config(cfg)
+    _emit(
+        {
+            args.key: valor,
+            "config.yaml": str(caminho),
+        },
+        as_json=args.json,
+    )
+    return ExitCode.OK
+
+
+def _config_edit(caminho: Path) -> int:
+    from kairos_cli.config import open_in_editor
+
+    try:
+        open_in_editor(caminho, spawn=None)
+    except OSError as exc:
+        print(f"kairos: {exc}", file=sys.stderr)
+        return ExitCode.ERROR
+    print(f"config.yaml em {caminho}")
+    return ExitCode.OK
+
+
+def cmd_context(args) -> int:
+    import json as _json
+
+    from kairos_cli.context import build_context, render_context
+
+    contexto = build_context()
+    if args.json:
+        print(_json.dumps(contexto, ensure_ascii=False, indent=2, default=str))
+    else:
+        for linha in render_context(contexto):
+            print(linha)
+    return ExitCode.OK
 
 
 def cmd_tools(args) -> int:
@@ -936,6 +986,7 @@ HANDLERS = {
     "status": cmd_status,
     "doctor": cmd_doctor,
     "config": cmd_config,
+    "context": cmd_context,
     "tools": cmd_tools,
     "approvals": cmd_approvals,
     "skills": cmd_skills,

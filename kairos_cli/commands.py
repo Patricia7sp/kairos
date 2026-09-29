@@ -169,6 +169,12 @@ COMMANDS: tuple[Command, ...] = (
         unit="agents",
     ),
     _c(
+        "context",
+        "Contexto do ambiente, da sessão e do estado persistido",
+        status=Status.IMPLEMENTED,
+        unit="kairos-cli",
+    ),
+    _c(
         "cron",
         "Jobs agendados",
         _sub("list", "Lista os jobs"),
