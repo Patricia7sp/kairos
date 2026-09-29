@@ -1816,3 +1816,40 @@ superfície.
   `docs/superpowers/plans/2026-09-28-p3-sandbox-turno-comum.md`. Validação:
   suíte completa **2962 passed, 41 skipped, 1 deselected**, Ruff, `ruff format
   --check`, `scripts/ci.sh --fast`.
+
+## Entrega do lote — CLI oficial, lote 1: shell, config e contexto (2026-09-29)
+
+Recorte confirmado com a usuária em 2026-09-29 (plano
+`docs/superpowers/plans/2026-09-29-cli-oficial.md`): shell interativo +
+`config set/edit` + `kairos context` + guia de extensão + home unificado,
+**mantendo o parser argparse declarativo** (sem rewrite).
+
+- `kairos` sem comando em **TTY** abre um shell de acolhimento (`kairos_cli/
+  shell.py`): menu numerado (analisar projeto / chat interativo / contexto /
+  sair) e linha livre (comando conhecido direto; senão prompt rápido `run`).
+  Cada opção vira o argv exato de `main(...)` — sem lógica duplicada, mesma
+  árvore, mesmos handlers, mesmo core (D-PC.1). Sessão do shell:
+  `KAIROS_SHELL_SESSION` (padrão `cli`). **Fora de TTY** (pipe/CI) continua
+  ajuda + `ExitCode.USAGE`; `main([]) == 2` preservado por teste.
+- `config set KEY VALUE`: scalar YAML tipado (`true`→bool, `42`→int, texto
+  comum→str), cria nós pontilhados e preserva o resto do arquivo (tmpfile +
+  `os.replace` via `save_config`). `config edit`: `$EDITOR`/`VISUAL`, fallback
+  `vi`, sentido `spawn` injetável; erro do editor é exit 1 — recusa, não
+  silêncio.
+- `kairos context` (`kairos_cli/context.py`): leitura honesta de `state.db` —
+  total de sessões e a mais recente (id, fonte, `execution_kind`, `message_
+  count`) + contorno do ambiente (home, perfil, container, versão). Sem banco,
+  responde "nenhum turno persistido ainda" **sem criá-lo** (regra do
+  `insights`). `--json` para script.
+- `KAIROS_HOME` unificado: `config.get_config_path()` passou a usar
+  `startup_fast.resolve_kairos_home` (com `expanduser`) — era resolvido em dois
+  lugares e divergia no uso de `~`.
+- Guia de extensão `docs/guia-cli-comandos.md` (árvore declarativa → handler →
+  testes; recusa 69; "sem lógica core na CLI").
+- Decisões **D-CLI.11** (shell é guard de TTY que delega, não parser novo) e
+  **D-CLI.12** (`kairos context` é leitura honesta do estado) em
+  `docs/decisoes.md`. Comando `context` entrou em `PROPRIOS_DO_KAIROS` no
+  teste de superfície (evidência de 48 herdados preservada).
+- Testes: `tests/test_cli_shell.py` (29). Validação: suíte completa **2991
+  passed, 41 skipped, 1 deselected**, Ruff, `ruff format --check`,
+  `scripts/ci.sh --fast`.
