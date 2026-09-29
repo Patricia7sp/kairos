@@ -10,6 +10,8 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
+from kairos_cli.startup_fast import resolve_kairos_home
+
 __all__ = [
     "ConfigLayer",
     "ConfigResolver",
@@ -17,8 +19,11 @@ __all__ = [
     "apply_migrations",
     "get_config_path",
     "load_config",
+    "open_in_editor",
+    "parse_cli_value",
     "resolve_value",
     "save_config",
+    "set_config_value",
 ]
 
 
@@ -114,10 +119,11 @@ def apply_migrations(
 
 
 def get_config_path() -> Path:
-    import os
-
-    kairos_home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
-    return kairos_home / "config.yaml"
+    # Fonte única de resolução do home: `startup_fast.resolve_kairos_home`
+    # (que também faz expanduser). Antes havia um segundo cálculo aqui, à
+    # revelia do fast path — duas respostas para "onde mora o Kairos?" divergem
+    # na primeira vez que alguém usa `~` em KAIROS_HOME.
+    return Path(resolve_kairos_home()) / "config.yaml"
 
 
 def load_config() -> dict[str, Any]:
@@ -147,3 +153,54 @@ def save_config(config: dict[str, Any]) -> None:
         yaml.safe_dump(config, tf, sort_keys=False)
         tmp_name = tf.name
     os.replace(tmp_name, path)
+
+
+def parse_cli_value(raw: str) -> Any:
+    """Valor de `config set` como scalar YAML quando dá, senão string crua.
+
+    `true`, `42`, `null`, `[a, b]` viram os tipos reais; um texto comum
+    continua texto. O usuário digita o valor que veria no YAML.
+    """
+    import yaml
+
+    if not raw.strip():
+        return None
+    try:
+        valor = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return raw
+    if isinstance(valor, str):
+        return raw
+    return valor
+
+
+def set_config_value(config: dict[str, Any], dotted: str, value: Any) -> dict[str, Any]:
+    """Grava `value` na chave pontilhada, criando os nós intermediários."""
+    partes = dotted.split(".")
+    alvo: Any = config
+    for parte in partes[:-1]:
+        atual = alvo.get(parte)
+        if not isinstance(atual, dict):
+            atual = {}
+            alvo[parte] = atual
+        alvo = atual
+    alvo[partes[-1]] = value
+    return config
+
+
+def open_in_editor(path: Path | None = None, *, spawn=None, editor: str | None = None) -> None:
+    """Abre o config.yaml no `$EDITOR` (fallback `vi`).
+
+    `spawn` é injetável para teste: recebe a lista de argv e devolve o exit
+    code do editor. Falha do editor é erro — aceitar silêncio aqui esconderia
+    que o usuário não salvou nada.
+    """
+    import os
+    import shlex
+    import subprocess
+
+    comando = editor or os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
+    argv = [*shlex.split(comando), str(path or get_config_path())]
+    spawn = spawn or subprocess.call
+    if spawn(argv) != 0:
+        raise OSError(f"editor '{comando}' encerrado com erro")

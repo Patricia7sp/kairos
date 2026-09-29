@@ -1802,6 +1802,28 @@ subprocesso afirmando que `argparse` não entra em `sys.modules`. A guarda de
 leveza criada na Tarefa 15 só tem sentido se alguém de fato usar o módulo
 antes dos imports pesados; este é esse uso.
 
+### D-CLI.11 — O shell é um guard de TTY que delega, não um parser novo
+
+`kairos` sem comando em terminal abre um menu de acolhimento; fora de
+terminal (pipe, redireção, CI) continua sendo **ajuda + `ExitCode.USAGE`**
+— o comportamento de script nunca muda por causa da interatividade, e o teste
+`main([]) == USAGE` continua valendo. O shell **não reimplementa nada**: cada
+opção vira o argv exato que o usuário digitaria (`run`/`chat`/`context`),
+atravessando a mesma árvore declarativa e os mesmos handlers. A sessão do
+shell (`KAIROS_SHELL_SESSION`, padrão `cli`) é a mesma do `chat` — o turno
+executado dentro dele é o mesmo persistence story de qualquer outro.
+
+### D-CLI.12 — `kairos context` é leitura honesta do estado, não um core paralelo
+
+O comando não monta service graph nem toca providers: reporta o contorno do
+ambiente (home, perfil, container, versão) e, se `state.db` existe, o total de
+sessões e a mais recente (com a contagem de mensagens). Sem banco, responde
+"nenhum turno persistido ainda" e **não cria** o banco para soar completo —
+mesma regra do `insights`: ausência não vira zero bonito. Junto do lote, a
+resolução de `KAIROS_HOME` foi unificada numa única fonte
+(`startup_fast.resolve_kairos_home`, que faz `expanduser`); antes havia um
+segundo cálculo dentro de `config.get_config_path`, que divergia no uso de `~`.
+
 ### D-T28.1 — E-mail entra só como canal de saída; IMAP não é portado
 
 O bloqueio "T-28 — mail/email/lembretes por canais" é costura de três eixos no

@@ -26,8 +26,9 @@ REPO = Path(__file__).resolve().parent.parent
 #: Comandos que nascem no Kairos e não têm correspondente no legado.
 #: `token` existe porque o painel precisava de um caminho para a credencial
 #: que não passasse por variável de ambiente nem por log; `email` e `remind`
-#: nascem do lote de e-mail/lembretes (canal de saída + agenda única).
-PROPRIOS_DO_KAIROS = frozenset({"runtime", "token", "telegram", "email", "remind"})
+#: nascem do lote de e-mail/lembretes (canal de saída + agenda única);
+#: `context` nasce do lote da CLI oficial.
+PROPRIOS_DO_KAIROS = frozenset({"runtime", "token", "telegram", "email", "remind", "context"})
 
 
 class ArvoreTests(unittest.TestCase):
