@@ -2026,6 +2026,83 @@ Aprovação por turno do `bash` inalterada (`MUTATING_TOOLS`). Os demais
 
 ---
 
+## Plugins: o emissor de hooks (2026-10-02)
+
+### D-PLUG.1 — `provides_hooks` é a única fonte do registro
+
+O registro de callbacks sai de `plugin.yaml → provides_hooks` cruzado com as
+funções de módulo de mesmo nome em `plugin.py`. Callback implementado e **não
+declarado** não entra; callback declarado e **não implementado** não é erro — o
+plugin só não escuta aquele hook, e o inventário diz isso explicitamente. O
+caminho inverso (o plugin escrever `hooks.json`) é a D-CLI.9: arquivo que
+ninguém lê é efeito fictício, agora sem volta.
+
+### D-PLUG.2 — Este lote emite **observação**, não transformação
+
+`EMITTED_HOOKS` tem seis nomes: `on_session_start`, `on_session_end`,
+`pre_tool_call`, `post_tool_call`, `pre_llm_call`, `post_llm_call`. Os `transform_*`
+e o portão `pre_verify` ficam de fora: mudar o que o modelo ou o usuário veem é
+outra decisão, com política própria (injeção de conteúdo, cortar tool call,
+bloquear execução). O motivo está marcado 🔴 **não mapeado** na spec
+(`_reversa_sdd/plugins/design.md`) — emitir por dedução seria inventar o
+contrato. `hooks list` reporta "hooks sem emissor" em vez de listar 37 nomes
+como se funcionassem.
+
+O `post_tool_call` leva `tool` e `is_error`, **não** o corpo do resultado: ele é
+limitado a 32 KiB e já foi entregue ao modelo; copiá-lo para todo plugin em toda
+chamada é imposto de latência para um dado cujo hook certo (transformação) não
+existe ainda.
+
+### D-PLUG.3 — Callbacks são síncronos e saem do event loop
+
+`HookRegistry.invoke_hook` é síncrono por contrato, então o emissor despacha via
+`asyncio.to_thread`: um plugin lento em `pre_tool_call` degrada a thread
+auxiliar, não o loop do turno. A spec registra esse risco como aberto
+(*"um plugin lento degrada todo turno sem sinal"*); mitigado, não resolvido.
+
+### D-PLUG.4 — `plugins.disabled` é fail-closed; plugin ruim é visível
+
+`plugins.disabled` no `config.yaml` desliga sem desinstalar. Parse
+malformado (`"disabled: sim"`, lista com número, `plugins:` como lista) levanta
+`ValueError` **antes** de qualquer leitura de disco: quem escreveu aquilo
+acreditando que desligou não recebe um "nenhum plugin desabilitado" calado.
+Composição e CLI leem a regra por `disabled_from_config`, para que o
+interruptor não tenha duas gramáticas.
+
+Do outro lado, o que é do plugin não derruba o host: manifesto inválido, módulo
+que levanta, ativo sem `plugin.py` e `requires_env` ausente viram `error` /
+`missing_env` **visíveis** no inventário, e os outros plugins seguem. Colisão
+de nome entre bundled e usuário resolve por precedência (o bundled primeiro),
+não por sobrescrita silenciosa; o nome do módulo importado leva um resumo do
+caminho para que dois homônimos não se roubem o `sys.modules`.
+
+### D-PLUG.5 — A CLI lê o registro; não há `hooks.json` para governar
+
+`plugins list` mostra nome, versão, kind, estado, hooks declarados,
+registrados, env faltando e erro. `hooks list` separa os quatro números que
+antes apareciam misturados: declarados, com emissor, sem emissor, com callback
+registrado — e marca cada callback `[emite]` ou `[SEM EMISSOR]`. `hooks use`
+continua recusando com **69**: não existe arquivo que ele governaria, e o
+caminho para desligar algo é `plugins.disabled` (D-T28.3).
+
+### D-PLUG.6 — O hook não decide o desfecho do turno; quem cancela, cancela
+
+A falha de um callback de `on_session_end` (inclusive um `CancelledError`
+levantado dentro dele) vira **log**: o `turn_end` já foi emitido, e um observador
+de terceiro que chega atrasado descreve o que aconteceu — não decide o que
+acontece. Quem cancela o turno de fora continua cancelando: em
+`run_persistent_cleanup` o `outcome.cancellation` é o cancelamento de **quem
+aguarda** (o cleanup é shieldado), não a voz do plugin; engoli-lo quebraria
+`wait_for`/TaskGroup na Cancellation externa.
+
+O mesmo bloco define o `outcome` que o hook recebe, e ele distingue os três
+desfechos: `turn_end`, `turn_error` e `interrompido`. O `GeneratorExit` do
+fechamento normal do async generator **não** é falha de turno — tratá-lo como
+`interrompido` mentiria justamente para o observador que existe para telemetria,
+e o protocolo de `aclose` exige propagá-lo.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

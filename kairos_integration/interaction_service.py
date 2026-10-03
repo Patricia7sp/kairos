@@ -168,6 +168,7 @@ class InteractionService:
         admission: InteractionAdmissionGate | None = None,
         event_home: Path | None = None,
         chat_sandbox: Any | None = None,
+        hooks: Any | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -183,6 +184,7 @@ class InteractionService:
         self._event_home = event_home
         self._tool_approvals: dict[str, tuple[str, asyncio.Future[str]]] = {}
         self._chat_sandbox = chat_sandbox
+        self._hooks = hooks
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -279,14 +281,61 @@ class InteractionService:
         """Own the complete loop and close pending calls even on disconnect."""
         await self._repair_incomplete_tools(envelope.conversation_id)
         primary: BaseException | None = None
+        desfecho = "turn_end"
         try:
             async with aclosing(self._stream_tool_turn(envelope)) as stream:
                 async for event in stream:
+                    if event.kind == "turn_error":
+                        desfecho = "turn_error"
                     yield event
+        except GeneratorExit:
+            # Fechamento normal do async generator: o consumidor parou de iterar
+            # depois do `turn_end` (ou o loop do turno desligou), e o `aclose`
+            # injeta `GeneratorExit` aqui. Não é falha do turno — tratá-lo como
+            # `interrompido` mentiria no `outcome` que o observador recebe — e não
+            # pode ser engolido: o protocolo de finalização exige propagação.
+            raise
         except BaseException as exc:
             primary = exc
+            desfecho = "interrompido"
             raise
         finally:
+            # Um observador de plugin precisa do fim do turno mesmo quando ele
+            # termina em erro ou em desconexão — é nesse desfecho que a
+            # telemetria dele vale. Isolado pelo mesmo padrão de cleanup
+            # persistente do resto do arquivo: hook de terceiro não vira a causa
+            # do turno, nem substitui a falha primária.
+            hook_outcome = await run_persistent_cleanup(
+                lambda: self._plugin_hook(
+                    "on_session_end",
+                    conversation_id=envelope.conversation_id,
+                    source=envelope.source,
+                    profile=envelope.profile,
+                    outcome=desfecho,
+                ),
+                task_name="kairos-plugin-hook-session-end",
+            )
+            # D-PLUG.6: a falha do hook — inclusive um `CancelledError` levantado
+            # dentro do callback — vira log. O `turn_end` já foi emitido, e um
+            # observador de terceiro que chega atrasado descreve o que
+            # aconteceu; não decide o que acontece.
+            #
+            # `outcome.cancellation` é outra coisa e sai como sempre saiu: é o
+            # cancelamento de **quem aguarda** (`run_persistent_cleanup` shielda
+            # o cleanup e recolhe o cancelamento do waiter), não a voz do plugin.
+            # Engolir esse sim é que quebraria `wait_for`/TaskGroup para quem
+            # cancela o turno de fora.
+            if hook_outcome.error is not None:
+                logger.warning(
+                    "hook on_session_end falhou; turno preservado",
+                    exc_info=(
+                        type(hook_outcome.error),
+                        hook_outcome.error,
+                        hook_outcome.error.__traceback__,
+                    ),
+                )
+            if hook_outcome.cancellation is not None and primary is None:
+                raise hook_outcome.cancellation
             outcome = await run_persistent_cleanup(
                 lambda: self._repair_incomplete_tools(envelope.conversation_id),
                 task_name="kairos-chat-tool-history-close",
@@ -298,10 +347,32 @@ class InteractionService:
             if outcome.cancellation is not None and primary is None:
                 raise outcome.cancellation
 
+    async def _plugin_hook(self, hook: str, **payload: Any) -> None:
+        """Despacha um hook de plugin, se houver emitter; sem plugins, não é caminho.
+
+        O `Any` evita cortar o ciclo entre a camada de integração e a unit de
+        plugins no import (mesma convenção de `chat_sandbox`). Sem emitter
+        — instalação sem plugins — a chamada é um `is None` e nada mais: o
+        emitter não paga custo em request que ninguém escuta.
+        """
+        emitter = self._hooks
+        if emitter is None:
+            return
+        await emitter.emit(hook, **payload)
+
     async def _stream_tool_turn(
         self, envelope: InteractionEnvelope
     ) -> AsyncIterator[InteractionEvent]:
         snapshot, prepared, selection, request = await self._prepare_turn(envelope)
+        # Depois de `_prepare_turn`: a sessão existe quando o observador é
+        # avisado. `on_session_start` com a sessão ainda por criar seria um hook
+        # que mente sobre o estado que o callback vai ler.
+        await self._plugin_hook(
+            "on_session_start",
+            conversation_id=envelope.conversation_id,
+            source=envelope.source,
+            profile=envelope.profile,
+        )
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
         totals = TurnAccumulator()
         costs: list[InteractionCost] = []
@@ -311,6 +382,14 @@ class InteractionService:
         enabled_names = self._chat_tool_names(envelope)
         while True:
             round_started = time.monotonic()
+            await self._plugin_hook(
+                "pre_llm_call",
+                conversation_id=envelope.conversation_id,
+                provider=selection.ref.provider,
+                model=selection.ref.model,
+                source=envelope.source,
+                round_index=tool_rounds,
+            )
             async with aclosing(
                 self._stream_accountable_round(
                     envelope.conversation_id,
@@ -327,6 +406,16 @@ class InteractionService:
                 async for event in stream:
                     yield event
             error = accumulator.error
+            await self._plugin_hook(
+                "post_llm_call",
+                conversation_id=envelope.conversation_id,
+                provider=selection.ref.provider,
+                model=selection.ref.model,
+                source=envelope.source,
+                round_index=tool_rounds,
+                outcome="failed" if error is not None else "completed",
+                error_kind=error.kind.value if error is not None else None,
+            )
             cost = estimate_interaction_cost(
                 prepared.price,
                 accumulator.usage,
@@ -503,17 +592,58 @@ class InteractionService:
                     if decision != "allow":
                         result = denied_tool_result(call)
                     else:
-                        result = await execute_chat_tool(call, execute=dispatch)
+                        result = await self._run_tool_with_hooks(
+                            call, dispatch, conversation_id, source
+                        )
                     await self._observe_tool(
                         call, result, conversation_id=conversation_id, source=source
                     )
                 else:
-                    result = await execute_chat_tool(call, execute=dispatch)
+                    result = await self._run_tool_with_hooks(
+                        call, dispatch, conversation_id, source
+                    )
                     await self._observe_tool(
                         call, result, conversation_id=conversation_id, source=source
                     )
             await self._persist_tool_result(conversation_id, call, result, selection)
             yield InteractionEvent.from_tool_result(result, conversation_id)
+
+    async def _run_tool_with_hooks(
+        self,
+        call: CanonicalToolCall,
+        dispatch: Callable[..., Any],
+        conversation_id: str,
+        source: str,
+    ) -> InteractionToolResult:
+        """Executa a ferramenta avisando os plugins antes e depois.
+
+        Só este caminho emite: recusa por aprovação, ferramenta não habilitada e
+        limite de ferramentas não passam por aqui — a ferramenta **não rodou**, e
+        um observador que fosse avisado assim registraria uma execução que não
+        aconteceu.
+
+        O payload leva a identidade da chamada e os argumentos, e **não** o corpo
+        do resultado: ele é limitado a 32 KiB e já foi entregue ao modelo;
+        copiá-lo para todo plugin registrado em toda chamada é imposto de latência
+        para um dado que existe justamente no hook de transformação — que ainda
+        não tem emissor.
+        """
+        await self._plugin_hook(
+            "pre_tool_call",
+            tool=call.name,
+            arguments=call.arguments,
+            conversation_id=conversation_id,
+            source=source,
+        )
+        result = await execute_chat_tool(call, execute=dispatch)
+        await self._plugin_hook(
+            "post_tool_call",
+            tool=call.name,
+            is_error=result.is_error,
+            conversation_id=conversation_id,
+            source=source,
+        )
+        return result
 
     def _open_approval(self, conversation_id: str) -> tuple[str, asyncio.Future[str]]:
         approval_id = uuid.uuid4().hex
