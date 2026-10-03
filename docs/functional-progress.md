@@ -1853,3 +1853,48 @@ Recorte confirmado com a usuária em 2026-09-29 (plano
 - Testes: `tests/test_cli_shell.py` (29). Validação: suíte completa **2991
   passed, 41 skipped, 1 deselected**, Ruff, `ruff format --check`,
   `scripts/ci.sh --fast`.
+
+## Entrega do lote — hooks de plugin de verdade (2026-10-02)
+
+O lote escolhido (Opção A) fecha a lacuna mais irritante da spec de plugins:
+`HookRegistry`, `load_manifest` e `resolve_state` existiam testados e **sem
+nenhum consumidor no build** — um plugin podia declarar `provides_hooks` e nunca
+ser chamado.
+
+- **Descoberta e registro** (`kairos_plugins/loader.py`): `<home>/plugins/*/`
+  com `plugin.yaml` + `plugin.py`; registro cruzado com `provides_hooks`
+  (D-PLUG.1); falha suave com `error`/`missing_env` visíveis; bundled tem
+  precedência sobre o usuário; `plugins.disabled` desliga sem desinstalar
+  (D-PLUG.4). Parse de config **fail-closed**, regra única em
+  `disabled_from_config`.
+- **Emissor** (`kairos_plugins/emitter.py`): `EMITTED_HOOKS` como fonte única do
+  emissor **e** do relatório do CLI — os dois não podem divergir. Seis hooks de
+  observação; `transform_*` e `pre_verify` explicitamente fora (D-PLUG.2).
+  Callback síncrono vai para `asyncio.to_thread` (D-PLUG.3). Emitir um hook sem
+  emissor é `UnknownHook`, não no-op.
+- **Núcleo** (`kairos_integration/interaction_service.py`): o serviço aceita
+  `hooks=` e emite `on_session_start`/`on_session_end` no ciclo do turno,
+  `pre_llm_call`/`post_llm_call` por rodada do provedor e
+  `pre_tool_call`/`post_tool_call` **só na ferramenta que rodou** — recusa por
+  aprovação e limite de ferramentas não passam pelo par, porque não houve
+  execução. `build_plugin_hooks` devolve `None` sem plugin nenhum: instalação
+  sem plugins não paga nada por ter emitter no caminho.
+- **CLI**: `plugins list` e `hooks list` leem o registro real (estado por
+  plugin, hooks declarados × registrados, os quatro números de hooks);
+  `hooks use` segue em **69** dizendo o que governs (D-PLUG.5).
+- **D-PLUG.6** (recorte de 2026-10-03, opção "A" escolhida pela usuária): o hook não
+  decide o desfecho do turno — falha e até `CancelledError` de callback viram
+  log, enquanto cancelamento de quem aguarda continua cancelando. O `outcome`
+  distingue `turn_end`/`turn_error`/`interrompido`, e o `GeneratorExit` do
+  fechamento normal do async generator deixou de ser contado como
+  interrupção (bug encontrado pelo teste: todo turno normal dizia
+  "interrompido" ao plugin).
+- **Decisões**: D-PLUG.1 a D-PLUG.6 em `docs/decisoes.md`.
+- **Testes**: `tests/test_plugin_hooks.py` (36) — descoberta, falha suave,
+  precedência, parse fail-closed, emissor, ponte `<home>/plugins` → registro →
+  emissor → turno com um plugin de verdade escrevendo em disco, e os dois
+  comandos da CLI com `KAIROS_HOME` temporário, desfecho do turno e
+  cancelamento externo. Validação: suíte completa
+  **3027 passed, 41 skipped, 1 deselected**, `ruff check .`,
+  `ruff format --check .`.
+

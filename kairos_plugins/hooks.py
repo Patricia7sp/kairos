@@ -178,6 +178,15 @@ class HookRegistry:
     def registered(self, hook: str) -> list[str]:
         return [p for p, _ in self._hooks.get(hook, [])]
 
+    def hooks_with_callbacks(self) -> dict[str, list[str]]:
+        """Hook -> plugins que registram callback, só os que têm callback.
+
+        Leitura para o inventário (`hooks list`). Não devolve o callback: quem
+        precisa do que está registrado precisa do nome do plugin, e devolver a
+        função faria a CLI poder executá-la.
+        """
+        return {hook: [p for p, _ in plugins] for hook, plugins in sorted(self._hooks.items())}
+
     def invoke_hook(self, hook: str, **kwargs: Any) -> HookResult:
         """Executa **todos** os callbacks, com falhas isoladas.
 

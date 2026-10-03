@@ -335,21 +335,62 @@ def cmd_mcp(args) -> int:
 
 
 def cmd_plugins(args) -> int:
-    from kairos_plugins import VALID_HOOKS, VALID_PLUGIN_KINDS
+    from kairos_plugins import EMITTED_HOOKS, VALID_HOOKS, disabled_from_config, load_plugins
 
     if args.plugins_command == "list":
-        raiz = _home() / "plugins"
-        nomes = sorted(p.name for p in raiz.iterdir()) if raiz.is_dir() else []
-        _emit(
-            {
-                "instalados": nomes or ["nenhum"],
-                "kinds válidos": sorted(VALID_PLUGIN_KINDS),
-                "hooks disponíveis": len(VALID_HOOKS),
-            },
-            as_json=args.json,
-        )
+        from kairos_cli.config import load_config
+
+        home = _home()
+        try:
+            disabled = disabled_from_config(load_config())
+        except ValueError as exc:
+            print(f"kairos: config.yaml inválido: {exc}", file=sys.stderr)
+            return ExitCode.USAGE
+
+        plugins = load_plugins(home, disabled=disabled)
+        if args.json:
+            _emit(
+                {
+                    "home": str(home),
+                    "plugins": [_linha_de_plugin(p) for p in plugins.plugins],
+                    "hooks no registro": len(plugins.registry.hooks_with_callbacks()),
+                    "hooks com emissor": sorted(EMITTED_HOOKS),
+                    "hooks declarados no total": len(VALID_HOOKS),
+                },
+                as_json=True,
+            )
+            return ExitCode.OK
+
+        print(f"home  {home}")
+        if not plugins.plugins:
+            print("nenhum plugin em plugins/")
+        for p in plugins.plugins:
+            print(f"\n{p.name}  {p.version or '-'}  [{p.kind.value}]  {p.state.value}")
+            print(f"  declarados   {', '.join(p.declared_hooks) or '-'}")
+            print(f"  registrados  {', '.join(p.registered_hooks) or '-'}")
+            if p.missing_env:
+                print(f"  env faltando {', '.join(p.missing_env)}")
+            if p.error:
+                print(f"  erro         {p.error}")
+        hooked = plugins.registry.hooks_with_callbacks()
+        print(f"\nhooks com callback  {len(hooked)} de {len(VALID_HOOKS)} declarados")
+        print(f"hooks com emissor    {', '.join(sorted(EMITTED_HOOKS))}")
         return ExitCode.OK
     return ExitCode.NOT_IMPLEMENTED
+
+
+def _linha_de_plugin(plugin) -> dict:
+    """Um plugin no formato do `--json`: mesmo dado, sem `repr` de enum."""
+    return {
+        "nome": plugin.name,
+        "versão": plugin.version,
+        "kind": plugin.kind.value,
+        "estado": plugin.state.value,
+        "hooks declarados": list(plugin.declared_hooks),
+        "hooks registrados": list(plugin.registered_hooks),
+        "env faltando": list(plugin.missing_env),
+        **({"erro": plugin.error} if plugin.error else {}),
+    }
 
 
 def cmd_profile(args) -> int:

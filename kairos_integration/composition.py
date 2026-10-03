@@ -35,6 +35,7 @@ __all__ = [
     "ComposedInteractionService",
     "build_interaction_router",
     "build_interaction_service",
+    "build_plugin_hooks",
 ]
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
         if not isinstance(profile_configs, Mapping):
             profile_configs = {}
         chat_sandbox = build_chat_sandbox(home, config)
+        plugin_hooks = build_plugin_hooks(home, config)
         return ComposedInteractionService(
             home=home,
             connection=connection,
@@ -277,6 +279,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             persistence=persistence,
             turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
             chat_sandbox=chat_sandbox,
+            hooks=plugin_hooks,
         )
     except BaseException as build_error:
         cleanup_errors: list[BaseException] = []
@@ -323,6 +326,31 @@ def build_chat_sandbox(home: Path, config: Mapping[str, Any]) -> ChatBashSandbox
     if not parse_chat_sandbox_config(chat_section.get("sandboxed_bash")):
         return None
     return ChatBashSandbox(home)
+
+
+def build_plugin_hooks(home: Path, config: Mapping[str, Any]):
+    """Lê os plugins instalados e devolve o emissor — ou `None` se não há plugin.
+
+    `plugins.disabled` no `config.yaml` desliga um plugin sem desinstalá-lo, que é
+    o caminho para um plugin quebrado sair do caminho do turno sem apagar o
+    diretório. Parse **fail-closed**: seção `plugins` que não seja mapeamento, ou
+    `disabled` que não seja lista de nomes, levanta `ValueError` — um
+    interruptor malformado que cala para "ninguém desabilitado" seria o pior
+    desfecho possível, porque o usuário acredita que desligou.
+
+    Sem `<home>/plugins`, nada é lido, nada é importado e o retorno é `None`:
+    uma instalação sem plugins não paga nada por ter emitter no caminho do turno.
+    """
+    from kairos_plugins.emitter import HookEmitter
+    from kairos_plugins.loader import disabled_from_config, load_plugins
+
+    # O gate de config roda antes de qualquer leitura do disco: um
+    # `plugins.disabled` malformado levanta mesmo sem plugin nenhum instalado.
+    disabled = disabled_from_config(config)
+    loaded = load_plugins(home, disabled=disabled)
+    if loaded.empty:
+        return None
+    return HookEmitter(loaded.registry)
 
 
 def build_interaction_router(home: Path) -> InteractionRouter:
