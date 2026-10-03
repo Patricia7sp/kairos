@@ -40,6 +40,7 @@ def _listar(home: Path, *, as_json: bool) -> int:
     from kairos_cli.config import load_config
     from kairos_plugins import (
         EMITTED_HOOKS,
+        ENQUEUED_HOOKS,
         HOOK_FAMILIES,
         VALID_HOOKS,
         disabled_from_config,
@@ -55,10 +56,16 @@ def _listar(home: Path, *, as_json: bool) -> int:
     plugins = load_plugins(home, disabled=disabled)
     hooked = plugins.registry.hooks_with_callbacks()
 
+    # D-PLUG.7: os dois modos de despacho contam separado. "emite" (awaited) e
+    # "enfileira" (observador de stream) são contratos diferentes — fundir num
+    # número só diria que a família stream está no caminho do token, que é
+    # justamente o que ela não está.
+    disparados = EMITTED_HOOKS | ENQUEUED_HOOKS
     linhas = {
         "hooks declarados": len(VALID_HOOKS),
-        "hooks com emissor no runtime": len(EMITTED_HOOKS),
-        "hooks sem emissor": len(VALID_HOOKS) - len(EMITTED_HOOKS),
+        "hooks que o runtime emite (await)": len(EMITTED_HOOKS),
+        "hooks que o runtime enfileira (stream)": len(ENQUEUED_HOOKS),
+        "hooks sem emissor": len(VALID_HOOKS) - len(disparados),
         "hooks com callback registrado": len(hooked),
         "plugins descobertos": len(plugins.plugins),
     }
@@ -68,6 +75,8 @@ def _listar(home: Path, *, as_json: bool) -> int:
                 {
                     **linhas,
                     "emissores": sorted(EMITTED_HOOKS),
+                    "enfileirados": sorted(ENQUEUED_HOOKS),
+                    "sem_emissor": sorted(VALID_HOOKS - disparados),
                     "familias": sorted(HOOK_FAMILIES),
                     "callbacks": hooked,
                     "plugins": [
@@ -93,7 +102,12 @@ def _listar(home: Path, *, as_json: bool) -> int:
     if hooked:
         print("\ncallbacks registrados:")
         for hook, nomes in hooked.items():
-            marca = "emite" if hook in EMITTED_HOOKS else "SEM EMISSOR"
+            if hook in EMITTED_HOOKS:
+                marca = "emite"
+            elif hook in ENQUEUED_HOOKS:
+                marca = "enfileira"
+            else:
+                marca = "SEM EMISSOR"
             print(f"  {hook}  [{marca}]  <- {', '.join(nomes)}")
     else:
         print("\nnenhum callback registrado: nenhum plugin ativo em plugins/")

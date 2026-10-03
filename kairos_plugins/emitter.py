@@ -12,6 +12,11 @@ funcionassem.
 retorno de um callback não muda parâmetro, argumento, resultado nem streaming do
 turno. Os `transform_*` e o portão `pre_verify` ficam de fora — mudar o que o
 modelo ou o usuário veem é outra decisão, com política própria (D-PLUG.2).
+
+**`EMITTED_HOOKS` e `ENQUEUED_HOOKS` são disjuntos por construção, e a família
+stream só existe na segunda.** Emitir `on_stream_*` por aqui está errado por
+construção, não por convenção: awaited em cada delta segura o token. O
+despachante correto é `stream_dispatcher.StreamHookDispatcher.enqueue`.
 """
 
 from __future__ import annotations
@@ -24,11 +29,12 @@ from kairos_plugins.hooks import HookRegistry, UnknownHook
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EMITTED_HOOKS", "HookEmitter"]
+__all__ = ["EMITTED_HOOKS", "ENQUEUED_HOOKS", "HookEmitter"]
 
 
-#: Hooks que o runtime emite hoje. Fonte única para o emissor e para o relatório
-#: do CLI — os dois leem daqui, então emitter e relatório não podem divergir.
+#: Hooks que o runtime emite hoje, **por `await`**. Fonte única para o emissor e
+#: para o relatório do CLI — os dois leem daqui, então emitter e relatório não
+#: podem divergir.
 EMITTED_HOOKS: frozenset[str] = frozenset(
     {
         # Ciclo da sessão/turno.
@@ -40,6 +46,19 @@ EMITTED_HOOKS: frozenset[str] = frozenset(
         # Rodada do provedor.
         "pre_llm_call",
         "post_llm_call",
+    }
+)
+
+
+#: Hooks que o runtime **enfileira** em vez de esperar. A família stream é a
+#: única: um `await` por delta devolveria ao plugin o ritmo do stream, que é o
+#: que RF-08 proíbe. `emit` recusa estes nomes — quem os chama por engano recebe
+# `UnknownHook` em vez de degradar o stream em silêncio.
+ENQUEUED_HOOKS: frozenset[str] = frozenset(
+    {
+        "on_stream_start",
+        "on_stream_delta",
+        "on_stream_end",
     }
 )
 
@@ -78,7 +97,8 @@ class HookEmitter:
 
         Hook fora de `EMITTED_HOOKS` é **erro de programação** e levanta: emitir
         um hook que a lista diz que não tem emissor é exatamente a divergência que
-        este lote existe para tornar visível.
+        este lote existe para tornar visível. A família stream cai no mesmo
+        caminho — `on_stream_delta` por aqui seria um plugin no caminho do token.
         """
         if hook not in EMITTED_HOOKS:
             raise UnknownHook(

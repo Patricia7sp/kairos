@@ -1,7 +1,9 @@
 # Progresso funcional do Kairos
 
-Atualizado em 13/09/2026. Código publicado na `main`: PR #31, `a896c6f`.
-Este documento inclui o checkpoint de continuidade após a implantação. A conclusão integral não está declarada.
+Atualizado em 03/10/2026. Código integrado na `main`: PR #88, `69e4616`.
+Este documento reúne checkpoints de continuidade e entregas já integradas. O
+lote de hooks de stream iniciado em 03/10 permanece em desenvolvimento local,
+ainda não integrado à `main`. A conclusão integral não está declarada.
 
 ## Mandato e critérios
 
@@ -1898,3 +1900,51 @@ ser chamado.
   **3027 passed, 41 skipped, 1 deselected**, `ruff check .`,
   `ruff format --check .`.
 
+## Entrega do lote — família stream de plugin (2026-10-03)
+
+Segundo recorte da unit `plugins`, escolhido pela usuária: a família `STREAM`
+(RF-08, **Must**), que estava registrada desde o lote anterior e nunca disparada.
+`on_stream_start`, `on_stream_delta` e `on_stream_end` são **Must** da spec
+(`_reversa_sdd/plugins/requirements.md:49`): disparados assincronamente fora do
+caminho do token, com payload normalizado, observando sem transformar.
+
+- **Despachante** (`kairos_plugins/stream_dispatcher.py`): `enqueue` síncrono,
+  sem `await` e sem alocar quando ninguém escuta; fila **bounded por callback**
+  (256) com worker por callback em `asyncio.to_thread`; fila cheia descarta o
+  mais antigo, conta e loga esparso; `aclose` esvazia a fila com teto de 2 s e
+  cancela o worker que travou.
+- **Dois modos, sem sobreposição** (`kairos_plugins/emitter.py`): `ENQUEUED_HOOKS`
+  ao lado de `EMITTED_HOOKS`, disjuntos, e `emit` **recusa** a família stream com
+  `UnknownHook` — observar por `await` virou erro de programação, não
+  degradação silenciosa.
+- **Núcleo** (`kairos_integration/interaction_service.py`): `on_stream_start` na
+  abertura de cada stream do provedor (com `attempt`, que é o que distingue
+  retry de reconexão), `on_stream_delta` por delta de texto e de reasoning,
+  `on_stream_end` no fechamento com `final_text`/`finished`/`error`; dreno no
+  `finally` do turno.
+- **Entrega do desfecho antes do teardown**: o `turn_end` passou a entrar na fila
+  de eventos do produtor em vez de voltar como valor de retorno. Sem isso, o
+  dreno (e os demais cleanups) ficavam na frente do `turn_end` do consumidor e o
+  timeout de um observador travado virava atraso visível de 2 s em todo turno —
+  o oposto de "observador não segura o fim do turno". Custo: o stream fecha até
+  2 s depois do `turn_end`, e nunca antes.
+- **CLI**: `hooks list` distingue o que o runtime **emite (await)** do que ele
+  **enfileira (stream)**, com as duas contagens; `on_interim_message` segue
+  **SEM EMISSOR** — não há superfície de mensagem interina no Kairos (o legado
+  emite para o TUI), e emitir seria inventar uma.
+- **D-PLUG.7** em `docs/decisoes.md`: observar não vira intervir (o callback
+  recebe `callback(**item)`, dict novo dele — a não transformação é estrutural,
+  não uma guarda); fila cheia perde o passado, nunca o presente nem o
+  `on_stream_end`; dreno do turno com timeout; **ordem só existe dentro de um
+  hook** (workers distintos em threads distintas, sem ordem entre `start`, `delta`
+  e `end`).
+- **Fora de escopo, declarado**: transformação de stream (RF-09/RF-11),
+  `transform_api_error_classification` (RF-12) e `telemetry_schema_version`.
+- **Testes**: `tests/test_plugin_stream_hooks.py` (14) — plugin em disco
+  escrevendo anotações, critério de aceitação da spec (callback que reescreve o
+  delta não altera o texto do usuário), isolamento entre callbacks, callback
+  travado que não segura o `turn_end`, fila cheia com drop contador, payload de
+  `start`/`end` com `final_text` e `error` de provedor, retry com `attempt`, e
+  `emit` recusando a família stream. Validação: suíte completa
+  **3041 passed, 41 skipped, 1 deselected**, `ruff check .`,
+  `ruff format --check .`.

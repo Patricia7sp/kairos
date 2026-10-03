@@ -2101,6 +2101,44 @@ fechamento normal do async generator **não** é falha de turno — tratá-lo co
 `interrompido` mentiria justamente para o observador que existe para telemetria,
 e o protocolo de `aclose` exige propagá-lo.
 
+### D-PLUG.7 — A família `STREAM` observa em fila; o token não espera ninguém
+
+`on_stream_start`, `on_stream_delta` e `on_stream_end` (RF-08) saem do caminho do
+token por `enqueue`: síncrono, sem `await`, sem alocar quando não há quem escute,
+com uma fila **bounded por callback** e um worker por callback lendo em
+`asyncio.to_thread`. `HookEmitter.emit` recusa esses três com `UnknownHook` — quem
+tentasse observá-los pelo caminho awaited receberia erro de programação em vez de
+um callback de terceiro entre o token e o usuário.
+
+Quatro consequências são contrato, não acidente de implementação:
+
+- **Observar não vira intervir.** O callback recebe `callback(**item)`, e a dupla
+  asterisco entrega um dict novo, dele: reescrever `payload["delta"]` muda só a
+  cópia do plugin, e o texto do usuário já estava decidido antes do despacho.
+  Nenhum `MappingProxyType` é necessário para isso, e nenhum levantaria
+  `TypeError`: a garantia é não haver, no caminho do token, nada que o plugin
+  alcance.
+- **Fila cheia descarta o mais antigo e conta.** Quem observa perde o passado,
+  nunca o presente nem o `on_stream_end`, e nunca segura o token. O descarte é
+  logado esparso (primeiro, depois potências de dois): silencioso esconderia uma
+  telemetria furada.
+- **O dreno é do turno, com timeout.** O legado perde o que está em fila quando o
+  processo morre. Aqui `aclose` esvazia a fila no `finally` do turno, pelo mesmo
+  `run_persistent_cleanup` de D-PLUG.6, com teto de 2 s: callback que trava perde
+  o worker com log e não segura o fim do turno. Isso exigiu que o `turn_end`
+  **entre na fila de eventos antes** do teardown — do jeito anterior, o dreno
+  ficava na frente do `turn_end` do consumidor e o timeout de um observador
+  travado virava atraso visível em todo turno.
+- **Ordem só existe dentro de um hook.** Worker por (hook, plugin) significa
+  ordem na fila dele e **nenhuma ordem entre `start`, `delta` e `end`** — são
+  threads distintas. Quem precisar de ordem usa o caminho awaited dos hooks de
+  sessão; prometer ordem aqui seria um contrato que a concorrência não sustenta.
+
+`on_interim_message` fica **sem emissor** e o relatório de hooks diz isso: não há
+superfície de mensagem interina no Kairos (o legado emite para o TUI), e emitir
+seria inventar superfície. Transformação de stream (RF-09/RF-11) segue fora deste
+lote, como em D-PLUG.2.
+
 ---
 
 ## Ainda em aberto
