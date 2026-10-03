@@ -98,6 +98,20 @@ async def _finish_provider_stream(
         raise unwind from cleanup_error
 
 
+#: Quais `ProviderEvent.kind` são delta de texto e quais são de reasoning.
+#: Fonte única: o acumulador soma com elas e o observador de stream despacha com
+#: elas. Um segundo lugar decidindo "delta é o quê" é o começo de divergência
+#: entre o que o usuário leu e o que o plugin viu.
+_TEXT_DELTA_KINDS = frozenset({"text_delta", "delta"})
+_REASONING_DELTA_KINDS = frozenset({"reasoning_delta", "reasoning"})
+
+#: kind de evento -> kind de stream, no vocabulário do payload do hook.
+_STREAM_DELTA_KINDS: dict[str, str] = {
+    **{kind: "text" for kind in _TEXT_DELTA_KINDS},
+    **{kind: "reasoning" for kind in _REASONING_DELTA_KINDS},
+}
+
+
 @dataclass
 class TurnAccumulator:
     """Estado mutável de um único stream, nunca exposto às superfícies."""
@@ -111,9 +125,9 @@ class TurnAccumulator:
     error: ProviderError | None = None
 
     def accept(self, event: ProviderEvent) -> None:
-        if event.kind in {"text_delta", "delta"}:
+        if event.kind in _TEXT_DELTA_KINDS:
             self.text += event.text
-        elif event.kind in {"reasoning_delta", "reasoning"}:
+        elif event.kind in _REASONING_DELTA_KINDS:
             self.reasoning += event.reasoning
         elif event.kind == "tool_call" and event.tool_call is not None:
             self.tool_calls.append(event.tool_call)
@@ -138,7 +152,8 @@ class TurnAccumulator:
 
 @dataclass(frozen=True)
 class _StreamTerminal:
-    event: InteractionEvent | None = None
+    """Desfecho do produtor. O último evento vai pela fila, não por aqui."""
+
     error: BaseException | None = None
 
 
@@ -169,6 +184,7 @@ class InteractionService:
         event_home: Path | None = None,
         chat_sandbox: Any | None = None,
         hooks: Any | None = None,
+        stream_hooks: Any | None = None,
     ) -> None:
         self._gateway = gateway
         self._resolver = resolver
@@ -185,6 +201,10 @@ class InteractionService:
         self._tool_approvals: dict[str, tuple[str, asyncio.Future[str]]] = {}
         self._chat_sandbox = chat_sandbox
         self._hooks = hooks
+        # D-PLUG.7: a família stream é despachante, não emitter. São objetos
+        # diferentes porque o modo de despacho é diferente — um enfileira sem
+        # `await`, o outro espera o callback. `Any` pela mesma razão de `hooks`.
+        self._stream_hooks = stream_hooks
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -216,7 +236,7 @@ class InteractionService:
     async def _stream_with_owned_producer(
         self, envelope: InteractionEnvelope
     ) -> AsyncIterator[InteractionEvent]:
-        """Own the demand-paced producer until terminal delivery or explicit close."""
+        """Own the demand-paced producer until the last event or explicit close."""
         demand: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         events: asyncio.Queue[InteractionEvent] = asyncio.Queue(maxsize=1)
         producer = asyncio.create_task(
@@ -240,8 +260,6 @@ class InteractionService:
                         event_task.cancel()
                         with suppress(asyncio.CancelledError):
                             await event_task
-                if terminal.event is not None:
-                    yield terminal.event
                 if terminal.error is not None:
                     raise terminal.error
                 return
@@ -271,9 +289,15 @@ class InteractionService:
                             event = await anext(owned_stream)
                         except StopAsyncIteration:
                             return _StreamTerminal()
-                        if event.kind in {"turn_end", "turn_error"}:
-                            return _StreamTerminal(event=event)
                         await events.put(event)
+                        if event.kind in {"turn_end", "turn_error"}:
+                            # O desfecho entra na fila **antes** do teardown, e o
+                            # teardown roda ao fechar o `aclosing` abaixo. Antes
+                            # ele voltava como valor de retorno do produtor, o que
+                            # segurava o `turn_end` atrás de todo cleanup —
+                            # inclusive o dreno dos observadores, que por
+                            # contrato não pode atrasar o usuário.
+                            return _StreamTerminal()
         except Exception as exc:  # noqa: BLE001 - transporta falha pelo limite do iterador
             return _StreamTerminal(error=exc)
 
@@ -346,6 +370,19 @@ class InteractionService:
                 logger.error("falha ao fechar resultados pendentes de ferramentas")
             if outcome.cancellation is not None and primary is None:
                 raise outcome.cancellation
+            # D-PLUG.7: por último, o dreno dos observadores de stream. Cada
+            # delta foi enfileirado durante o turno e é entregue aqui — um
+            # observador de telemetria que perde o fim do turno porque o processo
+            # reiniciou não está observing. O dreno tem timeout interno: plugin
+            # que trava perde o worker com log e não segura o fim do turno.
+            drain = await run_persistent_cleanup(
+                self._drain_stream_observers,
+                task_name="kairos-stream-hook-drain",
+            )
+            if drain.error is not None:
+                logger.warning("falha ao drenar observadores de stream do turno")
+            if drain.cancellation is not None and primary is None:
+                raise drain.cancellation
 
     async def _plugin_hook(self, hook: str, **payload: Any) -> None:
         """Despacha um hook de plugin, se houver emitter; sem plugins, não é caminho.
@@ -359,6 +396,54 @@ class InteractionService:
         if emitter is None:
             return
         await emitter.emit(hook, **payload)
+
+    def _observe_stream(self, hook: str, **payload: Any) -> None:
+        """Enfileira um hook da família stream. **Síncrono, sem `await`.**
+
+        É o ponto exato do RF-08: o caminho do token chama isto e segue. Se
+        esta função esperasse o callback, um plugin lento passaria a ditar o
+        ritmo do stream de cada usuário com plugin instalado.
+        """
+        dispatcher = self._stream_hooks
+        if dispatcher is None:
+            return
+        dispatcher.enqueue(hook, **payload)
+
+    async def _drain_stream_observers(self) -> None:
+        dispatcher = self._stream_hooks
+        if dispatcher is None:
+            return
+        await dispatcher.aclose()
+
+    def _observe_stream_delta(
+        self,
+        provider_event: ProviderEvent,
+        base: Mapping[str, Any],
+        attempt: int,
+    ) -> None:
+        """Enfileira `on_stream_delta` para texto e reasoning, e só para esses.
+
+        `tool_call` e `finish` não são delta de stream: quem observa a
+        progressão do texto não quer o argumento de uma ferramenta no meio, e
+        `finish` já chega inteiro pelo `on_stream_end`. Instalação sem
+        observador sai antes do dict — o caminho do token não aloca por token.
+        """
+        kind = _STREAM_DELTA_KINDS.get(provider_event.kind)
+        if kind is None:
+            return
+        dispatcher = self._stream_hooks
+        if dispatcher is None or not dispatcher.listening("on_stream_delta"):
+            return
+        delta = provider_event.reasoning if kind == "reasoning" else provider_event.text
+        if not delta:
+            return
+        self._observe_stream(
+            "on_stream_delta",
+            **base,
+            attempt=attempt,
+            delta=delta,
+            kind=kind,
+        )
 
     async def _stream_tool_turn(
         self, envelope: InteractionEnvelope
@@ -401,6 +486,13 @@ class InteractionService:
                     costs=costs,
                     source=envelope.source,
                     round_started=round_started,
+                    stream_payload={
+                        "conversation_id": envelope.conversation_id,
+                        "provider": selection.ref.provider,
+                        "model": selection.ref.model,
+                        "source": envelope.source,
+                        "round_index": tool_rounds,
+                    },
                 )
             ) as stream:
                 async for event in stream:
@@ -740,10 +832,16 @@ class InteractionService:
         costs: list[InteractionCost],
         source: str,
         round_started: float,
+        stream_payload: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[InteractionEvent]:
         try:
             async with aclosing(
-                self._stream_provider_round(prepared, request, accumulator)
+                self._stream_provider_round(
+                    prepared,
+                    request,
+                    accumulator,
+                    stream_payload=stream_payload or {},
+                )
             ) as stream:
                 async for event in stream:
                     yield event
@@ -870,26 +968,47 @@ class InteractionService:
         prepared: PreparedProviderAdapter | _LegacyPreparedAdapter,
         request: AdapterRequest,
         accumulator: TurnAccumulator,
+        *,
+        stream_payload: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[InteractionEvent]:
+        base = dict(stream_payload or {})
         while True:
             accumulator.attempts += 1
+            attempt = accumulator.attempts
             attempt_usage: TokenUsage | None = None
             try:
                 provider_stream = prepared.create_adapter().stream(request)
                 primary: BaseException | None = None
                 try:
+                    # D-PLUG.7: por tentativa de stream, que é a unidade que o
+                    # observador enxerga — uma retentativa é outro stream, e
+                    # `attempt` é o que separa as duas na telemetria.
+                    self._observe_stream("on_stream_start", **base, attempt=attempt)
                     async for provider_event in provider_stream:
                         if provider_event.kind == "usage":
                             attempt_usage = provider_event.usage
                             continue
                         self._validate_tool_event(provider_event, accumulator)
                         accumulator.accept(provider_event)
+                        self._observe_stream_delta(provider_event, base, attempt)
                         event = InteractionEvent.from_provider(provider_event)
                         if event is not None:
                             yield event
                 except BaseException as exc:  # noqa: BLE001 - preserves primary unwind
                     primary = exc
                 finally:
+                    # Antes de fechar: `_finish_provider_stream` restaura o
+                    # sinal de unwind e relança o erro primário, e um `on_stream_end`
+                    # faltando justamente na tentativa que falhou seria o
+                    # pior lugar para perder o evento.
+                    self._observe_stream(
+                        "on_stream_end",
+                        **base,
+                        attempt=attempt,
+                        final_text=accumulator.text,
+                        finished=primary is None,
+                        error=None if primary is None else f"{type(primary).__name__}: {primary}",
+                    )
                     await _finish_provider_stream(provider_stream, primary)
             except ProviderError as exc:
                 accumulator.add_attempt_usage(attempt_usage)

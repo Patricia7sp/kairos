@@ -553,7 +553,7 @@ def test_emitted_hooks_sao_hooks_que_o_registro_aceita():
 def test_sem_plugins_nao_existe_emitter(tmp_path):
     from kairos_integration.composition import build_plugin_hooks
 
-    assert build_plugin_hooks(tmp_path, {}) is None
+    assert build_plugin_hooks(tmp_path, {}) == (None, None)
 
 
 def test_plugin_ativo_produz_emitter(tmp_path):
@@ -566,10 +566,16 @@ def test_plugin_ativo_produz_emitter(tmp_path):
         modulo="def pre_tool_call(**_):\n    return 1\n",
     )
 
-    emitter = build_plugin_hooks(tmp_path, {})
+    emitter, streams = build_plugin_hooks(tmp_path, {})
 
     assert emitter is not None
     assert emitter.enabled is True
+    # D-PLUG.7: os dois saem do mesmo registro, mesmo com plugin que só escuta
+    # `pre_tool_call` — o despachante existe para ser `None` só quando não há
+    # plugin, não quando não há observador de stream.
+    assert streams is not None
+    assert streams.enabled is True
+    assert streams.listening("on_stream_delta") is False
 
 
 def test_config_malformado_derruba_a_composicao(tmp_path):
@@ -590,9 +596,11 @@ def test_plugin_desligado_nao_produz_emitter(tmp_path):
         modulo="def pre_tool_call(**_):\n    return 1\n",
     )
 
-    emitter = build_plugin_hooks(tmp_path, {"plugins": {"disabled": ["presente"]}})
+    emitter, streams = build_plugin_hooks(tmp_path, {"plugins": {"disabled": ["presente"]}})
 
-    assert emitter is None or emitter.enabled is False
+    assert (emitter is None or emitter.enabled is False) and (
+        streams is None or streams.enabled is False
+    )
 
 
 # ---------------------------------------------------------------------------
