@@ -52,22 +52,31 @@ class SystemKeyringVault:
             values = secret.reveal()
             identifier = values.get("api_key") or values.get("token") or next(iter(values.values()))
             payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-            previous = self._client.get_password(self._service(ref), ref.credential_id)
-            self._client.set_password(self._service(ref), ref.credential_id, payload)
             entries = self._read_index()
+            original_entries = dict(entries)
+            previous = self._client.get_password(self._service(ref), ref.credential_id)
             entry = {
                 "provider": ref.provider,
                 "credential_id": ref.credential_id,
                 "auth_method": auth_method,
             }
-            entries[self._entry_key(ref)] = entry
             try:
+                self._client.set_password(self._service(ref), ref.credential_id, payload)
+                entries[self._entry_key(ref)] = entry
                 self._write_index(entries)
             except Exception:
-                if previous is None:
-                    self._client.delete_password(self._service(ref), ref.credential_id)
-                else:
-                    self._client.set_password(self._service(ref), ref.credential_id, previous)
+                try:
+                    if previous is None:
+                        if (
+                            self._client.get_password(self._service(ref), ref.credential_id)
+                            is not None
+                        ):
+                            self._client.delete_password(self._service(ref), ref.credential_id)
+                    else:
+                        self._client.set_password(self._service(ref), ref.credential_id, previous)
+                finally:
+                    if self._read_index() != original_entries:
+                        self._write_index(original_entries)
                 raise
         return CredentialMetadata(ref, auth_method, "keyring", identifier)
 

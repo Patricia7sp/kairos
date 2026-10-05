@@ -73,6 +73,15 @@ def test_cli_le_arquivo_pelo_core(install, tmp_path, capsys, command):
     assert "read_file" in capsys.readouterr().err
 
 
+def test_cli_bash_falha_real_retorna_erro(install, monkeypatch, capsys):
+    gateway = install(CanonicalToolCall("shell", "bash", json.dumps({"command": "exit 7"})))
+    with terminal_input(monkeypatch, "sim\n"):
+        assert main(["run", "--session", "cli-test", "--tools", "execute"]) != 0
+    result = next(m for m in gateway.requests[1].messages if m.role == "tool")
+    assert json.loads(result.content[0].value)["exit_code"] == 7
+    assert "falhou" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "answer,allowed", [("sim\n", True), ("não\n", False), ("\n", False), ("\x04", False)]
 )

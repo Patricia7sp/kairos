@@ -248,7 +248,9 @@ def _result(call: CanonicalToolCall, value: Any) -> InteractionToolResult:
     content = _serialize(value)
     if content is None:
         return _error(call, "output_too_large")
-    is_error = isinstance(value, dict) and isinstance(value.get("error"), str)
+    is_error = isinstance(value, dict) and (
+        isinstance(value.get("error"), str) or value.get("success") is False
+    )
     return InteractionToolResult(tool_call_id=call.id, content=content, is_error=is_error)
 
 

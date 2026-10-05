@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from kairos_domain.credentials import contains_secret_fields
 from kairos_security.credentials import factory, io
 from kairos_security.credentials.contracts import (
     CredentialMetadata,
@@ -142,6 +143,10 @@ class ProfileCredentialService:
             for entries in pool.values()
         ):
             raise VaultError("metadados de credenciais indisponíveis")
+        if contains_secret_fields(pool):
+            raise VaultError(
+                "credenciais legadas exigem kairos auth migrate antes de alterar o perfil"
+            )
         return document, pool, original
 
     def _restore_document(self, original: str | None) -> None:

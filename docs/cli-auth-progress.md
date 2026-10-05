@@ -32,7 +32,8 @@ abrupto; se a própria recuperação falhar, a operação retorna erro.
   e Web; cofre e passphrase administrada já existentes no projeto.
 - Implementação em `.worktrees/tools-mcp`, branch `feat/cli-tools-mcp`,
   sobre as alterações anteriores de tools/aprovação/MCP. Checkout original
-  preservado. Sem commit, merge ou deploy nesta entrega.
+  preservado. A branch foi reaplicada sobre a `main` para manter separado
+  o PR #89 de hooks; o PR deste recorte inclui tools/MCP e autenticação.
 
 ## Verificação
 
@@ -46,7 +47,7 @@ diretórios temporários, gateway real sem rede e keyring de teste.
 Suíte direcionada: 129 testes e 319 subtestes passaram. Ruff check/format,
 `git diff --check` e help do executável passaram.
 
-Validação final, após os ajustes de revisão (`uv run pytest -q`): 3075
+Validação anterior à preparação do PR (`uv run pytest -q`): 3075
 testes e 5840 subtestes passaram, 41 foram pulados e 1 deselecionado.
 Persistem duas falhas preexistentes de incompatibilidade do Codex:
 
@@ -61,9 +62,38 @@ por timeout consultando o Docker Hub. A repetição direta passou sem
 warnings; o teste correspondente passou na suíte final. Log do script:
 `/tmp/kairos-auth-ci.log`.
 
-Não houve build de imagem nem validação com credenciais reais. Testes de
-imagem sem os pré-requisitos foram pulados; o caminho live não foi
-habilitado. O gate de merge continua bloqueado pelas duas falhas acima.
+Nessa execução não houve build de imagem nem validação com credenciais
+reais. Testes de imagem sem os pré-requisitos foram pulados; o caminho
+live não foi habilitado.
+
+## Preparação do PR
+
+A revisão independente encontrou quatro lacunas, reproduzidas por testes
+antes das correções: bash não zero marcado como sucesso; primeiro login
+com escrita parcial no keyring antes do índice; segredo legado em outro
+provedor regravado em texto plano; migração que não reconhecia o campo
+`key` gravado pela CLI antiga. As correções normalizam `success=False`,
+recuperam o backend mesmo antes da atualização do índice, validam campos
+secretos em todo o pool e migram `key` para `api_key`, incluindo entradas
+mistas com referência e segredo. A conferência encontrou ainda colisões de
+IDs resolvidos; a migração agora verifica unicidade de referências e valida
+todos os payloads antes da primeira gravação. As regressões verificam que
+segredo, método e documento anteriores são preservados na recusa.
+
+Os 200 testes direcionados passaram. A revisão independente encerrou os
+cinco apontamentos e aprovou o código, condicionado aos gates de CI. O
+Codex 0.154.0 foi copiado do pacote
+do container para `/tmp/kairos-codex-pin.4PdtTl/package` e disponibilizado
+somente no PATH das validações. Os dois testes de compatibilidade passaram
+com essa versão, sem mudança do pin do projeto. O CI local completo está
+registrado em `/tmp/kairos-pr-local-ci.log`; sessões offline, em
+`/tmp/kairos-pr-offline-tests.log`. A rodada anterior à última correção
+passou integralmente: 3069 testes gerais, 25 de imagem e 26 de sessões
+offline. Um teste de sandbox do host foi pulado por depender de perfil
+AppArmor/seccomp instalado. A imagem real, o stub e o broker foram
+construídos; o broker informou Docker 29.7.2 e os novos módulos foram
+importados da imagem real. A validação completa é repetida sobre a árvore
+final antes do merge.
 
 ## Próximas etapas
 

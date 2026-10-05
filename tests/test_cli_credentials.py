@@ -295,3 +295,106 @@ def test_erro_de_backend_nao_expoe_material_secreto(home, monkeypatch, capsys, c
     assert code != 0
     output = capsys.readouterr()
     assert "sensitive-private-value" not in output.out + output.err
+
+
+def test_primeiro_login_reverte_keyring_sem_indice_apos_gravacao_parcial(home, monkeypatch):
+    from test_credential_vault import MemoryKeyring
+
+    from kairos_security.credentials import (
+        CredentialService,
+        EncryptedFileVault,
+        SystemKeyringVault,
+        factory,
+    )
+
+    client = MemoryKeyring()
+    service = CredentialService(
+        keyring=SystemKeyringVault(client, index_path=home / "credential-index.json"),
+        encrypted=EncryptedFileVault(home / "unused.vault"),
+    )
+    monkeypatch.setattr(factory, "build_credential_service", lambda _: service)
+    setter = client.set_password
+
+    def fail_after_store(service_name, username, payload):
+        setter(service_name, username, payload)
+        raise OSError("keyring failure after store")
+
+    monkeypatch.setattr(client, "set_password", fail_after_store)
+    assert login() != 0
+    assert client.get_password("kairos/openai", "primary") is None
+    assert service.list("openai") == []
+    assert not (home / "auth.json").exists()
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"api_key": "retained-legacy"}, {"credential_id": "primary", "key": "retained-legacy"}],
+)
+def test_login_recusa_segredo_legado_em_outro_provedor_antes_de_efeitos(home, entry):
+    original = json.dumps({"revision": 42, "credential_pool": {"groq": [entry]}})
+    (home / "auth.json").write_text(original)
+    vault = build_credential_service(home)
+    assert login() != 0
+    assert vault.list("openai") == []
+    assert (home / "auth.json").read_text() == original
+
+
+@pytest.mark.parametrize(
+    "entry,credential_id",
+    [
+        ({"key": "legacy-cli-private"}, "legacy-1"),
+        ({"credential_id": "primary", "key": "legacy-cli-private"}, "primary"),
+    ],
+)
+def test_migra_formato_do_login_antigo_e_permite_novo_login(home, entry, credential_id):
+    (home / "auth.json").write_text(json.dumps({"credential_pool": {"openai": [entry]}}))
+    assert main(["auth", "migrate", "--confirm-remove-plaintext"]) == 0
+    assert "legacy-cli-private" not in (home / "auth.json").read_text()
+    assert build_credential_service(home).get(CredentialRef("openai", credential_id)).reveal() == {
+        "api_key": "legacy-cli-private"
+    }
+    assert login() == 0
+
+
+@pytest.mark.parametrize(
+    "entries,credential_id",
+    [
+        (
+            [
+                {"credential_id": "primary", "key": "first"},
+                {"credential_id": "primary", "key": "second"},
+            ],
+            "primary",
+        ),
+        ([{"key": "first"}, {"credential_id": "legacy-1", "key": "second"}], "legacy-1"),
+        ([{"credential_id": "legacy-2", "auth_method": "api_key"}, {"key": "new"}], "legacy-2"),
+    ],
+)
+def test_migracao_recusa_colisao_antes_de_alterar_cofre(home, entries, credential_id):
+    ref = CredentialRef("openai", credential_id)
+    vault = build_credential_service(home)
+    vault.put(ref, CredentialSecret({"api_key": "retained-private"}), auth_method="retained-method")
+    original = json.dumps({"revision": 18, "credential_pool": {"openai": entries}})
+    (home / "auth.json").write_text(original)
+    assert main(["auth", "migrate", "--confirm-remove-plaintext"]) != 0
+    assert (home / "auth.json").read_text() == original
+    vault = build_credential_service(home)
+    assert vault.get(ref).reveal() == {"api_key": "retained-private"}
+    assert vault.list("openai")[0].auth_method == "retained-method"
+
+
+def test_migracao_valida_payloads_antes_da_primeira_gravacao(home):
+    ref = CredentialRef("openai", "legacy-1")
+    vault = build_credential_service(home)
+    vault.put(ref, CredentialSecret({"api_key": "retained-private"}))
+    original = json.dumps(
+        {
+            "credential_pool": {
+                "openai": [{"key": "first"}, {"key": "conflict-a", "api_key": "conflict-b"}]
+            }
+        }
+    )
+    (home / "auth.json").write_text(original)
+    assert main(["auth", "migrate", "--confirm-remove-plaintext"]) != 0
+    assert (home / "auth.json").read_text() == original
+    assert build_credential_service(home).get(ref).reveal() == {"api_key": "retained-private"}

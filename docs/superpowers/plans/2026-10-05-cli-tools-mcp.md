@@ -63,7 +63,7 @@ Ruling: escopo inicial opt-in com `--tools` e recusa em JSON/pipe — preserva o
 
 Ruling: worktree em `.worktrees/tools-mcp` — o validador MCP existente rejeita `/c` até em caminhos de arquivo; renomear o diretório evita misturar essa correção com a entrega. O registro Git da worktree foi reparado após bloqueio parcial do sandbox.
 
-Revisão final: leitura própria em passagem separada, sem ferramenta de subagente disponível. A revisão cobre paridade, omissão por indisponibilidade, mudanças entre rodadas, efeitos em arquivos e protocolo de saída. Revisão independente permanece recomendada antes de merge.
+Revisão inicial: leitura própria em passagem separada, sem ferramenta de subagente disponível naquela etapa. A revisão cobre paridade, omissão por indisponibilidade, mudanças entre rodadas, efeitos em arquivos e protocolo de saída.
 
 Diagnóstico durante a validação geral: `test_unavailable_sandbox_never_falls_back_to_host` criava um `pytest.MonkeyPatch` sem restaurá-lo. Reprodução isolada junto dos novos testes: quatro falhas por executor contaminado. Corrigido usando a fixture `monkeypatch`, sem alterar o comportamento de produção. Os 88 testes direcionados, incluindo sandbox, passaram depois da correção.
 
@@ -74,3 +74,10 @@ Limites da verificação: `--fast` não executou imagem/integração Docker; `ru
 Recorte subsequente de autenticação CLI/Web implementado e verificado:
 [registro e limites](../../cli-auth-progress.md). Restrição de workspace
 continua pendente.
+
+Preparação do PR autorizada pelo usuário: branch reaplicada sobre a `main`,
+preservando separado o PR #89. Revisão independente posterior encerrou cinco
+apontamentos com regressões reais: erro de bash, primeira escrita parcial
+no keyring, proteção contra segredos em todo o pool, migração do formato
+`key` e colisões de referências. Registro de testes e limites no documento
+de autenticação acima. Squash-merge condicionado ao CI local e remoto verde.

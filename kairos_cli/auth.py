@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 #: Reexportado do domínio (Tarefa 02) para manter uma definição só.
-from kairos_domain.credentials import PLACEHOLDER_SECRETS, has_usable_secret
+from kairos_domain.credentials import PLACEHOLDER_SECRETS, contains_secret_fields, has_usable_secret
 
 
 class LockBusy(RuntimeError):
@@ -122,7 +122,7 @@ class AuthStore:
         o sintoma aparece como falha de autenticação — não como arquivo
         corrompido.
         """
-        if self.vault is not None and _contains_secret(self.profile):
+        if self.vault is not None and contains_secret_fields(self.profile):
             raise ValueError("segredo não pode ser persistido no auth.json com cofre configurado")
         from kairos_security.credentials.io import (
             credential_file_lock,
@@ -138,16 +138,6 @@ class AuthStore:
                 path,
                 json.dumps(document, ensure_ascii=False, indent=2),
             )
-
-
-def _contains_secret(value: Any) -> bool:
-    if isinstance(value, dict):
-        if {str(key).lower() for key in value} & {"api_key", "token", "secret", "password"}:
-            return True
-        return any(_contains_secret(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_secret(item) for item in value)
-    return False
 
 
 @dataclass
