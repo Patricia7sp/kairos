@@ -95,6 +95,23 @@ construídos; o broker informou Docker 29.7.2 e os novos módulos foram
 importados da imagem real. A validação completa é repetida sobre a árvore
 final antes do merge.
 
+## Integração do recorte
+
+O recorte está no [PR #90](https://github.com/Patricia7sp/kairos/pull/90),
+contra `main`; o PR #89 permanece separado. A revisão independente aprovou
+as correções dos cinco apontamentos.
+
+A rodada local final de `scripts/ci.sh`, com Codex 0.154.0, passou por
+completo: 3073 testes gerais, 5840 subtestes, lint, shellcheck, lock,
+recall, TypeScript e testes dos três frontends; imagem real construída e
+25 testes de imagem com 25 subtestes passando. Nos testes gerais, 16
+foram pulados e 26 deselecionados (imagem executada separadamente e live
+não habilitado). As sessões Docker offline tiveram 26 testes passando e
+um skip por exigir perfil AppArmor/seccomp do host. O pacote de CLI e
+autenticação foi importado da imagem real. Merge condicionado aos nove
+jobs de verificação remotos verdes; o deploy é pós-merge, conforme o guia
+do projeto.
+
 ## Próximas etapas
 
 Restrição de workspace, autorização para automações sem terminal,
