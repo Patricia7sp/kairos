@@ -16,6 +16,12 @@ Na SPA, abra **Provedores**, informe a chave e use **Testar conexão**. A chave
 vai direto ao keyring ou ao cofre criptografado, o campo é limpo após o envio e
 as APIs nunca devolvem o segredo nem um fragmento dele.
 
+No terminal, `kairos login --provider openai` solicita a chave em um prompt
+oculto e usa o mesmo serviço de persistência da SPA. `kairos logout --provider
+openai` remove todas as credenciais locais desse provedor; sem `--provider`,
+remove as do perfil ativo. O cofre deve estar acessível nesse processo; veja
+[as condições de autenticação na CLI](guia-cli-comandos.md#credenciais-de-provedores).
+
 O cartão separa o estado da credencial do estado da conexão. **Credencial
 configurada** confirma somente que o cofre recebeu a chave; **Conexão não
 testada**, **Conexão verificada** e **Falha na conexão** registram o resultado

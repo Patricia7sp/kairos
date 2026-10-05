@@ -259,17 +259,16 @@ def test_common_turn_approved_bash_runs_in_sandbox(db, tmp_path):
     assert len(results) == 1 and not results[0].is_error
 
 
-def test_unavailable_sandbox_never_falls_back_to_host(db, tmp_path):
+def test_unavailable_sandbox_never_falls_back_to_host(db, tmp_path, monkeypatch):
     async def failing_factory(_project):
         raise RuntimeError("sem docker")
 
-    monkeypatch_host = pytest.MonkeyPatch()
-    monkeypatch_host.setattr(
+    monkeypatch.setattr(
         "kairos_integration.chat_sandbox.registry.dispatch",
         lambda *a, **k: pytest.fail("host dispatch não pode ser o plano B"),
         raising=False,
     )
-    monkeypatch_host.setattr(
+    monkeypatch.setattr(
         "kairos_integration.interaction_service.registry.dispatch",
         lambda *a, **k: pytest.fail("host dispatch não pode ser o plano B"),
         raising=False,

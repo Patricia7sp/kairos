@@ -251,6 +251,11 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="habilita busca web no Chat; consultas são enviadas ao DuckDuckGo",
         )
         parser.add_argument(
+            "--tools",
+            action="store_true",
+            help="habilita ferramentas do Chat; mutações exigem aprovação no terminal",
+        )
+        parser.add_argument(
             "--experiences",
             action=argparse.BooleanOptionalAction,
             default=True,
@@ -373,7 +378,9 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("--data", help="Dados JSON do agente a importar")
     elif command == "login" and subcommand is None:
         parser.add_argument("--provider", required=True, help="Identificador do provedor")
-        parser.add_argument("--api-key", required=True, help="Chave de API do provedor")
+        parser.add_argument(
+            "--api-key", help="Chave de API do provedor (padrão: prompt oculto no terminal)"
+        )
     elif command == "logout" and subcommand is None:
         parser.add_argument("--provider", help="Provedor a desconectar (padrão: todos)")
     elif command == "prompt-size" and subcommand == "set":
