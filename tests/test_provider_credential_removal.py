@@ -117,6 +117,7 @@ def test_replacement_preserves_other_credentials_and_document_fields(credentials
         "/api/providers/openai/credentials", json={"secret": "replacement-private"}
     )
     assert response.status_code == 200
+    before["active_credentials"] = {"openai": {"credential_id": "primary", "backend": "encrypted"}}
     assert json.loads((home / "auth.json").read_text()) == before
     assert "replacement-private" not in (home / "auth.json").read_text()
 
@@ -150,6 +151,7 @@ def test_simultaneous_delete_and_save_share_the_same_transaction_lock(credential
             release.set()
         assert deletion.result(timeout=5).status_code == 200
         assert replacement.result(timeout=5).status_code == 200
+    before["active_credentials"] = {"openai": {"credential_id": "primary", "backend": "encrypted"}}
     assert json.loads((home / "auth.json").read_text()) == before
     assert build_credential_service(home).get(CredentialRef("openai", "primary")).reveal() == {
         "api_key": "new-private"

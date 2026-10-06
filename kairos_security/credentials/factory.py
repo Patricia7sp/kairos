@@ -65,7 +65,9 @@ def build_credential_service(home: Path) -> CredentialService:
         client = keyring.get_keyring()
     keyring_vault = SystemKeyringVault(client, index_path=home / "credential-index.json")
     encrypted = EncryptedFileVault(home / "credentials.vault")
-    service = CredentialService(keyring=keyring_vault, encrypted=encrypted)
+    service = CredentialService(
+        keyring=keyring_vault, encrypted=encrypted, auth_path=home / "auth.json"
+    )
     if not keyring_vault.available and (passphrase := read_managed_passphrase()):
         if encrypted.path.exists():
             service.unlock(passphrase)

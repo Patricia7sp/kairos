@@ -22,6 +22,34 @@ class ReadOnlyCredentialError(VaultError):
     """A origem da credencial não permite alteração pelo perfil."""
 
 
+def active_credential_selections(
+    document: object, *, backend: str | None = None, provider: str | None = None
+) -> dict[str, dict[str, str]]:
+    if not isinstance(document, dict):
+        raise VaultError("auth.json deve ser um objeto")
+    selected = document.get("active_credentials", {})
+    if not isinstance(selected, dict) or any(
+        not isinstance(provider, str)
+        or not provider.strip()
+        or not isinstance(selection, dict)
+        or set(selection) != {"credential_id", "backend"}
+        or not isinstance(selection["credential_id"], str)
+        or not selection["credential_id"].strip()
+        or selection["backend"] not in ("keyring", "encrypted")
+        for provider, selection in selected.items()
+    ):
+        raise VaultError("seleção de credenciais inválida; faça novo login")
+    if backend is not None and any(
+        selection["backend"] != backend
+        for selected_provider, selection in selected.items()
+        if provider is None or selected_provider == provider
+    ):
+        raise VaultError(
+            "Cofre da credencial ativa indisponível; restaure o backend ou faça novo login."
+        )
+    return selected
+
+
 class ProfileCredentialService:
     def __init__(self, home: Path) -> None:
         self.home = Path(home)
@@ -59,6 +87,10 @@ class ProfileCredentialService:
                         if entry.get("credential_id") != ref.credential_id
                     ),
                 ]
+                document.setdefault("active_credentials", {})[provider] = {
+                    "credential_id": ref.credential_id,
+                    "backend": "keyring" if saved.origin == "keyring" else "encrypted",
+                }
                 self._write(document)
             except Exception:
                 try:
@@ -89,6 +121,8 @@ class ProfileCredentialService:
             document, pool, original = self._document()
             vault = factory.build_credential_service(self.home)
             self._writable(vault)
+            backend = "keyring" if vault.state == VaultState.KEYRING else "encrypted"
+            active_credential_selections(document, backend=backend, provider=provider)
             metadata = [
                 item
                 for item in vault.list(provider)
@@ -101,7 +135,7 @@ class ProfileCredentialService:
                     "Credencial externa é somente leitura; remova-a na origem."
                 )
             previous = [(item, vault.get(item.ref)) for item in metadata]
-            original_pool = json.dumps(pool)
+            original_document = json.dumps(document)
             if primary_only:
                 remaining = [
                     entry
@@ -114,14 +148,16 @@ class ProfileCredentialService:
                     pool.pop(provider, None)
             elif provider is None:
                 pool.clear()
+                document.pop("active_credentials", None)
             else:
                 pool.pop(provider, None)
+                active_credential_selections(document).pop(provider, None)
             removed = []
             try:
                 for item, secret in previous:
                     removed.append((item, secret))
                     vault.delete(item.ref)
-                if json.dumps(pool) != original_pool:
+                if json.dumps(document) != original_document:
                     self._write(document)
             except Exception:
                 try:
@@ -137,6 +173,7 @@ class ProfileCredentialService:
         document = json.loads(original) if original is not None else {}
         if not isinstance(document, dict):
             raise VaultError("auth.json deve ser um objeto")
+        active_credential_selections(document)
         pool = document.setdefault("credential_pool", {})
         if not isinstance(pool, dict) or any(
             not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries)

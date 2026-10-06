@@ -74,6 +74,7 @@ def test_logout_remove_segredos_do_provedor_preservando_outros(home):
     assert vault.list("openai") == []
     assert vault.get(CredentialRef("groq", "primary"))
     document["credential_pool"].pop("openai")
+    document["active_credentials"].pop("openai")
     assert json.loads(path.read_text()) == document
 
 
