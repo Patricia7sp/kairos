@@ -26,7 +26,9 @@ from kairos_integration.turn_ownership import SQLiteAsyncTurnLeaseBackend
 from kairos_providers import ModelSelectionContext, ModelSelectionResolver, ProviderModelRef
 from kairos_providers._async_cleanup import AsyncCleanupCoordinator, run_persistent_cleanup
 from kairos_providers.composition import build_provider_gateway
+from kairos_providers.gateway import CredentialSelectionRequiredError
 from kairos_providers.selection import ModelSelectionUnavailableError
+from kairos_security.credentials import VaultError
 from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories import MessageRepository, SessionRepository
@@ -148,6 +150,24 @@ class ComposedInteractionService(InteractionService):
                         yield event
             finally:
                 self._turn_composition.reset(token)
+        except CredentialSelectionRequiredError as exc:
+            primary = exc
+            yield InteractionEvent(
+                kind="turn_error",
+                conversation_id=envelope.conversation_id,
+                error=str(exc),
+                error_kind="auth",
+                retryable=False,
+            )
+        except VaultError as exc:
+            primary = exc
+            yield InteractionEvent(
+                kind="turn_error",
+                conversation_id=envelope.conversation_id,
+                error="Credencial ativa indisponível; verifique o cofre ou faça novo login.",
+                error_kind="auth",
+                retryable=False,
+            )
         except BaseException as exc:
             primary = exc
             raise

@@ -298,6 +298,7 @@ kairos_web/ui/styles/components.css
 kairos_web/ui/styles/tokens.css
 kairos_web/ui/styles/views.css
 tests/test_acp.py
+tests/test_active_credentials.py
 tests/test_adapter_json_payload.py
 tests/test_agent.py
 tests/test_anthropic_messages_adapter.py

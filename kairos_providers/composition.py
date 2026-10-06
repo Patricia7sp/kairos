@@ -94,6 +94,15 @@ class _LazyCredentialService:
     def get(self, ref: Any) -> Any:
         return self._get().get(ref)
 
+    def active_ref(self, provider: str) -> Any:
+        selector = getattr(self._get(), "active_ref", None)
+        return selector(provider) if selector is not None else None
+
+    def selection_transaction(self):
+        from kairos_security.credentials.io import credential_file_lock
+
+        return credential_file_lock(self._home / "auth.json")
+
     def _get(self) -> Any:
         if self._service is None:
             self._service = build_credential_service(self._home)

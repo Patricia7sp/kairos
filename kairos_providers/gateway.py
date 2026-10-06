@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -19,7 +20,23 @@ from kairos_providers.contracts import (
     ProviderModelRef,
 )
 from kairos_providers.provider_registry import ProviderAdapterRegistry
-from kairos_security.credentials import CredentialRef, CredentialService, VaultError
+from kairos_security.credentials import (
+    CredentialMetadata,
+    CredentialNotFoundError,
+    CredentialRef,
+    CredentialService,
+    VaultError,
+)
+
+
+class CredentialSelectionRequiredError(VaultError):
+    """Várias contas legadas não constituem uma seleção de conta."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Há várias credenciais sem seleção ativa; selecione uma credencial "
+            "ou faça novo login para definir primary."
+        )
 
 
 @dataclass(frozen=True)
@@ -128,22 +145,12 @@ class ProviderGateway:
         descriptor = self.registry.describe(ref.provider)
         credential_id: str | None = None
         auth_method = descriptor.auth_methods[0] if descriptor.auth_methods else "local"
-        if descriptor.auth_methods:
-            credentials = self._credentials.list(ref.provider)
-            if credentials:
-                metadata = credentials[0]
-                credential_ref = metadata.ref
-                if not isinstance(credential_ref, CredentialRef):
-                    raise TypeError("referência de credencial inválida")
-                credential_id = credential_ref.credential_id
-                candidate_method = getattr(metadata, "auth_method", None)
-                if isinstance(candidate_method, str) and candidate_method:
-                    auth_method = candidate_method
-                kwargs = self._credentials.get(credential_ref).reveal()
-            else:
-                kwargs = {}
-        else:
-            kwargs = {}
+        metadata, kwargs = self._resolve_credential(ref.provider)
+        if metadata is not None:
+            credential_id = metadata.ref.credential_id
+            candidate_method = getattr(metadata, "auth_method", None)
+            if isinstance(candidate_method, str) and candidate_method:
+                auth_method = candidate_method
         kwargs["model"] = ref.model
 
         try:
@@ -211,6 +218,14 @@ class ProviderGateway:
         if credential_values is None:
             try:
                 credential_values = self._credential_values(provider)
+            except CredentialSelectionRequiredError as exc:
+                return ConnectionStatus(
+                    False,
+                    provider,
+                    str(exc),
+                    auth_method=descriptor.auth_methods[0],
+                    state="unavailable",
+                )
             except VaultError:
                 credential_values = {}
         has_credentials = bool(credential_values)
@@ -277,13 +292,46 @@ class ProviderGateway:
         return self.registry.create(provider, **kwargs)
 
     def _credential_values(self, provider: str) -> dict[str, Any]:
+        return self._resolve_credential(provider)[1]
+
+    def _resolve_credential(
+        self, provider: str
+    ) -> tuple[CredentialMetadata | None, dict[str, Any]]:
+        if not self.registry.describe(provider).auth_methods:
+            return None, {}
+        transaction = getattr(self._credentials, "selection_transaction", nullcontext)
+        with transaction():
+            metadata = self._active_credential(provider)
+            values = self._credentials.get(metadata.ref).reveal() if metadata is not None else {}
+            return metadata, values
+
+    def _active_credential(self, provider: str) -> CredentialMetadata | None:
+        """Primary é a seleção persistida pelo login; uma única legada é compatível."""
+        if not self.registry.describe(provider).auth_methods:
+            return None
         credentials = self._credentials.list(provider)
+        for metadata in credentials:
+            if not isinstance(metadata.ref, CredentialRef) or metadata.ref.provider != provider:
+                raise VaultError("referência de credencial inválida para o provedor")
+        active_ref = getattr(self._credentials, "active_ref", None)
+        selected = active_ref(provider) if active_ref is not None else None
+        if selected is not None:
+            if not isinstance(selected, CredentialRef) or selected.provider != provider:
+                raise VaultError("seleção de credencial inválida para o provedor")
+            metadata = next((item for item in credentials if item.ref == selected), None)
+            if metadata is None:
+                raise CredentialNotFoundError(
+                    "Credencial ativa indisponível; faça novo login para selecionar uma conta."
+                )
+            return metadata
+        primary = [item for item in credentials if item.ref.credential_id == "primary"]
+        if len(primary) == 1:
+            return primary[0]
+        if primary or len(credentials) > 1:
+            raise CredentialSelectionRequiredError()
         if not credentials:
-            return {}
-        ref = credentials[0].ref
-        if not isinstance(ref, CredentialRef):
-            raise TypeError("referência de credencial inválida")
-        return self._credentials.get(ref).reveal()
+            return None
+        return next(iter(credentials))
 
     def _load_cached(self, provider: str) -> ProviderCatalogResult:
         snapshot = self._snapshots.load(provider)

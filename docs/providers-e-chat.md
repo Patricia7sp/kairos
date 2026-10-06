@@ -22,6 +22,16 @@ openai` remove todas as credenciais locais desse provedor; sem `--provider`,
 remove as do perfil ativo. O cofre deve estar acessível nesse processo; veja
 [as condições de autenticação na CLI](guia-cli-comandos.md#credenciais-de-provedores).
 
+Login e substituição pela SPA selecionam `primary` para as próximas requisições
+do provedor, sem apagar as credenciais anteriores. A seleção é persistida no
+perfil junto ao backend do cofre e vale para geração, descoberta e teste de
+conexão. Se o backend mudar, o Kairos recusa a conta de outro cofre e pede
+restauração do backend ou novo login explícito. Cada turno fixa a
+credencial durante suas tentativas; falha de autenticação ou indisponibilidade
+da conta ativa exige intervenção, sem troca automática para uma conta antiga.
+Em perfis anteriores sem seleção explícita, `primary` tem precedência. Sem ela,
+uma única credencial legada é aceita; várias exigem seleção ou novo login.
+
 O cartão separa o estado da credencial do estado da conexão. **Credencial
 configurada** confirma somente que o cofre recebeu a chave; **Conexão não
 testada**, **Conexão verificada** e **Falha na conexão** registram o resultado
