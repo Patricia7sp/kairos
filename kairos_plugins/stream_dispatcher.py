@@ -9,8 +9,8 @@ imutáveis, e observa sem transformar. Um `await` por delta devolveria ao plugin
 o controle do ritmo do stream.
 
 O caminho do token aqui é `enqueue`: **síncrono, sem `await`, sem alocar quando
-ninguém escuta.** O callback roda em `asyncio.to_thread` a partir de um worker
-por (hook, plugin), lendo de uma fila bounded própria. Três consequências que são
+ninguém escuta.** O callback roda em uma thread daemon exclusiva por
+(turno, hook, plugin), lendo de uma fila bounded própria. Três consequências que são
 o contrato, não acidente de implementação:
 
 1. **Observação não vira intervenção.** O runtime nunca entrega o objeto do
@@ -39,8 +39,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
+import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from kairos_plugins.emitter import ENQUEUED_HOOKS
@@ -68,9 +70,10 @@ class _Consumer:
     hook: str
     plugin: str
     callback: Callable[..., Any]
-    queue: asyncio.Queue[Any]
+    queue: queue.Queue[Any]
     task: asyncio.Task[None] | None = None
     dropped: int = 0
+    stopped: threading.Event = field(default_factory=threading.Event)
 
 
 class StreamHookDispatcher:
@@ -106,6 +109,10 @@ class StreamHookDispatcher:
         """Alguém registra callback para este hook? Custo de um lookup."""
         return hook in self._listening
 
+    def for_turn(self) -> StreamHookDispatcher:
+        """Compartilha o registro, mantendo filas e workers exclusivos do turno."""
+        return StreamHookDispatcher(self._registry, queue_size=self._queue_size)
+
     def enqueue(self, hook: str, /, **payload: Any) -> bool:
         """Entrega `payload` a quem escuta `hook`. Síncrono e sem `await`.
 
@@ -135,14 +142,8 @@ class StreamHookDispatcher:
         consumers = list(self._consumers.values())
         if not consumers:
             return
-        tasks: list[asyncio.Task[None]] = []
-        for consumer in consumers:
-            self._put(consumer, _STOP, descartar_primeiro=True)
-            if consumer.task is not None:
-                tasks.append(consumer.task)
+        tasks = [asyncio.create_task(self._stop_consumer(consumer)) for consumer in consumers]
         self._consumers.clear()
-        if not tasks:
-            return
         _, pending = await asyncio.wait(tasks, timeout=timeout)
         if pending:
             logger.warning(
@@ -153,7 +154,25 @@ class StreamHookDispatcher:
             )
             for task in pending:
                 task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            for consumer in consumers:
+                if consumer.task is not None and not consumer.task.done():
+                    consumer.task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(
+            *(consumer.task for consumer in consumers if consumer.task is not None),
+            return_exceptions=True,
+        )
+
+    @staticmethod
+    async def _stop_consumer(consumer: _Consumer) -> None:
+        while True:
+            try:
+                consumer.queue.put_nowait(_STOP)
+                break
+            except queue.Full:
+                await asyncio.sleep(0.001)
+        if consumer.task is not None:
+            await consumer.task
 
     def _consumers_for(self, hook: str) -> list[_Consumer]:
         registro = self._registry
@@ -168,7 +187,7 @@ class StreamHookDispatcher:
                     hook=hook,
                     plugin=plugin,
                     callback=callback,
-                    queue=asyncio.Queue(maxsize=self._queue_size),
+                    queue=queue.Queue(maxsize=self._queue_size),
                 )
                 consumer.task = asyncio.create_task(
                     self._run(consumer),
@@ -185,26 +204,17 @@ class StreamHookDispatcher:
         self,
         consumer: _Consumer,
         item: Any,
-        *,
-        descartar_primeiro: bool = False,
     ) -> bool:
         """Enfileira sem bloquear; fila cheia descarta o mais antigo e conta."""
         try:
             consumer.queue.put_nowait(item)
             return True
-        except asyncio.QueueFull:
-            if descartar_primeiro:
-                self._discard_oldest(consumer)
-                try:
-                    consumer.queue.put_nowait(item)
-                    return True
-                except asyncio.QueueFull:  # pragma: no cover - fila só encolhe
-                    return False
+        except queue.Full:
             self._discard_oldest(consumer)
             try:
                 consumer.queue.put_nowait(item)
                 return True
-            except asyncio.QueueFull:  # pragma: no cover - fila só encolhe
+            except queue.Full:  # pragma: no cover - fila só encolhe
                 logger.warning(
                     "fila do hook %s do plugin %r cheia mesmo após descartar; evento perdido",
                     consumer.hook,
@@ -215,7 +225,7 @@ class StreamHookDispatcher:
     def _discard_oldest(self, consumer: _Consumer) -> None:
         try:
             consumer.queue.get_nowait()
-        except asyncio.QueueEmpty:  # pragma: no cover - só encheu acima
+        except queue.Empty:  # pragma: no cover - thread já retirou o item
             return
         consumer.dropped += 1
         # Esparso de propósito: um delta por token inundaria o log, mas um
@@ -232,29 +242,50 @@ class StreamHookDispatcher:
 
     @staticmethod
     async def _run(consumer: _Consumer) -> None:
-        while True:
-            item = await consumer.queue.get()
-            if item is _STOP:
-                return
+        loop = asyncio.get_running_loop()
+        completed = loop.create_future()
+
+        def complete() -> None:
+            if not completed.done():
+                completed.set_result(None)
+
+        def observe() -> None:
             try:
-                await asyncio.to_thread(consumer.callback, **item)
-            except asyncio.CancelledError:
-                # D-PLUG.6: um `CancelledError` da thread do callback é o plugin
-                # falando e vira log; `cancelling()` > 0 é o *shutdown* cancelando
-                # o worker, e esse sai. Confundir os dois mataria o observador ou
-                # deixaria o worker fantasma depois do turno.
-                worker = asyncio.current_task()
-                if worker is not None and worker.cancelling():
-                    raise
-                logger.warning(
-                    "hook %s do plugin %r levantou CancelledError; worker continua",
-                    consumer.hook,
-                    consumer.plugin,
-                )
-            except Exception as exc:  # noqa: BLE001 - falha de plugin é do plugin
-                logger.warning(
-                    "hook %s do plugin %r falhou; stream preservado: %s",
-                    consumer.hook,
-                    consumer.plugin,
-                    exc,
-                )
+                while not consumer.stopped.is_set():
+                    try:
+                        item = consumer.queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+                    if item is _STOP or consumer.stopped.is_set():
+                        return
+                    try:
+                        consumer.callback(**item)
+                    except asyncio.CancelledError:
+                        logger.warning(
+                            "hook %s do plugin %r levantou CancelledError; worker continua",
+                            consumer.hook,
+                            consumer.plugin,
+                        )
+                    except BaseException as exc:  # noqa: BLE001 - falha de plugin é do plugin
+                        logger.warning(
+                            "hook %s do plugin %r falhou; stream preservado: %s",
+                            consumer.hook,
+                            consumer.plugin,
+                            exc,
+                        )
+            finally:
+                try:
+                    loop.call_soon_threadsafe(complete)
+                except RuntimeError:
+                    if not loop.is_closed():
+                        raise
+
+        threading.Thread(
+            target=observe,
+            name=f"kairos-stream-hook:{consumer.hook}:{consumer.plugin}",
+            daemon=True,
+        ).start()
+        try:
+            await completed
+        finally:
+            consumer.stopped.set()

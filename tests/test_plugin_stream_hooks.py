@@ -9,8 +9,11 @@ mata o observador. Nada aqui lê código-fonte nem conta itens de catálogo.
 
 import asyncio
 import json
+import subprocess
+import sys
 import threading
 import time
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -69,6 +72,38 @@ def test_enqueue_sem_ninguem_escuta_nao_custa_nada():
     assert dispatcher.listening("on_stream_delta") is False
     assert dispatcher.enqueue("on_stream_delta", delta="oi") is False
     assert dispatcher.dropped == 0
+
+
+def test_callback_bloqueado_nao_impede_shutdown_do_processo():
+    programa = """
+import asyncio
+import threading
+from kairos_plugins import HookRegistry, StreamHookDispatcher
+
+entrou = threading.Event()
+def bloqueado(**payload):
+    entrou.set()
+    threading.Event().wait()
+
+async def main():
+    registry = HookRegistry()
+    registry.register('on_stream_delta', bloqueado, plugin='observador')
+    dispatcher = StreamHookDispatcher(registry, queue_size=1)
+    dispatcher.enqueue('on_stream_delta', delta='primeiro')
+    while not entrou.is_set():
+        await asyncio.sleep(.001)
+    dispatcher.enqueue('on_stream_delta', delta='pendente')
+    await dispatcher.aclose(timeout=.02)
+    print('dreno-terminou', flush=True)
+
+asyncio.run(main())
+print('processo-terminou', flush=True)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", programa], capture_output=True, text=True, timeout=3, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["dreno-terminou", "processo-terminou"]
 
 
 @pytest.mark.anyio
@@ -190,6 +225,46 @@ async def test_o_dreno_entrega_a_fila_e_o_turno_seguinte_tem_worker_de_novo():
     assert vistos == ["turno-1", "turno-2"]
 
 
+@pytest.mark.anyio
+async def test_fechar_fila_cheia_drena_sem_descartar_observacoes():
+    vistos = []
+    dispatcher = StreamHookDispatcher(
+        registro_observador(on_stream_delta=lambda **p: vistos.append(p["delta"])),
+        queue_size=2,
+    )
+    dispatcher.enqueue("on_stream_delta", delta="primeiro")
+    dispatcher.enqueue("on_stream_delta", delta="segundo")
+    await dispatcher.aclose()
+    assert vistos == ["primeiro", "segundo"]
+
+
+@pytest.mark.anyio
+async def test_timeout_do_dreno_cobre_a_espera_por_espaco_na_fila(caplog):
+    entrou = threading.Event()
+    libera = threading.Event()
+    terminou = threading.Event()
+    vistos = []
+
+    def bloqueado(**payload):
+        entrou.set()
+        libera.wait(timeout=5)
+        vistos.append(payload["delta"])
+        terminou.set()
+
+    dispatcher = StreamHookDispatcher(registro_observador(on_stream_delta=bloqueado), queue_size=1)
+    try:
+        dispatcher.enqueue("on_stream_delta", delta="em execução")
+        assert await asyncio.to_thread(entrou.wait, 5)
+        dispatcher.enqueue("on_stream_delta", delta="pendente")
+        with caplog.at_level("WARNING", logger="kairos_plugins.stream_dispatcher"):
+            await asyncio.wait_for(dispatcher.aclose(timeout=0.05), timeout=1)
+        assert any("não drenaram" in record.message for record in caplog.records)
+    finally:
+        libera.set()
+        assert await asyncio.to_thread(terminou.wait, 5)
+    assert vistos == ["em execução"]
+
+
 # ---------------------------------------------------------------------------
 # o runtime: o que o turno enfileira
 # ---------------------------------------------------------------------------
@@ -307,6 +382,80 @@ async def roda(db, adapters, streams=None):
 
 
 @pytest.mark.anyio
+async def test_falha_de_limpeza_nao_entrega_sucesso_terminal(db, monkeypatch):
+    service = make_service(db, [FakeAdapter(texto_e_fim())])
+    repair = service._repair_incomplete_tools
+
+    async def falha_no_fim(conversation_id):
+        if service._history(conversation_id):
+            raise OSError("histórico indisponível no fechamento")
+        await repair(conversation_id)
+
+    monkeypatch.setattr(service, "_repair_incomplete_tools", falha_no_fim)
+    vistos = []
+    with pytest.raises(OSError, match="histórico indisponível"):
+        async for event in service.stream(envelope_de_texto()):
+            vistos.append(event.kind)
+    assert "delta" in vistos
+    assert "turn_end" not in vistos
+
+
+@pytest.mark.anyio
+async def test_fechar_um_turno_nao_recria_worker_de_outro_turno_ativo(db):
+    entrou = threading.Event()
+    libera_callback = threading.Event()
+    segundo_callback = threading.Event()
+    libera_provedor = asyncio.Event()
+    fim_b = asyncio.Event()
+    vistos = []
+
+    def observa(**payload):
+        if payload["conversation_id"] != "b":
+            return
+        if payload["delta"] == "primeiro":
+            entrou.set()
+            libera_callback.wait(timeout=10)
+        else:
+            segundo_callback.set()
+        vistos.append(payload["delta"])
+
+    class AdapterBloqueado:
+        async def stream(self, request):
+            yield ProviderEvent(kind="text_delta", text="primeiro")
+            await libera_provedor.wait()
+            yield ProviderEvent(kind="text_delta", text="segundo")
+            yield ProviderEvent(kind="finish", finish_reason="stop")
+
+    dispatcher = StreamHookDispatcher(registro_observador(on_stream_delta=observa))
+    service = make_service(db, [AdapterBloqueado(), FakeAdapter(texto_e_fim())], streams=dispatcher)
+
+    async def consome_b():
+        async for event in service.stream(replace(envelope_de_texto(), conversation_id="b")):
+            if event.kind == "turn_end":
+                fim_b.set()
+
+    task_b = asyncio.create_task(consome_b())
+    try:
+        assert await asyncio.to_thread(entrou.wait, 5)
+        await asyncio.wait_for(
+            anexa_turno(service, replace(envelope_de_texto(), conversation_id="a")), timeout=5
+        )
+        libera_provedor.set()
+        await asyncio.wait_for(fim_b.wait(), timeout=5)
+        executou_concorrente = await asyncio.to_thread(segundo_callback.wait, 0.2)
+    finally:
+        libera_callback.set()
+        libera_provedor.set()
+        await asyncio.wait_for(task_b, timeout=5)
+    assert not executou_concorrente
+    assert vistos == ["primeiro", "segundo"]
+
+
+async def anexa_turno(service, envelope):
+    return [event async for event in service.stream(envelope)]
+
+
+@pytest.mark.anyio
 async def test_o_runtime_enfileira_o_texto_do_turno_e_nao_o_argumento_da_ferramenta(db):
     recorder = StreamRecorder()
 
@@ -391,6 +540,42 @@ async def test_a_retentativa_e_outra_tentativa_e_o_erro_vai_no_stream_end(db):
     assert "ProviderError" in falhou["error"]
     assert (terminou["finished"], terminou["attempt"]) == (True, 2)
     assert terminou["final_text"] == "Depois da retentativa."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("falha_primaria", [False, True])
+async def test_stream_end_reflete_falha_de_fechamento_sem_perder_erro_primario(db, falha_primaria):
+    recorder = StreamRecorder()
+
+    class IteradorComFalhaNoFechamento:
+        def __init__(self):
+            self.events = iter(texto_e_fim())
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            event = next(self.events, None)
+            if event is not None:
+                return event
+            if falha_primaria:
+                raise OSError("falha original do stream")
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            raise RuntimeError("falha de fechamento do provider")
+
+    class Adapter:
+        def stream(self, request):
+            return IteradorComFalhaNoFechamento()
+
+    error_type = OSError if falha_primaria else RuntimeError
+    with pytest.raises(error_type) as failure:
+        await roda(db, [Adapter()], streams=recorder)
+    fim = next(payload for hook, payload in recorder.vistos if hook == "on_stream_end")
+    assert fim["finished"] is False
+    assert str(failure.value) in fim["error"]
+    assert fim["final_text"] == "Resposta."
 
 
 # ---------------------------------------------------------------------------

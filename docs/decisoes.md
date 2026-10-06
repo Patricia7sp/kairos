@@ -2105,8 +2105,10 @@ e o protocolo de `aclose` exige propagá-lo.
 
 `on_stream_start`, `on_stream_delta` e `on_stream_end` (RF-08) saem do caminho do
 token por `enqueue`: síncrono, sem `await`, sem alocar quando não há quem escute,
-com uma fila **bounded por callback** e um worker por callback lendo em
-`asyncio.to_thread`. `HookEmitter.emit` recusa esses três com `UnknownHook` — quem
+com uma fila **bounded por callback e turno** e uma thread daemon exclusiva
+consumindo essa fila. Essas threads não ocupam o executor padrão do core nem
+impedem o shutdown de `asyncio.run` quando um callback bloqueia.
+`HookEmitter.emit` recusa esses três com `UnknownHook` — quem
 tentasse observá-los pelo caminho awaited receberia erro de programação em vez de
 um callback de terceiro entre o token e o usuário.
 
@@ -2125,11 +2127,17 @@ Quatro consequências são contrato, não acidente de implementação:
 - **O dreno é do turno, com timeout.** O legado perde o que está em fila quando o
   processo morre. Aqui `aclose` esvazia a fila no `finally` do turno, pelo mesmo
   `run_persistent_cleanup` de D-PLUG.6, com teto de 2 s: callback que trava perde
-  o worker com log e não segura o fim do turno. Isso exigiu que o `turn_end`
-  **entre na fila de eventos antes** do teardown — do jeito anterior, o dreno
-  ficava na frente do `turn_end` do consumidor e o timeout de um observador
-  travado virava atraso visível em todo turno.
-- **Ordem só existe dentro de um hook.** Worker por (hook, plugin) significa
+  o worker com log e não segura o fim do turno. Cada turno recebe um
+  despachante próprio a partir do registro compartilhado: fechar um turno não
+  encerra as filas de outro turno ativo. A sentinela espera espaço na fila sem
+  descartar uma observação adicional; essa espera também está dentro do timeout.
+  O `turn_end` entra na fila após a limpeza do histórico, fechamento do gateway
+  e liberação da posse do turno, e antes do dreno dos observadores. Assim uma
+  falha operacional não aparece depois de um desfecho de sucesso.
+  O timeout impede novos callbacks naquela fila; ele não interrompe à força um
+  callback síncrono em execução. Uma thread bloqueada permanece daemon e não
+  impede a saída do processo.
+- **Ordem só existe dentro de um hook e turno.** Worker por (turno, hook, plugin) significa
   ordem na fila dele e **nenhuma ordem entre `start`, `delta` e `end`** — são
   threads distintas. Quem precisar de ordem usa o caminho awaited dos hooks de
   sessão; prometer ordem aqui seria um contrato que a concorrência não sustenta.

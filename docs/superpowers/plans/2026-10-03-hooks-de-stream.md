@@ -49,7 +49,7 @@ carrega.
    `TypeError` só apareceria se o proxy escapasse do `**` — o que ele não
    escapa. O que sustenta o critério é não haver, no caminho do token, nada que
    o plugin alcance; não um erro de escrita ao tentar.
-3. **Fila bounded, drop-oldest, com contador.** Cada callback tem a sua fila
+3. **Fila bounded, drop-oldest, com contador.** Cada callback de cada turno tem a sua fila
    (`maxsize`), enfileirar é `put_nowait`, e fila cheia descarta o **mais
    antigo** e tenta de novo. Descartar o mais antigo é a política certa para
    quem observa: um consumidor lento perde o passado, nunca o presente nem o
@@ -60,14 +60,13 @@ carrega.
    daemon morre com o processo). Aqui o dreno acontece no `finally` do turno,
    pelo mesmo `run_persistent_cleanup` de D-PLUG.6, com timeout: callback que
    trava não segura o fim do turno.
-   Isso exigiu um ajuste no produtor: o `turn_end` **entra na fila de eventos
-   antes** do teardown, em vez de voltar como valor de retorno do produtor. Do
-   jeito anterior, todo cleanup — inclusive este dreno — ficava na frente do
-   `turn_end` que o consumidor recebia, e o timeout de um observador travado
-   virava atraso visível no fim de todo turno. Publicar antes e drenar depois é
-   o que torna "observador não segura o fim do turno" verdade no relógio do
-   usuário, e não só na intenção.
-5. **Ordem só existe dentro de um hook.** Cada (hook, plugin) tem um worker, e
+   O produtor conclui a limpeza operacional (histórico, gateway e posse) antes
+   de entregar `turn_end`, e drena somente os observadores depois. Cada turno
+   recebe filas próprias do registro compartilhado. A sentinela de fechamento
+   espera espaço sem descartar uma observação extra, dentro do mesmo timeout.
+   Workers usam threads daemon exclusivas, sem ocupar o executor padrão:
+   callback bloqueado não impede o encerramento do processo depois do timeout.
+5. **Ordem só existe dentro de um hook e turno.** Cada (turno, hook, plugin) tem um worker, e
    a fila dele preserva a ordem; entre `on_stream_start`, `on_stream_delta` e
    `on_stream_end` não há ordem, porque são workers distintos em threads
    distintas — e o de delta é, de propósito, mais lento que o de end. Quem
@@ -126,6 +125,12 @@ verdade em disco:
   `source`), `final_text` acumulado e `error` no caminho de falha do provedor;
 - `emit("on_stream_delta")` **levanta** — o caminho awaited não alcança a
   família stream;
+- fechar um turno não recria os workers de outro turno ativo;
+- fechar uma fila cheia não descarta uma observação extra, e a espera por
+  capacidade respeita o timeout;
+- falha de limpeza não entrega `turn_end` de sucesso, e `on_stream_end`
+  reflete falha no fechamento do provider preservando a falha primária;
+- um subprocesso com callback bloqueado sai após o dreno sem liberar o callback;
 - `on_interim_message` continua `SEM EMISSOR` no relatório.
 
 Suíte completa + `ruff check` + `ruff format --check` + `scripts/ci.sh --fast`

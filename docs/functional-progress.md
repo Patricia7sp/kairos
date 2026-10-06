@@ -1909,8 +1909,8 @@ Segundo recorte da unit `plugins`, escolhido pela usuária: a família `STREAM`
 caminho do token, com payload normalizado, observando sem transformar.
 
 - **Despachante** (`kairos_plugins/stream_dispatcher.py`): `enqueue` síncrono,
-  sem `await` e sem alocar quando ninguém escuta; fila **bounded por callback**
-  (256) com worker por callback em `asyncio.to_thread`; fila cheia descarta o
+  sem `await` e sem alocar quando ninguém escuta; fila **bounded por callback e turno**
+  (256) com thread daemon exclusiva por callback e turno; fila cheia descarta o
   mais antigo, conta e loga esparso; `aclose` esvazia a fila com teto de 2 s e
   cancela o worker que travou.
 - **Dois modos, sem sobreposição** (`kairos_plugins/emitter.py`): `ENQUEUED_HOOKS`
@@ -1922,12 +1922,17 @@ caminho do token, com payload normalizado, observando sem transformar.
   retry de reconexão), `on_stream_delta` por delta de texto e de reasoning,
   `on_stream_end` no fechamento com `final_text`/`finished`/`error`; dreno no
   `finally` do turno.
-- **Entrega do desfecho antes do teardown**: o `turn_end` passou a entrar na fila
-  de eventos do produtor em vez de voltar como valor de retorno. Sem isso, o
-  dreno (e os demais cleanups) ficavam na frente do `turn_end` do consumidor e o
-  timeout de um observador travado virava atraso visível de 2 s em todo turno —
-  o oposto de "observador não segura o fim do turno". Custo: o stream fecha até
-  2 s depois do `turn_end`, e nunca antes.
+- **Entrega do desfecho após limpeza operacional e antes do dreno**: o produtor
+  fecha histórico, gateway e posse antes de entregar `turn_end`; só o dreno
+  dos observadores ocorre depois. Filas exclusivas do turno preservam outro
+  turno ativo, e a sentinela espera capacidade sem perder um evento adicional.
+  O timeout de 2 s também cobre essa espera. O stream fecha até 2 s depois do
+  `turn_end`, e nunca antes.
+- **Shutdown isolado do executor do core**: callback bloqueado não ocupa
+  `asyncio.to_thread` nem impede a saída do CLI. O teste roda um subprocesso
+  com callback que nunca retorna e confirma sua saída sem liberar o callback.
+- **Fim observado após fechamento do provider**: `on_stream_end` reflete uma
+  falha de `aclose`, preservando a falha original quando ambas ocorrem.
 - **CLI**: `hooks list` distingue o que o runtime **emite (await)** do que ele
   **enfileira (stream)**, com as duas contagens; `on_interim_message` segue
   **SEM EMISSOR** — não há superfície de mensagem interina no Kairos (o legado
@@ -1940,7 +1945,7 @@ caminho do token, com payload normalizado, observando sem transformar.
   e `end`).
 - **Fora de escopo, declarado**: transformação de stream (RF-09/RF-11),
   `transform_api_error_classification` (RF-12) e `telemetry_schema_version`.
-- **Testes**: `tests/test_plugin_stream_hooks.py` (14) — plugin em disco
+- **Testes**: `tests/test_plugin_stream_hooks.py` — plugin em disco
   escrevendo anotações, critério de aceitação da spec (callback que reescreve o
   delta não altera o texto do usuário), isolamento entre callbacks, callback
   travado que não segura o `turn_end`, fila cheia com drop contador, payload de
@@ -1948,3 +1953,12 @@ caminho do token, com payload normalizado, observando sem transformar.
   `emit` recusando a família stream. Validação: suíte completa
   **3041 passed, 41 skipped, 1 deselected**, `ruff check .`,
   `ruff format --check .`.
+
+Revisão de 2026-10-06, após atualizar a branch com os PRs #90 e #91:
+as regressões reproduziram o fechamento de filas de outro turno, o descarte
+adicional pela sentinela, o sucesso entregue antes de falha de limpeza, a
+observação de sucesso antes de falha do `aclose` do provider e o shutdown preso
+no executor padrão. Correções verificadas por 21 testes de stream e revisão
+independente. `scripts/ci.sh` completo verde: **3111 passed, 16 skipped,
+26 deselected, 5860 subtests passed**; imagem real **25 passed e 25 subtests**;
+lint, shell, recall, lock e os três frontends verdes.

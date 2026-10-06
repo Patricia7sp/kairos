@@ -9,6 +9,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from functools import partial
 from pathlib import Path
@@ -204,6 +205,9 @@ class InteractionService:
         # diferentes porque o modo de despacho é diferente — um enfileira sem
         # `await`, o outro espera o callback. `Any` pela mesma razão de `hooks`.
         self._stream_hooks = stream_hooks
+        self._turn_stream_hooks: ContextVar[Any | None] = ContextVar(
+            f"kairos-stream-observers-{id(self)}", default=None
+        )
         ownership_options = {}
         if turn_lease_clock is not None:
             ownership_options["clock"] = turn_lease_clock
@@ -278,7 +282,12 @@ class InteractionService:
         demand: asyncio.Queue[None],
         events: asyncio.Queue[InteractionEvent],
     ) -> _StreamTerminal:
+        dispatcher = self._stream_hooks
+        if dispatcher is not None and hasattr(dispatcher, "for_turn"):
+            dispatcher = dispatcher.for_turn()
+        token = self._turn_stream_hooks.set(dispatcher)
         try:
+            terminal_event = None
             async with self._turn_ownership.acquire(envelope.conversation_id, envelope.source):
                 await self._ensure_session(envelope)
                 async with aclosing(self._stream_owned(envelope)) as owned_stream:
@@ -288,17 +297,27 @@ class InteractionService:
                             event = await anext(owned_stream)
                         except StopAsyncIteration:
                             return _StreamTerminal()
-                        await events.put(event)
                         if event.kind in {"turn_end", "turn_error"}:
-                            # O desfecho entra na fila **antes** do teardown, e o
-                            # teardown roda ao fechar o `aclosing` abaixo. Antes
-                            # ele voltava como valor de retorno do produtor, o que
-                            # segurava o `turn_end` atrás de todo cleanup —
-                            # inclusive o dreno dos observadores, que por
-                            # contrato não pode atrasar o usuário.
-                            return _StreamTerminal()
+                            terminal_event = event
+                            break
+                        await events.put(event)
+            if terminal_event is not None:
+                await events.put(terminal_event)
+            return _StreamTerminal()
         except Exception as exc:  # noqa: BLE001 - transporta falha pelo limite do iterador
             return _StreamTerminal(error=exc)
+        finally:
+            try:
+                drain = await run_persistent_cleanup(
+                    self._drain_stream_observers,
+                    task_name="kairos-stream-hook-drain",
+                )
+                if drain.error is not None:
+                    logger.warning("falha ao drenar observadores de stream do turno")
+                if drain.cancellation is not None:
+                    raise drain.cancellation
+            finally:
+                self._turn_stream_hooks.reset(token)
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         """Own the complete loop and close pending calls even on disconnect."""
@@ -369,19 +388,6 @@ class InteractionService:
                 logger.error("falha ao fechar resultados pendentes de ferramentas")
             if outcome.cancellation is not None and primary is None:
                 raise outcome.cancellation
-            # D-PLUG.7: por último, o dreno dos observadores de stream. Cada
-            # delta foi enfileirado durante o turno e é entregue aqui — um
-            # observador de telemetria que perde o fim do turno porque o processo
-            # reiniciou não está observing. O dreno tem timeout interno: plugin
-            # que trava perde o worker com log e não segura o fim do turno.
-            drain = await run_persistent_cleanup(
-                self._drain_stream_observers,
-                task_name="kairos-stream-hook-drain",
-            )
-            if drain.error is not None:
-                logger.warning("falha ao drenar observadores de stream do turno")
-            if drain.cancellation is not None and primary is None:
-                raise drain.cancellation
 
     async def _plugin_hook(self, hook: str, **payload: Any) -> None:
         """Despacha um hook de plugin, se houver emitter; sem plugins, não é caminho.
@@ -403,13 +409,13 @@ class InteractionService:
         esta função esperasse o callback, um plugin lento passaria a ditar o
         ritmo do stream de cada usuário com plugin instalado.
         """
-        dispatcher = self._stream_hooks
+        dispatcher = self._turn_stream_hooks.get()
         if dispatcher is None:
             return
         dispatcher.enqueue(hook, **payload)
 
     async def _drain_stream_observers(self) -> None:
-        dispatcher = self._stream_hooks
+        dispatcher = self._turn_stream_hooks.get()
         if dispatcher is None:
             return
         await dispatcher.aclose()
@@ -430,7 +436,7 @@ class InteractionService:
         kind = _STREAM_DELTA_KINDS.get(provider_event.kind)
         if kind is None:
             return
-        dispatcher = self._stream_hooks
+        dispatcher = self._turn_stream_hooks.get()
         if dispatcher is None or not dispatcher.listening("on_stream_delta"):
             return
         delta = provider_event.reasoning if kind == "reasoning" else provider_event.text
@@ -993,19 +999,22 @@ class InteractionService:
                 except BaseException as exc:  # noqa: BLE001 - preserves primary unwind
                     primary = exc
                 finally:
-                    # Antes de fechar: `_finish_provider_stream` restaura o
-                    # sinal de unwind e relança o erro primário, e um `on_stream_end`
-                    # faltando justamente na tentativa que falhou seria o
-                    # pior lugar para perder o evento.
-                    self._observe_stream(
-                        "on_stream_end",
-                        **base,
-                        attempt=attempt,
-                        final_text=accumulator.text,
-                        finished=primary is None,
-                        error=None if primary is None else f"{type(primary).__name__}: {primary}",
-                    )
-                    await _finish_provider_stream(provider_stream, primary)
+                    try:
+                        await _finish_provider_stream(provider_stream, primary)
+                    except BaseException as exc:
+                        primary = exc
+                        raise
+                    finally:
+                        self._observe_stream(
+                            "on_stream_end",
+                            **base,
+                            attempt=attempt,
+                            final_text=accumulator.text,
+                            finished=primary is None,
+                            error=None
+                            if primary is None
+                            else f"{type(primary).__name__}: {primary}",
+                        )
             except ProviderError as exc:
                 accumulator.add_attempt_usage(attempt_usage)
                 if self._retry_policy.can_retry(
