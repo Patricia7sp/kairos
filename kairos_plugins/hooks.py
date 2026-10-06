@@ -178,6 +178,15 @@ class HookRegistry:
     def registered(self, hook: str) -> list[str]:
         return [p for p, _ in self._hooks.get(hook, [])]
 
+    def entries(self, hook: str) -> list[tuple[str, Callable]]:
+        """(plugin, callback) registrados em `hook`, em ordem de registro.
+
+        Quem **executa** callback precisa disto: o despachante da família stream
+        dá uma fila e um worker próprios por callback, e um `run-all` com um
+        `await` seria exatamente o caminho do token que RF-08 proíbe.
+        """
+        return list(self._hooks.get(hook, []))
+
     def hooks_with_callbacks(self) -> dict[str, list[str]]:
         """Hook -> plugins que registram callback, só os que têm callback.
 

@@ -282,7 +282,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
         if not isinstance(profile_configs, Mapping):
             profile_configs = {}
         chat_sandbox = build_chat_sandbox(home, config)
-        plugin_hooks = build_plugin_hooks(home, config)
+        plugin_hooks, plugin_streams = build_plugin_hooks(home, config)
         return ComposedInteractionService(
             home=home,
             connection=connection,
@@ -300,6 +300,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
             chat_sandbox=chat_sandbox,
             hooks=plugin_hooks,
+            stream_hooks=plugin_streams,
         )
     except BaseException as build_error:
         cleanup_errors: list[BaseException] = []
@@ -349,7 +350,12 @@ def build_chat_sandbox(home: Path, config: Mapping[str, Any]) -> ChatBashSandbox
 
 
 def build_plugin_hooks(home: Path, config: Mapping[str, Any]):
-    """Lê os plugins instalados e devolve o emissor — ou `None` se não há plugin.
+    """Lê os plugins instalados e devolve emissor e despachante de stream.
+
+    São **dois** objetos porque o modo de despacho é diferente (D-PLUG.7): o
+    emissor espera o callback (`await`), o despachante da família stream
+    enfileira sem `await` para não segurar o token. Saem do mesmo registro, e
+    ambos são `None` quando não há plugin nenhum.
 
     `plugins.disabled` no `config.yaml` desliga um plugin sem desinstalá-lo, que é
     o caminho para um plugin quebrado sair do caminho do turno sem apagar o
@@ -358,19 +364,21 @@ def build_plugin_hooks(home: Path, config: Mapping[str, Any]):
     interruptor malformado que cala para "ninguém desabilitado" seria o pior
     desfecho possível, porque o usuário acredita que desligou.
 
-    Sem `<home>/plugins`, nada é lido, nada é importado e o retorno é `None`:
-    uma instalação sem plugins não paga nada por ter emitter no caminho do turno.
+    Sem `<home>/plugins`, nada é lido, nada é importado e o retorno é
+    `(None, None)`: uma instalação sem plugins não paga nada por ter emitter no
+    caminho do turno.
     """
     from kairos_plugins.emitter import HookEmitter
     from kairos_plugins.loader import disabled_from_config, load_plugins
+    from kairos_plugins.stream_dispatcher import StreamHookDispatcher
 
     # O gate de config roda antes de qualquer leitura do disco: um
     # `plugins.disabled` malformado levanta mesmo sem plugin nenhum instalado.
     disabled = disabled_from_config(config)
     loaded = load_plugins(home, disabled=disabled)
     if loaded.empty:
-        return None
-    return HookEmitter(loaded.registry)
+        return None, None
+    return HookEmitter(loaded.registry), StreamHookDispatcher(loaded.registry)
 
 
 def build_interaction_router(home: Path) -> InteractionRouter:
