@@ -8,6 +8,24 @@ from kairos_tools.registry import ToolRegistry
 from kairos_web import server
 
 
+def test_inventory_classifica_mcp_como_chat_e_exige_aprovacao(monkeypatch):
+    from kairos_web.tools_api import list_toolsets
+
+    registry = ToolRegistry()
+    registry.register(
+        "mcp__example__send",
+        lambda: None,
+        {
+            "type": "function",
+            "function": {"name": "mcp__example__send"},
+        },
+    )
+    monkeypatch.setattr("kairos_web.tools_api.registry", registry)
+    tool = list_toolsets()["tools"][0]
+    assert tool["chat"] is True
+    assert tool["mutating"] is True
+
+
 def test_inventory_reports_unavailable_tools_aliases_and_detached_schemas():
     registry = ToolRegistry()
     register_builtin_tools(registry)

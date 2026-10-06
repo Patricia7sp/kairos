@@ -15,7 +15,7 @@ from kairos_security.credentials.contracts import (
 )
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 
-_SECRET_FIELDS = ("api_key", "token", "secret", "password")
+_SECRET_FIELDS = ("api_key", "key", "token", "secret", "password")
 
 
 class MigrationConfirmationRequired(RuntimeError):
@@ -43,13 +43,16 @@ class LegacyCredentialMigration:
 
     def import_and_verify(self) -> MigrationReport:
         entries = self._legacy_entries(self._read())
+        prepared = [
+            (provider, ref, CredentialSecret(self._string_payload(entry)), self._auth_method(entry))
+            for provider, _index, entry, ref in entries
+        ]
         verified = 0
-        for provider, _index, entry, ref in entries:
-            secret = CredentialSecret(self._string_payload(entry))
+        for provider, ref, secret, auth_method in prepared:
             self.vault.put(
                 ref,
                 secret,
-                auth_method=self._auth_method(entry),
+                auth_method=auth_method,
             )
             if self.vault.get(ref).reveal() != secret.reveal():
                 raise MigrationVerificationError(
@@ -112,12 +115,20 @@ class LegacyCredentialMigration:
         document: dict[str, Any],
     ) -> list[tuple[str, int, dict[str, Any], CredentialRef]]:
         found = []
+        references: set[CredentialRef] = set()
         for provider, credentials in document.get("credential_pool", {}).items():
             for index, entry in enumerate(credentials):
-                if "credential_id" in entry or not any(key in entry for key in _SECRET_FIELDS):
+                has_secret = any(key in entry for key in _SECRET_FIELDS)
+                if not has_secret and "credential_id" not in entry:
                     continue
-                ref = CredentialRef(provider, f"legacy-{index + 1}")
-                found.append((provider, index, entry, ref))
+                ref = CredentialRef(provider, entry.get("credential_id", f"legacy-{index + 1}"))
+                if ref in references:
+                    raise MigrationVerificationError(
+                        "referências de credenciais duplicadas no perfil"
+                    )
+                references.add(ref)
+                if has_secret:
+                    found.append((provider, index, entry, ref))
         return found
 
     @staticmethod
@@ -126,7 +137,13 @@ class LegacyCredentialMigration:
             raise MigrationVerificationError(
                 "credencial legada contém valores não textuais e não será alterada"
             )
-        return dict(entry)
+        payload = {key: value for key, value in entry.items() if key != "credential_id"}
+        if "key" in payload:
+            legacy_key = payload.pop("key")
+            if "api_key" in payload and payload["api_key"] != legacy_key:
+                raise MigrationVerificationError("credencial legada contém chaves conflitantes")
+            payload["api_key"] = legacy_key
+        return payload
 
     @staticmethod
     def _auth_method(entry: dict[str, Any]) -> str:

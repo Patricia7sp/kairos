@@ -14,6 +14,7 @@ de runtime (git/calendar internos, blueprints) aqui.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -136,7 +137,7 @@ def chat_tool_definitions(
     """
     source = definitions if definitions is not None else registry.get_definitions()
     return tuple(
-        dict(definition)
+        copy.deepcopy(dict(definition))
         for definition in source
         if isinstance(definition, Mapping)
         and _is_chat_tool(_definition_name(definition) or "")
@@ -247,7 +248,9 @@ def _result(call: CanonicalToolCall, value: Any) -> InteractionToolResult:
     content = _serialize(value)
     if content is None:
         return _error(call, "output_too_large")
-    is_error = isinstance(value, dict) and isinstance(value.get("error"), str)
+    is_error = isinstance(value, dict) and (
+        isinstance(value.get("error"), str) or value.get("success") is False
+    )
     return InteractionToolResult(tool_call_id=call.id, content=content, is_error=is_error)
 
 
