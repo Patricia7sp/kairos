@@ -40,13 +40,8 @@ from kairos_providers.contracts import ProviderModelRef, SelectionReason
 from kairos_providers.provider_registry import UnknownProviderError
 from kairos_providers.settings import load_config_document, update_config_document
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
-from kairos_security.credentials import (
-    CredentialNotFoundError,
-    CredentialRef,
-    CredentialSecret,
-    build_credential_service,
-)
-from kairos_security.credentials.io import credential_file_lock
+from kairos_security.credentials import build_credential_service
+from kairos_security.credentials.profile import ProfileCredentialService, ReadOnlyCredentialError
 from kairos_state.repositories import shares as shares_repo
 from kairos_state.repositories.sessions import SessionRepository
 from kairos_web.chat_transport import (
@@ -563,55 +558,17 @@ async def save_provider_credential(provider: str, req: SaveCredentialRequest):
     finally:
         await gateway.aclose()
 
-    kairos_home = _application_home(app)
-    kairos_home.mkdir(parents=True, exist_ok=True)
-    auth_path = kairos_home / "auth.json"
-    ref = CredentialRef(provider, "primary")
-    with credential_file_lock(auth_path):
-        store = _get_auth_store()
-        previous_profile = store.profile.get(provider)
-        if previous_profile is not None and (
-            not isinstance(previous_profile, list)
-            or not all(isinstance(entry, dict) for entry in previous_profile)
-        ):
-            raise HTTPException(503, "metadados de credenciais indisponíveis")
-        try:
-            try:
-                previous = store.vault.get(ref)
-            except CredentialNotFoundError:
-                previous = None
-            metadata = store.vault.put(
-                ref,
-                CredentialSecret({"api_key": secret}),
-                auth_method=req.auth_method,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503, detail="cofre de credenciais indisponível"
-            ) from exc
-        store.profile[provider] = [
-            {"credential_id": ref.credential_id, "auth_method": metadata.auth_method},
-            *(
-                entry
-                for entry in (previous_profile or [])
-                if entry.get("credential_id") != ref.credential_id
-            ),
-        ]
-        try:
-            store.write_atomically(auth_path)
-        except Exception:
-            if previous is None:
-                store.vault.delete(ref)
-            else:
-                store.vault.put(ref, previous, auth_method=metadata.auth_method)
-            if previous_profile is None:
-                store.profile.pop(provider, None)
-            else:
-                store.profile[provider] = previous_profile
-            raise
+    try:
+        metadata = ProfileCredentialService(_application_home(app)).save_primary(
+            provider, secret, auth_method=req.auth_method
+        )
+    except ReadOnlyCredentialError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "cofre ou metadados de credenciais indisponíveis") from exc
     return {
         "provider": provider,
-        "credential_id": ref.credential_id,
+        "credential_id": metadata.ref.credential_id,
         "auth_method": metadata.auth_method,
         "state": "configured",
     }

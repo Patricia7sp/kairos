@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -16,27 +15,44 @@ async def run_login(home: Path, args) -> int:
 
     api_key = getattr(args, "api_key", None)
     if not api_key:
-        print("É necessário passar a API key via --api-key.", file=sys.stderr)
-        return 1
+        if not sys.stdin.isatty():
+            print("Informe --api-key ou execute login em um terminal interativo.", file=sys.stderr)
+            return 1
+        import getpass
 
-    from kairos_cli.auth import AuthStore, has_usable_secret
+        try:
+            api_key = getpass.getpass("Chave de API: ")
+        except EOFError:
+            print("Login cancelado: nenhuma chave informada.", file=sys.stderr)
+            return 1
+
+    from kairos_domain.credentials import has_usable_secret
 
     if not has_usable_secret(api_key):
         print("API key rejeitada: valor placeholder não é segredo utilizável.", file=sys.stderr)
         return 1
 
-    path = home / "auth.json"
-    try:
-        document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except ValueError:
-        print("auth.json existente está corrompido; abortando.", file=sys.stderr)
-        return 1
-    if not isinstance(document, dict):
-        print("auth.json existente tem estrutura inválida; abortando.", file=sys.stderr)
-        return 1
+    from kairos_providers.composition import build_provider_gateway
+    from kairos_providers.provider_registry import UnknownProviderError
+    from kairos_security.credentials import PassphraseFileError, VaultError
+    from kairos_security.credentials.profile import ProfileCredentialService
 
-    store = AuthStore(profile=document.get("credential_pool", {}))
-    store.add_credential(provider, {"key": api_key})
-    store.write_atomically(path)
+    gateway = build_provider_gateway(home)
+    try:
+        descriptor = gateway.registry.describe(provider)
+        if "api_key" not in descriptor.auth_methods:
+            print("O provedor não aceita autenticação por API key.", file=sys.stderr)
+            return 1
+        ProfileCredentialService(home).save_primary(provider, api_key.strip())
+    except (UnknownProviderError, PassphraseFileError, VaultError, OSError, ValueError):
+        print(
+            "Login não concluído: verifique o provedor, os metadados e o estado do cofre.",
+            file=sys.stderr,
+        )
+        return 1
+    except Exception as exc:
+        raise VaultError("Login não concluído: falha do backend de credenciais.") from exc
+    finally:
+        await gateway.aclose()
     print(f"Login bem-sucedido para o provedor '{provider}'.")
     return 0

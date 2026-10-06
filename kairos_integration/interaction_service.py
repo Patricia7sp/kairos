@@ -16,7 +16,6 @@ from typing import Any
 
 from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.chat_tools import (
-    CHAT_TOOLS,
     TOOL_APPROVAL_TIMEOUT_SECONDS,
     WEB_SEARCH_TOOLS,
     chat_tool_definitions,
@@ -464,7 +463,8 @@ class InteractionService:
         accumulator = TurnAccumulator()
         tool_rounds = 0
         executed_calls: list[str] = []
-        enabled_names = self._chat_tool_names(envelope)
+        turn_tools = request.tools
+        enabled_names = frozenset(tool["function"]["name"] for tool in turn_tools)
         while True:
             round_started = time.monotonic()
             await self._plugin_hook(
@@ -583,11 +583,7 @@ class InteractionService:
             request = replace(
                 request,
                 messages=self._history(envelope.conversation_id),
-                tools=(
-                    self._chat_tools(envelope)
-                    if tool_rounds < 4 and len(executed_calls) < 8
-                    else ()
-                ),
+                tools=(turn_tools if tool_rounds < 4 and len(executed_calls) < 8 else ()),
             )
             accumulator = TurnAccumulator()
 
@@ -1135,17 +1131,6 @@ class InteractionService:
         if envelope.web_search:
             return WEB_SEARCH_TOOLS
         return ()
-
-    @staticmethod
-    def _chat_tool_names(envelope: InteractionEnvelope) -> frozenset[str]:
-        if envelope.tools:
-            tools = set(CHAT_TOOLS)
-            if not envelope.web_search:
-                tools.discard("web_search")
-            return frozenset(tools)
-        if envelope.web_search:
-            return frozenset({"web_search"})
-        return frozenset()
 
     def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
         prepare = getattr(self._gateway, "prepare", None)

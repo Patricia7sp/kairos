@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kairos_cli.runtime import RuntimeHumanRenderer, render_runtime_event
+from kairos_cli.tool_approval import request_tool_decision
 from kairos_integration import (
     InteractionEnvelope,
     InteractionEvent,
@@ -45,6 +46,16 @@ class _HumanRenderer:
             self.failed = True
         elif event.kind is InteractionEventKind.TURN_END:
             self.finish_line()
+        elif event.kind is InteractionEventKind.TOOL_CALL and event.tool_call is not None:
+            self.finish_line()
+            print(
+                f"[ferramenta] {json.dumps(event.tool_call.name, ensure_ascii=True)}",
+                file=sys.stderr,
+                flush=True,
+            )
+        elif event.kind is InteractionEventKind.TOOL_RESULT and event.tool_result is not None:
+            status = "falhou ou foi recusada" if event.tool_result.is_error else "concluída"
+            print(f"[ferramenta] {status}", file=sys.stderr, flush=True)
 
     def finish_line(self) -> None:
         if self.line_open:
@@ -63,6 +74,7 @@ async def run_chat(
     quiet: bool = False,
     idempotency_key: str | None = None,
     web_search: bool = False,
+    tools: bool = False,
     experiences: bool = True,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
@@ -75,6 +87,8 @@ async def run_chat(
     runtime_session = _is_runtime_session(home, session_id)
     if runtime_session and web_search:
         raise ChatUsageError("--web-search é uma opção do Chat por modelo, não do Agent Runtime")
+    if runtime_session and tools:
+        raise ChatUsageError("--tools é uma opção do Chat por modelo, não do Agent Runtime")
     service = build_interaction_service(home)
     try:
         if prompt:
@@ -87,6 +101,7 @@ async def run_chat(
                 idempotency_key=idempotency_key or (uuid.uuid4().hex if runtime_session else None),
                 runtime_session=runtime_session,
                 web_search=web_search,
+                tools=tools,
                 home=home,
                 experiences=experiences,
             )
@@ -98,6 +113,7 @@ async def run_chat(
             quiet=quiet,
             runtime_session=runtime_session,
             web_search=web_search,
+            tools=tools,
             home=home,
             experiences=experiences,
         )
@@ -120,6 +136,7 @@ async def _run_interactive(
     quiet: bool,
     runtime_session: bool = False,
     web_search: bool = False,
+    tools: bool = False,
     home: Path | None = None,
     experiences: bool = True,
 ) -> int:
@@ -146,6 +163,7 @@ async def _run_interactive(
                 idempotency_key=uuid.uuid4().hex if runtime_session else None,
                 runtime_session=runtime_session,
                 web_search=web_search,
+                tools=tools,
                 home=home,
                 experiences=experiences,
             ),
@@ -162,6 +180,7 @@ async def _run_turn(
     idempotency_key: str | None = None,
     runtime_session: bool = False,
     web_search: bool = False,
+    tools: bool = False,
     home: Path | None = None,
     experiences: bool = True,
 ) -> int:
@@ -173,6 +192,7 @@ async def _run_turn(
         override=override,
         idempotency_key=idempotency_key,
         web_search=web_search,
+        tools=tools,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()
@@ -204,19 +224,9 @@ async def _run_turn(
                 if event.kind == "error":
                     renderer.failed = True
                 continue
-            if as_json:
-                print(
-                    json.dumps(
-                        interaction_event_to_json(event, conversation_id=session_id),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-                if event.kind is InteractionEventKind.TURN_ERROR:
-                    renderer.failed = True
-            else:
-                renderer.emit(event)
+            await _handle_chat_event(
+                service, event, renderer, session_id=session_id, as_json=as_json
+            )
     except asyncio.CancelledError:
         if accepted_turn_id is not None:
             cursor = (
@@ -243,6 +253,39 @@ async def _run_turn(
     finally:
         renderer.finish_line()
     return 1 if renderer.failed else 0
+
+
+async def _handle_chat_event(
+    service,
+    event: InteractionEvent,
+    renderer: _HumanRenderer,
+    *,
+    session_id: str,
+    as_json: bool,
+) -> None:
+    if as_json:
+        print(
+            json.dumps(
+                interaction_event_to_json(event, conversation_id=session_id),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    else:
+        renderer.emit(event)
+    if event.kind is InteractionEventKind.TOOL_APPROVAL_REQUEST:
+        renderer.finish_line()
+        decision = await request_tool_decision(event, as_json=as_json)
+        service.decide_tool_approval(
+            approval_id=event.tool_approval_id,
+            session_id=session_id,
+            decision=decision,
+        )
+    if event.kind is InteractionEventKind.TURN_ERROR or (
+        event.tool_result is not None and event.tool_result.is_error
+    ):
+        renderer.failed = True
 
 
 def _augment_with_experiences(content: str, home: Path) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from kairos_domain.message import DomainRuleViolation
 
@@ -13,6 +14,7 @@ __all__ = [
     "SecretError",
     "assert_env_is_for_secrets",
     "classify_auth_failure",
+    "contains_secret_fields",
     "has_usable_secret",
     "should_reauthenticate",
 ]
@@ -54,6 +56,16 @@ def has_usable_secret(value: str | None) -> bool:
     if not stripped:
         return False
     return stripped.lower() not in PLACEHOLDER_SECRETS
+
+
+def contains_secret_fields(value: Any) -> bool:
+    if isinstance(value, dict):
+        if {str(key).lower() for key in value} & {"api_key", "key", "token", "secret", "password"}:
+            return True
+        return any(contains_secret_fields(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_secret_fields(item) for item in value)
+    return False
 
 
 def assert_env_is_for_secrets(key: str, *, is_credential: bool) -> None:

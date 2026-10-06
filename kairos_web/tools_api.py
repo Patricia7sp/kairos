@@ -14,6 +14,6 @@ def list_toolsets():
     items = registry.inventory()
     for tool in items["tools"]:
         nome = tool["name"]
-        tool["chat"] = nome in CHAT_TOOLS
-        tool["mutating"] = nome in MUTATING_TOOLS
+        tool["chat"] = nome in CHAT_TOOLS or nome.startswith("mcp__")
+        tool["mutating"] = nome in MUTATING_TOOLS or nome.startswith("mcp__")
     return items

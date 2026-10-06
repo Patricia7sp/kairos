@@ -727,6 +727,7 @@ def cmd_run(args) -> int:
                 quiet=getattr(args, "quiet", False),
                 idempotency_key=getattr(args, "idempotency_key", None),
                 web_search=getattr(args, "web_search", False),
+                tools=getattr(args, "tools", False),
                 experiences=getattr(args, "experiences", True),
             )
         )

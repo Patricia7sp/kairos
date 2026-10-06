@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from contextlib import nullcontext
+from pathlib import Path
 
 from kairos_security.credentials.contracts import (
     CredentialMetadata,
@@ -13,12 +16,47 @@ from kairos_security.credentials.contracts import (
     VaultError,
     VaultState,
 )
+from kairos_security.credentials.io import credential_file_lock
 from kairos_security.credentials.keyring_backend import SystemKeyringVault
 
 
 class CredentialService:
-    def __init__(self, *, keyring: SystemKeyringVault, encrypted: CredentialVault) -> None:
+    def __init__(
+        self,
+        *,
+        keyring: SystemKeyringVault,
+        encrypted: CredentialVault,
+        auth_path: Path | None = None,
+    ) -> None:
         self._backend: CredentialVault = keyring if keyring.available else encrypted
+        self._auth_path = auth_path
+
+    def selection_transaction(self):
+        return (
+            credential_file_lock(self._auth_path) if self._auth_path is not None else nullcontext()
+        )
+
+    def active_ref(self, provider: str) -> CredentialRef | None:
+        """Relê a seleção não secreta; não permite substituí-la pela ordem do cofre."""
+        if self._auth_path is None:
+            return None
+        from kairos_security.credentials.profile import active_credential_selections
+
+        with credential_file_lock(self._auth_path):
+            try:
+                document = (
+                    json.loads(self._auth_path.read_text(encoding="utf-8"))
+                    if self._auth_path.exists()
+                    else {}
+                )
+            except (OSError, ValueError) as exc:
+                raise VaultError("seleção de credenciais indisponível; faça novo login") from exc
+            selection = active_credential_selections(
+                document, backend=self.backend_name, provider=provider
+            ).get(provider)
+            if selection is None:
+                return None
+            return CredentialRef(provider, selection["credential_id"])
 
     @property
     def backend_name(self) -> str:

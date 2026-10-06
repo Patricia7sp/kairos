@@ -334,16 +334,23 @@ class ExecucaoTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(["uninstall", "--yes"]), 1)
 
-    def test_login_logout_persistem_no_auth_json(self):
+    def test_login_logout_persistem_referencias_no_auth_json(self):
         import json
 
         home = Path(self._tmp.name)
-        self.assertEqual(main(["login", "--provider", "roundtrip", "--api-key", "sk-roundtrip"]), 0)
-        dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
-        self.assertIn("roundtrip", dados["credential_pool"])
-        self.assertEqual(main(["logout", "--provider", "roundtrip"]), 0)
-        dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
-        self.assertNotIn("roundtrip", dados["credential_pool"])
+        passphrase = home / "passphrase"
+        passphrase.write_text("surface-test-passphrase")
+        passphrase.chmod(0o600)
+        with patch.dict(os.environ, {"KAIROS_VAULT_PASSPHRASE_FILE": str(passphrase)}):
+            self.assertEqual(
+                main(["login", "--provider", "openai", "--api-key", "sk-roundtrip"]), 0
+            )
+            dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+            self.assertEqual(dados["credential_pool"]["openai"][0]["credential_id"], "primary")
+            self.assertNotIn("sk-roundtrip", (home / "auth.json").read_text())
+            self.assertEqual(main(["logout", "--provider", "openai"]), 0)
+            dados = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+            self.assertNotIn("openai", dados["credential_pool"])
 
     def test_login_rejeita_placeholder(self):
         self.assertEqual(main(["login", "--provider", "x", "--api-key", "changeme"]), 1)

@@ -17,7 +17,72 @@ na CLI.
 - **Nada de lógica core na CLI.** Se o comando começou a duplicar o core,
   ele está no lugar errado: a lógica vai para a unit, o handler só a chama.
 
+## Conversar com ferramentas
+
+```bash
+kairos chat --session trabalho --tools
+kairos run --session trabalho --tools "Leia o README.md e resuma o projeto"
+kairos run --session pesquisa --tools --web-search "Pesquise o assunto e consulte as fontes"
+```
+
+`--tools` habilita as ferramentas disponíveis do Chat, inclusive as de servidores
+MCP stdio já configurados. A busca continua dependendo de `--web-search`.
+Sem `--tools`, o comportamento anterior é preservado. Sessões do Agent Runtime
+usam ferramentas nativas e recusam essa opção; suas aprovações continuam em
+`kairos runtime approve`.
+
+Cada chamada mutadora mostra nome e argumentos em stderr e exige `sim` no
+terminal. Enter, resposta diferente, EOF ou expiração recusam a chamada. Não há
+aprovação automática para pipes: stdin sem TTY e `--json` recusam mutações
+imediatamente, sem consumir a entrada. Em JSON, stdout permanece NDJSON de
+eventos; avisos ficam em stderr. Falha ou recusa de ferramenta faz o comando
+terminar com código 1, mesmo quando o modelo produz uma resposta final.
+
+As chamadas usam o mesmo serviço e a mesma política da Web. A opção não cria
+uma sandbox nem limita os caminhos ao diretório atual: arquivos e comandos
+mantêm o escopo do ambiente configurado. O bash pode usar a sandbox opcional
+`chat.sandboxed_bash`, sem alterar o escopo das ferramentas de arquivo.
+
+O conjunto de schemas é fixado no início do turno. Ferramentas indisponíveis ou
+registradas depois não podem ser executadas por uma chamada inventada pelo
+modelo; a seleção será refeita no próximo turno.
+
 ## Passo a passo
+
+### Credenciais de provedores
+
+```bash
+kairos auth vault-status --json
+kairos login --provider openai
+kairos logout --provider openai
+```
+
+`login` pede a chave em um prompt oculto quando executado em terminal. A opção
+`--api-key` continua disponível para compatibilidade. CLI e Web gravam pelo
+mesmo serviço: o segredo fica no keyring ou no cofre criptografado; `auth.json`
+contém referências e métodos de autenticação. O login configura a credencial,
+sem fazer uma chamada de rede para verificar saldo ou disponibilidade.
+
+O cofre precisa estar acessível ao processo. Com keyring disponível, não há
+senha-mestra. Para o backend criptografado em processos separados, configure
+`KAIROS_VAULT_PASSPHRASE_FILE` com um arquivo administrado do usuário atual, sem
+permissões de grupo/outros (modo `0600`). `kairos auth vault-unlock` verifica a
+senha somente naquela execução; não desbloqueia os comandos seguintes.
+
+`logout --provider` remove todas as credenciais locais daquele provedor;
+`logout` sem provedor remove todas as credenciais locais do perfil ativo. A
+remoção pela página de Provedores continua limitada à credencial principal.
+Fontes externas somente leitura recusam alterações. Cofre bloqueado ou
+metadados inválidos produzem erro, sem anunciar sucesso. Credenciais legadas
+devem ser migradas com `kairos auth migrate --confirm-remove-plaintext` antes
+de um novo login.
+
+As operações usam o lock compartilhado e tentam restaurar segredos, métodos e
+metadados anteriores se uma etapa de persistência falhar. Isso não constitui
+uma transação atômica entre os dois arquivos em caso de interrupção abrupta
+do processo.
+
+### Implementar um comando
 
 1. **Declare na árvore** `kairos_cli/commands.py` — um `_c(...)`/`_sub(...)`
    com `help`, `status=Status.IMPLEMENTED` e `unit=` (a unit que sustenta o

@@ -82,7 +82,7 @@ def test_removal_is_authenticated_and_unknown_provider_is_rejected(credentials):
 def test_removal_rolls_back_vault_when_metadata_write_fails(credentials):
     client, home, before = credentials
     with patch(
-        "kairos_web.provider_credentials_api.secure_atomic_write_text", side_effect=OSError("disk")
+        "kairos_security.credentials.io.secure_atomic_write_text", side_effect=OSError("disk")
     ):
         response = client.delete("/api/providers/openai/credentials")
     assert response.status_code == 503
@@ -95,7 +95,7 @@ def test_external_credential_is_read_only(credentials):
     source = ExternalCredentialSource(
         {CredentialRef("openai", "primary"): CredentialSecret({"api_key": "external-secret"})}
     )
-    with patch("kairos_web.provider_credentials_api.build_credential_service", return_value=source):
+    with patch("kairos_security.credentials.factory.build_credential_service", return_value=source):
         response = client.delete("/api/providers/openai/credentials")
     assert response.status_code == 409
     assert "externa" in response.json()["detail"]
@@ -117,6 +117,7 @@ def test_replacement_preserves_other_credentials_and_document_fields(credentials
         "/api/providers/openai/credentials", json={"secret": "replacement-private"}
     )
     assert response.status_code == 200
+    before["active_credentials"] = {"openai": {"credential_id": "primary", "backend": "encrypted"}}
     assert json.loads((home / "auth.json").read_text()) == before
     assert "replacement-private" not in (home / "auth.json").read_text()
 
@@ -150,6 +151,7 @@ def test_simultaneous_delete_and_save_share_the_same_transaction_lock(credential
             release.set()
         assert deletion.result(timeout=5).status_code == 200
         assert replacement.result(timeout=5).status_code == 200
+    before["active_credentials"] = {"openai": {"credential_id": "primary", "backend": "encrypted"}}
     assert json.loads((home / "auth.json").read_text()) == before
     assert build_credential_service(home).get(CredentialRef("openai", "primary")).reveal() == {
         "api_key": "new-private"

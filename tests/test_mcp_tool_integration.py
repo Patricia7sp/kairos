@@ -9,6 +9,7 @@ chamam para exercitar o spawn honesto.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,44 @@ from kairos_integration.chat_tools import chat_tool_definitions, needs_tool_appr
 from kairos_mcp.client import SchemaCache
 from kairos_tools.mcp_tools import register_mcp_tools, server_configs, sync_mcp_servers
 from kairos_tools.registry import ToolRegistry
+
+
+def test_mcp_atravessa_turno_aprovacao_pipe_e_historico(mcp_reg, tmp_path, monkeypatch):
+    from test_chat_search_loop import RoundGateway, answer_round, make_service, turn
+    from test_chat_tool_approval import mutator_round
+
+    from kairos_providers import CanonicalToolCall
+    from kairos_state import connect, initialize_schema
+
+    monkeypatch.setattr("kairos_integration.chat_tools.registry", mcp_reg)
+    monkeypatch.setattr("kairos_integration.interaction_service.registry", mcp_reg)
+    call = CanonicalToolCall("sum-1", "mcp__fake__sum", '{"a":2,"b":3}')
+    gateway = RoundGateway([mutator_round(call), answer_round()])
+    connection = connect(tmp_path / "turn.db")
+    initialize_schema(connection)
+    service = make_service(connection, gateway)
+
+    async def scenario():
+        events = []
+        async for event in service.stream(turn(tools=True)):
+            events.append(event)
+            if event.kind == "tool_approval_request":
+                service.decide_tool_approval(
+                    approval_id=event.tool_approval_id, session_id="search", decision="allow"
+                )
+        return events
+
+    try:
+        events = asyncio.run(scenario())
+        results = [event.tool_result for event in events if event.kind == "tool_result"]
+        assert results[0].content == "5"
+        assert not results[0].is_error
+        assert any(event.kind == "tool_approval_request" for event in events)
+        assert any(message.role == "tool" for message in gateway.requests[1].messages)
+        assert events[-1].kind == "turn_end"
+    finally:
+        connection.close()
+
 
 FAKE_SERVER = Path(__file__).with_name("fake_mcp_server.py")
 
