@@ -2179,6 +2179,27 @@ semântica anterior quando não fornecem workspace no envelope.
 
 ---
 
+## D-CLI.AUTO — autorização explícita para scripts de um turno
+
+**Referências:** `_reversa_sdd/tools/requirements.md` (RF-09/RF-10b),
+`_reversa_sdd/hermes-cli/requirements.md`, D-CLI.WS e plano CLI/MCP de 2026-10-05.
+
+A CLI usa `--allow-tool NOME`, repetível, para responder aos eventos de
+aprovação do Chat com uma autorização explícita. Diferentemente do bypass
+amplo do legado, a lista contém nomes exatos de ferramentas mutadoras e vale
+somente para um turno com mensagem e workspace explícitos. Não é persistida
+nem enviada ao modelo; não muda os schemas, o executor ou as demais guardas.
+Sem a opção, JSON e pipe mantêm recusa imediata; ferramentas fora da lista
+preservam a confirmação humana ou a recusa sem terminal.
+
+A lista é congelada antes da composição do serviço. A decisão continua ligada
+ao approval ID e à conversa do evento. Nomes desconhecidos, globs, MCP, Git,
+agenda, aliases e sessões do Agent Runtime são recusados. Bash permanece
+condicionado ao worker Docker existente; a autorização não o habilita no host.
+A auditoria em stderr registra somente o nome autorizado, sem argumentos.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

@@ -34,10 +34,33 @@ usam ferramentas nativas e recusam essa opção; suas aprovações continuam em
 
 Cada chamada mutadora mostra nome e argumentos em stderr e exige `sim` no
 terminal. Enter, resposta diferente, EOF ou expiração recusam a chamada. Não há
-aprovação automática para pipes: stdin sem TTY e `--json` recusam mutações
+aprovação implícita para pipes: stdin sem TTY e `--json` recusam mutações
 imediatamente, sem consumir a entrada. Em JSON, stdout permanece NDJSON de
 eventos; avisos ficam em stderr. Falha ou recusa de ferramenta faz o comando
 terminar com código 1, mesmo quando o modelo produz uma resposta final.
+
+Scripts podem autorizar ferramentas específicas para um único turno:
+
+```bash
+kairos run --session trabalho --tools --workspace ~/projetos/app \
+  --allow-tool write_file --allow-tool edit_file --json \
+  "Atualize a documentação"
+```
+
+`--allow-tool` pode ser repetido e aceita os nomes exatos `write_file`,
+`edit_file`, `patch` e `bash`. Exige `--tools`, workspace explícito e uma
+mensagem; não vale para conversa interativa nem sessões do Agent Runtime.
+A lista fica congelada para esse turno e não é salva para futuras execuções.
+Cada chamada passa pelo serviço de aprovação: ferramentas listadas recebem
+a decisão explícita sem ler stdin, inclusive em JSON/pipe; ferramentas não
+listadas continuam exigindo confirmação ou sendo recusadas sem terminal.
+O aviso em stderr identifica a ferramenta autorizada sem imprimir argumentos.
+Em JSON, stdout continua sendo NDJSON de eventos, incluindo a solicitação de
+aprovação e o resultado da chamada.
+
+A opção não libera caminhos externos nem ferramentas omitidas pelo workspace.
+`--allow-tool bash` só executa com o bash Docker disponível; não libera shell
+no host. MCP, Git e agenda não são nomes aceitos pela autorização.
 
 O workspace é o diretório atual no início do comando, ou o diretório existente
 informado por `--workspace` (exige `--tools`). Caminhos relativos usam essa raiz;

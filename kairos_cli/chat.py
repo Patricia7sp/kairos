@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kairos_cli.runtime import RuntimeHumanRenderer, render_runtime_event
-from kairos_cli.tool_approval import request_tool_decision
+from kairos_cli.tool_approval import AUTOMATION_TOOLS, request_tool_decision
 from kairos_integration import (
     InteractionEnvelope,
     InteractionEvent,
@@ -77,6 +77,7 @@ async def run_chat(
     tools: bool = False,
     experiences: bool = True,
     workspace: str | None = None,
+    allow_tools: tuple[str, ...] | list[str] = (),
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -86,6 +87,13 @@ async def run_chat(
     if idempotency_key is not None and not prompt:
         raise ChatUsageError("--idempotency-key só pode ser usado com uma mensagem")
     runtime_session = _is_runtime_session(home, session_id)
+    authorized_tools = _tool_authorization(
+        allow_tools,
+        tools=tools,
+        workspace=workspace,
+        prompt=prompt,
+        runtime_session=runtime_session,
+    )
     if runtime_session and web_search:
         raise ChatUsageError("--web-search é uma opção do Chat por modelo, não do Agent Runtime")
     if runtime_session and tools:
@@ -105,6 +113,7 @@ async def run_chat(
                 web_search=web_search,
                 tools=tools,
                 workspace=workspace,
+                authorized_tools=authorized_tools,
                 home=home,
                 experiences=experiences,
             )
@@ -129,6 +138,23 @@ async def run_chat(
         return 1
     finally:
         await service.aclose()
+
+
+def _tool_authorization(names, *, tools, workspace, prompt, runtime_session) -> frozenset[str]:
+    authorized = frozenset(names)
+    if not authorized:
+        return authorized
+    if runtime_session:
+        raise ChatUsageError("--allow-tool é uma opção do Chat por modelo, não do Agent Runtime")
+    if not tools:
+        raise ChatUsageError("--allow-tool exige --tools")
+    if workspace is None or not workspace.strip():
+        raise ChatUsageError("--allow-tool exige --workspace explícito")
+    if not prompt.strip():
+        raise ChatUsageError("--allow-tool exige uma mensagem para um único turno")
+    if not authorized <= AUTOMATION_TOOLS:
+        raise ChatUsageError("--allow-tool aceita somente: " + ", ".join(sorted(AUTOMATION_TOOLS)))
+    return authorized
 
 
 def _selected_workspace(workspace: str | None, *, tools: bool, runtime_session: bool) -> str | None:
@@ -209,6 +235,7 @@ async def _run_turn(
     home: Path | None = None,
     experiences: bool = True,
     workspace: str | None = None,
+    authorized_tools: frozenset[str] = frozenset(),
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -252,7 +279,12 @@ async def _run_turn(
                     renderer.failed = True
                 continue
             await _handle_chat_event(
-                service, event, renderer, session_id=session_id, as_json=as_json
+                service,
+                event,
+                renderer,
+                session_id=session_id,
+                as_json=as_json,
+                authorized_tools=authorized_tools,
             )
     except asyncio.CancelledError:
         if accepted_turn_id is not None:
@@ -289,6 +321,7 @@ async def _handle_chat_event(
     *,
     session_id: str,
     as_json: bool,
+    authorized_tools: frozenset[str] = frozenset(),
 ) -> None:
     if as_json:
         print(
@@ -303,7 +336,9 @@ async def _handle_chat_event(
         renderer.emit(event)
     if event.kind is InteractionEventKind.TOOL_APPROVAL_REQUEST:
         renderer.finish_line()
-        decision = await request_tool_decision(event, as_json=as_json)
+        decision = await request_tool_decision(
+            event, as_json=as_json, authorized_tools=authorized_tools
+        )
         service.decide_tool_approval(
             approval_id=event.tool_approval_id,
             session_id=session_id,

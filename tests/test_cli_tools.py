@@ -39,8 +39,8 @@ def install(monkeypatch, tmp_path):
     connection = connect(tmp_path / "state.db")
     initialize_schema(connection)
 
-    def build(call):
-        gateway = RoundGateway([mutator_round(call), answer_round()])
+    def build(*calls):
+        gateway = RoundGateway([mutator_round(*calls), answer_round()])
         service = make_service(connection, gateway)
 
         class Client:

@@ -7,8 +7,10 @@ import json
 import os
 import sys
 
-from kairos_integration.chat_tools import TOOL_APPROVAL_TIMEOUT_SECONDS
+from kairos_integration.chat_tools import MUTATING_TOOLS, TOOL_APPROVAL_TIMEOUT_SECONDS
 from kairos_integration.interaction_contract import InteractionEvent
+
+AUTOMATION_TOOLS = MUTATING_TOOLS
 
 
 async def _read_answer() -> str:
@@ -42,16 +44,21 @@ async def _read_answer() -> str:
         loop.remove_reader(descriptor)
 
 
-async def request_tool_decision(event: InteractionEvent, *, as_json: bool) -> str:
+async def request_tool_decision(
+    event: InteractionEvent, *, as_json: bool, authorized_tools: frozenset[str] = frozenset()
+) -> str:
+    call = event.tool_call
+    if call is None:
+        return "deny"
+    if call.name in authorized_tools:
+        print(f"Execução autorizada explicitamente: {call.name}.", file=sys.stderr, flush=True)
+        return "allow"
     if as_json or not sys.stdin.isatty():
         print(
             "Execução recusada: a aprovação exige terminal interativo sem --json.",
             file=sys.stderr,
             flush=True,
         )
-        return "deny"
-    call = event.tool_call
-    if call is None:
         return "deny"
     detail = json.dumps({"ferramenta": call.name, "argumentos": call.arguments}, ensure_ascii=True)
     print(

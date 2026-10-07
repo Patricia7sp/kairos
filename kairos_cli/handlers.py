@@ -729,6 +729,7 @@ def cmd_run(args) -> int:
                 web_search=getattr(args, "web_search", False),
                 tools=getattr(args, "tools", False),
                 workspace=getattr(args, "workspace", None),
+                allow_tools=getattr(args, "allow_tool", ()),
                 experiences=getattr(args, "experiences", True),
             )
         )
