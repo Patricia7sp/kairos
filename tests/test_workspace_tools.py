@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from test_cli_tools import install as cli_install
@@ -143,17 +144,18 @@ def test_patch_valida_todos_os_arquivos_antes_da_primeira_escrita(tools, tmp_pat
     internal.write_text("original\n")
     outside = tmp_path / "externo.txt"
     outside.write_text("original\n")
-    patch = """<<<<<<< SEARCH interno.txt
-original
-=======
-alterado
->>>>>>> REPLACE
-<<<<<<< SEARCH ../externo.txt
-original
-=======
-alterado
->>>>>>> REPLACE
-"""
+    patch = dedent("""\
+    <<<<<<< SEARCH interno.txt
+    original
+    =======
+    alterado
+    >>>>>>> REPLACE
+    <<<<<<< SEARCH ../externo.txt
+    original
+    =======
+    alterado
+    >>>>>>> REPLACE
+    """)
     with fs.workspace_scope(root):
         result = tools.dispatch("patch", {"mode": "patch", "patch": patch})
     assert "workspace" in result["error"].lower()
