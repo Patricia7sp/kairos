@@ -315,6 +315,7 @@ tests/test_chat_tool_approval.py
 tests/test_chat_tools.py
 tests/test_cjk.py
 tests/test_cli.py
+tests/test_cli_automation.py
 tests/test_cli_chat.py
 tests/test_cli_insights.py
 tests/test_cli_model.py

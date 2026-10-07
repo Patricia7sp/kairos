@@ -259,6 +259,13 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="habilita ferramentas do Chat; mutações exigem aprovação no terminal",
         )
         parser.add_argument(
+            "--allow-tool",
+            action="append",
+            default=[],
+            metavar="NOME",
+            help="autoriza uma ferramenta mutadora neste turno; exige --tools, --workspace e mensagem",
+        )
+        parser.add_argument(
             "--experiences",
             action=argparse.BooleanOptionalAction,
             default=True,
