@@ -234,7 +234,8 @@ def test_execute_chat_tool_maps_unavailable_without_host_fallback(tmp_path, monk
     assert json.loads(result.content)["status"] == "unavailable"
 
 
-def test_common_turn_approved_bash_runs_in_sandbox(db, tmp_path):
+@pytest.mark.parametrize("restricted_workspace", [False, True])
+def test_common_turn_approved_bash_runs_in_sandbox(db, tmp_path, restricted_workspace):
     homeowners = []
     sandbox = ChatBashSandbox(tmp_path, worker_factory=worker_factory(homeowners))
     service = make_service(
@@ -243,7 +244,13 @@ def test_common_turn_approved_bash_runs_in_sandbox(db, tmp_path):
     events = []
 
     async def scenario():
-        driver = asyncio.create_task(collect_with(events, service, turn(tools=True)))
+        driver = asyncio.create_task(
+            collect_with(
+                events,
+                service,
+                turn(tools=True, workspace=str(tmp_path) if restricted_workspace else None),
+            )
+        )
         approval = await wait_for_kind(events, "tool_approval_request")
         service.decide_tool_approval(
             approval_id=approval.tool_approval_id, session_id="search", decision="allow"
@@ -259,7 +266,10 @@ def test_common_turn_approved_bash_runs_in_sandbox(db, tmp_path):
     assert len(results) == 1 and not results[0].is_error
 
 
-def test_unavailable_sandbox_never_falls_back_to_host(db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("restricted_workspace", [False, True])
+def test_unavailable_sandbox_never_falls_back_to_host(
+    db, tmp_path, monkeypatch, restricted_workspace
+):
     async def failing_factory(_project):
         raise RuntimeError("sem docker")
 
@@ -280,7 +290,13 @@ def test_unavailable_sandbox_never_falls_back_to_host(db, tmp_path, monkeypatch)
     events = []
 
     async def scenario():
-        driver = asyncio.create_task(collect_with(events, service, turn(tools=True)))
+        driver = asyncio.create_task(
+            collect_with(
+                events,
+                service,
+                turn(tools=True, workspace=str(tmp_path) if restricted_workspace else None),
+            )
+        )
         approval = await wait_for_kind(events, "tool_approval_request")
         service.decide_tool_approval(
             approval_id=approval.tool_approval_id, session_id="search", decision="allow"

@@ -19,7 +19,7 @@ from kairos_integration import (
     interaction_event_to_json,
 )
 from kairos_integration import build_interaction_router as build_interaction_service
-from kairos_integration.interaction_contract import InteractionServiceUnavailableError
+from kairos_integration.interaction_contract import InteractionServiceError
 from kairos_providers import ProviderModelRef
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_runtime.wire import runtime_event_to_json
@@ -76,6 +76,7 @@ async def run_chat(
     web_search: bool = False,
     tools: bool = False,
     experiences: bool = True,
+    workspace: str | None = None,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -89,6 +90,7 @@ async def run_chat(
         raise ChatUsageError("--web-search é uma opção do Chat por modelo, não do Agent Runtime")
     if runtime_session and tools:
         raise ChatUsageError("--tools é uma opção do Chat por modelo, não do Agent Runtime")
+    workspace = _selected_workspace(workspace, tools=tools, runtime_session=runtime_session)
     service = build_interaction_service(home)
     try:
         if prompt:
@@ -102,6 +104,7 @@ async def run_chat(
                 runtime_session=runtime_session,
                 web_search=web_search,
                 tools=tools,
+                workspace=workspace,
                 home=home,
                 experiences=experiences,
             )
@@ -114,10 +117,11 @@ async def run_chat(
             runtime_session=runtime_session,
             web_search=web_search,
             tools=tools,
+            workspace=workspace,
             home=home,
             experiences=experiences,
         )
-    except InteractionServiceUnavailableError as exc:
+    except InteractionServiceError as exc:
         print(exc.message, file=sys.stderr, flush=True)
         return 1
     except RuntimeErrorInfo as exc:
@@ -125,6 +129,25 @@ async def run_chat(
         return 1
     finally:
         await service.aclose()
+
+
+def _selected_workspace(workspace: str | None, *, tools: bool, runtime_session: bool) -> str | None:
+    if runtime_session and workspace is not None:
+        raise ChatUsageError(
+            "--workspace é uma opção do Chat por modelo; o runtime usa seu próprio cwd"
+        )
+    if workspace is not None and not tools:
+        raise ChatUsageError("--workspace exige --tools")
+    if tools:
+        try:
+            selected = Path(workspace).expanduser() if workspace is not None else Path.cwd()
+            selected = selected.resolve(strict=True)
+            if not selected.is_dir():
+                raise NotADirectoryError
+            workspace = str(selected)
+        except OSError as exc:
+            raise ChatUsageError("workspace deve apontar para um diretório existente") from exc
+    return workspace
 
 
 async def _run_interactive(
@@ -139,6 +162,7 @@ async def _run_interactive(
     tools: bool = False,
     home: Path | None = None,
     experiences: bool = True,
+    workspace: str | None = None,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -164,6 +188,7 @@ async def _run_interactive(
                 runtime_session=runtime_session,
                 web_search=web_search,
                 tools=tools,
+                workspace=workspace,
                 home=home,
                 experiences=experiences,
             ),
@@ -183,6 +208,7 @@ async def _run_turn(
     tools: bool = False,
     home: Path | None = None,
     experiences: bool = True,
+    workspace: str | None = None,
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -193,6 +219,7 @@ async def _run_turn(
         idempotency_key=idempotency_key,
         web_search=web_search,
         tools=tools,
+        workspace=workspace,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()

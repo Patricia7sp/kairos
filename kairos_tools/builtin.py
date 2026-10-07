@@ -9,11 +9,11 @@ from __future__ import annotations
 import asyncio
 import os
 import urllib.parse
-from pathlib import Path
 from typing import Any
 
 import httpx
 
+from kairos_tools import workspace as fs
 from kairos_tools.file_patch import patch_tool
 from kairos_tools.file_search import search_files_tool
 from kairos_tools.registry import ToolRegistry, registry
@@ -23,6 +23,8 @@ from kairos_tools.web_extract import web_extract_tool
 
 async def bash_tool(command: str, cwd: str | None = None, timeout: int = 60) -> dict[str, Any]:
     """Executa um comando shell no sistema operacional."""
+    if not fs.tool_allowed("bash"):
+        raise fs.WorkspaceDenied()
     work_dir = os.path.expanduser(cwd) if cwd else os.getcwd()
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -51,13 +53,13 @@ async def bash_tool(command: str, cwd: str | None = None, timeout: int = 60) -> 
 
 async def read_file_tool(path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
     """Lê o conteúdo de um arquivo de texto no sistema de arquivos."""
-    p = Path(os.path.expanduser(path))
-    if not p.exists():
+    p = fs.file_path(path)
+    if not fs.exists(p):
         return {"error": f"Arquivo não encontrado: {path}"}
-    if not p.is_file():
+    if not fs.is_file(p):
         return {"error": f"O caminho não é um arquivo: {path}"}
     try:
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = fs.read_text(p, encoding="utf-8", errors="replace")
         lines = text.splitlines()
         selected_lines = lines[offset : offset + limit]
         return {
@@ -73,10 +75,11 @@ async def read_file_tool(path: str, offset: int = 0, limit: int = 2000) -> dict[
 
 async def write_file_tool(path: str, content: str) -> dict[str, Any]:
     """Escreve conteúdo em um arquivo, criando diretórios pais se necessário."""
-    p = Path(os.path.expanduser(path))
+    p = fs.file_path(path)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        if not fs.restricted():
+            p.parent.mkdir(parents=True, exist_ok=True)
+        fs.write_text(p, content, encoding="utf-8")
         return {"path": str(p), "bytes_written": len(content.encode("utf-8")), "success": True}
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Erro ao escrever arquivo: {exc}", "success": False}
@@ -84,11 +87,11 @@ async def write_file_tool(path: str, content: str) -> dict[str, Any]:
 
 async def edit_file_tool(path: str, old_str: str, new_str: str) -> dict[str, Any]:
     """Substitui um trecho exato de texto dentro de um arquivo existente."""
-    p = Path(os.path.expanduser(path))
-    if not p.exists():
+    p = fs.file_path(path)
+    if not fs.exists(p):
         return {"error": f"Arquivo não encontrado: {path}"}
     try:
-        text = p.read_text(encoding="utf-8")
+        text = fs.read_text(p, encoding="utf-8")
         if old_str not in text:
             return {"error": f"Trecho alvo não encontrado no arquivo {path}", "success": False}
         occurrences = text.count(old_str)
@@ -98,7 +101,7 @@ async def edit_file_tool(path: str, old_str: str, new_str: str) -> dict[str, Any
                 "success": False,
             }
         new_text = text.replace(old_str, new_str, 1)
-        p.write_text(new_text, encoding="utf-8")
+        fs.write_text(p, new_text, encoding="utf-8")
         return {"path": str(p), "replaced": True, "success": True}
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Erro ao editar arquivo: {exc}", "success": False}
@@ -106,19 +109,23 @@ async def edit_file_tool(path: str, old_str: str, new_str: str) -> dict[str, Any
 
 async def list_dir_tool(path: str = ".") -> dict[str, Any]:
     """Lista os arquivos e subdiretórios dentro de um diretório."""
-    p = Path(os.path.expanduser(path))
-    if not p.exists():
+    p = fs.file_path(path)
+    if not fs.exists(p):
         return {"error": f"Diretório não encontrado: {path}"}
-    if not p.is_dir():
+    if not fs.is_dir(p):
         return {"error": f"O caminho não é um diretório: {path}"}
     try:
         entries = []
-        for item in sorted(p.iterdir()):
+        for item in sorted(fs.entries(p)):
+            try:
+                fs.file_stat(item)
+            except fs.WorkspaceDenied:
+                continue
             entries.append(
                 {
                     "name": item.name,
-                    "is_dir": item.is_dir(),
-                    "size": item.stat().st_size if item.is_file() else 0,
+                    "is_dir": fs.is_dir(item),
+                    "size": fs.file_stat(item).st_size if fs.is_file(item) else 0,
                 }
             )
         return {"path": str(p), "entries": entries, "count": len(entries)}

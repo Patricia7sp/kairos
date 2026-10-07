@@ -11,6 +11,7 @@ que a mude depois — a ausência é a garantia.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import copy
 import inspect
 import logging
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from kairos_tools.budget import ResultBudget
+from kairos_tools.workspace import tool_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +239,12 @@ class ToolRegistry:
         if entry is None:
             return tool_error(f"Unknown tool: {name}")
 
+        if not tool_allowed(entry.name, override=entry.override_of is not None):
+            return {
+                "status": "denied",
+                "error": "Ferramenta sem isolamento comprovado para o workspace.",
+            }
+
         args = arguments or {}
         try:
             if entry.is_async:
@@ -301,7 +309,7 @@ def _run_async(coro):
     import concurrent.futures
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        return pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()
 
 
 #: O singleton.

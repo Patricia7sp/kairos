@@ -17,6 +17,7 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from kairos_gateway.adapters.config import save_config
 from kairos_gateway.slack_inbound import (
@@ -36,7 +37,8 @@ EVENT_ID = "Ev789XYZ"
 NOW = int(time.time())
 
 
-def _signature(secret: str, raw: bytes, *, ts: int = NOW) -> tuple[str, str]:
+def _signature(secret: str, raw: bytes, *, ts: int | None = None) -> tuple[str, str]:
+    ts = int(time.time()) if ts is None else ts
     base = f"v0:{ts}:{raw.decode('utf-8')}"
     digest = hmac.new(secret.encode(), base.encode(), hashlib.sha256).hexdigest()
     return str(ts), f"v0={digest}"
@@ -133,6 +135,17 @@ def _signed(raw: bytes) -> dict[str, str]:
 
 
 class SignatureTests(unittest.TestCase):
+    def test_assinatura_de_teste_usa_relogio_no_momento_da_chamada(self):
+        raw = _message_payload()
+        with patch("time.time", return_value=NOW + 601):
+            ts, signature = _signature(SIGNING_SECRET, raw)
+            self.assertEqual(int(ts), int(time.time()))
+            self.assertTrue(
+                verify_slack_signature(
+                    SIGNING_SECRET, raw, timestamp_header=ts, signature_header=signature
+                )
+            )
+
     def test_verify_aceita_assinatura_valida(self):
         raw = _message_payload()
         ts, sig = _signature(SIGNING_SECRET, raw)

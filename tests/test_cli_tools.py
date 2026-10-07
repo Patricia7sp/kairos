@@ -33,6 +33,7 @@ def terminal_input(monkeypatch, text):
 
 @pytest.fixture
 def install(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("KAIROS_HOME", str(tmp_path))
     monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
     connection = connect(tmp_path / "state.db")
@@ -73,12 +74,13 @@ def test_cli_le_arquivo_pelo_core(install, tmp_path, capsys, command):
     assert "read_file" in capsys.readouterr().err
 
 
-def test_cli_bash_falha_real_retorna_erro(install, monkeypatch, capsys):
+def test_cli_bash_no_host_nao_e_habilitado_no_workspace(install, monkeypatch, capsys):
     gateway = install(CanonicalToolCall("shell", "bash", json.dumps({"command": "exit 7"})))
     with terminal_input(monkeypatch, "sim\n"):
         assert main(["run", "--session", "cli-test", "--tools", "execute"]) != 0
     result = next(m for m in gateway.requests[1].messages if m.role == "tool")
-    assert json.loads(result.content[0].value)["exit_code"] == 7
+    assert "não habilitada" in result.content[0].value
+    assert "bash" not in {tool["function"]["name"] for tool in gateway.requests[0].tools}
     assert "falhou" in capsys.readouterr().err
 
 

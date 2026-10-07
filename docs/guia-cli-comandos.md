@@ -22,11 +22,12 @@ na CLI.
 ```bash
 kairos chat --session trabalho --tools
 kairos run --session trabalho --tools "Leia o README.md e resuma o projeto"
+kairos run --session trabalho --tools --workspace ~/projetos/app "Edite o README.md"
 kairos run --session pesquisa --tools --web-search "Pesquise o assunto e consulte as fontes"
 ```
 
-`--tools` habilita as ferramentas disponíveis do Chat, inclusive as de servidores
-MCP stdio já configurados. A busca continua dependendo de `--web-search`.
+`--tools` habilita as ferramentas disponíveis do Chat dentro do workspace.
+A busca continua dependendo de `--web-search`.
 Sem `--tools`, o comportamento anterior é preservado. Sessões do Agent Runtime
 usam ferramentas nativas e recusam essa opção; suas aprovações continuam em
 `kairos runtime approve`.
@@ -38,10 +39,25 @@ imediatamente, sem consumir a entrada. Em JSON, stdout permanece NDJSON de
 eventos; avisos ficam em stderr. Falha ou recusa de ferramenta faz o comando
 terminar com código 1, mesmo quando o modelo produz uma resposta final.
 
-As chamadas usam o mesmo serviço e a mesma política da Web. A opção não cria
-uma sandbox nem limita os caminhos ao diretório atual: arquivos e comandos
-mantêm o escopo do ambiente configurado. O bash pode usar a sandbox opcional
-`chat.sandboxed_bash`, sem alterar o escopo das ferramentas de arquivo.
+O workspace é o diretório atual no início do comando, ou o diretório existente
+informado por `--workspace` (exige `--tools`). Caminhos relativos usam essa raiz;
+caminhos absolutos precisam ficar dentro dela. A aprovação de uma escrita não
+autoriza sair do workspace. Leitura, escrita, edição, patch, busca e listagem
+recusam links simbólicos e arquivos com múltiplos hard links, inclusive links
+internos. Busca e listagem omitem esses itens. Um patch em lote valida todos os
+arquivos antes de começar a escrever.
+
+Shell no host, Git, agenda, servidores MCP de terceiros e overrides de plugins são
+omitidos/recusados nesse modo: seus processos ou handlers não têm contenção de
+arquivos comprovada. `bash` continua disponível com `chat.sandboxed_bash`: roda
+no worker Docker isolado, com workspace próprio vazio, sem montar o projeto
+do host. A raiz dos arquivos fica fixada por turno, incluindo aprovação e
+tentativas, e não depende de mudanças posteriores no diretório do processo.
+
+Essa fronteira cobre as operações de arquivo das ferramentas nativas. Plugins
+instalados e hooks em processo continuam sendo código confiável; isso não é
+isolamento de todo o processo Kairos. Web, canais e ACP mantêm suas políticas
+existentes; o ACP continua solicitando aprovação para edições fora de seu cwd.
 
 O conjunto de schemas é fixado no início do turno. Ferramentas indisponíveis ou
 registradas depois não podem ser executadas por uma chamada inventada pelo

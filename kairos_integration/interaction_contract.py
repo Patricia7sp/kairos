@@ -115,8 +115,14 @@ class InteractionEnvelope:
     idempotency_key: str | None = None
     web_search: bool = False
     tools: bool = False
+    workspace: str | None = None
 
     def __post_init__(self) -> None:
+        if self.workspace is not None:
+            from pathlib import Path
+
+            if not isinstance(self.workspace, str) or not Path(self.workspace).is_absolute():
+                raise ValueError("workspace deve ser um diretório absoluto")
         if type(self.web_search) is not bool:
             raise TypeError("web_search deve ser booleano")
         if type(self.tools) is not bool:

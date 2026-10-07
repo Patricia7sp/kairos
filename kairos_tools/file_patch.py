@@ -12,8 +12,9 @@ from __future__ import annotations
 import difflib
 import os
 import re
-from pathlib import Path
 from typing import Any
+
+from kairos_tools import workspace as fs
 
 FUZZY_THRESHOLD = 0.75
 FUZZY_MARGIN = 0.05
@@ -114,7 +115,7 @@ def _apply_block(text: str, old_string: str, new_string: str) -> tuple[str, int,
 
 def _read(path: str) -> tuple[str | None, str | None]:
     try:
-        return Path(path).read_text(encoding="utf-8"), None
+        return fs.read_text(path, encoding="utf-8"), None
     except FileNotFoundError:
         return None, f"Arquivo não encontrado: {path}"
     except OSError as exc:
@@ -140,7 +141,7 @@ def _replace_in_file(path: str, old_string: str, new_string: str) -> dict[str, A
             "error": "Trecho alvo não encontrado (exato ou difuso confiável).",
             "fuzzy": True,
         }
-    Path(path).write_text(new_text, encoding="utf-8")
+    fs.write_text(path, new_text, encoding="utf-8")
     return {"path": path, "success": True, "replaced": True, "fuzzy_used": not occurrences}
 
 
@@ -154,7 +155,7 @@ def _replace_all_in_file(path: str, old_string: str, new_string: str) -> dict[st
         if best_fuzzy_span(text, old_string) is None:
             return {"path": path, "success": False, "error": "Trecho alvo não encontrado."}
         return {"path": path, "success": False, "error": "replace_all não aplica fallback difuso."}
-    Path(path).write_text(text.replace(old_string, new_string), encoding="utf-8")
+    fs.write_text(path, text.replace(old_string, new_string), encoding="utf-8")
     return {"path": path, "success": True, "replaced": count, "replace_all": True}
 
 
@@ -231,7 +232,7 @@ def _apply_file_blocks(name: str, blocks: list[dict[str, Any]]) -> dict[str, Any
         cached = next_text
         file_result["applied"] += 1
     if file_result["applied"]:
-        Path(name).write_text(cached or "", encoding="utf-8")
+        fs.write_text(name, cached or "", encoding="utf-8")
     file_result["success"] = bool(file_result["applied"]) and not file_result["errors"]
     return file_result
 
@@ -248,6 +249,8 @@ def _dispatch_patch(patch: str, path: str | None, order: list[str] | None) -> di
     except ValueError as exc:
         return {"status": "invalid_arguments", "error": f"Formato V4A inválido: {exc}"}
 
+    for name in grouped:
+        fs.validate_file(name)
     results = [_apply_file_blocks(name, grouped[name]) for name in grouped]
     errors = [err for item in results for err in item["errors"]]
     return {

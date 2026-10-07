@@ -2149,6 +2149,36 @@ lote, como em D-PLUG.2.
 
 ---
 
+## D-CLI.WS — workspace restrito para ferramentas do Chat na CLI
+
+**Referências:** `_reversa_sdd/tools/requirements.md` (despacho comum e ponte
+async), `_reversa_sdd/acp-adapter/requirements.md` (RF-12/RF-24b), D-03.2,
+D-17.1 e D-17.3 deste documento.
+
+O cwd do ACP é um piso de autoaprovação; uma edição externa pode ser autorizada
+por diálogo. A CLI `run/chat --tools` agora usa uma fronteira mais restrita,
+conforme o recorte de workspace autorizado: cwd inicial ou `--workspace`, sem
+acesso a arquivos externos mesmo após aprovação. A raiz é informação do
+transporte no envelope, não argumento do modelo nem parâmetro do provedor.
+
+O turno mantém um descritor da raiz e um ContextVar próprio até terminar sua
+limpeza. A ponte async para a thread do registro propaga esse contexto. As
+operações nativas usam `dir_fd` e `O_NOFOLLOW`, recusam symlinks e arquivos com
+múltiplos hard links, e truncam somente após verificar o descritor aberto.
+Busca/listagem omitem links; patch em lote valida todos os destinos antes da
+primeira escrita. Isso protege caminhos e a troca de links entre checagem e
+abertura; não promete isolamento contra processos externos que movem inodes
+já abertos ou alteram mounts do host.
+
+MCP stdio, agenda configurada, Git no host e bash no host não comprovam contenção só por cwd ou
+argumentos: ficam omitidos/recusados sob essa fronteira. Overrides de plugins
+também são recusados. O bash Docker existente mantém seu workspace vazio
+isolado. Código de plugins/hooks instalado no processo continua confiável;
+a guarda não é uma sandbox de Python. Outros transportes e ACP preservam a
+semântica anterior quando não fornecem workspace no envelope.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
