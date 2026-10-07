@@ -437,6 +437,10 @@ def calendar_tool(
     uid: Any = None,
 ) -> dict[str, Any]:
     """Lê e altera a agenda local (.ics). add/rm alteram o arquivo e exigem aprovação."""
+    from kairos_tools.workspace import WorkspaceDenied, tool_allowed
+
+    if not tool_allowed("calendar"):
+        raise WorkspaceDenied()
     if subcommand not in _ALLOWED_SUBCOMMANDS:
         return _error(f"subcomando não suportado: {subcommand}")
     source = calendar_source(_home())

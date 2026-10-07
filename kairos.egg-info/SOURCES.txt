@@ -242,6 +242,7 @@ kairos_tools/policy.py
 kairos_tools/registry.py
 kairos_tools/search_results.py
 kairos_tools/web_extract.py
+kairos_tools/workspace.py
 kairos_tui_host/__init__.py
 kairos_tui_host/rpc.py
 kairos_tui_host/supervisor.py
@@ -452,3 +453,4 @@ tests/test_web_search_tool.py
 tests/test_web_session_history.py
 tests/test_webhook_inbound.py
 tests/test_whatsapp_inbound.py
+tests/test_workspace_tools.py

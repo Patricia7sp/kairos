@@ -282,6 +282,26 @@ class InteractionService:
         demand: asyncio.Queue[None],
         events: asyncio.Queue[InteractionEvent],
     ) -> _StreamTerminal:
+        from kairos_tools.workspace import workspace_scope
+
+        try:
+            with workspace_scope(envelope.workspace):
+                return await self._produce_workspace_owned(envelope, demand, events)
+        except OSError:
+            return _StreamTerminal(
+                error=InteractionServiceError(
+                    "workspace",
+                    "Workspace indisponível; escolha um diretório existente sem links.",
+                    retryable=False,
+                )
+            )
+
+    async def _produce_workspace_owned(
+        self,
+        envelope: InteractionEnvelope,
+        demand: asyncio.Queue[None],
+        events: asyncio.Queue[InteractionEvent],
+    ) -> _StreamTerminal:
         dispatcher = self._stream_hooks
         if dispatcher is not None and hasattr(dispatcher, "for_turn"):
             dispatcher = dispatcher.for_turn()
@@ -1133,10 +1153,26 @@ class InteractionService:
             ),
         )
 
-    @staticmethod
-    def _chat_tools(envelope: InteractionEnvelope) -> tuple[dict[str, Any], ...]:
+    def _chat_tools(self, envelope: InteractionEnvelope) -> tuple[dict[str, Any], ...]:
         if envelope.tools:
-            return chat_tool_definitions(web_search_enabled=envelope.web_search)
+            definitions = chat_tool_definitions(web_search_enabled=envelope.web_search)
+            from kairos_tools.workspace import tool_allowed
+
+            registered = registry.snapshot_registration()
+            return tuple(
+                definition
+                for definition in definitions
+                if (
+                    tool_allowed(
+                        definition["function"]["name"],
+                        override=(
+                            registered.get(definition["function"]["name"]) is not None
+                            and registered[definition["function"]["name"]].override_of is not None
+                        ),
+                    )
+                    or (definition["function"]["name"] == "bash" and self._chat_sandbox is not None)
+                )
+            )
         if envelope.web_search:
             return WEB_SEARCH_TOOLS
         return ()

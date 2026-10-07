@@ -10,12 +10,13 @@ paginação e linhas de contexto.
 from __future__ import annotations
 
 import fnmatch
-import os
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from kairos_tools import workspace as fs
 
 #: Caminhos que toda busca relevante ignora — espelha o default de `rg`
 #: (ignora `.git` e VCS ocultos) com o que um bytecode/história de hoje
@@ -130,14 +131,17 @@ def _invalid(message: str) -> dict[str, Any]:
 
 
 def _run(params: SearchParams) -> dict[str, Any]:
-    root = Path(os.path.expanduser(params.path))
-    if not root.exists():
+    root = fs.file_path(params.path)
+    try:
+        fs.file_stat(root)
+    except FileNotFoundError:
         return _invalid(f"Diretório não encontrado: {params.path}")
-    if params.target == "content" and not root.is_dir():
+    if params.target == "content" and not fs.is_dir(root):
         return _invalid(f"O caminho não é um diretório: {params.path}")
-    if params.target == "files" and root.is_file():
+    if params.target == "files" and fs.is_file(root):
         root = root.parent
-    root = root.resolve()
+    if not fs.restricted():
+        root = root.resolve()
 
     if params.target == "files":
         return _search_by_name(root, params)
@@ -156,14 +160,18 @@ def _candidate_files(root: Path, file_glob: str | None) -> list[Path]:
         if current.name in SKIP_DIRS:
             continue
         try:
-            entries = sorted(current.iterdir(), key=lambda p: p.name)
+            entries = sorted(fs.entries(current), key=lambda p: p.name)
         except OSError:
             continue
         for entry in entries:
             if len(seen) >= MAX_SCANNED_FILES:
                 break
+            try:
+                fs.file_stat(entry)
+            except OSError:
+                continue
             name = entry.name
-            if entry.is_dir() and not entry.is_symlink():
+            if fs.is_dir(entry) and not entry.is_symlink():
                 if name not in SKIP_DIRS:
                     stack.append(entry)
             elif file_glob is None or fnmatch.fnmatch(name, file_glob):
@@ -180,13 +188,17 @@ def _search_by_name(root: Path, params: SearchParams) -> dict[str, Any]:
         if current.name in SKIP_DIRS:
             continue
         try:
-            entries = sorted(current.iterdir(), key=lambda p: p.name)
+            entries = sorted(fs.entries(current), key=lambda p: p.name)
         except OSError:
             continue
         for entry in entries:
             if len(results) >= params.offset + params.limit:
                 break
-            if entry.is_dir() and not entry.is_symlink() and entry.name not in SKIP_DIRS:
+            try:
+                fs.file_stat(entry)
+            except OSError:
+                continue
+            if fs.is_dir(entry) and not entry.is_symlink() and entry.name not in SKIP_DIRS:
                 stack.append(entry)
                 continue
             scanned += 1
@@ -199,10 +211,10 @@ def _search_by_name(root: Path, params: SearchParams) -> dict[str, Any]:
                 results.append(
                     {
                         "path": rel,
-                        "is_dir": entry.is_dir(),
-                        "size": entry.stat().st_size if entry.is_file() else 0,
+                        "is_dir": fs.is_dir(entry),
+                        "size": fs.file_stat(entry).st_size if fs.is_file(entry) else 0,
                         "last_modified": time.strftime(
-                            "%Y-%m-%dT%H:%M:%S", time.localtime(entry.stat().st_mtime)
+                            "%Y-%m-%dT%H:%M:%S", time.localtime(fs.file_stat(entry).st_mtime)
                         ),
                     }
                 )
@@ -229,10 +241,10 @@ def _search_by_content(root: Path, params: SearchParams) -> dict[str, Any]:
     for candidate in _candidate_files(root, params.file_glob):
         scanned_files += 1
         try:
-            size = candidate.stat().st_size
+            size = fs.file_stat(candidate).st_size
             if size < 0 or size > MAX_BYTES_PER_FILE:
                 continue
-            lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = fs.read_text(candidate, encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
         file_matches, file_hits = _grep_lines(

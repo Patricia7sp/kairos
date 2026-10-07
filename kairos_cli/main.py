@@ -251,6 +251,9 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="habilita busca web no Chat; consultas são enviadas ao DuckDuckGo",
         )
         parser.add_argument(
+            "--workspace", help="Diretório autorizado para ferramentas (padrão: diretório atual)"
+        )
+        parser.add_argument(
             "--tools",
             action="store_true",
             help="habilita ferramentas do Chat; mutações exigem aprovação no terminal",

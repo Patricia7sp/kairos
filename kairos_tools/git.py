@@ -153,6 +153,10 @@ async def git_tool(
     staged: bool = False,
 ) -> dict[str, Any]:
     """Opera o repositório git indicado nos subcomandos aceitos."""
+    from kairos_tools.workspace import WorkspaceDenied, tool_allowed
+
+    if not tool_allowed("git"):
+        raise WorkspaceDenied()
     if subcommand not in _ALLOWED_SUBCOMMANDS:
         return _error(f"subcomando não suportado: {subcommand}")
     if not _git_available():

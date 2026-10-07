@@ -111,6 +111,10 @@ spawn via cache de schema, e **toda** chamada `mcp__*` exige aprovação por tur
 (fail-closed: schema de terceiro não permite inferir mutação). Transportes
 http/sse são recusados barulhentos, não silenciosos.
 
+No Chat da CLI com workspace restrito, ferramentas MCP de terceiros ficam
+omitidas e recusadas até haver isolamento comprovado do processo servidor.
+A aprovação por chamada não contém o acesso do servidor ao host.
+
 ## Critérios de decisão
 
 Uma candidata avança quando **todas** as condições valem:

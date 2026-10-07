@@ -728,6 +728,7 @@ def cmd_run(args) -> int:
                 idempotency_key=getattr(args, "idempotency_key", None),
                 web_search=getattr(args, "web_search", False),
                 tools=getattr(args, "tools", False),
+                workspace=getattr(args, "workspace", None),
                 experiences=getattr(args, "experiences", True),
             )
         )

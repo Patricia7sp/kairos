@@ -254,6 +254,10 @@ def _schema_for(server: str, entry: dict[str, Any]) -> dict[str, Any]:
 
 def _make_handler(cfg: MCPServerConfig, tool_name: str):
     def handler(**arguments: Any) -> Any:
+        from kairos_tools.workspace import WorkspaceDenied, tool_allowed
+
+        if not tool_allowed(namespaced_tool_name(cfg.name, tool_name)):
+            raise WorkspaceDenied()
         try:
             text = invoke_tool(cfg, tool_name, arguments)
         except (McpRuntimeError, OSError) as exc:
