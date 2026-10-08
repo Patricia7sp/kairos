@@ -21,6 +21,7 @@ from kairos_providers import (
     ModelSelectionContext,
     ProviderModelRef,
 )
+from kairos_skills.sync import sync_bundled_skills
 from kairos_state import connect, initialize_schema
 
 
@@ -118,6 +119,19 @@ def test_selecao_preserva_ordem_e_nao_duplica(installed, tmp_path):
     )
     selected, _ = skill_payload(gateway.requests[0].messages[-1])
     assert [s["name"] for s in selected] == ["segunda", "primeira"]
+
+
+def test_skill_sincronizada_de_categoria_chega_ao_adapter(installed, tmp_path):
+    bundle = tmp_path / "bundle"
+    source = bundle / "documentos" / "revisar-docs"
+    source.mkdir(parents=True)
+    text = skill_text(body="Procedimento categorizado fictício.")
+    (source / "SKILL.md").write_text(text)
+    sync_bundled_skills(bundle, tmp_path / "skills")
+    gateway, _ = installed()
+    assert main(["run", "--skill", "revisar-docs", "--no-experiences", "pedido"]) == 0
+    selected, _ = skill_payload(gateway.requests[0].messages[-1])
+    assert selected[0]["text"] == text
 
 
 @pytest.mark.parametrize("bad", ["ausente", "../fora", "invalida", "conversao"])

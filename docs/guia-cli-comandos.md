@@ -20,6 +20,24 @@ na CLI.
 ## Usar uma skill instalada
 
 ```bash
+kairos skills sync
+kairos skills list
+```
+
+O sync reconhece skills diretamente no bundle e dentro de suas categorias,
+instalando-as em `<KAIROS_HOME>/skills/NOME`. Copia anexos sem executá-los e
+preserva permissões de scripts. Nomes precisam seguir o mesmo kebab-case de
+`--skill`, até 64 caracteres. Duplicatas e links na descoberta, ou links e
+arquivos especiais nos diretórios das skills, recusam a sincronização antes
+de alterar as skills instaladas.
+
+Edições locais, skills sem origem registrada e exclusões feitas pelo usuário
+são preservadas. A migração do manifesto antigo é conservadora. O marcador
+`<KAIROS_HOME>/skills/.no-bundled-skills` mantém o opt-out. Em uma falha observada
+na cópia ou gravação do manifesto, as alterações desse sync são revertidas;
+isso não constitui recuperação após interrupção abrupta do processo.
+
+```bash
 kairos run --session trabalho --skill revisar-docs "Revise este texto: ..."
 kairos run --session trabalho --tools --workspace ~/projetos/app \
   --skill revisar-docs --allow-tool edit_file --json "Revise README.md"

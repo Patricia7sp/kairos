@@ -23,7 +23,7 @@ class SkillSelectionError(ValueError):
     """Recusa pública sem reproduzir o conteúdo da skill."""
 
 
-def _check_name(name: str) -> None:
+def validate_skill_name(name: str) -> None:
     if not isinstance(name, str) or len(name) > 64 or not _NAME.fullmatch(name):
         raise SkillSelectionError("Nome de skill inválido: use kebab-case, até 64 caracteres.")
 
@@ -37,7 +37,7 @@ class SkillSnapshot:
     sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
-        _check_name(self.name)
+        validate_skill_name(self.name)
         if not isinstance(self.text, str):
             raise SkillSelectionError("Conteúdo da skill deve ser texto UTF-8.")
         try:
@@ -123,7 +123,7 @@ def load_selected_skills(home: Path, names: Sequence[str]) -> tuple[SkillSnapsho
     if not selected:
         return ()
     for name in selected:
-        _check_name(name)
+        validate_skill_name(name)
     selected = tuple(dict.fromkeys(selected))
     if len(selected) > MAX_SELECTED_SKILLS:
         raise SkillSelectionError("Selecione até oito skills por turno.")

@@ -115,11 +115,11 @@ do projeto.
 ## Próximas etapas
 
 Restrição de workspace e autorização para automações sem terminal foram
-integradas e implantadas pelos PRs #92 e #93. O próximo recorte implementa
-seleção explícita de skills em turnos únicos do Chat na CLI: especificação
+integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em
+turnos únicos do Chat na CLI foi integrada e implantada pelo PR #94: especificação
 `superpowers/specs/2026-10-07-cli-skills-design.md` e plano
 `superpowers/plans/2026-10-08-cli-skills.md`. Consumo explícito preserva o contexto
 no histórico; índice automático, anexos, autoria, curador e workflows duráveis
-continuam pendentes. Evidências de integração deste recorte serão registradas
-após os gates local e remoto.
+continuam pendentes. O recorte seguinte corrige a descoberta de skills bundled
+em categorias na sincronização, preservando autoria, manifesto e opt-out.
 Não foram realizadas chamadas a provedores com credenciais reais.

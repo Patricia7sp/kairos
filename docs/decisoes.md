@@ -850,6 +850,25 @@ A resposta não muda; a **natureza** muda — de "decisão a tomar" para
 "mecanismo existente a preservar". A diferença importa: reproduz-se algo
 testado em vez de inventar.
 
+### D-09.SYNC — Categorias do bundle preservam o nome instalado
+
+**Referências:** `_reversa_sdd/skills/requirements.md`, organização e índice;
+`_reversa_sdd/skills/design.md`, estado interno do manifesto; D-09.1–D-09.4.
+
+O sync descobre `NOME/SKILL.md` e `CATEGORIA/NOME/SKILL.md`, instalando ambos
+no formato plano `<home>/skills/NOME`. Não há precedência silenciosa para
+colisões: nomes duplicados recusam o bundle. A captura por descritores sem
+seguir links valida os arquivos antes de qualquer alteração no destino;
+anexos são copiados e não executados. Hashes de origem continuam cobrindo os
+nomes relativos e bytes de todos os arquivos, preservando o manifesto v2.
+
+Uma skill local sem entrada no manifesto é trabalho do usuário e não pode
+ser sobrescrita por um novo bundle. Edições, exclusões, migração v1 e opt-out
+mantêm suas regras. Cópias preparadas e originais guardados permitem reverter
+o lote em falhas observadas antes do commit do manifesto; não há garantia de
+transação após término abrupto do processo ou contra escritores concorrentes.
+O temporário do manifesto usa criação exclusiva e substituição atômica.
+
 ### D-09.2 — O caso do meio é o inteligente
 
 A lógica de atualização tem três casos, e o segundo é o que faz o mecanismo
