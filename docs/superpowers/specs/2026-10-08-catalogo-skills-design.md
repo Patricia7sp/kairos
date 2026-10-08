@@ -1,6 +1,6 @@
 # Catálogo compacto e leitura de skills sob demanda
 
-Status: proposta para revisão; não autoriza implementação.
+Status: aprovada pela usuária em 2026-10-08; plano escrito e aguardando revisão em `../plans/2026-10-08-catalogo-skills.md`.
 
 ## Objetivo e entendimento
 
@@ -14,10 +14,8 @@ Base examinada: `main` em `8f8db6c1eff47d192837d3db357d8fcc2436c07b`.
 Checkout original preservado. Proposta na branch `feat/catalogo-skills`, no
 worktree `.worktrees/skills_runtime`.
 
-Premissa de produto proposta: habilitação explícita. A preferência entre
-opt-in e ativação por padrão foi perguntada; até haver outra indicação,
-esta especificação usa opt-in. A aprovação da especificação confirma também
-essa política. Não houve implementação ou alteração de produção neste recorte.
+Política aprovada: habilitação explícita por turno e snapshot fixado por sessão.
+Não houve implementação ou alteração de produção neste recorte.
 
 ## Rastreabilidade
 
