@@ -435,6 +435,7 @@ tests/test_security_audit.py
 tests/test_service_event_producers.py
 tests/test_service_events.py
 tests/test_skill_runtime.py
+tests/test_skill_sync_categories.py
 tests/test_skills.py
 tests/test_slack_inbound.py
 tests/test_spa_chat_contract.py

@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 __all__ = [
     "MANIFEST_NAME",
@@ -101,12 +104,21 @@ def write_manifest(path: Path, manifest: dict[str, str]) -> None:
     tratadas como novas e re-copiadas por cima da edição do usuário.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        "".join(f"{name}:{digest}\n" for name, digest in sorted(manifest.items())),
-        encoding="utf-8",
-    )
-    os.replace(tmp, path)
+    with NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=".bundled-manifest-", delete=False
+    ) as output:
+        tmp = Path(output.name)
+        try:
+            output.write("".join(f"{name}:{digest}\n" for name, digest in sorted(manifest.items())))
+            output.flush()
+            os.fsync(output.fileno())
+        except BaseException:
+            tmp.unlink()
+            raise
+    try:
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
@@ -135,12 +147,30 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
     if not bundled_dir.is_dir():
         return result
 
+    with _snapshot_bundle(bundled_dir) as bundled:
+        return _sync_discovered(bundled, user_dir)
+
+
+def _sync_discovered(bundled: dict[str, Path], user_dir: Path) -> SyncResult:
+    if user_dir.is_symlink():
+        raise ValueError("Diretório de skills não pode ser um link.")
     user_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = user_dir / MANIFEST_NAME
+    if manifest_path.is_symlink():
+        raise ValueError("Manifesto de skills não pode ser um link.")
     manifest = read_manifest(manifest_path)
+    with (
+        TemporaryDirectory(prefix=".skill-sync-", dir=user_dir) as temporary,
+        ExitStack() as rollback,
+    ):
+        result = _sync_items(bundled, user_dir, manifest, Path(temporary), rollback)
+        write_manifest(manifest_path, manifest)
+        rollback.pop_all()
+        return result
 
-    bundled = {p.name: p for p in sorted(bundled_dir.iterdir()) if (p / "SKILL.md").is_file()}
-    result.total_bundled = len(bundled)
+
+def _sync_items(bundled, user_dir, manifest, staging, rollback) -> SyncResult:
+    result = SyncResult(total_bundled=len(bundled))
 
     for name, src in bundled.items():
         dest = user_dir / name
@@ -148,7 +178,10 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
         current = origin_hash(src)
 
         if name not in manifest:
-            _copy_tree(src, dest)
+            if dest.exists() or dest.is_symlink():
+                result.user_modified.append(name)
+                continue
+            _copy_tree(src, dest, staging, rollback)
             manifest[name] = current
             result.copied.append(name)
             continue
@@ -165,7 +198,7 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
 
         if recorded and origin_hash(dest) == recorded:
             # Caso 2: o usuário nunca tocou — seguro atualizar.
-            _copy_tree(src, dest)
+            _copy_tree(src, dest, staging, rollback)
             manifest[name] = current
             result.updated.append(name)
             continue
@@ -178,13 +211,121 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
             del manifest[name]
             result.cleaned.append(name)
 
-    write_manifest(manifest_path, manifest)
     return result
 
 
-def _copy_tree(src: Path, dest: Path) -> None:
+def _copy_tree(src: Path, dest: Path, staging: Path, rollback: ExitStack) -> None:
     import shutil
 
+    directory = staging / dest.name
+    directory.mkdir()
+    new = directory / "new"
+    old = directory / "old"
+    shutil.copytree(src, new)
     if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+        os.replace(dest, old)
+    rollback.callback(_restore_copy, dest, old, directory / "discard")
+    os.replace(new, dest)
+
+
+def _restore_copy(dest: Path, old: Path, discard: Path) -> None:
+    if dest.exists() or dest.is_symlink():
+        os.replace(dest, discard)
+    if old.exists():
+        os.replace(old, dest)
+
+
+@contextmanager
+def _directory(name, *, parent=None):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _entries(fd):
+    with os.scandir(fd) as entries:
+        return sorted(entries, key=lambda entry: entry.name)
+
+
+def _is_skill(fd):
+    try:
+        info = os.stat("SKILL.md", dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("SKILL.md deve ser arquivo regular sem links.")
+    return True
+
+
+@contextmanager
+def _snapshot_bundle(bundled_dir: Path):
+    with TemporaryDirectory(prefix="kairos-bundle-sync-") as temporary:
+        snapshots = {}
+
+        def capture(name, fd):
+            if name in snapshots:
+                raise ValueError("Nome de skill duplicado no bundle; sincronização recusada.")
+            destination = Path(temporary) / name
+            _copy_directory(fd, destination)
+            snapshots[name] = destination
+
+        try:
+            with _directory(bundled_dir) as root:
+                for entry in _entries(root):
+                    if entry.is_symlink():
+                        raise ValueError("Links não são aceitos no bundle de skills.")
+                    if entry.name.startswith(".") or not entry.is_dir(follow_symlinks=False):
+                        continue
+                    with _directory(entry.name, parent=root) as directory:
+                        if _is_skill(directory):
+                            capture(entry.name, directory)
+                            continue
+                        for child in _entries(directory):
+                            if child.is_symlink():
+                                raise ValueError("Links não são aceitos no bundle de skills.")
+                            if child.name.startswith(".") or not child.is_dir(
+                                follow_symlinks=False
+                            ):
+                                continue
+                            with _directory(child.name, parent=directory) as skill:
+                                if _is_skill(skill):
+                                    capture(child.name, skill)
+        except OSError:
+            raise ValueError("Não foi possível ler o bundle de skills com segurança.") from None
+        yield dict(sorted(snapshots.items()))
+
+
+def _copy_directory(fd: int, destination: Path) -> None:
+    destination.mkdir()
+    for entry in _entries(fd):
+        info = entry.stat(follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            with _directory(entry.name, parent=fd) as child:
+                _copy_directory(child, destination / entry.name)
+        elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+            _copy_file(fd, entry.name, destination / entry.name)
+        else:
+            raise ValueError("Bundle de skills contém link ou arquivo especial.")
+    destination.chmod(stat.S_IMODE(os.fstat(fd).st_mode))
+
+
+def _copy_file(parent: int, name: str, destination: Path) -> None:
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("Bundle de skills contém link ou arquivo especial.")
+        with destination.open("xb") as output:
+            while chunk := os.read(fd, 64 * 1024):
+                output.write(chunk)
+        after = os.fstat(fd)
+        if after.st_nlink != 1 or (before.st_size, before.st_mtime_ns) != (
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ValueError("Bundle de skills alterado durante a leitura.")
+        destination.chmod(stat.S_IMODE(before.st_mode))
+    finally:
+        os.close(fd)
