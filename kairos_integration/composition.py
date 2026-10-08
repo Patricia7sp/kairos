@@ -297,6 +297,7 @@ def build_interaction_service(home: Path) -> ComposedInteractionService:
             messages=MessageRepository(connection),
             usage=persistence.usage,
             persistence=persistence,
+            skill_catalog_home=home,
             turn_leases=SQLiteAsyncTurnLeaseBackend(home / "state.db"),
             chat_sandbox=chat_sandbox,
             hooks=plugin_hooks,

@@ -79,6 +79,7 @@ CHAT_TOOLS: frozenset[str] = frozenset(
         "web_extract",
         "git",
         "calendar",
+        "skill_view",
     }
 )
 
@@ -260,6 +261,32 @@ async def execute_chat_tool(
     execute: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> InteractionToolResult:
     """Valida a chamada, executa a ferramenta e serializa com limites rígidos."""
+    if call.name == "skill_view":
+        from kairos_tools.skill_view import skill_catalog_available, skill_view_tool
+
+        entry = registry.snapshot_registration().get("skill_view")
+        if (
+            not skill_catalog_available()
+            or entry is None
+            or entry.handler is not skill_view_tool
+            or entry.override_of is not None
+        ):
+            return _error(call, "unsupported_tool")
+        arguments = _body_arguments(call.arguments)
+        if arguments is None:
+            return _error(call, "invalid_arguments")
+        try:
+            value = await skill_view_tool(**arguments)
+        except TypeError:
+            return _error(call, "invalid_arguments")
+        content = json.dumps(
+            value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+        )
+        if len(content.encode()) > MAX_OUTPUT_BYTES:
+            return _error(call, "output_too_large")
+        return InteractionToolResult(
+            tool_call_id=call.id, content=content, is_error="error" in value
+        )
     if call.name != "web_search" and not _is_chat_tool(call.name):
         return _error(call, "unsupported_tool")
     if call.name == "web_search":

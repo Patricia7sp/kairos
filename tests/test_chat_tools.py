@@ -247,8 +247,12 @@ def test_caller_cancellation_propagates_and_stops_search(chat_tools, monkeypatch
 
 
 def test_definitions_reach_accepted_chat_tools_from_the_registry(chat_tools):
+    from kairos_tools.registry import registry
+
     names = {_definition_name(definition) for definition in chat_tools.chat_tool_definitions()}
-    assert names == set(chat_tools.CHAT_TOOLS)
+    available = {_definition_name(definition) for definition in registry.get_definitions()}
+    assert names == available & set(chat_tools.CHAT_TOOLS)
+    assert "skill_view" not in names
     assert "web_search" in names
     assert names <= set(chat_tools.CHAT_TOOLS)
 

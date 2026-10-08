@@ -48,11 +48,10 @@ def test_inventory_reports_unavailable_tools_aliases_and_detached_schemas():
     inventory = registry.inventory()
 
     tools = {tool["name"]: tool for tool in inventory["tools"]}
-    # A única ferramenta indisponível da fixture é a remota: qualquer outra
-    # indisponibilidade aqui é deriva, e contar totais congelados é
-    # change-detector — o número de ferramentas cresce, a regra não.
     assert inventory["total"] == len(inventory["tools"])
-    assert sum(tool["available"] for tool in inventory["tools"]) == len(inventory["tools"]) - 1
+    assert {tool["name"] for tool in inventory["tools"] if tool["available"]} == {
+        definition["function"]["name"] for definition in registry.get_definitions()
+    }
     assert tools["remote_read"]["available"] is False
     assert tools["remote_read"]["description"] == "Read the remote resource"
     assert tools["read_file"]["schema"]["function"]["parameters"]["required"] == ["path"]

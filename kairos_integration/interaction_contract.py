@@ -40,6 +40,7 @@ class InteractionEventKind(StrEnum):
     """Eventos canônicos emitidos durante um turno."""
 
     TURN_START = "turn_start"
+    SKILL_CATALOG_READY = "skill_catalog_ready"
     DELTA = "delta"
     REASONING_DELTA = "reasoning_delta"
     TOOL_CALL = "tool_call"
@@ -118,8 +119,13 @@ class InteractionEnvelope:
     tools: bool = False
     workspace: str | None = None
     skills: tuple[SkillSnapshot, ...] = ()
+    skills_catalog: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.skills_catalog) is not bool:
+            raise TypeError("skills_catalog deve ser booleano")
+        if self.skills_catalog and self.source != "cli":
+            raise ValueError("Catálogo de skills só está disponível em turnos únicos da CLI.")
         if self.workspace is not None:
             from pathlib import Path
 
@@ -199,6 +205,14 @@ class InteractionToolResult:
 
 
 @dataclass(frozen=True)
+class SkillCatalogNotice:
+    digest: str
+    entries: int
+    omitted_skills: int
+    omitted_references: int
+
+
+@dataclass(frozen=True)
 class InteractionEvent:
     """A version-neutral event suitable for WebSocket and CLI translators."""
 
@@ -216,6 +230,7 @@ class InteractionEvent:
     error: str | None = None
     error_kind: str | None = None
     retryable: bool = False
+    catalog_notice: SkillCatalogNotice | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, InteractionEventKind):

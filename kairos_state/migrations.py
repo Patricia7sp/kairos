@@ -18,6 +18,7 @@ from kairos_state.cron_schema import CRON_SCHEMA_SQL
 from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 from kairos_state.shares_schema import SHARES_SCHEMA_SQL
+from kairos_state.skills_schema import SKILLS_SCHEMA_SQL
 
 __all__ = [
     "CANONICAL_TABLES",
@@ -80,6 +81,10 @@ def _v5_shares_schema(conn: sqlite3.Connection) -> None:
     execute_schema(conn, SHARES_SCHEMA_SQL)
 
 
+def _v6_skills_schema(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, SKILLS_SCHEMA_SQL)
+
+
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
 #: transação. Rodar duas vezes não altera o resultado (RF-17): a versão
 #: registrada faz o segundo passe não encontrar degrau pendente.
@@ -89,6 +94,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "ledger durável de agendamentos", _v3_cron_schema),
     Migration(4, "notepad durável por job de agendamentos", _v4_notepad_schema),
     Migration(5, "compartilhamento de conversas por link", _v5_shares_schema),
+    Migration(6, "catálogo imutável e assets de skills por sessão", _v6_skills_schema),
 )
 
 
@@ -166,6 +172,8 @@ CANONICAL_TABLES = frozenset(
         "runtime_approvals",
         "runtime_directory_leases",
         "runtime_queue",
+        "skill_catalogs",
+        "skill_catalog_assets",
     }
 )
 
@@ -227,6 +235,11 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
             conn.execute(f"DROP VIEW IF EXISTS {view}")
         conn.executescript(_schema.FTS_SQL)
         conn.executescript(_schema.FTS_TRIGGERS)
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+        conn.execute(
+            "INSERT INTO messages_fts_trigram(rowid,content,tool_name,tool_calls) "
+            "SELECT id,content,tool_name,tool_calls FROM messages_fts_trigram_src"
+        )
 
     depois = canonical_fingerprint(conn)
     if antes != depois:

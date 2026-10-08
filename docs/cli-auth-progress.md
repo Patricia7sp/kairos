@@ -119,7 +119,13 @@ integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills e
 turnos únicos do Chat na CLI foi integrada e implantada pelo PR #94: especificação
 `superpowers/specs/2026-10-07-cli-skills-design.md` e plano
 `superpowers/plans/2026-10-08-cli-skills.md`. Consumo explícito preserva o contexto
-no histórico; índice automático, anexos, autoria, curador e workflows duráveis
-continuam pendentes. O recorte seguinte corrige a descoberta de skills bundled
-em categorias na sincronização, preservando autoria, manifesto e opt-out.
+no histórico. O PR #95 corrigiu a descoberta de skills bundled em categorias,
+preservando autoria, manifesto e opt-out.
+
+O recorte atual implementa catálogo instalado opt-in por turno, snapshot
+SQLite imutável por sessão e leitura paginada de SKILL/referências com hashes
+verificados. A CLI real foi testada com adapter local fictício, migração,
+reabertura, backup/rollback e contenção. Revisão final, gates completos,
+integração e deploy deste recorte ainda estão em andamento. Índice automático
+por padrão, autoria, curador e workflows duráveis continuam pendentes.
 Não foram realizadas chamadas a provedores com credenciais reais.

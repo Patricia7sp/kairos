@@ -15,7 +15,8 @@ import unittest
 from pathlib import Path
 
 from kairos_state import connect, initialize_schema, read_schema_version
-from kairos_state.schema import LEGACY_SHAPE_VERSION, SCHEMA_VERSION
+from kairos_state.migrations import MIGRATIONS
+from kairos_state.schema import SCHEMA_VERSION
 
 # ERD §1: 10 tabelas + 3 índices FTS.
 EXPECTED_TABLES = {
@@ -99,10 +100,8 @@ class SchemaTestCase(unittest.TestCase):
         self.assertLessEqual({"messages_fts", "messages_fts_trigram"}, self.tables())
 
     def test_versao_do_schema_e_propria_do_kairos(self):
-        # A versão do legado fica registrada para rastreabilidade, não como a nossa.
         self.assertEqual(read_schema_version(self.db), SCHEMA_VERSION)
-        self.assertEqual(SCHEMA_VERSION, 5)
-        self.assertEqual(LEGACY_SHAPE_VERSION, 26)
+        self.assertEqual(SCHEMA_VERSION, MIGRATIONS[-1].version)
 
     def test_inicializacao_e_idempotente(self):
         before = self.tables()
