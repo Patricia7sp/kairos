@@ -121,7 +121,7 @@ class SearchIndex:
         return self._conn.execute(
             f"SELECT m.id, m.session_id, m.content FROM {table} f "  # noqa: S608 — nome de tabela vem do dict fechado de Route
             f"JOIN messages m ON m.id = f.rowid "
-            f"WHERE f MATCH ? AND m.active = 1 "
+            f"WHERE {table} MATCH ? AND m.active = 1 "
             f"ORDER BY m.timestamp DESC LIMIT ?",
             (query, limit),
         ).fetchall()

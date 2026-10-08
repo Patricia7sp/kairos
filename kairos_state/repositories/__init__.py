@@ -17,6 +17,7 @@ from kairos_state.repositories.search import (
     probe,
 )
 from kairos_state.repositories.sessions import SessionRepository
+from kairos_state.repositories.skill_catalogs import SkillCatalogRepository
 from kairos_state.repositories.usage import BillingRoute, TokenDelta, UsageRepository
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "SearchCapabilities",
     "SearchIndex",
     "SessionRepository",
+    "SkillCatalogRepository",
     "TokenDelta",
     "UsageRepository",
     "probe",

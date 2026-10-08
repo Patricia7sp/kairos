@@ -14,8 +14,10 @@ from kairos_providers._async_cleanup import (
     AsyncCleanupCoordinator,
     run_persistent_cleanup,
 )
+from kairos_skills.catalog import SkillAssetRecord, SkillCatalogSnapshot
 from kairos_state import connect
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories.skill_catalogs import SkillCatalogRepository
 
 __all__ = ["SQLiteAsyncInteractionPersistence"]
 
@@ -35,6 +37,7 @@ class SQLiteAsyncInteractionPersistence:
         self._sessions = None
         self._messages = None
         self._usage = None
+        self._skill_catalogs = None
         self._executor.submit(self._initialize).result()
         self._close = AsyncCleanupCoordinator(task_name="kairos-interaction-persistence-close")
 
@@ -44,6 +47,7 @@ class SQLiteAsyncInteractionPersistence:
         self._sessions = SessionRepository(connection)
         self._messages = MessageRepository(connection)
         self._usage = UsageRepository(connection)
+        self._skill_catalogs = SkillCatalogRepository(connection)
 
     @property
     def usage(self) -> UsageRepository:
@@ -68,6 +72,30 @@ class SQLiteAsyncInteractionPersistence:
 
     async def flush_usage(self) -> int:
         return await self._call(self.usage.flush)
+
+    async def get_skill_catalog(
+        self, session_id: str, *, home_id: str
+    ) -> SkillCatalogSnapshot | None:
+        assert self._skill_catalogs is not None
+        return await self._call(self._skill_catalogs.get, session_id, home_id=home_id)
+
+    async def create_skill_catalog_if_absent(
+        self, session_id: str, snapshot: SkillCatalogSnapshot
+    ) -> SkillCatalogSnapshot:
+        assert self._skill_catalogs is not None
+        return await self._call(self._skill_catalogs.create_if_absent, session_id, snapshot)
+
+    async def get_skill_asset(self, session_id: str, asset: SkillAssetRecord) -> str | None:
+        assert self._skill_catalogs is not None
+        return await self._call(self._skill_catalogs.get_asset, session_id, asset)
+
+    async def put_skill_asset(self, session_id: str, asset: SkillAssetRecord, text: str) -> str:
+        assert self._skill_catalogs is not None
+        return await self._call(self._skill_catalogs.put_asset, session_id, asset, text)
+
+    async def export_skill_catalog(self, session_id: str) -> dict[str, Any] | None:
+        assert self._skill_catalogs is not None
+        return await self._call(self._skill_catalogs.export_session, session_id)
 
     async def aclose(self) -> None:
         await self._close.run(self._close_attempt)
