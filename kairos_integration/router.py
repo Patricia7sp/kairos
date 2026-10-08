@@ -90,6 +90,7 @@ class InteractionRouter:
             or envelope.override is not None
             or envelope.web_search
             or envelope.tools
+            or envelope.skills
             or any(key in envelope.parameters for key in _IDENTITY_PARAMETERS)
         ):
             raise RuntimeErrorInfo("invalid_event", "envelope de runtime inválido", False)

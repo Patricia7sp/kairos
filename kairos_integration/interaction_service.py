@@ -37,6 +37,7 @@ from kairos_integration.interaction_contract import (
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
+from kairos_integration.skill_context import render_skill_context, skill_display_metadata
 from kairos_integration.turn_ownership import AsyncTurnLeaseBackend, SessionTurnOwnership
 from kairos_observability.service_events import record_service_event_async
 from kairos_providers import (
@@ -1207,7 +1208,9 @@ class InteractionService:
         self, envelope: InteractionEnvelope, selection: ResolvedModelSelection
     ) -> None:
         args = (envelope.conversation_id, "user", envelope.content, selection)
-        kwargs = {"api_content": envelope.content}
+        kwargs = {"api_content": render_skill_context(envelope.content, envelope.skills)}
+        if envelope.skills:
+            kwargs["display_metadata"] = skill_display_metadata(envelope.skills)
         if self._persistence is not None:
             await self._persistence.append_turn_message(*args, **kwargs)
         else:
