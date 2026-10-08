@@ -1,7 +1,7 @@
 # Criação de skills pela CLI com proveniência e rollback
 
-Status: recorte aprovado em conversa em 2026-10-08; especificação escrita para
-revisão da usuária antes do plano de implementação.
+Status: recorte e especificação aprovados pela usuária em 2026-10-08; plano
+escrito para revisão em `../plans/2026-10-08-autoria-skills.md`.
 
 ## Objetivo e entendimento aprovado
 
@@ -291,7 +291,6 @@ telemetria, curador automático e grafo de aprendizado.
 
 ## Próxima etapa
 
-Revisar esta especificação. Após aprovação do documento, escrever o plano com
-contratos entre tarefas, testes de falha e método de execução. A aprovação do
-recorte já recebida autoriza este documento; implementação começa após revisão
-do documento e do plano.
+Especificação aprovada. Revisar o plano em `../plans/2026-10-08-autoria-skills.md`,
+com contratos entre tarefas e testes de falha. Método nativo preservado das
+etapas anteriores; implementação começa após aprovação do plano.
