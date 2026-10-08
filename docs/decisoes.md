@@ -2210,6 +2210,9 @@ O primeiro consumo de skills no Chat usa `--skill NOME`, explícito e repetível
 em uma mensagem única da CLI. O loader lê somente a instalação em `<home>/skills`,
 sem seguir links, e captura snapshots imutáveis com hash do conteúdo. Mantém
 as regras de leitura de frontmatter antigo, mas recusa coerções de tipos.
+O parser estrito recusa aliases e limita profundidade a 64 níveis e composição
+a 2.048 nós; limite de bytes sozinho não limita a expansão de YAML. Erros de
+construção são traduzidos sem reproduzir valores do arquivo.
 
 O serviço persiste a skill como contexto da mensagem user em `api_content`;
 `content` conserva o pedido exibido e metadata registra nome, versão e hash.

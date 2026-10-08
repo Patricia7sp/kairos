@@ -242,3 +242,66 @@ def test_yaml_profundamente_aninhado_recusado_sem_traceback(tmp_path):
     with pytest.raises(SkillSelectionError) as exc:
         load_selected_skills(tmp_path, ["revisar-docs"])
     assert "privado-ficticio" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "value", ["!!int segredo-ficticio", "2026-99-99", "9" * 5000], ids=["tag", "data", "inteiro"]
+)
+def test_conversao_yaml_invalida_recusada_sem_expor_valor(tmp_path, value):
+    from kairos_skills.runtime import SkillSelectionError, load_selected_skills
+
+    write_skill(
+        tmp_path,
+        text=f"---\nname: revisar-docs\ndescription: Revise.\nextra: {value}\n---\ncorpo\n",
+    )
+    with pytest.raises(SkillSelectionError) as exc:
+        load_selected_skills(tmp_path, ["revisar-docs"])
+    assert "segredo-ficticio" not in str(exc.value)
+
+
+def test_aliases_yaml_nao_expandem_sem_limite(tmp_path):
+    header = ["name: revisar-docs", "description: Revise.", "base: &base {k: v}"]
+    previous = "base"
+    for index in range(7):
+        current = f"level{index}"
+        aliases = ", ".join([f"*{previous}"] * 10)
+        header.append(f"{current}: &{current} {{<<: [{aliases}]}}")
+        previous = current
+    write_skill(tmp_path, text="---\n" + "\n".join(header) + "\n---\ncorpo\n")
+    code = """
+import resource, sys
+from pathlib import Path
+from kairos_skills.runtime import SkillSelectionError, load_selected_skills
+resource.setrlimit(resource.RLIMIT_AS, (192 * 1024 * 1024, 192 * 1024 * 1024))
+try:
+    load_selected_skills(Path(sys.argv[1]), ['revisar-docs'])
+except SkillSelectionError:
+    print('recusado')
+else:
+    raise AssertionError('expansão de aliases aceita')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "recusado"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["[" * 65 + "x" + "]" * 65, "{" + ",".join(f"k{i}: x" for i in range(1100)) + "}"],
+    ids=["profundidade", "nos"],
+)
+def test_complexidade_yaml_recusada(tmp_path, extra):
+    from kairos_skills.runtime import SkillSelectionError, load_selected_skills
+
+    write_skill(
+        tmp_path,
+        text=f"---\nname: revisar-docs\ndescription: Revise.\nextra: {extra}\n---\ncorpo\n",
+    )
+    with pytest.raises(SkillSelectionError):
+        load_selected_skills(tmp_path, ["revisar-docs"])

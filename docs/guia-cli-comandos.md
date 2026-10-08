@@ -41,7 +41,9 @@ O aviso em stderr informa os nomes, sem imprimir o conteúdo das skills.
 
 Até oito skills únicas, 64 KiB por arquivo e 128 KiB no total; os limites são
 de bytes UTF-8 e excessos são recusados, sem truncamento. Arquivos devem ter
-frontmatter válido, descrição de até 60 caracteres e corpo não vazio. Links e
+frontmatter válido, descrição de até 60 caracteres e corpo não vazio. No consumo
+explícito, aliases YAML são recusados e o frontmatter tem limites de 64 níveis
+e 2.048 nós, para limitar o trabalho do parser. Links e
 arquivos especiais são recusados. Falha em qualquer seleção impede o envio
 do turno inteiro.
 

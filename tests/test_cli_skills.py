@@ -120,10 +120,15 @@ def test_selecao_preserva_ordem_e_nao_duplica(installed, tmp_path):
     assert [s["name"] for s in selected] == ["segunda", "primeira"]
 
 
-@pytest.mark.parametrize("bad", ["ausente", "../fora", "invalida"])
+@pytest.mark.parametrize("bad", ["ausente", "../fora", "invalida", "conversao"])
 def test_segunda_skill_invalida_nao_persiste(installed, tmp_path, monkeypatch, capsys, bad):
     write_skill(tmp_path)
     write_skill(tmp_path, "invalida", "segredo-ficticio-invalido")
+    write_skill(
+        tmp_path,
+        "conversao",
+        "---\nname: conversao\ndescription: Revise.\nextra: !!int segredo-ficticio-invalido\n---\ncorpo\n",
+    )
     gateway, db = installed()
     monkeypatch.setattr(chat, "build_interaction_service", lambda _: pytest.fail("compôs serviço"))
     assert main(["run", "--skill", "revisar-docs", "--skill", bad, "--json", "pedido"]) == 2

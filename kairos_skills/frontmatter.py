@@ -113,7 +113,8 @@ def parse_frontmatter(text: str, *, strict_types: bool = False) -> tuple[Frontma
         raise FrontmatterError("SKILL.md não começa com bloco de frontmatter '---'")
 
     try:
-        data = yaml.safe_load(m.group(1)) or {}
+        data = _load_strict_yaml(m.group(1)) if strict_types else yaml.safe_load(m.group(1))
+        data = data or {}
     except yaml.YAMLError as exc:
         raise FrontmatterError(f"frontmatter não é YAML válido: {exc}") from exc
     if not isinstance(data, dict):
@@ -159,6 +160,36 @@ def parse_frontmatter(text: str, *, strict_types: bool = False) -> tuple[Frontma
         extra={k: v for k, v in data.items() if k not in known},
     )
     return fm, text[m.end() :]
+
+
+def _load_strict_yaml(text: str):
+    import yaml
+
+    class BoundedLoader(yaml.SafeLoader):
+        def __init__(self, stream):
+            self.skill_depth = 0
+            self.skill_nodes = 0
+            super().__init__(stream)
+
+        def compose_node(self, parent, index):
+            if self.check_event(yaml.AliasEvent):
+                raise FrontmatterError("Aliases YAML não são aceitos no contexto de skills.")
+            if self.skill_depth >= 64 or self.skill_nodes >= 2048:
+                raise FrontmatterError("Frontmatter excede o limite de complexidade.")
+            self.skill_depth += 1
+            self.skill_nodes += 1
+            try:
+                return super().compose_node(parent, index)
+            finally:
+                self.skill_depth -= 1
+
+    loader = BoundedLoader(text)
+    try:
+        return loader.get_single_data()
+    except (yaml.YAMLError, ValueError, OverflowError, RecursionError):
+        raise FrontmatterError("Frontmatter YAML inválido.") from None
+    finally:
+        loader.dispose()
 
 
 def _validate_field_types(data: dict) -> None:

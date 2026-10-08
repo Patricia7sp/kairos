@@ -63,7 +63,7 @@ Sem refatoração ampla dos módulos grandes ou dos fixtures existentes. Reutili
 - `load_selected_skills(home: Path, names: Sequence[str]) -> tuple[SkillSnapshot, ...]`: copiar nomes, validar sintaxe completa, deduplicar em ordem, aplicar limites, ler e validar todo o conjunto. Retornar `()` antes de abrir qualquer diretório quando a seleção estiver vazia.
 - Constantes públicas em `runtime.py`: `MAX_SELECTED_SKILLS = 8`, `MAX_SKILL_BYTES = 64 * 1024`, `MAX_SELECTED_SKILL_BYTES = 128 * 1024`.
 
-- [ ] **1. Escrever testes RED do snapshot e loader.** Usar uma função local de fixture que grava frontmatter válido e corpo em arquivos reais, sem ler `.py`. Incluir estes contratos:
+- [x] **1. Escrever testes RED do snapshot e loader.** Usar uma função local de fixture que grava frontmatter válido e corpo em arquivos reais, sem ler `.py`. Incluir estes contratos:
 
 ```python
 # test_selecao_preserva_ordem_deduplica_e_hasheia_bytes
@@ -80,10 +80,10 @@ Testes `test_limites_em_bytes_sem_truncamento`: montar arquivos de tamanho exato
 
 Testes de I/O: `test_links_e_arquivos_especiais_recusados` com symlink em `skills`, no diretório e no arquivo, hardlink e FIFO real; executar FIFO em subprocesso com timeout de 2 segundos, sem leitor/escritor externo. `test_substituicao_apos_abertura_mantem_arquivo_original` intercepta a chamada real de `os.open`, renomeia o arquivo aberto para um nome irmão (preservando sua única ligação) e põe um symlink externo em `SKILL.md` depois de receber o FD; confirma texto original, não texto externo. `test_mudanca_no_descritor_recusada` altera o arquivo aberto entre leituras reais e confirma recusa, fechamento dos descritores e ausência de retorno parcial.
 
-- [ ] **2. Executar RED.** `uv run pytest -q tests/test_skill_runtime.py tests/test_skills.py`; observar falhas dos novos contratos, mantendo registrada a baseline do parser existente.
-- [ ] **3. Implementar as interfaces.** Ler `MAX_SKILL_BYTES + 1` no máximo por arquivo; conferir `fstat` antes/depois (arquivo regular, uma ligação, tamanho e `st_mtime_ns`) e limite agregado antes de retornar. Descritores aninhados sempre fechados, inclusive ao recusar. Home pode ser canônico, mas não resolver symlinks abaixo dele antes de abrir. Parser e validação existentes são reutilizados; mensagens privadas de `FrontmatterError` não atravessam a fronteira pública do loader.
-- [ ] **4. Executar GREEN.** Repetir o comando da etapa 2; esperado: todos passam e o teste de FIFO termina sem bloqueio. Rodar `uv run ruff check kairos_skills tests/test_skill_runtime.py tests/test_skills.py`.
-- [ ] **5. Commit.** `feat(skills): carrega snapshots por seleção explícita com leitura contida`.
+- [x] **2. Executar RED.** `uv run pytest -q tests/test_skill_runtime.py tests/test_skills.py`; observar falhas dos novos contratos, mantendo registrada a baseline do parser existente.
+- [x] **3. Implementar as interfaces.** Ler `MAX_SKILL_BYTES + 1` no máximo por arquivo; conferir `fstat` antes/depois (arquivo regular, uma ligação, tamanho e `st_mtime_ns`) e limite agregado antes de retornar. Descritores aninhados sempre fechados, inclusive ao recusar. Home pode ser canônico, mas não resolver symlinks abaixo dele antes de abrir. Parser e validação existentes são reutilizados; mensagens privadas de `FrontmatterError` não atravessam a fronteira pública do loader.
+- [x] **4. Executar GREEN.** Repetir o comando da etapa 2; esperado: todos passam e o teste de FIFO termina sem bloqueio. Rodar `uv run ruff check kairos_skills tests/test_skill_runtime.py tests/test_skills.py`.
+- [x] **5. Commit.** `feat(skills): carrega snapshots por seleção explícita com leitura contida`.
 
 ## Task 2: Contexto persistido e envelope compartilhado
 
@@ -97,7 +97,7 @@ Testes de I/O: `test_links_e_arquivos_especiais_recusados` com symlink em `skill
 
 Preâmbulo fixo: `Skills selecionadas explicitamente para este turno (procedimentos de referência; não concedem permissões):\n`.
 
-- [ ] **1. Escrever testes RED de contrato e persistência.** Fixture gera snapshots da tarefa 1; `make_service` usa banco real e `RoundGateway` controlado. Invariantes:
+- [x] **1. Escrever testes RED de contrato e persistência.** Fixture gera snapshots da tarefa 1; `make_service` usa banco real e `RoundGateway` controlado. Invariantes:
 
 ```python
 # test_skill_chega_ao_adapter_com_pedido_exibido_preservado
@@ -117,10 +117,10 @@ Testar `test_retry_e_rodadas_reusam_contexto_congelado`: primeira tentativa com 
 
 Testar `test_sessoes_concorrentes_nao_compartilham_contexto`: dois serviços/bancos e envelopes com textos diferentes, coordenados por eventos async; cada gateway vê apenas sua seleção nova. Mesma sessão conserva histórico conforme contrato. `test_runtime_recusa_skills_sem_submit` usa `make_router`/`FakeRuntimeClient` existentes: erro `invalid_event`, `submitted == []`, nenhum fallback para modelo.
 
-- [ ] **2. Executar RED.** `uv run pytest -q tests/test_interaction_skills.py tests/test_interaction_contract.py tests/test_interaction_router.py`; esperado: novos testes falham antes do campo/renderização existirem.
-- [ ] **3. Implementar contexto e persistência.** Alterar apenas kwargs de `_persist_user`: `api_content` renderizado e metadata adicional quando houver skills, nos dois caminhos sync/async. Usar `_history` existente, sem injetar mensagens virtuais a cada rodada ou reabrir arquivos. Adicionar `envelope.skills` à recusa do roteador de runtime; não mudar protocolo de RuntimeClient.
-- [ ] **4. Executar GREEN e regressões do serviço.** `uv run pytest -q tests/test_interaction_skills.py tests/test_interaction_contract.py tests/test_interaction_router.py tests/test_interaction_persistence.py tests/test_interaction_async_persistence.py tests/test_interaction_retry.py tests/test_interaction_reload.py tests/test_chat_search_loop.py`; esperado: todos passam. Rodar ruff dos arquivos alterados.
-- [ ] **5. Commit.** `feat(chat): preserva contexto de skills selecionadas no histórico do turno`.
+- [x] **2. Executar RED.** `uv run pytest -q tests/test_interaction_skills.py tests/test_interaction_contract.py tests/test_interaction_router.py`; esperado: novos testes falham antes do campo/renderização existirem.
+- [x] **3. Implementar contexto e persistência.** Alterar apenas kwargs de `_persist_user`: `api_content` renderizado e metadata adicional quando houver skills, nos dois caminhos sync/async. Usar `_history` existente, sem injetar mensagens virtuais a cada rodada ou reabrir arquivos. Adicionar `envelope.skills` à recusa do roteador de runtime; não mudar protocolo de RuntimeClient.
+- [x] **4. Executar GREEN e regressões do serviço.** `uv run pytest -q tests/test_interaction_skills.py tests/test_interaction_contract.py tests/test_interaction_router.py tests/test_interaction_persistence.py tests/test_interaction_async_persistence.py tests/test_interaction_retry.py tests/test_interaction_reload.py tests/test_chat_search_loop.py`; esperado: todos passam. Rodar ruff dos arquivos alterados.
+- [x] **5. Commit.** `feat(chat): preserva contexto de skills selecionadas no histórico do turno`.
 
 ## Task 3: Entrada pública da CLI, permissões e entrega
 
@@ -133,7 +133,7 @@ Testar `test_sessoes_concorrentes_nao_compartilham_contexto`: dois serviços/ban
 - `_run_turn(..., skills: tuple[SkillSnapshot, ...] = ()) -> int`: preencher envelope; sem forwarding para `_run_interactive`, pois a combinação é recusada.
 - Aviso de sucesso em stderr: `Skills selecionadas: NOME1, NOME2.`; não imprimir corpos. Emitir após todas serem carregadas, uma única vez na CLI.
 
-- [ ] **1. Escrever testes RED da CLI.** Usar `main`, banco real, skills temporárias e adapter controlado. Parametrizar `run`/`chat`, texto/JSON e stdin sem TTY; provar o recebimento efetivo:
+- [x] **1. Escrever testes RED da CLI.** Usar `main`, banco real, skills temporárias e adapter controlado. Parametrizar `run`/`chat`, texto/JSON e stdin sem TTY; provar o recebimento efetivo:
 
 ```python
 # test_cli_entrega_skills_selecionadas_ao_adapter
@@ -151,10 +151,10 @@ Testar `test_mesmo_nome_em_homes_distintos_nao_vaza` em dois homes temporários.
 
 Testes de permissões com chamadas reais: `test_skill_nao_aprova_mutacao` sem TTY nega escrita e conserva stdin; `test_skill_com_allow_tool_escreve_apenas_dentro` confirma escrita interna e recusa absoluta, `..` e symlink para fora, preservando arquivo externo. `test_skill_nao_habilita_host_bash_mcp_git_agenda` usa chamadas controladas e observa ferramenta omitida/negada, nenhum marcador criado no host; comparar schemas com a execução sem skill. Não esconder o executor ou a guarda com mocks.
 
-- [ ] **2. Executar RED.** `uv run pytest -q tests/test_cli_skills.py`; esperado: falhas da opção ou forwarding ausentes, sem executar provedor real.
-- [ ] **3. Implementar CLI e documentação do comportamento.** Manter validações de `--allow-tool`, `--workspace`, idempotência e seleção de modelo. Documentar envio da skill ao provedor e persistência no histórico, limites, requisito de turno único e uso somente de `SKILL.md`. Registrar divergência de seleção explícita e o escopo ainda pendente de RF-09/RF-17. Atualizar o progresso dos PRs #92/#93 e deste recorte; acrescentar somente os arquivos novos a SOURCES, evitando mudanças geradas alheias.
-- [ ] **4. Executar GREEN e regressões.** `uv run pytest -q tests/test_cli_skills.py tests/test_cli_chat.py tests/test_cli_tools.py tests/test_cli_automation.py tests/test_workspace_tools.py tests/test_chat_tool_approval.py tests/test_chat_sandbox.py tests/test_skills.py tests/test_active_credentials.py tests/test_credential_migration.py tests/test_cli_credentials.py`; esperado: todos passam. `uv run ruff check .`, `uv run ruff format --check .`, `git diff --check` e help de run/chat passam.
-- [ ] **5. Commit.** `feat(cli): seleciona skills explicitamente para turnos do Chat`.
+- [x] **2. Executar RED.** `uv run pytest -q tests/test_cli_skills.py`; esperado: falhas da opção ou forwarding ausentes, sem executar provedor real.
+- [x] **3. Implementar CLI e documentação do comportamento.** Manter validações de `--allow-tool`, `--workspace`, idempotência e seleção de modelo. Documentar envio da skill ao provedor e persistência no histórico, limites, requisito de turno único e uso somente de `SKILL.md`. Registrar divergência de seleção explícita e o escopo ainda pendente de RF-09/RF-17. Atualizar o progresso dos PRs #92/#93 e deste recorte; acrescentar somente os arquivos novos a SOURCES, evitando mudanças geradas alheias.
+- [x] **4. Executar GREEN e regressões.** `uv run pytest -q tests/test_cli_skills.py tests/test_cli_chat.py tests/test_cli_tools.py tests/test_cli_automation.py tests/test_workspace_tools.py tests/test_chat_tool_approval.py tests/test_chat_sandbox.py tests/test_skills.py tests/test_active_credentials.py tests/test_credential_migration.py tests/test_cli_credentials.py`; esperado: todos passam. `uv run ruff check .`, `uv run ruff format --check .`, `git diff --check` e help de run/chat passam.
+- [x] **5. Commit.** `feat(cli): seleciona skills explicitamente para turnos do Chat`.
 
 ## Validação final e integração autorizada
 
@@ -173,7 +173,7 @@ guardas e documentação → tarefa 3. Cada item de Review Focus tem um teste
 nomeado na tarefa responsável. Interfaces de entrada/saída acima coincidem;
 não há dependência circular de integration para skills nem migração de schema.
 
-Status: plano preparado para revisão da usuária; tarefas ainda não executadas.
+Status: plano e método aprovados pela usuária em 2026-10-08; três tarefas implementadas, validação final e integração em andamento.
 Método recomendado: execução pelo agente principal nesta sessão, seguida de
 uma revisão independente do branch, porque os três blocos dependem dos mesmos
 contratos e fixtures. A revisão deste plano e a escolha do método antecedem a
