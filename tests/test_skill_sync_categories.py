@@ -157,12 +157,33 @@ class CategorySyncTests(unittest.TestCase):
     def test_script_executavel_e_copiado_sem_executar(self):
         source = self.skill("categoria/script")
         script = source / "exec.sh"
-        script.write_text("#!/bin/sh\nexit 99\n")
+        marker = self.root / "exec-marker"
+        script.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
         script.chmod(0o755)
         sync_bundled_skills(self.bundle, self.home)
         installed = self.home / "script" / "exec.sh"
         self.assertEqual(installed.read_bytes(), script.read_bytes())
         self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+        self.assertFalse(marker.exists())
+
+    def test_nome_incompativel_com_manifesto_recusa_sem_alterar_destino(self):
+        self.skill("segura", "original")
+        sync_bundled_skills(self.bundle, self.home)
+        manifest = (self.home / MANIFEST_NAME).read_bytes()
+        for name in ("foo:bar", "foo\nbar", "#comentario", " espacada ", "Maiuscula", "a" * 65):
+            with self.subTest(name=name), TemporaryDirectory() as temporary:
+                bundle = Path(temporary)
+                bad = bundle / "categoria" / name
+                bad.mkdir(parents=True)
+                (bad / "SKILL.md").write_text("conteúdo fictício")
+                normal = bundle / "nova"
+                normal.mkdir()
+                (normal / "SKILL.md").write_text("normal")
+                with self.assertRaises(ValueError):
+                    sync_bundled_skills(bundle, self.home)
+                self.assertFalse((self.home / "nova").exists())
+                self.assertEqual((self.home / MANIFEST_NAME).read_bytes(), manifest)
+                self.assertEqual((self.home / "segura" / "SKILL.md").read_text(), "original")
 
     def test_opt_out_nao_varre_bundle_invalido(self):
         self.home.mkdir(parents=True)

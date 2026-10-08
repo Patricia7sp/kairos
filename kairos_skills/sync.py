@@ -22,6 +22,8 @@ from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
+from kairos_skills.runtime import validate_skill_name
+
 __all__ = [
     "MANIFEST_NAME",
     "NO_BUNDLED_SKILLS_MARKER",
@@ -265,6 +267,7 @@ def _snapshot_bundle(bundled_dir: Path):
         snapshots = {}
 
         def capture(name, fd):
+            validate_skill_name(name)
             if name in snapshots:
                 raise ValueError("Nome de skill duplicado no bundle; sincronização recusada.")
             destination = Path(temporary) / name

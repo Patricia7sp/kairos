@@ -26,8 +26,10 @@ kairos skills list
 
 O sync reconhece skills diretamente no bundle e dentro de suas categorias,
 instalando-as em `<KAIROS_HOME>/skills/NOME`. Copia anexos sem executá-los e
-preserva permissões de scripts. Nomes duplicados, links e arquivos especiais
-recusam o bundle antes de alterar as skills instaladas.
+preserva permissões de scripts. Nomes precisam seguir o mesmo kebab-case de
+`--skill`, até 64 caracteres. Duplicatas e links na descoberta, ou links e
+arquivos especiais nos diretórios das skills, recusam a sincronização antes
+de alterar as skills instaladas.
 
 Edições locais, skills sem origem registrada e exclusões feitas pelo usuário
 são preservadas. A migração do manifesto antigo é conservadora. O marcador
