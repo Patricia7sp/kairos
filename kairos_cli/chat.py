@@ -23,6 +23,7 @@ from kairos_integration.interaction_contract import InteractionServiceError
 from kairos_providers import ProviderModelRef
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_runtime.wire import runtime_event_to_json
+from kairos_skills.runtime import SkillSelectionError, SkillSnapshot, load_selected_skills
 
 __all__ = ["ChatUsageError", "run_chat"]
 
@@ -78,6 +79,7 @@ async def run_chat(
     experiences: bool = True,
     workspace: str | None = None,
     allow_tools: tuple[str, ...] | list[str] = (),
+    skill_names: tuple[str, ...] | list[str] = (),
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
@@ -99,6 +101,13 @@ async def run_chat(
     if runtime_session and tools:
         raise ChatUsageError("--tools é uma opção do Chat por modelo, não do Agent Runtime")
     workspace = _selected_workspace(workspace, tools=tools, runtime_session=runtime_session)
+    skills = _selected_skills(home, skill_names, prompt=prompt, runtime_session=runtime_session)
+    if skills:
+        print(
+            "Skills selecionadas: " + ", ".join(skill.name for skill in skills) + ".",
+            file=sys.stderr,
+            flush=True,
+        )
     service = build_interaction_service(home)
     try:
         if prompt:
@@ -114,6 +123,7 @@ async def run_chat(
                 tools=tools,
                 workspace=workspace,
                 authorized_tools=authorized_tools,
+                skills=skills,
                 home=home,
                 experiences=experiences,
             )
@@ -138,6 +148,20 @@ async def run_chat(
         return 1
     finally:
         await service.aclose()
+
+
+def _selected_skills(home, names, *, prompt, runtime_session) -> tuple[SkillSnapshot, ...]:
+    names = tuple(names)
+    if not names:
+        return ()
+    if runtime_session:
+        raise ChatUsageError("--skill é uma opção do Chat por modelo, não do Agent Runtime")
+    if not prompt.strip():
+        raise ChatUsageError("--skill exige uma mensagem para um único turno")
+    try:
+        return load_selected_skills(home, names)
+    except SkillSelectionError as exc:
+        raise ChatUsageError(str(exc)) from None
 
 
 def _tool_authorization(names, *, tools, workspace, prompt, runtime_session) -> frozenset[str]:
@@ -236,6 +260,7 @@ async def _run_turn(
     experiences: bool = True,
     workspace: str | None = None,
     authorized_tools: frozenset[str] = frozenset(),
+    skills: tuple[SkillSnapshot, ...] = (),
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -247,6 +272,7 @@ async def _run_turn(
         web_search=web_search,
         tools=tools,
         workspace=workspace,
+        skills=skills,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()

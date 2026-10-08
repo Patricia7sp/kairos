@@ -229,3 +229,16 @@ def test_colecao_invalida_recusada():
     for values in ([snapshot, snapshot], ["revisar-docs"], [{"name": "revisar-docs"}]):
         with pytest.raises(SkillSelectionError):
             validate_skill_snapshots(values)
+
+
+def test_yaml_profundamente_aninhado_recusado_sem_traceback(tmp_path):
+    from kairos_skills.runtime import SkillSelectionError, load_selected_skills
+
+    nested = "[" * 1500 + "privado-ficticio" + "]" * 1500
+    write_skill(
+        tmp_path,
+        text=f"---\nname: revisar-docs\ndescription: Revise.\nextra: {nested}\n---\ncorpo\n",
+    )
+    with pytest.raises(SkillSelectionError) as exc:
+        load_selected_skills(tmp_path, ["revisar-docs"])
+    assert "privado-ficticio" not in str(exc.value)

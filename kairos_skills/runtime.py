@@ -49,7 +49,7 @@ class SkillSnapshot:
         try:
             frontmatter, body = parse_frontmatter(self.text, strict_types=True)
             validate_frontmatter(frontmatter, new_skill=False)
-        except FrontmatterError:
+        except (FrontmatterError, RecursionError):
             raise SkillSelectionError(f"Skill {self.name}: frontmatter inválido.") from None
         if frontmatter.name != self.name:
             raise SkillSelectionError(

@@ -272,6 +272,13 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="injeta experiências ativas como referência no turno atual (padrão: ligado)",
         )
         parser.add_argument(
+            "--skill",
+            action="append",
+            default=[],
+            metavar="NOME",
+            help="envia uma skill instalada como contexto; repetível, exige mensagem única",
+        )
+        parser.add_argument(
             "--idempotency-key",
             help="chave durável para repetir manualmente o mesmo turno de runtime",
         )

@@ -2200,6 +2200,30 @@ A auditoria em stderr registra somente o nome autorizado, sem argumentos.
 
 ---
 
+## D-CLI.SKILL — consumo explícito de skills como contexto do turno
+
+**Referências:** `_reversa_sdd/skills/requirements.md` (RF-05, RF-09 e RF-17),
+`_reversa_sdd/adrs/009-proveniencia-de-skill.md`, D-09.1–D-09.7, D-CLI.WS,
+D-CLI.AUTO e especificação `2026-10-07-cli-skills-design.md`.
+
+O primeiro consumo de skills no Chat usa `--skill NOME`, explícito e repetível,
+em uma mensagem única da CLI. O loader lê somente a instalação em `<home>/skills`,
+sem seguir links, e captura snapshots imutáveis com hash do conteúdo. Mantém
+as regras de leitura de frontmatter antigo, mas recusa coerções de tipos.
+
+O serviço persiste a skill como contexto da mensagem user em `api_content`;
+`content` conserva o pedido exibido e metadata registra nome, versão e hash.
+Rodadas, retries e reinícios usam esse histórico, sem reabrir arquivos. Omitir
+a seleção não apaga o contexto já enviado em mensagens anteriores.
+
+Isso não muda schemas, aprovação, workspace, bash Docker ou credenciais.
+Scripts e anexos não são carregados; não há autoria, curadoria ou alterações
+de proveniência. RF-09/RF-17 permanecem parciais: índice automático com cache e
+leitura de referências sob demanda pertencem a recortes futuros. A seleção
+explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
+
+---
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável

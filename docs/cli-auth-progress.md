@@ -114,6 +114,12 @@ do projeto.
 
 ## Próximas etapas
 
-Restrição de workspace, autorização para automações sem terminal,
-integração de skills no runtime e workflows duráveis continuam pendentes.
+Restrição de workspace e autorização para automações sem terminal foram
+integradas e implantadas pelos PRs #92 e #93. O próximo recorte implementa
+seleção explícita de skills em turnos únicos do Chat na CLI: especificação
+`superpowers/specs/2026-10-07-cli-skills-design.md` e plano
+`superpowers/plans/2026-10-08-cli-skills.md`. Consumo explícito preserva o contexto
+no histórico; índice automático, anexos, autoria, curador e workflows duráveis
+continuam pendentes. Evidências de integração deste recorte serão registradas
+após os gates local e remoto.
 Não foram realizadas chamadas a provedores com credenciais reais.
