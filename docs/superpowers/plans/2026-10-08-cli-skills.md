@@ -51,7 +51,7 @@
 
 Sem refatoração ampla dos módulos grandes ou dos fixtures existentes. Reutilizar `RoundGateway`, `answer_round`, `make_service`, `collect` de `test_chat_search_loop` e `mutator_round` de `test_chat_tool_approval`. O fixture `install` de `test_cli_tools` permite chamadas reais com arquivos temporários; testes de resposta direta e reinício podem compor seus próprios serviços.
 
-## Tarefa 1: Snapshot e leitura segura de skills instaladas
+## Task 1: Snapshot e leitura segura de skills instaladas
 
 **Files:** criar `kairos_skills/runtime.py` e `tests/test_skill_runtime.py`; modificar `kairos_skills/frontmatter.py` e `tests/test_skills.py`.
 
@@ -85,7 +85,7 @@ Testes de I/O: `test_links_e_arquivos_especiais_recusados` com symlink em `skill
 - [ ] **4. Executar GREEN.** Repetir o comando da etapa 2; esperado: todos passam e o teste de FIFO termina sem bloqueio. Rodar `uv run ruff check kairos_skills tests/test_skill_runtime.py tests/test_skills.py`.
 - [ ] **5. Commit.** `feat(skills): carrega snapshots por seleção explícita com leitura contida`.
 
-## Tarefa 2: Contexto persistido e envelope compartilhado
+## Task 2: Contexto persistido e envelope compartilhado
 
 **Files:** criar `kairos_integration/skill_context.py`, `tests/test_interaction_skills.py`; modificar `interaction_contract.py`, `interaction_service.py`, `router.py` e testes de contrato/roteador citados no mapa.
 
@@ -122,7 +122,7 @@ Testar `test_sessoes_concorrentes_nao_compartilham_contexto`: dois serviços/ban
 - [ ] **4. Executar GREEN e regressões do serviço.** `uv run pytest -q tests/test_interaction_skills.py tests/test_interaction_contract.py tests/test_interaction_router.py tests/test_interaction_persistence.py tests/test_interaction_async_persistence.py tests/test_interaction_retry.py tests/test_interaction_reload.py tests/test_chat_search_loop.py`; esperado: todos passam. Rodar ruff dos arquivos alterados.
 - [ ] **5. Commit.** `feat(chat): preserva contexto de skills selecionadas no histórico do turno`.
 
-## Tarefa 3: Entrada pública da CLI, permissões e entrega
+## Task 3: Entrada pública da CLI, permissões e entrega
 
 **Files:** modificar `kairos_cli/main.py`, `handlers.py`, `chat.py`; criar `tests/test_cli_skills.py`; atualizar `docs/guia-cli-comandos.md`, `docs/decisoes.md`, `docs/cli-auth-progress.md`, `kairos.egg-info/SOURCES.txt`.
 
