@@ -1,6 +1,6 @@
 # Skills explícitas nos turnos da CLI
 
-Status: proposta escrita para revisão da usuária; implementação ainda não iniciada.
+Status: aprovada pela usuária em 2026-10-08; implementação ainda não iniciada.
 
 ## Objetivo e entendimento aceito
 
