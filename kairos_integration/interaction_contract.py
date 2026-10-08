@@ -20,6 +20,7 @@ from kairos_providers.adapter_contract import (
 )
 from kairos_providers.base import TokenUsage
 from kairos_providers.contracts import ProviderModelRef, SelectionReason
+from kairos_skills.runtime import SkillSnapshot, validate_skill_snapshots
 
 __all__ = [
     "InteractionCost",
@@ -116,6 +117,7 @@ class InteractionEnvelope:
     web_search: bool = False
     tools: bool = False
     workspace: str | None = None
+    skills: tuple[SkillSnapshot, ...] = ()
 
     def __post_init__(self) -> None:
         if self.workspace is not None:
@@ -140,6 +142,7 @@ class InteractionEnvelope:
         if self.idempotency_key is not None and not isinstance(self.idempotency_key, str):
             raise TypeError("idempotency_key deve ser uma string ou None")
         object.__setattr__(self, "parameters", _immutable_parameters(self.parameters))
+        object.__setattr__(self, "skills", validate_skill_snapshots(self.skills))
 
 
 @dataclass(frozen=True)

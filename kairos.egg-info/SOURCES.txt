@@ -112,6 +112,7 @@ kairos_integration/persistence.py
 kairos_integration/retry.py
 kairos_integration/router.py
 kairos_integration/selection_context.py
+kairos_integration/skill_context.py
 kairos_integration/surfaces.py
 kairos_integration/turn_ownership.py
 kairos_mcp/__init__.py
@@ -204,6 +205,7 @@ kairos_skills/__init__.py
 kairos_skills/curator.py
 kairos_skills/frontmatter.py
 kairos_skills/hub.py
+kairos_skills/runtime.py
 kairos_skills/sync.py
 kairos_state/__init__.py
 kairos_state/cjk.py
@@ -321,6 +323,7 @@ tests/test_cli_insights.py
 tests/test_cli_model.py
 tests/test_cli_runtime.py
 tests/test_cli_runtime_delivery.py
+tests/test_cli_skills.py
 tests/test_cli_surface.py
 tests/test_codex_adapter.py
 tests/test_codex_rpc.py
@@ -379,6 +382,7 @@ tests/test_interaction_retry.py
 tests/test_interaction_router.py
 tests/test_interaction_selection.py
 tests/test_interaction_service.py
+tests/test_interaction_skills.py
 tests/test_interaction_turn_ownership.py
 tests/test_komodo_deploy.py
 tests/test_legacy_removal.py
@@ -430,6 +434,7 @@ tests/test_schema.py
 tests/test_security_audit.py
 tests/test_service_event_producers.py
 tests/test_service_events.py
+tests/test_skill_runtime.py
 tests/test_skills.py
 tests/test_slack_inbound.py
 tests/test_spa_chat_contract.py

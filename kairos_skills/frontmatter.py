@@ -104,7 +104,7 @@ def validate_frontmatter(fm: Frontmatter, *, new_skill: bool = False) -> None:
 _FM_BLOCK = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
-def parse_frontmatter(text: str) -> tuple[Frontmatter, str]:
+def parse_frontmatter(text: str, *, strict_types: bool = False) -> tuple[Frontmatter, str]:
     """Extrai frontmatter YAML e devolve `(frontmatter, corpo)`."""
     import yaml
 
@@ -113,11 +113,15 @@ def parse_frontmatter(text: str) -> tuple[Frontmatter, str]:
         raise FrontmatterError("SKILL.md não começa com bloco de frontmatter '---'")
 
     try:
-        data = yaml.safe_load(m.group(1)) or {}
+        data = _load_strict_yaml(m.group(1)) if strict_types else yaml.safe_load(m.group(1))
+        data = data or {}
     except yaml.YAMLError as exc:
         raise FrontmatterError(f"frontmatter não é YAML válido: {exc}") from exc
     if not isinstance(data, dict):
         raise FrontmatterError("frontmatter deve ser um mapa")
+
+    if strict_types:
+        _validate_field_types(data)
 
     meta = (data.get("metadata") or {}).get("kairos") or {}
     known = {
@@ -156,3 +160,54 @@ def parse_frontmatter(text: str) -> tuple[Frontmatter, str]:
         extra={k: v for k, v in data.items() if k not in known},
     )
     return fm, text[m.end() :]
+
+
+def _load_strict_yaml(text: str):
+    import yaml
+
+    class BoundedLoader(yaml.SafeLoader):
+        def __init__(self, stream):
+            self.skill_depth = 0
+            self.skill_nodes = 0
+            super().__init__(stream)
+
+        def compose_node(self, parent, index):
+            if self.check_event(yaml.AliasEvent):
+                raise FrontmatterError("Aliases YAML não são aceitos no contexto de skills.")
+            if self.skill_depth >= 64 or self.skill_nodes >= 2048:
+                raise FrontmatterError("Frontmatter excede o limite de complexidade.")
+            self.skill_depth += 1
+            self.skill_nodes += 1
+            try:
+                return super().compose_node(parent, index)
+            finally:
+                self.skill_depth -= 1
+
+    loader = BoundedLoader(text)
+    try:
+        return loader.get_single_data()
+    except (yaml.YAMLError, ValueError, OverflowError, RecursionError):
+        raise FrontmatterError("Frontmatter YAML inválido.") from None
+    finally:
+        loader.dispose()
+
+
+def _validate_field_types(data: dict) -> None:
+    for key in ("name", "description", "version", "author", "license"):
+        if key not in data or (key in {"author", "license"} and data[key] is None):
+            continue
+        if not isinstance(data[key], str):
+            raise FrontmatterError(f"{key} deve ser texto")
+    metadata = data.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise FrontmatterError("metadata deve ser um mapa")
+    namespace = metadata.get("kairos", {})
+    if not isinstance(namespace, dict):
+        raise FrontmatterError("metadata.kairos deve ser um mapa")
+    for mapping in (data, namespace):
+        for key in ("platforms", "tags", "related_skills"):
+            if key in mapping and (
+                not isinstance(mapping[key], list)
+                or any(not isinstance(value, str) for value in mapping[key])
+            ):
+                raise FrontmatterError(f"{key} deve ser uma lista de textos")

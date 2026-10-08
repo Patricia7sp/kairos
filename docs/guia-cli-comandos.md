@@ -17,6 +17,41 @@ na CLI.
 - **Nada de lógica core na CLI.** Se o comando começou a duplicar o core,
   ele está no lugar errado: a lógica vai para a unit, o handler só a chama.
 
+## Usar uma skill instalada
+
+```bash
+kairos run --session trabalho --skill revisar-docs "Revise este texto: ..."
+kairos run --session trabalho --tools --workspace ~/projetos/app \
+  --skill revisar-docs --allow-tool edit_file --json "Revise README.md"
+```
+
+`revisar-docs` é um exemplo: instale um `SKILL.md` válido em
+`<KAIROS_HOME>/skills/revisar-docs/SKILL.md`, com `name: revisar-docs` no
+frontmatter. `--skill NOME` é repetível, preserva a ordem da primeira ocorrência
+e aceita somente nomes kebab-case de diretórios imediatos. Não carrega o
+catálogo bundled ou optional automaticamente. Exige uma mensagem para um único
+turno de `run` ou `chat`; sessões do Agent Runtime recusam a opção.
+
+O texto completo de cada `SKILL.md` selecionado é enviado ao provedor do turno
+e preservado no histórico local. Editar ou apagar o arquivo não reescreve
+mensagens antigas. Omitir a opção no próximo comando não carrega outra skill,
+mas o contexto anterior continua no histórico ativo; use outra sessão para
+começar sem ele. O pedido exibido permanece separado do contexto enviado.
+O aviso em stderr informa os nomes, sem imprimir o conteúdo das skills.
+
+Até oito skills únicas, 64 KiB por arquivo e 128 KiB no total; os limites são
+de bytes UTF-8 e excessos são recusados, sem truncamento. Arquivos devem ter
+frontmatter válido, descrição de até 60 caracteres e corpo não vazio. No consumo
+explícito, aliases YAML são recusados e o frontmatter tem limites de 64 níveis
+e 2.048 nós, para limitar o trabalho do parser. Links e
+arquivos especiais são recusados. Falha em qualquer seleção impede o envio
+do turno inteiro.
+
+Skills são contexto e não concedem permissões. A opção funciona sem `--tools`,
+mas usar ferramentas exige as opções e aprovações existentes. Workspace e
+bash Docker mantêm suas restrições. Somente `SKILL.md` é carregado:
+`references/`, `scripts/` e `templates/` não são executados ou montados.
+
 ## Conversar com ferramentas
 
 ```bash
