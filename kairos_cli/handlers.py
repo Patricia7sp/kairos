@@ -731,6 +731,7 @@ def cmd_run(args) -> int:
                 workspace=getattr(args, "workspace", None),
                 allow_tools=getattr(args, "allow_tool", ()),
                 skill_names=getattr(args, "skill", ()),
+                skills_catalog=getattr(args, "skills_catalog", False),
                 experiences=getattr(args, "experiences", True),
             )
         )

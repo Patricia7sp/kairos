@@ -80,15 +80,24 @@ async def run_chat(
     workspace: str | None = None,
     allow_tools: tuple[str, ...] | list[str] = (),
     skill_names: tuple[str, ...] | list[str] = (),
+    skills_catalog: bool = False,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
+    if type(skills_catalog) is not bool:
+        raise ChatUsageError("--skills-catalog exige um valor booleano")
+    if skills_catalog and not prompt.strip():
+        raise ChatUsageError("--skills-catalog exige uma mensagem para um único turno")
     override = _model_override(provider, model)
     if idempotency_key is not None and not idempotency_key.strip():
         raise ChatUsageError("--idempotency-key exige um valor não vazio")
     if idempotency_key is not None and not prompt:
         raise ChatUsageError("--idempotency-key só pode ser usado com uma mensagem")
     runtime_session = _is_runtime_session(home, session_id)
+    if skills_catalog and runtime_session:
+        raise ChatUsageError(
+            "--skills-catalog é uma opção do Chat por modelo, não do Agent Runtime"
+        )
     authorized_tools = _tool_authorization(
         allow_tools,
         tools=tools,
@@ -124,6 +133,7 @@ async def run_chat(
                 workspace=workspace,
                 authorized_tools=authorized_tools,
                 skills=skills,
+                skills_catalog=skills_catalog,
                 home=home,
                 experiences=experiences,
             )
@@ -261,6 +271,7 @@ async def _run_turn(
     workspace: str | None = None,
     authorized_tools: frozenset[str] = frozenset(),
     skills: tuple[SkillSnapshot, ...] = (),
+    skills_catalog: bool = False,
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -273,6 +284,7 @@ async def _run_turn(
         tools=tools,
         workspace=workspace,
         skills=skills,
+        skills_catalog=skills_catalog,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()
@@ -349,6 +361,17 @@ async def _handle_chat_event(
     as_json: bool,
     authorized_tools: frozenset[str] = frozenset(),
 ) -> None:
+    if event.kind is InteractionEventKind.SKILL_CATALOG_READY:
+        notice = event.catalog_notice
+        if notice is None:
+            raise ChatUsageError("Aviso de catálogo inválido")
+        print(
+            f"Catálogo de skills: {notice.entries} disponíveis; "
+            f"{notice.omitted_skills} skills e {notice.omitted_references} referências omitidas.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
     if as_json:
         print(
             json.dumps(

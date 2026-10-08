@@ -173,7 +173,8 @@ de I/O; API interna de exportação sem novo comando público; evento interno de
 aviso sem alterar NDJSON. Nenhuma dessas escolhas concede uma capacidade nova
 fora do catálogo aprovado. Revisar estas escolhas antes da implementação.
 
-Status: plano escrito e auto-revisado; aguardando revisão da usuária.
+Status: plano aprovado pela usuária em 2026-10-08; tarefas 1–3 concluídas,
+tarefa 4 em execução, incluindo revisão e gates antes da integração.
 Método preservado das etapas anteriores: execução nativa pelo agente principal,
 seguida de revisão independente do branch. As quatro tarefas têm dependências
 diretas; esse método evita trocas de contexto sem abrir mão da revisão final.

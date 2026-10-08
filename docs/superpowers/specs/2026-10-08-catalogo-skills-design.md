@@ -1,6 +1,6 @@
 # Catálogo compacto e leitura de skills sob demanda
 
-Status: aprovada pela usuária em 2026-10-08; plano escrito e aguardando revisão em `../plans/2026-10-08-catalogo-skills.md`.
+Status: especificação e plano aprovados pela usuária em 2026-10-08; implementação em andamento conforme `../plans/2026-10-08-catalogo-skills.md`.
 
 ## Objetivo e entendimento
 

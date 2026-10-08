@@ -272,6 +272,11 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             help="injeta experiências ativas como referência no turno atual (padrão: ligado)",
         )
         parser.add_argument(
+            "--skills-catalog",
+            action="store_true",
+            help="anuncia skills instaladas e habilita leitura sob demanda neste turno único",
+        )
+        parser.add_argument(
             "--skill",
             action="append",
             default=[],

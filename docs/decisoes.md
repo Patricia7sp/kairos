@@ -2221,6 +2221,16 @@ A auditoria em stderr registra somente o nome autorizado, sem argumentos.
 
 ## D-CLI.SKILL — consumo explícito de skills como contexto do turno
 
+O catálogo sob demanda acrescenta `--skills-catalog`, opt-in por turno único
+da CLI, conforme `2026-10-08-catalogo-skills-design.md`. RF-09/RF-17 usam
+snapshot imutável e cache verificado em tabelas canônicas SQLite, em vez de
+`skills/index-cache/`, para compartilhar posse, migração, backup e reparo com
+a sessão. O índice contém nomes/descrições; corpos chegam como resultados
+da ferramenta nativa gated `skill_view`. Somente a instalação é fonte de
+leitura. A capacidade termina com o turno e não amplia `read_file`, execução,
+aprovação ou acesso ao workspace. Reinício conserva o snapshot e os arquivos
+já lidos; divergência de um arquivo não cacheado exige nova sessão.
+
 **Referências:** `_reversa_sdd/skills/requirements.md` (RF-05, RF-09 e RF-17),
 `_reversa_sdd/adrs/009-proveniencia-de-skill.md`, D-09.1–D-09.7, D-CLI.WS,
 D-CLI.AUTO e especificação `2026-10-07-cli-skills-design.md`.

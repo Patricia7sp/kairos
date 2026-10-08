@@ -70,6 +70,51 @@ mas usar ferramentas exige as opções e aprovações existentes. Workspace e
 bash Docker mantêm suas restrições. Somente `SKILL.md` é carregado:
 `references/`, `scripts/` e `templates/` não são executados ou montados.
 
+## Consultar o catálogo instalado
+
+```bash
+kairos run --session trabalho --skills-catalog "Revise a documentação"
+kairos chat --session trabalho --skills-catalog "Continue a revisão"
+```
+
+`--skills-catalog` anuncia nomes e descrições das skills instaladas e permite
+ao modelo chamar `skill_view` para ler procedimentos ou referências. Exige
+mensagem única e modelo com suporte confirmado a tools; não funciona em modo
+interativo nem em sessões do Agent Runtime. Repita a opção em cada turno que
+precisar dessa leitura. Sem ela, não há nova varredura, índice ou ferramenta;
+resultados anteriores permanecem no histórico.
+
+O catálogo fica fixado na sessão, inclusive após reinício. Skills novas ou
+alteradas exigem outra sessão para atualizar o catálogo. Um arquivo já lido
+é reutilizado pelo conteúdo original verificado e persistido; alteração ou
+remoção de um arquivo ainda não lido retorna erro solicitando nova sessão.
+`--skill NOME` pode coexistir: envia o arquivo atual como contexto do pedido,
+enquanto o catálogo continua com a versão fixada.
+
+`skill_view(name, reference=None, offset=0, limit=4000)` lê `SKILL.md` ou um
+ID relativo como `references/guia.md`. Aceita somente referências `.md`/`.txt`
+capturadas; páginas usam caracteres Unicode e `next_offset` informa a próxima
+página. Não executa scripts/templates nem concede escrita, bash ou MCP. A
+leitura funciona sem `--tools`; as outras ferramentas mantêm suas aprovações
+e restrições de workspace.
+
+Até 256 skills, índice de 32 KiB, SKILL de 64 KiB, 128 referências por skill,
+256 KiB por referência e 64 MiB agregados de arquivos textuais. Referências
+têm profundidade máxima de oito subdiretórios. Entradas inválidas são omitidas
+e contadas no aviso em stderr; raiz inválida, catálogo vazio e excesso global
+recusam o turno. Links, hardlinks e arquivos especiais são recusados.
+
+Cada turno admite 128 KiB de texto de páginas. Antes da leitura, reserva-se
+até quatro bytes por caractere e devolve-se a sobra: uma página ASCII pode
+ser recusada mesmo antes de atingir o limite efetivo. Reduza `limit` nesse
+caso. Cada resultado JSON é limitado a 32 KiB.
+
+Nomes/descrições são enviados ao provedor nos turnos habilitados; corpos e
+referências somente após chamadas de leitura. O banco local retém o catálogo
+e o conteúdo integral dos arquivos lidos, além das páginas no histórico.
+Avisos não imprimem corpos, descrições ou caminhos. Backup do banco inclui
+esse conteúdo; omitir a opção não apaga o histórico nem o cache.
+
 ## Conversar com ferramentas
 
 ```bash
