@@ -1,6 +1,8 @@
 """Leitor contido: arquivos instalados reais, sem seguir links."""
 
 import os
+import subprocess
+import sys
 
 import pytest
 from test_skill_runtime import write_skill
@@ -67,6 +69,20 @@ def test_arquivos_nao_regulares_nao_sao_anunciados(tmp_path, kind):
             os.link(external, bad)
         else:
             os.mkfifo(bad)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; from pathlib import Path; from kairos_skills.catalog_io import capture_skill_catalog; s=capture_skill_catalog(Path(sys.argv[1])); assert [e.name for e in s.entries]==['valida']; assert s.omitted_skills==1",
+                    str(tmp_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            return
     result = capture_skill_catalog(tmp_path)
     assert [e.name for e in result.entries] == ["valida"]
     assert result.omitted_skills == 1

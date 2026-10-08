@@ -171,6 +171,9 @@ async def web_search_tool(query: str, max_results: int = 5) -> dict[str, Any]:
 def register_builtin_tools(reg: ToolRegistry | None = None) -> None:
     """Registra todas as ferramentas nativas no registro padrão."""
     r = reg or registry
+    from kairos_tools.skill_view import register_skill_view_tools
+
+    register_skill_view_tools(r)
 
     # 1. bash
     r.register(

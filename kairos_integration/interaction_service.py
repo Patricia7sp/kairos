@@ -37,6 +37,7 @@ from kairos_integration.interaction_contract import (
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
+from kairos_integration.skill_catalog_turn import SkillCatalogTurn, prepare_skill_catalog_turn
 from kairos_integration.skill_context import render_skill_context, skill_display_metadata
 from kairos_integration.turn_ownership import AsyncTurnLeaseBackend, SessionTurnOwnership
 from kairos_observability.service_events import record_service_event_async
@@ -60,7 +61,9 @@ from kairos_providers.gateway import (
     ProviderBillingMetadata,
     ProviderGateway,
 )
+from kairos_skills.catalog import SkillCatalogError
 from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories.skill_catalogs import SkillCatalogRepository
 from kairos_tools.registry import registry
 
 __all__ = ["InteractionService"]
@@ -171,6 +174,8 @@ class InteractionService:
         messages: MessageRepository,
         usage: UsageRepository,
         persistence: SQLiteAsyncInteractionPersistence | None = None,
+        skill_catalog_home: Path | None = None,
+        skill_catalogs: SkillCatalogRepository | None = None,
         billing_base_url: str = "",
         billing_mode: str = "unknown",
         retry_policy: RetryPolicy | None = None,
@@ -194,6 +199,11 @@ class InteractionService:
         self._messages = messages
         self._usage = usage
         self._persistence = persistence
+        self._skill_catalog_home = skill_catalog_home
+        self._skill_catalogs = skill_catalogs
+        self._turn_catalog: ContextVar[SkillCatalogTurn | None] = ContextVar(
+            f"kairos-turn-catalog-{id(self)}", default=None
+        )
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
@@ -341,12 +351,61 @@ class InteractionService:
                 self._turn_stream_hooks.reset(token)
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        from kairos_tools.skill_view import skill_catalog_scope
+
+        catalog = None
+        initial_snapshot = None
+        if envelope.skills_catalog:
+            initial_snapshot = self._resolve_snapshot(envelope)
+            self._require_catalog_model(initial_snapshot.ref)
+            if self._skill_catalog_home is None:
+                raise InteractionServiceError(
+                    "skills_catalog", "Home do catálogo não configurado.", retryable=False
+                )
+            try:
+                catalog = await prepare_skill_catalog_turn(
+                    envelope,
+                    home=self._skill_catalog_home,
+                    repository=self._skill_catalogs,
+                    persistence=self._persistence,
+                )
+            except SkillCatalogError as exc:
+                raise InteractionServiceError("skills_catalog", str(exc), retryable=False) from None
+
+        async def view(*args, **kwargs):
+            if catalog is None or self._turn_ownership.is_lost():
+                raise SkillCatalogError(
+                    "Capacidade de leitura encerrada; posse do turno indisponível."
+                )
+            page = await catalog.view(*args, **kwargs)
+            if self._turn_ownership.is_lost():
+                raise SkillCatalogError(
+                    "Capacidade de leitura encerrada; posse do turno indisponível."
+                )
+            return page
+
+        token = self._turn_catalog.set(catalog)
+        try:
+            with skill_catalog_scope(view if catalog is not None else None):
+                async with aclosing(self._stream_owned_loop(envelope, initial_snapshot)) as stream:
+                    async for event in stream:
+                        yield event
+        finally:
+            if catalog is not None:
+                catalog.close()
+            self._turn_catalog.reset(token)
+
+    async def _stream_owned_loop(
+        self,
+        envelope: InteractionEnvelope,
+        initial_snapshot: InteractionSelectionSnapshot | None = None,
+    ) -> AsyncIterator[InteractionEvent]:
         """Own the complete loop and close pending calls even on disconnect."""
         await self._repair_incomplete_tools(envelope.conversation_id)
         primary: BaseException | None = None
         desfecho = "turn_end"
         try:
-            async with aclosing(self._stream_tool_turn(envelope)) as stream:
+            async with aclosing(self._stream_tool_turn(envelope, initial_snapshot)) as stream:
                 async for event in stream:
                     if event.kind == "turn_error":
                         desfecho = "turn_error"
@@ -472,9 +531,13 @@ class InteractionService:
         )
 
     async def _stream_tool_turn(
-        self, envelope: InteractionEnvelope
+        self,
+        envelope: InteractionEnvelope,
+        initial_snapshot: InteractionSelectionSnapshot | None = None,
     ) -> AsyncIterator[InteractionEvent]:
-        snapshot, prepared, selection, request = await self._prepare_turn(envelope)
+        snapshot, prepared, selection, request = await self._prepare_turn(
+            envelope, snapshot=initial_snapshot
+        )
         # Depois de `_prepare_turn`: a sessão existe quando o observador é
         # avisado. `on_session_start` com a sessão ainda por criar seria um hook
         # que mente sobre o estado que o callback vai ler.
@@ -485,6 +548,8 @@ class InteractionService:
             profile=envelope.profile,
         )
         yield InteractionEvent.turn_start(snapshot, envelope.conversation_id)
+        if notice := self._catalog_notice(envelope.conversation_id):
+            yield notice
         totals = TurnAccumulator()
         costs: list[InteractionCost] = []
         accumulator = TurnAccumulator()
@@ -578,7 +643,7 @@ class InteractionService:
                 return
 
             limit_error = None
-            if not (envelope.tools or envelope.web_search):
+            if not (envelope.tools or envelope.web_search or envelope.skills_catalog):
                 limit_error = InteractionServiceError(
                     "tools_disabled",
                     "as ferramentas estão desligadas para este turno",
@@ -609,7 +674,7 @@ class InteractionService:
             tool_rounds += 1
             request = replace(
                 request,
-                messages=self._history(envelope.conversation_id),
+                messages=self._request_messages(envelope.conversation_id),
                 tools=(turn_tools if tool_rounds < 4 and len(executed_calls) < 8 else ()),
             )
             accumulator = TurnAccumulator()
@@ -1115,14 +1180,17 @@ class InteractionService:
                 self._messages.append(*args, **kwargs)
 
     async def _prepare_turn(
-        self, envelope: InteractionEnvelope
+        self, envelope: InteractionEnvelope, *, snapshot: InteractionSelectionSnapshot | None = None
     ) -> tuple[
         InteractionSelectionSnapshot,
         PreparedProviderAdapter | _LegacyPreparedAdapter,
         ResolvedModelSelection,
         AdapterRequest,
     ]:
-        snapshot = self._resolve_snapshot(envelope)
+        if snapshot is None:
+            snapshot = self._resolve_snapshot(envelope)
+        if envelope.skills_catalog:
+            self._require_catalog_model(snapshot.ref)
         prepared = self._prepare(snapshot.ref)
         snapshot = replace(snapshot, credential_id=prepared.credential_id)
         selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
@@ -1148,21 +1216,23 @@ class InteractionService:
             selection,
             AdapterRequest(
                 model=snapshot.ref,
-                messages=self._history(envelope.conversation_id),
+                messages=self._request_messages(envelope.conversation_id),
                 parameters=snapshot.parameters,
                 tools=self._chat_tools(envelope),
             ),
         )
 
     def _chat_tools(self, envelope: InteractionEnvelope) -> tuple[dict[str, Any], ...]:
+        catalog_tools = (self._catalog_tool(),) if envelope.skills_catalog else ()
         if envelope.tools:
             definitions = chat_tool_definitions(web_search_enabled=envelope.web_search)
             from kairos_tools.workspace import tool_allowed
 
             registered = registry.snapshot_registration()
-            return tuple(
+            definitions = tuple(
                 definition
                 for definition in definitions
+                if definition["function"]["name"] != "skill_view"
                 if (
                     tool_allowed(
                         definition["function"]["name"],
@@ -1174,9 +1244,63 @@ class InteractionService:
                     or (definition["function"]["name"] == "bash" and self._chat_sandbox is not None)
                 )
             )
+            return definitions + catalog_tools
         if envelope.web_search:
-            return WEB_SEARCH_TOOLS
-        return ()
+            return WEB_SEARCH_TOOLS + catalog_tools
+        return catalog_tools
+
+    def _require_catalog_model(self, ref: ProviderModelRef) -> None:
+        self._catalog_tool()
+        model = self._resolver._catalog.find(ref)
+        if model.capabilities.tools is not True:
+            raise InteractionServiceError(
+                "skills_catalog",
+                "Catálogo exige um modelo com suporte confirmado a ferramentas; selecione outro modelo.",
+                retryable=False,
+            )
+
+    @staticmethod
+    def _catalog_tool() -> dict[str, Any]:
+        import copy
+
+        from kairos_tools.skill_view import SKILL_VIEW_DEFINITION, skill_view_tool
+
+        entry = registry.snapshot_registration().get("skill_view")
+        if entry is None or entry.handler is not skill_view_tool or entry.override_of is not None:
+            raise InteractionServiceError(
+                "skills_catalog",
+                "Handler nativo de skill_view indisponível; remova o override.",
+                retryable=False,
+            )
+        return copy.deepcopy(SKILL_VIEW_DEFINITION)
+
+    def _catalog_notice(self, conversation_id: str) -> InteractionEvent | None:
+        from kairos_integration.interaction_contract import SkillCatalogNotice
+
+        catalog = self._turn_catalog.get()
+        if catalog is None:
+            return None
+        fixed = catalog.snapshot
+        return InteractionEvent(
+            kind="skill_catalog_ready",
+            conversation_id=conversation_id,
+            catalog_notice=SkillCatalogNotice(
+                fixed.digest, len(fixed.entries), fixed.omitted_skills, fixed.omitted_references
+            ),
+        )
+
+    def _request_messages(self, conversation_id: str) -> tuple[CanonicalMessage, ...]:
+        history = self._history(conversation_id)
+        catalog = self._turn_catalog.get()
+        if catalog is None:
+            return history
+        return (
+            CanonicalMessage(
+                role="system",
+                content=(ContentPart(kind="text", value=catalog.snapshot.system_text),),
+            ),
+            *history,
+        )
 
     def _prepare(self, ref: ProviderModelRef) -> PreparedProviderAdapter | _LegacyPreparedAdapter:
         prepare = getattr(self._gateway, "prepare", None)

@@ -239,6 +239,12 @@ class ToolRegistry:
         if entry is None:
             return tool_error(f"Unknown tool: {name}")
 
+        if entry.name == "skill_view":
+            from kairos_tools.skill_view import skill_view_tool
+
+            if entry.handler is not skill_view_tool or entry.override_of is not None:
+                return tool_error("Override de skill_view recusado; use o handler nativo.")
+
         if not tool_allowed(entry.name, override=entry.override_of is not None):
             return {
                 "status": "denied",
