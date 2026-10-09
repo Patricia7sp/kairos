@@ -15,10 +15,11 @@ from kairos_skills.mutation_contract import (
     SkillMutationState,
     require,
     validate_actor,
+    validate_id,
 )
 from kairos_skills.mutation_io import SkillMutationFiles, read_skill_creation
 from kairos_skills.mutation_lock import skill_mutation_lock
-from kairos_skills.mutation_recovery import reconcile_pending
+from kairos_skills.mutation_recovery import expected_entry, mark_conflict, reconcile_pending
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
@@ -99,3 +100,77 @@ class SkillMutationService:
                     raise
         except (SkillMutationError, OSError) as error:
             raise operation_error(error, operation_id) from None
+
+    def rollback(self, create_id: str, *, actor: Actor):
+        validate_actor(actor)
+        validate_id(create_id)
+        operation_id = create_id
+        try:
+            with skill_mutation_lock(self.home):
+                created = self.repository.get(create_id)
+                require(
+                    created is not None
+                    and created.action is SkillMutationAction.CREATE
+                    and created.state is SkillMutationState.COMMITTED,
+                    "Informe o ID de uma criação concluída neste home.",
+                )
+                previous = self.repository.latest_rollback(create_id)
+                if previous is not None and previous.state is SkillMutationState.COMMITTED:
+                    return previous
+                with SkillMutationFiles(self.home) as files:
+                    reconcile_pending(self.repository, files, name=created.name)
+                    previous = self.repository.latest_rollback(create_id)
+                    if previous is not None and previous.state is SkillMutationState.COMMITTED:
+                        return previous
+                    expected = expected_entry(self.repository, created)
+                    if files.inspect_installed(created.name) != expected:
+                        raise SkillMutationError(
+                            "conflict",
+                            "A criação foi editada, substituída ou removida; arquivos preservados.",
+                        )
+                    operation_id = uuid.uuid4().hex
+                    draft = SkillMutationDraft(
+                        operation_id,
+                        self.repository.home_id,
+                        SkillMutationAction.ROLLBACK,
+                        created.name,
+                        actor,
+                        time.time(),
+                        expected.identity,
+                        expected.creation.sha256,
+                        expected.creation.size_bytes,
+                        create_id,
+                    )
+                    self.repository.prepare(draft, expected.creation.text)
+                    files.retire(created.name, operation_id)
+                    try:
+                        unchanged = files.inspect_private(operation_id, retired=True) == expected
+                    except SkillMutationError as error:
+                        if error.kind not in ("input", "conflict"):
+                            raise
+                        unchanged = False
+                    if not unchanged:
+                        self._restore_changed(files, draft, expected)
+                        raise SkillMutationError(
+                            "conflict",
+                            "Edição concorrente preservada e devolvida; rollback abortado.",
+                        )
+                    if not files.installed_name_absent(created.name):
+                        mark_conflict(self.repository, self.repository.get(operation_id))
+                    return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
+        except (SkillMutationError, OSError) as error:
+            raise operation_error(error, operation_id) from None
+
+    def _restore_changed(self, files, draft, expected):
+        record = self.repository.get(draft.operation_id)
+        if not files.directory_owned(draft.operation_id, expected.identity, retired=True):
+            mark_conflict(self.repository, record)
+        try:
+            files.restore(draft.operation_id, draft.name)
+        except SkillMutationError as error:
+            if error.kind == "conflict":
+                mark_conflict(self.repository, record)
+            raise
+        if not files.directory_owned(draft.name, expected.identity):
+            mark_conflict(self.repository, record)
+        self.repository.finish(draft.operation_id, SkillMutationState.ABORTED)

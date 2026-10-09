@@ -229,6 +229,38 @@ class SkillMutationFiles:
         validate_id(operation_id)
         return self._inspect(self.retired if retired else self.staging, operation_id)
 
+    def installed_name_absent(self, name: str) -> bool:
+        validate_name(name)
+        with io_errors():
+            self.check()
+            try:
+                os.stat(name, dir_fd=self.installed, follow_symlinks=False)
+            except FileNotFoundError:
+                return True
+            return False
+
+    def directory_owned(
+        self, name: str, identity: SkillDirectoryIdentity, *, retired: bool = False
+    ) -> bool:
+        """Identifica o diretório inteiro, mesmo se o editor invalidou o SKILL."""
+        if retired:
+            validate_id(name)
+        else:
+            validate_name(name)
+        parent = self.retired if retired else self.installed
+        with io_errors(), ExitStack() as stack:
+            self.check()
+            try:
+                fd = open_fd(stack, name, os.O_RDONLY | os.O_DIRECTORY, parent=parent)
+            except FileNotFoundError:
+                return False
+            observed = os.fstat(fd)
+            same_entry(parent, name, fd)
+            return (observed.st_dev, observed.st_ino) == (
+                identity.directory_dev,
+                identity.directory_ino,
+            )
+
     def stage(self, operation_id: str, creation) -> SkillFilesystemEntry:
         validate_id(operation_id)
         with io_errors(), ExitStack() as stack:
