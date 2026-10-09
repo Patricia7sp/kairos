@@ -18,6 +18,7 @@ from kairos_state.cron_schema import CRON_SCHEMA_SQL
 from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 from kairos_state.shares_schema import SHARES_SCHEMA_SQL
+from kairos_state.skill_mutations_schema import SKILL_MUTATIONS_SCHEMA_SQL
 from kairos_state.skills_schema import SKILLS_SCHEMA_SQL
 
 __all__ = [
@@ -85,6 +86,10 @@ def _v6_skills_schema(conn: sqlite3.Connection) -> None:
     execute_schema(conn, SKILLS_SCHEMA_SQL)
 
 
+def _v7_skill_mutations(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, SKILL_MUTATIONS_SCHEMA_SQL)
+
+
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
 #: transação. Rodar duas vezes não altera o resultado (RF-17): a versão
 #: registrada faz o segundo passe não encontrar degrau pendente.
@@ -95,6 +100,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "notepad durável por job de agendamentos", _v4_notepad_schema),
     Migration(5, "compartilhamento de conversas por link", _v5_shares_schema),
     Migration(6, "catálogo imutável e assets de skills por sessão", _v6_skills_schema),
+    Migration(7, "journal reversível de autoria manual de skills", _v7_skill_mutations),
 )
 
 
@@ -174,6 +180,9 @@ CANONICAL_TABLES = frozenset(
         "runtime_queue",
         "skill_catalogs",
         "skill_catalog_assets",
+        "skill_mutation_operations",
+        "skill_mutation_events",
+        "skill_mutation_contents",
     }
 )
 
