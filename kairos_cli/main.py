@@ -206,6 +206,15 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
 
     if command == "config" and subcommand == "show":
         parser.add_argument("key", nargs="?", help="chave pontilhada")
+    elif command == "skills" and subcommand == "add":
+        parser.add_argument("--file", required=True, help="SKILL.md local (sem stdin ou URL)")
+    elif command == "skills" and subcommand == "history":
+        parser.add_argument("--name", help="Nome da skill")
+        parser.add_argument(
+            "--limit", type=_skill_history_limit, default=20, help="1 a 100 (padrão 20)"
+        )
+    elif command == "skills" and subcommand == "rollback":
+        parser.add_argument("operation_id", metavar="ID", help="ID da criação no histórico")
     elif command == "config" and subcommand == "set":
         parser.add_argument("key")
         parser.add_argument("value")
@@ -578,6 +587,18 @@ def _logs_limit(value: str) -> int:
         raise argparse.ArgumentTypeError("--limit deve ser um inteiro entre 1 e 200") from exc
     if not 1 <= limit <= 200:
         raise argparse.ArgumentTypeError("--limit deve estar entre 1 e 200")
+    return limit
+
+
+def _skill_history_limit(value: str) -> int:
+    from argparse import ArgumentTypeError
+
+    try:
+        limit = int(value)
+    except ValueError:
+        raise ArgumentTypeError("limite deve ser um inteiro de 1 a 100") from None
+    if not 1 <= limit <= 100:
+        raise ArgumentTypeError("limite deve ser um inteiro de 1 a 100")
     return limit
 
 

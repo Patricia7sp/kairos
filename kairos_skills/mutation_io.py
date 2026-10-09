@@ -45,14 +45,27 @@ def same_entry(parent: int, name: str, fd: int) -> None:
         )
 
 
-def open_directory(stack: ExitStack, path: Path) -> tuple[int, list[tuple[int, str, int]]]:
+def open_directory(
+    stack: ExitStack, path: Path, *, create: bool = False
+) -> tuple[int, list[tuple[int, str, int]]]:
     path = Path(path).expanduser().absolute()
     if ".." in path.parts:
         raise SkillMutationError("input", "O caminho não pode conter escapes.")
     fd = open_fd(stack, path.anchor, os.O_RDONLY | os.O_DIRECTORY)
     chain = []
     for part in path.parts[1:]:
-        child = open_fd(stack, part, os.O_RDONLY | os.O_DIRECTORY, parent=fd)
+        try:
+            child = open_fd(stack, part, os.O_RDONLY | os.O_DIRECTORY, parent=fd)
+        except FileNotFoundError:
+            if not create:
+                raise
+            check_chain(chain)
+            try:
+                os.mkdir(part, 0o700, dir_fd=fd)
+                os.fsync(fd)
+            except FileExistsError:
+                pass
+            child = open_fd(stack, part, os.O_RDONLY | os.O_DIRECTORY, parent=fd)
         chain.append((fd, part, child))
         fd = child
     check_chain(chain)

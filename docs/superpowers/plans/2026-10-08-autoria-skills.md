@@ -113,10 +113,13 @@ record = repository.prepare(draft, creation.text)
 assert record.state is SkillMutationState.PREPARED
 repository.finish(record.operation_id, SkillMutationState.COMMITTED)
 assert repository.content(record.operation_id).text == creation.text
-assert [row[0] for row in connection.execute(
-    "SELECT state FROM skill_mutation_events WHERE operation_id=? ORDER BY sequence",
-    (record.operation_id,),
-)] == ["prepared", "committed"]
+assert [
+    row[0]
+    for row in connection.execute(
+        "SELECT state FROM skill_mutation_events WHERE operation_id=? ORDER BY sequence",
+        (record.operation_id,),
+    )
+] == ["prepared", "committed"]
 ```
 - [ ] **Step 2: Run RED.** `uv run pytest -q tests/test_skill_mutation_state.py`; esperado contrato ausente.
 - [ ] **Step 3: Implementar schema/repositório/migração.** Acrescentar v7, atualizar SCHEMA_VERSION e registrar três tabelas canônicas; não congelar versão literal em teste. Reusar write_with_retry(Budget.TRANSCRIPT) só em transações SQLite, nunca repetir rename dentro do retry. history desc por sequence, limite validado por tipo exato, sem conteúdo nos records; conteúdo validado por length(CAST(... AS BLOB)) antes do SELECT completo. Append-only não significa autenticidade criptográfica contra dono que reescreve o banco.
@@ -211,7 +214,7 @@ Interdependências: Task 1 records e Files → Task 2 drafts/repository; Task 1/
 Nenhuma ferramenta de modelo ou provider novo. As matrizes distinguem ausência
 de I/O, versão própria de cópia idêntica, confirmação de estado de suposição.
 
-Status: especificação aprovada; plano escrito e auto-revisado, aguardando revisão
-da usuária. Método de execução nativa preservado das etapas anteriores, com
+Status: especificação e plano aprovados pela usuária; execução nativa autorizada
+em 2026-10-09. Método preservado das etapas anteriores, com
 revisão independente única no final. A aprovação deste plano autoriza iniciar
 as cinco tarefas pelo método preservado; não requer aprovações entre tarefas.

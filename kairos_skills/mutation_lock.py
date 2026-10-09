@@ -33,32 +33,38 @@ def skill_mutation_lock(home: Path, *, timeout: float = 5.0):
             "conflict", "Outra mutação de skills está em andamento; tente novamente."
         )
     try:
-        with io_errors(), ExitStack() as stack:
-            parent, chain = open_directory(stack, home)
-            name = ".skills-write.lock"
-            fd = open_fd(stack, name, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK, parent=parent)
-            observed = os.fstat(fd)
-            if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
-                raise SkillMutationError("conflict", "Lock de skills inseguro; operação recusada.")
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise SkillMutationError(
-                            "conflict",
-                            "Outra mutação de skills está em andamento; tente novamente.",
-                        ) from None
-                    time.sleep(min(0.02, remaining))
+        with ExitStack() as stack:
+            with io_errors():
+                parent, chain = open_directory(stack, home, create=True)
+                name = ".skills-write.lock"
+                fd = open_fd(stack, name, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK, parent=parent)
+                observed = os.fstat(fd)
+                if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+                    raise SkillMutationError(
+                        "conflict", "Lock de skills inseguro; operação recusada."
+                    )
+                while True:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise SkillMutationError(
+                                "conflict",
+                                "Outra mutação de skills está em andamento; tente novamente.",
+                            ) from None
+                        time.sleep(min(0.02, remaining))
             try:
-                check_chain(chain)
-                same_entry(parent, name, fd)
+                with io_errors():
+                    check_chain(chain)
+                    same_entry(parent, name, fd)
                 yield
-                check_chain(chain)
-                same_entry(parent, name, fd)
+                with io_errors():
+                    check_chain(chain)
+                    same_entry(parent, name, fd)
             finally:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                with io_errors():
+                    fcntl.flock(fd, fcntl.LOCK_UN)
     finally:
         mutex.release()

@@ -17,6 +17,62 @@ na CLI.
 - **Nada de lógica core na CLI.** Se o comando começou a duplicar o core,
   ele está no lugar errado: a lógica vai para a unit, o handler só a chama.
 
+## Criar uma skill e reverter sua criação
+
+```bash
+kairos skills add --file ./SKILL.md --json
+kairos skills history --name revisar-docs --limit 20 --json
+kairos skills rollback ID_DA_CRIACAO --json
+```
+
+`add` instala somente o arquivo local fornecido, sem copiar anexos ou executar
+seu conteúdo. Exige UTF-8 até 64 KiB, frontmatter YAML sem aliases, nome
+kebab-case até 64 caracteres, descrição até 60 terminada em ponto, versão
+semver e corpo não vazio. A leitura de skills antigas continua aceitando
+versões legadas. Não aceita URL, stdin (`-`), substituição ou opção de origem.
+O ator é o usuário em primeiro plano e a origem registrada é `user`; autor
+ausente permanece ausente, sem inferência de login, ambiente ou git.
+
+O destino é `skills/NOME/SKILL.md`, relativo ao home da instalação. Qualquer
+entrada existente e nomes ainda reservados pelo manifesto bundled recusam
+a criação. A publicação atômica não substitui outra versão. O sync compartilha
+o lock `.skills-write.lock`, espera até cinco segundos e preserva a nova
+skill local, sem registrar uma falsa origem bundled.
+
+O histórico mostra metadata, em ordem de operação mais recente, com limite
+de 1 a 100 (padrão 20). Histórico vazio é uma lista JSON vazia. A consulta não
+publica nem reconcilia arquivos. IDs identificam também pendências e conflitos;
+novas mutações do mesmo nome tentam reconciliar apenas operações conhecidas.
+
+`rollback` reverte uma criação concluída somente se identidade, bytes e
+inventário continuarem originais. Edição, anexo, link, cópia idêntica com
+outra identidade ou remoção externa recusam a operação. A skill retirada fica
+em `.skill-mutations/retired/ID_DO_ROLLBACK`, com evidência ligada à criação.
+Repetir um rollback concluído devolve essa evidência, inclusive se outra skill
+já ocupar o nome. O serviço não apaga nem revoga outros arquivos ou credenciais.
+
+Uma edição concorrente durante a retirada é devolvida inteira quando o nome
+original está livre. Se estiver ocupado, as duas versões ficam preservadas
+e a operação informa conflito com ID. Salve o conteúdo preservado e resolva
+a ocupação/divergência antes de repetir; o serviço nunca sobrescreve uma versão
+para fazer a recuperação passar. Operações compatíveis usam o lock; editores
+externos não participam de uma transação única com o serviço.
+
+O ledger append-only em `state.db` retém conteúdo integral, hashes e eventos,
+mesmo após rollback. Inclua o banco e os diretórios instalados/privados em sua
+política de backup: backup SQLite conserva o ledger, mas não é snapshot dos
+arquivos. O tar do backup atual também não é um snapshot atômico. Restaurar
+o banco sobre arquivos divergentes não autoriza sobrescrevê-los. A área
+`.skill-mutations/staging/ID` contém preparações; conteúdo desconhecido não é
+promovido nem removido automaticamente. Área privada e instalação precisam
+estar no mesmo filesystem; sem lock ou rename seguro, o comando recusa com 69.
+
+Saídas 0/2/1/69 significam conclusão comprovada, entrada inválida,
+conflito/I/O/corrupção e recurso indisponível. Os avisos mostram ID e metadata,
+sem corpo, autor ou caminho absoluto. A criação fica disponível para `--skill`
+imediatamente e para catálogo de sessão nova; rollback conserva snapshots e
+páginas históricas. Este recorte é autoria manual, sem `/learn` ou curador.
+
 ## Usar uma skill instalada
 
 ```bash

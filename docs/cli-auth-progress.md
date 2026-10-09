@@ -122,10 +122,16 @@ turnos únicos do Chat na CLI foi integrada e implantada pelo PR #94: especifica
 no histórico. O PR #95 corrigiu a descoberta de skills bundled em categorias,
 preservando autoria, manifesto e opt-out.
 
-O recorte atual implementa catálogo instalado opt-in por turno, snapshot
+O PR #96 integrou e implantou o catálogo instalado opt-in por turno, snapshot
 SQLite imutável por sessão e leitura paginada de SKILL/referências com hashes
 verificados. A CLI real foi testada com adapter local fictício, migração,
-reabertura, backup/rollback e contenção. Revisão final, gates completos,
-integração e deploy deste recorte ainda estão em andamento. Índice automático
-por padrão, autoria, curador e workflows duráveis continuam pendentes.
+reabertura, backup/rollback e contenção.
+
+O recorte atual implementa autoria manual: `skills add --file`, `history` e
+`rollback`, proveniência USER explícita, ledger append-only e recuperação
+observacional sem substituir versões. Testes exercitam arquivos/SQLite,
+interrupção real de processos, edições concorrentes e consumo pelo adapter
+local fictício. O sync compartilha o lock. Revisão independente, gates completos,
+merge, deploy e smoke instalado deste recorte ainda estão em andamento.
+Índice automático por padrão, `/learn`, curador e workflows duráveis continuam pendentes.
 Não foram realizadas chamadas a provedores com credenciais reais.

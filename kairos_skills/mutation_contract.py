@@ -81,6 +81,7 @@ class SkillCreation:
 
     def __post_init__(self):
         name, digest, size = _creation_parts(self.text)
+        require(type(self.name) is str and type(self.sha256) is str)
         require(
             type(self.size_bytes) is int
             and (self.name, self.sha256, self.size_bytes) == (name, digest, size)

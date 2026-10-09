@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 import uuid
+from enum import StrEnum
 from pathlib import Path
 from unittest.mock import patch
 
@@ -199,6 +200,10 @@ class FilesTests(unittest.TestCase):
             raise RuntimeError("fixture")
         with skill_mutation_lock(self.home):
             pass
+        with self.assertRaises(OSError), skill_mutation_lock(self.home):
+            raise OSError("caller fixture")
+        with skill_mutation_lock(self.home):
+            pass
         lock = self.home / ".skills-write.lock"
         lock.unlink()
         lock.symlink_to(self.home / "outside")
@@ -305,10 +310,29 @@ class CreationTests(unittest.TestCase):
                     "revisar-docs",
                     actor,
                     1.0,
-                    SkillDirectoryIdentity(1, 2, 3, 4),
+                    SkillDirectoryIdentity(1, 2, 1, 4),
                     creation.sha256,
                     creation.size_bytes,
                 )
+
+    def test_creation_direct_fields_require_exact_types(self):
+        class Name(StrEnum):
+            SKILL = "revisar-docs"
+
+        class Digest(str):
+            pass
+
+        text = creation_text()
+        creation = validate_skill_creation(text)
+        for name, digest in (
+            (Name.SKILL, creation.sha256),
+            (creation.name, Digest(creation.sha256)),
+        ):
+            with (
+                self.subTest(name_type=type(name), digest_type=type(digest)),
+                self.assertRaises(SkillMutationError),
+            ):
+                SkillCreation(name, text, digest, creation.size_bytes)
 
     def test_links_e_fifo(self):
         with tempfile.TemporaryDirectory() as directory:
