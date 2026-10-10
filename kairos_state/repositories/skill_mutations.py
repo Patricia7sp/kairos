@@ -321,6 +321,7 @@ class SkillMutationRepository:
         with corrupt_errors():
             current = None
             removed = None
+            bundled_removed = False
             records = self._records(name)
             timeline = self._timeline()
             if timeline is not None:
@@ -356,6 +357,8 @@ class SkillMutationRepository:
                         )
                     current = None
                     removed = record
+                    if record.provenance is Provenance.BUNDLED:
+                        bundled_removed = True
                 elif record.action is SkillTreeAction.RESTORE:
                     require(
                         current is None
@@ -367,9 +370,10 @@ class SkillMutationRepository:
                         record.operation_id, record.provenance, root.device, root.inode
                     )
                     removed = None
+                    bundled_removed = False
                 else:
                     require(False)
-            return current, removed
+            return current, removed, bundled_removed
 
     def current_installation(self, name: str) -> InstallationProof | None:
         return self._projection(name)[0]
@@ -409,12 +413,7 @@ class SkillMutationRepository:
                     row[0]
                     for row in self._conn.execute("SELECT DISTINCT name FROM skill_tree_operations")
                 )
-            return frozenset(
-                name
-                for name in names
-                if (removed := self.current_removal(name)) is not None
-                and removed.provenance is Provenance.BUNDLED
-            )
+            return frozenset(name for name in names if self._projection(name)[2])
 
     def _assert_no_pending(self, name: str):
         pending = self.pending(name)
@@ -432,7 +431,7 @@ class SkillMutationRepository:
         def guarded_write(operation):
             def guarded():
                 self._assert_no_pending(draft.name)
-                current, removed = self._projection(draft.name)
+                current, removed, _ = self._projection(draft.name)
                 if draft.action is SkillTreeAction.REMOVE:
                     root = draft.proof.entries[0]
                     require(

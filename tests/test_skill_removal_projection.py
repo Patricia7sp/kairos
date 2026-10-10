@@ -240,6 +240,35 @@ class RemovalProjectionTests(unittest.TestCase):
         self.assertEqual(self.repo.current_removal(self.name).operation_id, removed.operation_id)
         self.assertIn(self.name, self.repo.bundled_tombstones())
 
+    def test_bundled_tombstone_survives_later_manual_removal_until_restore_commits(self):
+        bundled = self.remove(origin=Provenance.BUNDLED)
+        self.create()
+        manual = self.remove()
+        self.assertEqual(self.repo.current_removal(self.name).operation_id, manual.operation_id)
+        self.assertIs(self.repo.current_removal(self.name).provenance, Provenance.USER)
+        self.assertIn(self.name, self.repo.bundled_tombstones())
+        self.assertEqual(
+            self.repo.snapshot(bundled.operation_id).contents,
+            self.repo.snapshot(manual.operation_id).contents,
+        )
+
+        aborted = self.restore_draft(manual)
+        self.repo.prepare_restore(aborted)
+        self.assertIn(self.name, self.repo.bundled_tombstones())
+        self.repo.finish(aborted.operation_id, SkillMutationState.ABORTED)
+        self.assertIn(self.name, self.repo.bundled_tombstones())
+
+        restored = self.restore_draft(manual, inode=30)
+        self.repo.prepare_restore(restored)
+        self.repo.finish(restored.operation_id, SkillMutationState.CONFLICT)
+        self.assertIn(self.name, self.repo.bundled_tombstones())
+        self.repo.finish(restored.operation_id, SkillMutationState.COMMITTED)
+        self.assertNotIn(self.name, self.repo.bundled_tombstones())
+        self.assertEqual(
+            self.repo.current_installation(self.name).operation_id, restored.operation_id
+        )
+        self.assertIsNone(self.repo.current_removal(self.name))
+
     def test_history_rejects_tree_only_partial_ledger(self):
         with self.db:
             self.db.execute("DROP TABLE skill_mutation_events")
