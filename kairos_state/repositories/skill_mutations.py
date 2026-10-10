@@ -381,6 +381,27 @@ class SkillMutationRepository:
     def current_removal(self, name: str) -> SkillTreeRecord | None:
         return self._projection(name)[1]
 
+    def has_later_installation(self, remove_id: str) -> bool:
+        parent = self.get(remove_id)
+        require(
+            parent is not None
+            and parent.action is SkillTreeAction.REMOVE
+            and parent.state is SkillMutationState.COMMITTED,
+            "Informe o ID de uma remoção concluída.",
+        )
+        with corrupt_errors():
+            timeline = self._timeline()
+            require(timeline is not None)
+            records = {record.operation_id: record for record in self._records(parent.name)}
+            committed = [row for row in timeline if row[4] == "committed"]
+            removed_sequence = next(row[0] for row in committed if row[3] == remove_id)
+            return any(
+                row[0] > removed_sequence
+                and row[3] in records
+                and records[row[3]].action in (SkillMutationAction.CREATE, SkillTreeAction.RESTORE)
+                for row in committed
+            )
+
     def snapshot(self, operation_id: str):
         self._timeline()
         return self._tree_repository().snapshot(operation_id)

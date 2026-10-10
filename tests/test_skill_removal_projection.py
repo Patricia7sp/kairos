@@ -378,7 +378,7 @@ class RemovalWriterGuardTests(unittest.TestCase):
             self.service.add(self.source, actor=Actor.USER_FOREGROUND)
         self.assertEqual(raised.exception.kind, "conflict")
         self.assertEqual(raised.exception.operation_id, draft.operation_id)
-        self.assertIs(self.repo.get(draft.operation_id).state, SkillMutationState.PREPARED)
+        self.assertIs(self.repo.get(draft.operation_id).state, SkillMutationState.CONFLICT)
         self.assertEqual(
             (self.home / "skills" / self.created.name / "SKILL.md").read_bytes(), before
         )
@@ -389,7 +389,7 @@ class RemovalWriterGuardTests(unittest.TestCase):
             self.service.rollback(self.created.operation_id, actor=Actor.USER_FOREGROUND)
         self.assertEqual(raised.exception.kind, "conflict")
         self.assertEqual(raised.exception.operation_id, draft.operation_id)
-        self.assertIs(self.repo.get(draft.operation_id).state, SkillMutationState.PREPARED)
+        self.assertIs(self.repo.get(draft.operation_id).state, SkillMutationState.CONFLICT)
 
     def test_add_after_real_retirement_keeps_previous_removal(self):
         draft = self.remove_draft()
