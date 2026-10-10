@@ -237,8 +237,86 @@ class RemovalStateTests(unittest.TestCase):
                     "UPDATE skill_tree_snapshots SET manifest_json=?",
                     (json.dumps(altered, sort_keys=True, separators=(",", ":")),),
                 )
-            with self.assertRaises(SkillMutationError):
-                repo.snapshot(draft.operation_id)
+            queries = []
+            self.db.set_trace_callback(queries.append)
+            try:
+                with self.assertRaises(SkillMutationError):
+                    repo.snapshot(draft.operation_id)
+            finally:
+                self.db.set_trace_callback(None)
+            self.assertFalse(
+                any(
+                    query.lstrip().upper().startswith("SELECT CONTENT FROM SKILL_TREE_BLOBS")
+                    for query in queries
+                ),
+                queries,
+            )
+
+    def test_replace_cannot_destroy_canonical_tree_evidence(self):
+        from kairos_state.skill_writer import register_skill_writer
+
+        repo = self.modern()
+        draft = self.draft()
+        repo.prepare_remove(draft, self.capture())
+        writer = sqlite3.connect(self.path)
+        self.addCleanup(writer.close)
+        writer.execute("PRAGMA foreign_keys=ON")
+        register_skill_writer(writer)
+        writer.execute("PRAGMA recursive_triggers=OFF")
+        statements = (
+            "INSERT OR REPLACE INTO skill_tree_blobs(sha256,size_bytes,content) SELECT sha256,2,x'0102' FROM skill_tree_blobs WHERE size_bytes=2",
+            "INSERT OR REPLACE INTO skill_tree_blobs(rowid,sha256,size_bytes,content) SELECT rowid,printf('%064d',0),2,x'0102' FROM skill_tree_blobs WHERE size_bytes=2",
+            "INSERT OR REPLACE INTO skill_tree_snapshots(snapshot_id,manifest_json) SELECT snapshot_id,'[]' FROM skill_tree_snapshots",
+            "INSERT OR REPLACE INTO skill_tree_snapshots(rowid,snapshot_id,manifest_json) SELECT rowid,printf('%032d',0),'[]' FROM skill_tree_snapshots",
+            "INSERT OR REPLACE INTO skill_tree_operations SELECT sequence,operation_id,home_id,action,'replaced',actor,created_at,provenance,proof_json,snapshot_id,reverts FROM skill_tree_operations",
+            "INSERT OR REPLACE INTO skill_tree_operations SELECT sequence+100,operation_id,home_id,action,'replaced',actor,created_at,provenance,proof_json,snapshot_id,reverts FROM skill_tree_operations",
+            "INSERT OR REPLACE INTO skill_tree_events SELECT sequence,operation_id,'committed' FROM skill_tree_events",
+            "INSERT OR REPLACE INTO skill_mutation_timeline SELECT sequence+100,legacy_event,tree_event FROM skill_mutation_timeline WHERE tree_event IS NOT NULL",
+            "INSERT OR REPLACE INTO skill_mutation_timeline SELECT sequence,NULL,999 FROM skill_mutation_timeline WHERE tree_event IS NOT NULL",
+        )
+        before = self.db.serialize()
+        for sql in statements:
+            with self.subTest(sql=sql):
+                try:
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        writer.execute(sql)
+                    self.assertEqual(writer.serialize(), before)
+                finally:
+                    writer.rollback()
+                self.assertEqual(self.db.serialize(), before)
+        self.assertEqual(repo.snapshot(draft.operation_id), self.capture())
+
+    def test_deduplicated_blobs_allow_new_snapshot_without_changing_evidence(self):
+        repo = self.modern()
+        first = self.draft()
+        repo.prepare_remove(first, self.capture())
+        blobs = tuple(
+            tuple(row)
+            for row in self.db.execute("SELECT rowid,* FROM skill_tree_blobs ORDER BY rowid")
+        )
+        timeline = tuple(
+            tuple(row)
+            for row in self.db.execute("SELECT * FROM skill_mutation_timeline ORDER BY sequence")
+        )
+        second = self.draft(name="second")
+        repo.prepare_remove(second, self.capture())
+        self.assertEqual(
+            blobs,
+            tuple(
+                tuple(row)
+                for row in self.db.execute("SELECT rowid,* FROM skill_tree_blobs ORDER BY rowid")
+            ),
+        )
+        self.assertEqual(
+            timeline,
+            tuple(
+                tuple(row)
+                for row in self.db.execute(
+                    "SELECT * FROM skill_mutation_timeline ORDER BY sequence"
+                )
+            )[:-1],
+        )
+        self.assertEqual(repo.snapshot(first.operation_id), repo.snapshot(second.operation_id))
 
     def test_legacy_connection_cannot_append_operation_or_event(self):
         repo = self.modern()

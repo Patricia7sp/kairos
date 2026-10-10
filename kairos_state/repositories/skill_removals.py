@@ -251,8 +251,9 @@ class SkillRemovalRepository:
             for entry in snapshot.entries:
                 if entry.kind == "file":
                     self._conn.execute(
-                        "INSERT INTO skill_tree_blobs(sha256,size_bytes,content) VALUES (?,?,?) ON CONFLICT(sha256) DO NOTHING",
-                        (entry.sha256, entry.size, snapshot.contents[entry.path]),
+                        "INSERT INTO skill_tree_blobs(sha256,size_bytes,content) SELECT ?,?,? "
+                        "WHERE NOT EXISTS (SELECT 1 FROM skill_tree_blobs WHERE sha256=?)",
+                        (entry.sha256, entry.size, snapshot.contents[entry.path], entry.sha256),
                     )
             self._conn.execute(
                 "INSERT INTO skill_tree_snapshots(snapshot_id,manifest_json) VALUES (?,?)",

@@ -42,6 +42,38 @@ CREATE INDEX IF NOT EXISTS skill_tree_reverts ON skill_tree_operations(reverts,s
 """
 
 SKILL_REMOVALS_TRIGGERS_SQL = """
+CREATE TRIGGER IF NOT EXISTS skill_tree_blobs_no_replace
+BEFORE INSERT ON skill_tree_blobs
+WHEN EXISTS (SELECT 1 FROM skill_tree_blobs WHERE sha256=NEW.sha256 OR rowid=NEW.rowid)
+BEGIN
+    SELECT RAISE(ABORT,'skill journal is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS skill_tree_snapshots_no_replace
+BEFORE INSERT ON skill_tree_snapshots
+WHEN EXISTS (SELECT 1 FROM skill_tree_snapshots WHERE snapshot_id=NEW.snapshot_id OR rowid=NEW.rowid)
+BEGIN
+    SELECT RAISE(ABORT,'skill journal is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS skill_tree_operations_no_replace
+BEFORE INSERT ON skill_tree_operations
+WHEN EXISTS (SELECT 1 FROM skill_tree_operations WHERE operation_id=NEW.operation_id OR sequence=NEW.sequence)
+BEGIN
+    SELECT RAISE(ABORT,'skill journal is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS skill_tree_events_no_replace
+BEFORE INSERT ON skill_tree_events
+WHEN EXISTS (SELECT 1 FROM skill_tree_events WHERE sequence=NEW.sequence)
+BEGIN
+    SELECT RAISE(ABORT,'skill journal is append-only');
+END;
+CREATE TRIGGER IF NOT EXISTS skill_mutation_timeline_no_replace
+BEFORE INSERT ON skill_mutation_timeline
+WHEN EXISTS (SELECT 1 FROM skill_mutation_timeline
+             WHERE sequence=NEW.sequence OR legacy_event=NEW.legacy_event OR tree_event=NEW.tree_event)
+BEGIN
+    SELECT RAISE(ABORT,'skill journal is append-only');
+END;
+
 CREATE TRIGGER IF NOT EXISTS skill_tree_operations_no_update
 BEFORE UPDATE ON skill_tree_operations BEGIN
     SELECT RAISE(ABORT,'skill journal is append-only');
