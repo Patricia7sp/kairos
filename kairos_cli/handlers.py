@@ -345,10 +345,13 @@ def cmd_mcp(args) -> int:
 
 
 def cmd_plugins(args) -> int:
-    from kairos_plugins import EMITTED_HOOKS, VALID_HOOKS, disabled_from_config, load_plugins
+    if args.plugins_command == "remove":
+        from kairos_cli.plugin_mutations import run_plugin_removal
 
+        return run_plugin_removal(_home(), args)
     if args.plugins_command == "list":
         from kairos_cli.config import load_config
+        from kairos_plugins import EMITTED_HOOKS, VALID_HOOKS, disabled_from_config, load_plugins
 
         home = _home()
         try:

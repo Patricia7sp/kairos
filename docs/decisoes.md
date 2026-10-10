@@ -2302,3 +2302,24 @@ corrigir exige id imutável (ex.: `message_uid` ULID + `seq` de ordenação) e
 toca compressão, FTS, watermark, rewind e todos os consumidores — alcance
 muito além do schema. Fica registrado como dívida herdada consciente, a ser
 revisitada na Tarefa 05 (`hermes-state`) se ainda fizer sentido.
+
+
+### Remoção de instalações de plugins
+
+`kairos plugins remove NOME --yes` retira somente o filho imediato de
+`plugins/`, sem importar módulos, ler manifesto ou carregar configuração.
+`plugin-data/`, outros plugins e bundles permanecem preservados. Callbacks já
+carregados exigem reinício dos processos; o comando não oferece hot reload.
+
+A retirada usa lock e descritores, inventário limitado sem conteúdo e rename
+sem substituição. As provas imutáveis em `.plugins-retired/ID/` precedem o
+rename; só o resultado terminal durável comprova a remoção. Uma interrupção
+com original íntegro ainda instalado permite registrar aborto. Resíduos,
+conflitos e ausência sem resultado terminal recusam sucesso e não retomam
+limpeza automaticamente. O stderr JSON inclui `retirado` e `residuo_id` para
+inspeção de retirada parcial; não promete restaurar arquivos já apagados.
+
+Criação segura de diretórios privados exige filesystem local atestável
+(ext2/3/4, XFS, Btrfs ou tmpfs); overlay, FUSE e filesystems remotos são
+recusados. Entradas especiais, links, hardlinks e outros mounts também
+recusam a operação antes da exclusão.

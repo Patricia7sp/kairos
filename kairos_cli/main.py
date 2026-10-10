@@ -204,7 +204,13 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
     """Argumentos específicos, onde o comando os exige."""
     import argparse
 
-    if command == "mcp" and subcommand in {"test", "remove"}:
+    if command == "plugins" and subcommand == "remove":
+        parser.description = "Remove instalação sem importar código; preserva plugin-data. Callbacks ativos exigem reinício. Erro parcial informa residuo_id; não retoma limpeza."
+        parser.add_argument("name", metavar="NOME", help="filho imediato em plugins/")
+        parser.add_argument(
+            "--yes", action="store_true", help="Confirma a remoção irreversível da instalação"
+        )
+    elif command == "mcp" and subcommand in {"test", "remove"}:
         parser.add_argument("name", metavar="NOME", help="nome do servidor configurado")
     elif command == "config" and subcommand == "show":
         parser.add_argument("key", nargs="?", help="chave pontilhada")

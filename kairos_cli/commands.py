@@ -348,7 +348,12 @@ COMMANDS: tuple[Command, ...] = (
         "Plugins instalados",
         _sub("list", "Lista os plugins e o estado de cada um"),
         _sub("install", "Instala um plugin"),
-        _sub("remove", "Remove um plugin"),
+        _c(
+            "remove",
+            "Remove instalação preservando dados; exige --yes e reinício de callbacks ativos",
+            status=Status.IMPLEMENTED,
+            unit="plugins",
+        ),
         _sub("update", "Atualiza um plugin"),
         status=Status.IMPLEMENTED,
         unit="plugins",
