@@ -386,10 +386,12 @@ COMMANDS: tuple[Command, ...] = (
     _c(
         "skills",
         "Skills do agente",
-        _sub("add", "Cria uma skill"),
+        _c("add", "Cria uma skill de um SKILL.md local", status=Status.IMPLEMENTED),
+        _c("history", "Histórico de criações e reversões", status=Status.IMPLEMENTED),
         _sub("install", "Instala uma skill do hub"),
         _sub("list", "Lista as skills"),
         _sub("remove", "Remove uma skill"),
+        _c("rollback", "Reverte uma criação comprovada", status=Status.IMPLEMENTED),
         _sub("tap", "Fontes de skill"),
         status=Status.IMPLEMENTED,
         unit="skills",

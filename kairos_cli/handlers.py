@@ -285,6 +285,10 @@ def cmd_skills(args) -> int:
     from kairos_skills.sync import sync_bundled_skills
 
     sub = args.skills_command
+    if sub in ("add", "history", "rollback"):
+        from kairos_cli.skill_mutations import run_skill_mutation
+
+        return run_skill_mutation(_home(), args)
     user_dir = _home() / "skills"
 
     if sub == "list":

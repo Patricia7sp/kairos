@@ -22,6 +22,7 @@ from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
+from kairos_skills.mutation_lock import skill_mutation_lock
 from kairos_skills.runtime import validate_skill_name
 
 __all__ = [
@@ -149,7 +150,7 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
     if not bundled_dir.is_dir():
         return result
 
-    with _snapshot_bundle(bundled_dir) as bundled:
+    with _snapshot_bundle(bundled_dir) as bundled, skill_mutation_lock(user_dir.parent):
         return _sync_discovered(bundled, user_dir)
 
 

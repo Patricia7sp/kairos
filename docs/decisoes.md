@@ -2219,6 +2219,42 @@ A auditoria em stderr registra somente o nome autorizado, sem argumentos.
 
 ---
 
+## D-CLI.SKILL.AUTHOR — autoria manual com journal SQLite recuperável
+
+**Referências:** `_reversa_sdd/skills/requirements.md` RF-04–RF-08,
+`_reversa_sdd/skills/tasks.md` T-03–T-06/T-08, domínio §2.3, D-09.1–D-09.7
+e `2026-10-08-autoria-skills-design.md`.
+
+O recorte manual usa `skills add --file`, `history` e `rollback`. O serviço
+fixa `USER_FOREGROUND`/USER; conteúdo e contexto não escolhem origem e skills
+legadas sem proveniência permanecem protegidas como USER. A criação valida
+semver estrito sem endurecer a leitura legada, publica sem substituição e
+preserva qualquer skill antiga e tombstone bundled.
+
+**Divergência deliberada:** operações, eventos e conteúdo ficam no SQLite
+canônico em vez de um ledger JSONL separado. Migração aditiva, backup e reparo
+compartilham a infraestrutura existente; eventos e conteúdo são append-only.
+Append-only não autentica dados contra o dono do banco que contorne as proteções.
+Não existe transação única entre banco e filesystem: a evidência prepared
+precede o movimento, committed exige observação da identidade e recuperação
+recusa cópias idênticas com inodes diferentes. Nunca reconstruir arquivo atual
+por suposição a partir do blob de um backup.
+
+A CLI mantém descritores do home e banco vivos até encerrar a conexão, abre
+SQLite pelo descritor do arquivo e revalida identidade antes de PRAGMAs ou
+migração. Sem acesso seguro a esses descritores, recusa com 69. Preparações
+abortadas próprias são retiradas por rename sem substituição para a área
+privada preservada, em vez de unlink: a plataforma não oferece exclusão
+condicional por inode, e uma troca na última janela não pode perder conteúdo.
+
+Rollback retira o diretório inteiro para área privada, conservando evidência
+e conteúdo. Edições posteriores recusam a retirada; edições concorrentes ao
+movimento são devolvidas sem substituição, ou ambas as versões ficam preservadas
+em conflito. O sync compartilha o lock de instalação sem mudar suas políticas
+de autoria, exclusão, manifesto ou opt-out. Snapshots de catálogo e cache de
+sessões anteriores permanecem intactos. Gestão autônoma, instalação do hub e
+`/learn` não são entregues por este recorte.
+
 ## D-CLI.SKILL — consumo explícito de skills como contexto do turno
 
 O catálogo sob demanda acrescenta `--skills-catalog`, opt-in por turno único
