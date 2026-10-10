@@ -32,6 +32,7 @@ class Provenance(StrEnum):
     """
 
     USER = "user"  # o usuário pediu — pertence ao usuário
+    BUNDLED = "bundled"
     SEDIMENT = "sediment"  # sedimento do fork de revisão — território do Curador
 
 
@@ -104,9 +105,9 @@ def can_archive(
     2. **Referência de cron** — mesmo sendo sedimento, se algum job a
        referencia (inclusive pausado ou desabilitado), fica protegida.
     """
-    if actor.is_autonomous and skill.provenance is Provenance.USER:
+    if actor.is_autonomous and skill.provenance is not Provenance.SEDIMENT:
         raise UserSkillAutoCurated(
-            f"{actor.value} não pode curar a skill {skill.name!r}: proveniência é do usuário"
+            f"{actor.value} não pode curar a skill {skill.name!r}: proveniência não pertence ao Curador"
         )
 
     if cron_index is not None and cron_index.references(skill.name):

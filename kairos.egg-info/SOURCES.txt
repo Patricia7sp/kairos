@@ -496,3 +496,8 @@ tests/test_skill_mutation_recovery.py
 tests/test_skill_mutation_rollback.py
 tests/test_cli_skill_mutations.py
 tests/test_skill_mutation_sync.py
+kairos_skills/removal_contract.py
+kairos_state/skill_removals_schema.py
+kairos_state/skill_writer.py
+kairos_state/repositories/skill_removals.py
+tests/test_skill_removal_state.py

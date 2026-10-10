@@ -504,5 +504,14 @@ class RegistryTests(unittest.TestCase):
             self.assertIn("rubrica", r.enforced_at)
 
 
+class BundledOwnershipTests(unittest.TestCase):
+    def test_bundled_cannot_be_curated_by_autonomous_actors(self):
+        skill = Skill(name="bundled", provenance=Provenance.BUNDLED)
+        for actor in (Actor.CURATOR, Actor.BACKGROUND_REVIEW):
+            with self.subTest(actor=actor), self.assertRaises(UserSkillAutoCurated):
+                can_archive(skill, actor)
+        can_archive(skill, Actor.USER_FOREGROUND)
+
+
 if __name__ == "__main__":
     unittest.main()
