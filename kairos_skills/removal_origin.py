@@ -108,6 +108,10 @@ def prove_removal_origin(
             raw, _ = read_regular(installed, ".bundled_manifest", 1024 * 1024)
         except FileNotFoundError:
             raise SkillMutationError("conflict", "Origem desconhecida; remoção recusada.") from None
+        except SkillMutationError as error:
+            if error.kind == "input":
+                raise SkillMutationError("conflict", "Manifesto instalado inseguro.") from None
+            raise
         if name not in _manifest_names(raw):
             raise SkillMutationError("conflict", "Nome ausente do manifesto bundled v2.")
         bundled = _bundle_capture(name)

@@ -198,8 +198,9 @@ class RemovalServiceTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(SkillMutationError) as raised:
                 self.service.remove(self.name, **kwargs)
             self.assertEqual(raised.exception.kind, "denied")
-        with self.assertRaises(SkillMutationError):
+        with self.assertRaises(SkillMutationError) as raised:
             self.service.remove("../escape", actor=Actor.USER_FOREGROUND, confirmed=True)
+        self.assertEqual(raised.exception.kind, "input")
         self.assertEqual(set(self.home.iterdir()), before)
         self.assertEqual(len(self.repo.history()), 1)
 
@@ -410,6 +411,34 @@ class RemovalBundledServiceTests(unittest.TestCase):
         )
         resolver.start()
         self.addCleanup(resolver.stop)
+
+    def _assert_invalid_manifest_preserved(self):
+        manifest = self.home / "skills/.bundled_manifest"
+        before = manifest.stat()
+        with SkillRemovalFiles(self.home) as files:
+            captured = files.capture_installed("example")
+        with self.assertRaises(SkillMutationError) as raised:
+            self.service.remove("example", actor=Actor.USER_FOREGROUND, confirmed=True)
+        self.assertEqual(raised.exception.kind, "conflict")
+        self.assertEqual(manifest.stat(), before)
+        with SkillRemovalFiles(self.home) as files:
+            self.assertEqual(files.capture_installed("example"), captured)
+        self.assertEqual(self.repo.history(), ())
+        self.assertEqual(list((self.home / ".skill-mutations/staging").iterdir()), [])
+        self.assertEqual(list((self.home / ".skill-mutations/retired").iterdir()), [])
+
+    def test_oversized_installed_manifest_is_conflict_and_preserved(self):
+        manifest = self.home / "skills/.bundled_manifest"
+        manifest.write_bytes(b"x" * (1024 * 1024 + 1))
+        self._assert_invalid_manifest_preserved()
+        self.assertEqual(manifest.read_bytes(), b"x" * (1024 * 1024 + 1))
+
+    def test_nonregular_installed_manifest_is_conflict_and_preserved(self):
+        manifest = self.home / "skills/.bundled_manifest"
+        manifest.unlink()
+        manifest.mkdir()
+        self._assert_invalid_manifest_preserved()
+        self.assertTrue(manifest.is_dir())
 
     def test_bundled_restore_keeps_origin_and_clears_tombstone_only_at_commit(self):
         removed = self.service.remove("example", actor=Actor.USER_FOREGROUND, confirmed=True)
