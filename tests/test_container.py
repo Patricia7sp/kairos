@@ -637,6 +637,7 @@ class RealImageTests(unittest.TestCase):
             "delete_verified_tree(fd, 'copy', restored); "
             "assert not (home / 'copy').exists(); os.close(fd)",
             entrypoint="/opt/kairos/.venv/bin/python",
+            extra=("--tmpfs", "/tmp"),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 

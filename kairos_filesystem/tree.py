@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import struct
+import sys
 from contextlib import ExitStack, contextmanager
 
 from kairos_filesystem.contract import FilesystemError, TreeCapture, TreeEntry, TreeLimits
@@ -336,7 +337,60 @@ def verify_tree(parent_fd: int, name: str, expected: TreeCapture) -> None:
     _matches(actual, expected)
 
 
+class _StatFS(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_long),
+        ("block_size", ctypes.c_long),
+        ("blocks", ctypes.c_ulong),
+        ("blocks_free", ctypes.c_ulong),
+        ("blocks_available", ctypes.c_ulong),
+        ("files", ctypes.c_ulong),
+        ("files_free", ctypes.c_ulong),
+        ("filesystem_id", ctypes.c_int * 2),
+        ("name_length", ctypes.c_long),
+        ("fragment_size", ctypes.c_long),
+        ("flags", ctypes.c_long),
+        ("spare", ctypes.c_long * 4),
+    ]
+
+
+_LOCAL_NOTIFICATION_FILESYSTEMS = frozenset(
+    {
+        0xEF53,  # ext2/ext3/ext4
+        0x58465342,  # XFS
+        0x9123683E,  # Btrfs
+        0x01021994,  # tmpfs
+    }
+)
+
+
+def _attest_creation_filesystem(parent: int) -> None:
+    _require(
+        sys.platform == "linux" and ctypes.sizeof(ctypes.c_long) == 8,
+        "ABI de observação do filesystem indisponível.",
+        "unavailable",
+    )
+    try:
+        function = ctypes.CDLL(None, use_errno=True).fstatfs
+        function.argtypes = (ctypes.c_int, ctypes.POINTER(_StatFS))
+        function.restype = ctypes.c_int
+        observed = _StatFS()
+        _require(
+            function(parent, ctypes.byref(observed)) == 0,
+            "Observação do filesystem indisponível.",
+            "unavailable",
+        )
+    except (AttributeError, OSError):
+        raise FilesystemError("unavailable", "Observação do filesystem indisponível.") from None
+    _require(
+        observed.type in _LOCAL_NOTIFICATION_FILESYSTEMS,
+        "Filesystem sem garantia de notificação local; restauração recusada.",
+        "unavailable",
+    )
+
+
 def _creation_watch(stack: ExitStack, parent: int) -> tuple[int, int]:
+    _attest_creation_filesystem(parent)
     try:
         library = ctypes.CDLL(None, use_errno=True)
         initialize = library.inotify_init1
@@ -354,6 +408,12 @@ def _creation_watch(stack: ExitStack, parent: int) -> tuple[int, int]:
         return fd, descriptor
     except (AttributeError, OSError):
         raise FilesystemError("unavailable", "Observação de criação indisponível.") from None
+
+
+def assert_creation_supported(parent_fd: int) -> None:
+    """Atesta filesystem e observação de criação sem criar entradas no disco."""
+    with _io_errors(), ExitStack() as stack:
+        _creation_watch(stack, parent_fd)
 
 
 def _verify_creation(watcher: int, descriptor: int, name: str) -> None:

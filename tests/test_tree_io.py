@@ -504,3 +504,128 @@ class TreeIOTests(unittest.TestCase):
             delete_verified_tree(self.parent, "tree", snap)
         self.assertEqual(listed, 1)
         self.assertEqual(len(list(self.root.iterdir())), 20)
+
+    def test_restore_refuses_unattested_filesystem_before_mkdir(self):
+        import ctypes
+
+        from kairos_filesystem.tree import assert_creation_supported
+
+        snap = self.capture()
+        outside = self.home / "outside"
+        outside.write_bytes(b"preserve")
+        mkdir = os.mkdir
+        library = ctypes.CDLL(None, use_errno=True)
+        fstatfs = library.fstatfs
+        fstatfs.argtypes = (ctypes.c_int, ctypes.c_void_p)
+        fstatfs.restype = ctypes.c_int
+
+        class ObservedFilesystem:
+            def __init__(self, filesystem_type):
+                def observe(fd, buffer):
+                    result = fstatfs(fd, buffer)
+                    if result == 0:
+                        ctypes.cast(buffer, ctypes.POINTER(ctypes.c_long))[0] = filesystem_type
+                    return result
+
+                self.fstatfs = observe
+
+            def __getattr__(self, name):
+                return getattr(library, name)
+
+        creations = []
+        for index, filesystem_type in enumerate(
+            (0x6969, 0xFF534D42, 0x65735546, 0x794C7630, 0x12345678)
+        ):
+            destination = f"copy{index}"
+            creations.clear()
+
+            def record_mkdir(name, mode=0o777, *, dir_fd=None):
+                creations.append(name)
+                mkdir(name, mode, dir_fd=dir_fd)
+
+            with (
+                self.subTest(filesystem_type=hex(filesystem_type)),
+                patch(
+                    "kairos_filesystem.tree.ctypes.CDLL",
+                    return_value=ObservedFilesystem(filesystem_type),
+                ),
+                patch("kairos_filesystem.tree.os.mkdir", side_effect=record_mkdir),
+            ):
+                with self.assertRaises(FilesystemError) as probe:
+                    assert_creation_supported(self.parent)
+                self.assertEqual(probe.exception.kind, "unavailable")
+                with self.assertRaises(FilesystemError) as caught:
+                    restore_tree(self.parent, destination, snap)
+                self.assertEqual(caught.exception.kind, "unavailable")
+                self.assertFalse((self.home / destination).exists())
+                self.assertEqual(creations, [])
+                self.assertEqual(outside.read_bytes(), b"preserve")
+
+    def test_restore_attests_supported_filesystem_with_real_fstatfs(self):
+        import ctypes
+
+        (self.root / "file").write_bytes(b"keep")
+        snap = self.capture()
+        library = ctypes.CDLL(None, use_errno=True)
+        fstatfs = library.fstatfs
+        fstatfs.argtypes = (ctypes.c_int, ctypes.c_void_p)
+        fstatfs.restype = ctypes.c_int
+        observations = []
+
+        class ObservedFilesystem:
+            def __init__(self):
+                def observe(fd, buffer):
+                    result = fstatfs(fd, buffer)
+                    observations.append(result)
+                    if result == 0:
+                        ctypes.cast(buffer, ctypes.POINTER(ctypes.c_long))[0] = 0x01021994
+                    return result
+
+                self.fstatfs = observe
+
+            def __getattr__(self, name):
+                return getattr(library, name)
+
+        with patch("kairos_filesystem.tree.ctypes.CDLL", return_value=ObservedFilesystem()):
+            restored = restore_tree(self.parent, "copy", snap)
+        self.assertEqual(restored.contents, snap.contents)
+        self.assertTrue(observations)
+        self.assertTrue(all(result == 0 for result in observations))
+
+    def test_creation_capability_probe_has_no_filesystem_writes(self):
+        from kairos_filesystem.tree import assert_creation_supported
+
+        before = set(self.home.iterdir())
+        creations = []
+        mkdir = os.mkdir
+
+        def record(name, mode=0o777, *, dir_fd=None):
+            creations.append(name)
+            mkdir(name, mode, dir_fd=dir_fd)
+
+        with patch("kairos_filesystem.tree.os.mkdir", side_effect=record):
+            assert_creation_supported(self.parent)
+        self.assertEqual(creations, [])
+        self.assertEqual(set(self.home.iterdir()), before)
+
+    def test_creation_capability_probe_requires_inotify_after_fstatfs(self):
+        import ctypes
+
+        from kairos_filesystem.tree import assert_creation_supported
+
+        library = ctypes.CDLL(None, use_errno=True)
+        before = set(self.home.iterdir())
+
+        class NoNotifications:
+            def __getattr__(self, name):
+                if name == "inotify_init1":
+                    raise AttributeError(name)
+                return getattr(library, name)
+
+        with (
+            patch("kairos_filesystem.tree.ctypes.CDLL", return_value=NoNotifications()),
+            self.assertRaises(FilesystemError) as caught,
+        ):
+            assert_creation_supported(self.parent)
+        self.assertEqual(caught.exception.kind, "unavailable")
+        self.assertEqual(set(self.home.iterdir()), before)
