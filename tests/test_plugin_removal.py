@@ -113,11 +113,11 @@ class PluginRemovalTests(unittest.TestCase):
     def test_replaced_descendant_preserved(self):
         from kairos_filesystem.tree import delete_verified_tree
 
-        def replace(parent, name, expected):
+        def replace(parent, name, expected, **kwargs):
             tree = Path(f"/proc/self/fd/{parent}") / name
             (tree / "a.bin").rename(tree / "old")
             (tree / "a.bin").write_bytes(b"replacement")
-            delete_verified_tree(parent, name, expected)
+            delete_verified_tree(parent, name, expected, **kwargs)
 
         with (
             patch("kairos_plugins.removal.delete_verified_tree", side_effect=replace),
@@ -306,3 +306,84 @@ with patch(target, side_effect=stop):
         self.assertTrue(
             (self.home / ".plugins-retired" / raised.exception.operation_id / "tree").exists()
         )
+
+    def test_replaced_external_ancestor_stops_cleanup_and_preserves_residue(self):
+        original = os.unlink
+        moved = self.home / "moved-proofs"
+        replaced = False
+
+        def replace(name, *, dir_fd=None):
+            nonlocal replaced
+            original(name, dir_fd=dir_fd)
+            if not replaced:
+                replaced = True
+                proofs = self.home / ".plugins-retired"
+                proofs.rename(moved)
+                proofs.mkdir(mode=0o700)
+
+        with (
+            patch("kairos_filesystem.tree.os.unlink", side_effect=replace),
+            self.assertRaises(PluginRemovalError) as raised,
+        ):
+            remove_plugin(self.home, self.target.name, confirmed=True)
+        self.assertEqual(raised.exception.kind, "conflict")
+        self.assertTrue(raised.exception.retired)
+        tree = moved / raised.exception.operation_id / "tree"
+        self.assertTrue(tree.is_dir())
+        self.assertGreater(len(list(tree.iterdir())), 0)
+        self.assertFalse((tree.parent / "result.json").exists())
+
+    def test_uuid_collision_preserves_unknown_orphan(self):
+        import uuid
+
+        operation_id = "da0b2c50-806d-4e8f-9ef9-c0305f652706"
+        orphan = self.home / ".plugins-retired" / operation_id
+        orphan.mkdir(parents=True, mode=0o700)
+        orphan.parent.chmod(0o700)
+        (orphan / "unknown").write_bytes(b"preserve")
+        with (
+            patch("kairos_plugins.removal.uuid.uuid4", return_value=uuid.UUID(operation_id)),
+            self.assertRaises(PluginRemovalError),
+        ):
+            remove_plugin(self.home, self.target.name, confirmed=True)
+        self.assertEqual((orphan / "unknown").read_bytes(), b"preserve")
+        self.assertEqual(sorted(p.name for p in orphan.iterdir()), ["unknown"])
+        self.assertTrue(self.target.exists())
+
+    def test_terminal_fsync_failure_is_retried_and_still_refuses_success(self):
+        self._assert_terminal_fsync_failure("file")
+
+    def test_terminal_directory_fsync_failure_is_retried(self):
+        self._assert_terminal_fsync_failure("directory")
+
+    def _assert_terminal_fsync_failure(self, kind):
+        original = os.fsync
+        attempts = 0
+
+        def fail_terminal(fd):
+            nonlocal attempts
+            path = Path(os.readlink(f"/proc/self/fd/{fd}"))
+            terminal = (
+                path.name == "result.json"
+                if kind == "file"
+                else path.is_dir() and (path / "result.json").exists()
+            )
+            if terminal:
+                attempts += 1
+                raise OSError("SECRET terminal fsync")
+            return original(fd)
+
+        with patch("kairos_plugins.removal_records.os.fsync", side_effect=fail_terminal):
+            with self.assertRaises(PluginRemovalError) as first:
+                remove_plugin(self.home, self.target.name, confirmed=True)
+            terminal = self.home / ".plugins-retired" / first.exception.operation_id / "result.json"
+            before = terminal.read_bytes()
+            with self.assertRaises(PluginRemovalError) as repeated:
+                remove_plugin(self.home, self.target.name, confirmed=True)
+            self.assertEqual(repeated.exception.operation_id, first.exception.operation_id)
+            self.assertTrue(repeated.exception.retired)
+            self.assertEqual(attempts, 2)
+            self.assertEqual(terminal.read_bytes(), before)
+        recovered = remove_plugin(self.home, self.target.name, confirmed=True)
+        self.assertEqual(recovered.operation_id, first.exception.operation_id)
+        self.assertTrue(recovered.removed)

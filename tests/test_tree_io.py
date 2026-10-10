@@ -629,3 +629,67 @@ class TreeIOTests(unittest.TestCase):
             assert_creation_supported(self.parent)
         self.assertEqual(caught.exception.kind, "unavailable")
         self.assertEqual(set(self.home.iterdir()), before)
+
+    def test_restore_guard_refuses_before_creation(self):
+        (self.root / "file").write_bytes(b"contents")
+        snapshot = self.capture()
+
+        def guard():
+            raise FilesystemError("conflict", "external chain changed")
+
+        with self.assertRaises(FilesystemError):
+            restore_tree(self.parent, "copy", snapshot, guard=guard)
+        self.assertFalse((self.home / "copy").exists())
+
+    def test_delete_guard_refuses_before_unlink(self):
+        (self.root / "file").write_bytes(b"contents")
+        snapshot = self.capture()
+
+        def guard():
+            raise FilesystemError("conflict", "external chain changed")
+
+        with self.assertRaises(FilesystemError):
+            delete_verified_tree(self.parent, "tree", snapshot, guard=guard)
+        self.assertEqual((self.root / "file").read_bytes(), b"contents")
+
+    def test_posix_backslash_filename_roundtrip(self):
+        filename = r"legacy\asset.bin"
+        source = self.root / filename
+        source.write_bytes(b"\x00\xffcontents")
+        source.chmod(0o640)
+        snapshot = self.capture()
+        restored = restore_tree(self.parent, "copy", snapshot)
+        target = self.home / "copy" / filename
+        self.assertEqual(target.read_bytes(), source.read_bytes())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertEqual(restored.contents, snapshot.contents)
+        delete_verified_tree(self.parent, "copy", restored)
+        self.assertFalse(target.exists())
+
+    def test_restore_final_verification_does_not_allocate_inflated_contents(self):
+        from kairos_filesystem.tree import _read_file
+
+        (self.root / "SKILL.md").write_bytes(b"SKILL.md")
+        (self.root / "auxiliary").write_bytes(b"a" * 131072)
+        snapshot = self.capture()
+        original_fsync = os.fsync
+        allocations = []
+
+        def inflate(fd):
+            original_fsync(fd)
+            if fd == self.parent and (self.home / "copy/SKILL.md").exists():
+                (self.home / "copy/SKILL.md").write_bytes(b"x" * 65537)
+
+        def observe(fd, size, *, include_contents):
+            if include_contents and size == 65537:
+                allocations.append(size)
+            return _read_file(fd, size, include_contents=include_contents)
+
+        with (
+            patch("kairos_filesystem.tree.os.fsync", side_effect=inflate),
+            patch("kairos_filesystem.tree._read_file", side_effect=observe),
+            self.assertRaises(FilesystemError),
+        ):
+            restore_tree(self.parent, "copy", snapshot)
+        self.assertEqual(allocations, [])
+        self.assertEqual((self.home / "copy/SKILL.md").stat().st_size, 65537)

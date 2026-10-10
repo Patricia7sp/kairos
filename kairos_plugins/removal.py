@@ -63,8 +63,10 @@ def _exists(parent: int, name: str) -> bool:
     return True
 
 
-def _private(stack: ExitStack, parent: int, name: str, mount: int, *, create: bool) -> int:
-    if create and not _exists(parent, name):
+def _private(
+    stack: ExitStack, parent: int, name: str, mount: int, *, create: bool, exclusive: bool = False
+) -> int:
+    if exclusive or (create and not _exists(parent, name)):
         fd = _create_directory(stack, parent, name, mount)
         os.fsync(parent)
     else:
@@ -93,6 +95,7 @@ def _failure(exc, operation_id=None, retired=False):
 
 def _recover_record(retired, plugins, name, mount, record_id, *, chain):
     tree = False
+    installed = True
     try:
         with ExitStack() as stack:
             operation = _private(stack, retired, record_id, mount, create=False)
@@ -101,12 +104,20 @@ def _recover_record(retired, plugins, name, mount, record_id, *, chain):
             recorded_name, operation_id, expected = read_metadata(operation)
             if recorded_name != name:
                 return None
-            terminal = read_terminal(operation)
             installed = plugins is not None and _exists(plugins, name)
             tree = _exists(operation, "tree")
+            terminal = read_terminal(operation)
             if terminal == "aborted" and not tree:
                 return None
             if terminal == "removed" and not tree:
+                check_chain(chain)
+                same_entry(retired, operation_id, operation)
+                os.fsync(retired)
+                if plugins is not None:
+                    os.fsync(plugins)
+                for parent, _, child in chain:
+                    if child == retired:
+                        os.fsync(parent)
                 check_chain(chain)
                 same_entry(retired, operation_id, operation)
                 return PluginRemovalResult(name, operation_id, True)
@@ -123,7 +134,7 @@ def _recover_record(retired, plugins, name, mount, record_id, *, chain):
                 retired=tree or not installed,
             )
     except (FilesystemError, OSError) as exc:
-        raise _failure(exc, record_id, tree) from None
+        raise _failure(exc, record_id, tree or not installed) from None
 
 
 def _recover(retired: int, plugins: int | None, name: str, mount: int, chain):
@@ -146,7 +157,7 @@ def _retire(stack, chain, plugins, proofs, name, *, capture, mount):
     operation_id = str(uuid.uuid4())
     retired_effect = False
     try:
-        operation = _private(stack, proofs, operation_id, mount, create=True)
+        operation = _private(stack, proofs, operation_id, mount, create=True, exclusive=True)
         chain.append((proofs, operation_id, operation))
         write_metadata(operation, name, operation_id, capture)
         check_chain(chain)
@@ -157,7 +168,7 @@ def _retire(stack, chain, plugins, proofs, name, *, capture, mount):
             retired_effect = _exists(operation, "tree")
         check_chain(chain)
         verify_tree(operation, "tree", capture)
-        delete_verified_tree(operation, "tree", capture)
+        delete_verified_tree(operation, "tree", capture, guard=lambda: check_chain(chain))
         check_chain(chain)
         write_terminal(operation, state="removed")
         return PluginRemovalResult(name, operation_id, True)

@@ -9,6 +9,7 @@ import re
 import stat
 import struct
 import sys
+from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
 
 from kairos_filesystem.contract import FilesystemError, TreeCapture, TreeEntry, TreeLimits
@@ -36,7 +37,6 @@ def _name(name: str) -> None:
         and bool(name)
         and name not in (".", "..")
         and "/" not in name
-        and "\\" not in name
         and "\x00" not in name,
         "Nome deve identificar um filho imediato.",
     )
@@ -459,12 +459,20 @@ def _create_directory(stack: ExitStack, parent: int, name: str, mount: int) -> i
         return fd
 
 
-def restore_tree(parent_fd: int, name: str, snapshot: TreeCapture) -> TreeCapture:
+def _noop_guard() -> None:
+    pass
+
+
+def restore_tree(
+    parent_fd: int, name: str, snapshot: TreeCapture, *, guard: Callable[[], None] | None = None
+) -> TreeCapture:
     _name(name)
     validate_capture(snapshot, require_contents=True)
+    guard = _noop_guard if guard is None else guard
     with _io_errors(), ExitStack() as stack:
         mount = observed_mount_id(parent_fd)
         try:
+            guard()
             root = _create_directory(stack, parent_fd, name, mount)
         except FileExistsError:
             raise FilesystemError("conflict", "Destino ocupado; arquivos preservados.") from None
@@ -475,43 +483,54 @@ def restore_tree(parent_fd: int, name: str, snapshot: TreeCapture) -> TreeCaptur
             _check_path(parent_path, edges, mount)
             parent = directories[parent_path]
             if entry.kind == "directory":
+                guard()
                 fd = _create_directory(stack, parent, component, mount)
                 directories[entry.path] = fd
             else:
+                guard()
                 fd = open_fd(stack, component, os.O_WRONLY | os.O_CREAT | os.O_EXCL, parent=parent)
                 _metadata(fd, mount)
                 data = memoryview(snapshot.contents[entry.path])
                 while data:
+                    guard()
                     written = os.write(fd, data[:65536])
                     _require(written > 0, "Gravação incompleta.", "io")
                     data = data[written:]
+                guard()
                 os.fchmod(fd, entry.mode)
+                guard()
                 os.fsync(fd)
             edges[entry.path] = (parent, component, fd)
         for entry in reversed(snapshot.entries):
             if entry.kind == "directory":
                 fd = directories[entry.path]
                 _check_path(entry.path, edges, mount)
+                guard()
                 os.fchmod(fd, entry.mode)
+                guard()
                 os.fsync(fd)
         _check_mount_chain(list(edges.values()), mount)
+        guard()
         os.fsync(parent_fd)
         result = capture_tree(
-            parent_fd, name, limits=_expected_limits(snapshot), include_contents=True
+            parent_fd, name, limits=_expected_limits(snapshot), include_contents=False
         )
         _require(
             [(e.path, e.kind, e.mode, e.size, e.sha256) for e in result.entries]
-            == [(e.path, e.kind, e.mode, e.size, e.sha256) for e in snapshot.entries]
-            and result.contents == snapshot.contents,
+            == [(e.path, e.kind, e.mode, e.size, e.sha256) for e in snapshot.entries],
             "Restauração divergente; evidências preservadas.",
             "conflict",
         )
-        return result
+        guard()
+        return TreeCapture(result.entries, dict(snapshot.contents))
 
 
-def delete_verified_tree(parent_fd: int, name: str, expected: TreeCapture) -> None:
+def delete_verified_tree(
+    parent_fd: int, name: str, expected: TreeCapture, *, guard: Callable[[], None] | None = None
+) -> None:
     _name(name)
     validate_capture(expected)
+    guard = _noop_guard if guard is None else guard
     with _io_errors(), ExitStack() as stack:
         actual, handles, _chain = _scan(
             stack, parent_fd, name, _expected_limits(expected), expected.contents is not None
@@ -537,6 +556,7 @@ def delete_verified_tree(parent_fd: int, name: str, expected: TreeCapture) -> No
                     "conflict",
                 )
                 same_entry(parent, component, fd)
+                guard()
                 os.unlink(component, dir_fd=parent)
             else:
                 with os.scandir(fd) as iterator:
@@ -546,6 +566,9 @@ def delete_verified_tree(parent_fd: int, name: str, expected: TreeCapture) -> No
                         "conflict",
                     )
                 same_entry(parent, component, fd)
+                guard()
                 os.rmdir(component, dir_fd=parent)
             del edges[entry.path]
+            guard()
             os.fsync(parent)
+        guard()

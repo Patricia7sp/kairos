@@ -92,7 +92,7 @@ def _unique_pairs(pairs):
     return result
 
 
-def _read(fd: int, name: str) -> dict:
+def _read(fd: int, name: str, *, durable: bool = False) -> dict:
     descriptor = os.open(
         name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd
     )
@@ -118,6 +118,10 @@ def _read(fd: int, name: str) -> dict:
             raise FilesystemError("corrupt", "Prova de remoção ilegível.") from None
         if type(result) is not dict:
             raise FilesystemError("corrupt", "Prova de remoção inválida.")
+        if durable:
+            os.fsync(descriptor)
+            _private_file(descriptor, fd, name)
+            os.fsync(fd)
         return result
     finally:
         os.close(descriptor)
@@ -174,7 +178,7 @@ def write_terminal(operation_fd: int, *, state: str) -> None:
 
 def read_terminal(operation_fd: int) -> str | None:
     try:
-        value = _read(operation_fd, "result.json")
+        value = _read(operation_fd, "result.json", durable=True)
     except FileNotFoundError:
         return None
     if (
