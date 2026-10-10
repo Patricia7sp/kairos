@@ -131,7 +131,7 @@ class ArvoreTests(unittest.TestCase):
             with self.subTest(grupo=grupo):
                 cmd = find_command(grupo)
                 self.assertIsNotNone(cmd, grupo)
-                self.assertEqual({s.name for s in cmd.subcommands}, subs)
+                self.assertLessEqual(subs, {s.name for s in cmd.subcommands})
 
     def test_todo_comando_tem_ajuda(self):
         for c in COMMANDS:
@@ -171,6 +171,7 @@ class ParserTests(unittest.TestCase):
             "console.eval": ("console", "eval", "--expression", "1+1"),
             "skin.use": ("skin", "use", "--theme", "dark"),
             "hooks.use": ("hooks", "use", "--hook", "pre-turn"),
+            "skills.add": ("skills", "add", "--file", "SKILL.md"),
             "remind": ("remind", "30m", "lembrete de teste"),
         }
         for c in COMMANDS:

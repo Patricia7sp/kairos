@@ -66,6 +66,8 @@ o banco sobre arquivos divergentes não autoriza sobrescrevê-los. A área
 `.skill-mutations/staging/ID` contém preparações; conteúdo desconhecido não é
 promovido nem removido automaticamente. Área privada e instalação precisam
 estar no mesmo filesystem; sem lock ou rename seguro, o comando recusa com 69.
+Uma preparação abortada comprovada sai do staging por movimento sem substituição
+para `.skill-mutations/retired/ID_DA_CRIACAO`; seus bytes também ficam preservados.
 
 Saídas 0/2/1/69 significam conclusão comprovada, entrada inválida,
 conflito/I/O/corrupção e recurso indisponível. Os avisos mostram ID e metadata,

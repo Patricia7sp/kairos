@@ -114,6 +114,53 @@ class FilesTests(unittest.TestCase):
             self.assertEqual(copy.creation, original.creation)
             self.assertNotEqual(copy.identity, original.identity)
 
+    def test_discard_preserves_staging_replaced_after_inspection(self):
+        with SkillMutationFiles(self.home) as files:
+            expected = files.stage(self.operation, self.creation)
+            slot = self.home / ".skill-mutations" / "staging" / self.operation
+            saved = self.home / "saved"
+            inspect = files.inspect_private
+
+            def replace_after_inspection(operation):
+                result = inspect(operation)
+                slot.rename(saved)
+                shutil.copytree(saved, slot)
+                return result
+
+            with (
+                patch.object(files, "inspect_private", replace_after_inspection),
+                self.assertRaises(SkillMutationError),
+            ):
+                files.discard_staging(self.operation, expected)
+            self.assertEqual((slot / "SKILL.md").read_bytes(), self.creation.text.encode())
+            self.assertEqual((saved / "SKILL.md").read_bytes(), self.creation.text.encode())
+
+    def test_discard_retires_original_without_deleting_content(self):
+        with SkillMutationFiles(self.home) as files:
+            expected = files.stage(self.operation, self.creation)
+            files.discard_staging(self.operation, expected)
+            self.assertIsNone(files.inspect_private(self.operation))
+            self.assertEqual(files.inspect_private(self.operation, retired=True), expected)
+
+    def test_discard_preserves_file_replaced_after_inspection(self):
+        with SkillMutationFiles(self.home) as files:
+            expected = files.stage(self.operation, self.creation)
+            slot = self.home / ".skill-mutations" / "staging" / self.operation
+            inspect = files.inspect_private
+
+            def replace_after_inspection(operation):
+                result = inspect(operation)
+                (slot / "SKILL.md").rename(self.home / "saved.md")
+                (slot / "SKILL.md").write_text(self.creation.text)
+                return result
+
+            with (
+                patch.object(files, "inspect_private", replace_after_inspection),
+                self.assertRaises(SkillMutationError),
+            ):
+                files.discard_staging(self.operation, expected)
+            self.assertEqual((slot / "SKILL.md").read_bytes(), self.creation.text.encode())
+
     def test_platform_recusa_sem_fallback(self):
         with SkillMutationFiles(self.home) as files:
             original = files.stage(self.operation, self.creation)

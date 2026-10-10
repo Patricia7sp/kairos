@@ -8,7 +8,7 @@ import os
 import sqlite3
 import stat
 import sys
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from kairos_domain.ownership import Actor
@@ -20,9 +20,15 @@ from kairos_skills.mutation_contract import (
     validate_id,
     validate_name,
 )
-from kairos_skills.mutation_io import check_chain, open_directory, read_skill_creation
+from kairos_skills.mutation_io import (
+    check_chain,
+    open_directory,
+    open_fd,
+    read_skill_creation,
+    same_entry,
+)
 from kairos_skills.mutations import SkillMutationService
-from kairos_state.connection import connect, read_connection
+from kairos_state.connection import BUSY_TIMEOUT_MS, apply_wal_with_fallback
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
@@ -40,31 +46,70 @@ def mutation_metadata(record: SkillMutationRecord) -> dict[str, object]:
     }
 
 
-def _database_entry(home: Path, *, create_home: bool = False) -> bool:
+def _database_entry(directory: int, chain) -> bool:
+    found = False
+    for name in ("state.db", "state.db-wal", "state.db-shm", "state.db-journal"):
+        try:
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SkillMutationError("conflict", "Entrada do banco insegura; operação recusada.")
+        found |= name == "state.db"
+    check_chain(chain)
+    return found
+
+
+@contextmanager
+def _database_connection(home: Path, *, write: bool = False):
     with ExitStack() as stack:
         try:
-            directory, chain = open_directory(stack, home, create=create_home)
+            directory, chain = open_directory(stack, home, create=write)
         except FileNotFoundError:
-            return False
-        found = False
-        for name in ("state.db", "state.db-wal", "state.db-shm", "state.db-journal"):
-            try:
-                info = os.stat(name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise SkillMutationError(
-                    "conflict", "Entrada do banco insegura; operação recusada."
-                )
-            found |= name == "state.db"
-        check_chain(chain)
-        return found
+            yield None
+            return
+        if not _database_entry(directory, chain) and not write:
+            yield None
+            return
+        flags = (os.O_RDWR | os.O_CREAT) if write else os.O_RDONLY
+        fd = open_fd(stack, "state.db", flags | os.O_NONBLOCK, parent=directory)
+        observed = os.fstat(fd)
+        if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+            raise SkillMutationError("conflict", "Entrada do banco insegura; operação recusada.")
+        same_entry(directory, "state.db", fd)
+        _database_entry(directory, chain)
+        descriptor_path = Path(f"/proc/self/fd/{fd}")
+        if not descriptor_path.exists():
+            raise SkillMutationError("unavailable", "Abertura segura do banco indisponível.")
+        mode = "rw" if write else "ro"
+        connection = sqlite3.connect(
+            descriptor_path.as_uri() + "?mode=" + mode,
+            uri=True,
+            timeout=BUSY_TIMEOUT_MS / 1000,
+        )
+        stack.callback(connection.close)
+        connection.row_factory = sqlite3.Row
+        same_entry(directory, "state.db", fd)
+        _database_entry(directory, chain)
+        opened_path = connection.execute("PRAGMA database_list").fetchone()[2]
+        opened = os.stat(opened_path, follow_symlinks=False)
+        if (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino):
+            raise SkillMutationError("conflict", "Banco alterado durante abertura; recusado.")
+        connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        if write:
+            connection.execute("PRAGMA foreign_keys=ON")
+            apply_wal_with_fallback(connection)
+        same_entry(directory, "state.db", fd)
+        _database_entry(directory, chain)
+        yield connection
+        same_entry(directory, "state.db", fd)
+        _database_entry(directory, chain)
 
 
 def _history(home: Path, args):
-    if not _database_entry(home):
-        return ()
-    with read_connection(home / "state.db") as connection:
+    with _database_connection(home) as connection:
+        if connection is None:
+            return ()
         names = {
             row[0]
             for row in connection.execute(
@@ -105,7 +150,6 @@ def _emit(records, *, as_json: bool, history: bool):
 
 
 def run_skill_mutation(home: Path, args: argparse.Namespace) -> int:
-    connection = None
     try:
         command = args.skills_command
         if command == "history":
@@ -123,17 +167,16 @@ def run_skill_mutation(home: Path, args: argparse.Namespace) -> int:
                 validate_id(args.operation_id)
             else:
                 raise SkillMutationError("input", "Comando de autoria inválido.")
-            _database_entry(home, create_home=True)
-            connection = connect(home / "state.db")
-            migrate(connection)
-            repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
-            service = SkillMutationService(home, repository)
-            record = (
-                service.add(source, actor=Actor.USER_FOREGROUND)
-                if command == "add"
-                else service.rollback(args.operation_id, actor=Actor.USER_FOREGROUND)
-            )
-            records = mutation_metadata(record)
+            with _database_connection(home, write=True) as connection:
+                migrate(connection)
+                repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
+                service = SkillMutationService(home, repository)
+                record = (
+                    service.add(source, actor=Actor.USER_FOREGROUND)
+                    if command == "add"
+                    else service.rollback(args.operation_id, actor=Actor.USER_FOREGROUND)
+                )
+                records = mutation_metadata(record)
         _emit(records, as_json=args.json, history=command == "history")
         return 0
     except SkillMutationError as error:
@@ -148,6 +191,3 @@ def run_skill_mutation(home: Path, args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    finally:
-        if connection is not None:
-            connection.close()

@@ -338,10 +338,22 @@ class SkillMutationFiles:
             )
             self.check()
             same_entry(self.staging, operation_id, directory)
-            os.unlink("SKILL.md", dir_fd=directory)
-            os.fsync(directory)
-            os.rmdir(operation_id, dir_fd=self.staging)
-            os.fsync(self.staging)
+            observed = os.fstat(directory)
+            data, skill = read_regular(directory, "SKILL.md", 65536)
+            identity = SkillDirectoryIdentity(
+                observed.st_dev, observed.st_ino, skill.st_dev, skill.st_ino
+            )
+            if (
+                identity != expected.identity
+                or data != expected.creation.text.encode("utf-8")
+                or set(os.listdir(directory)) != {"SKILL.md"}
+            ):
+                raise SkillMutationError("conflict", "Staging divergente; conteúdo preservado.")
+            same_entry(self.staging, operation_id, directory)
+            rename_no_replace(self.staging, operation_id, self.retired, operation_id)
+            if self.inspect_private(operation_id, retired=True) != expected:
+                rename_no_replace(self.retired, operation_id, self.staging, operation_id)
+                raise SkillMutationError("conflict", "Staging divergente; conteúdo preservado.")
 
     def assert_name_available(self, name: str) -> None:
         validate_name(name)

@@ -4,6 +4,7 @@ import contextvars
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -142,6 +143,41 @@ class CliMutationTests(unittest.TestCase):
         os.link(outside, database)
         self.assertEqual(self.command(["skills", "history"])[0], 1)
         self.assertEqual(outside.read_bytes(), b"preserve outside")
+
+    def test_home_replaced_at_sqlite_open_preserves_outside(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        saved = self.root / "saved-home"
+        sqlite_connect = sqlite3.connect
+
+        def replace_home(*args, **kwargs):
+            self.home.rename(saved)
+            self.home.symlink_to(outside, target_is_directory=True)
+            return sqlite_connect(*args, **kwargs)
+
+        with patch("sqlite3.connect", replace_home):
+            self.assertEqual(self.command(["skills", "add", "--file", str(self.source)])[0], 1)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_database_replaced_at_sqlite_open_preserves_outside(self):
+        outside = self.root / "outside.db"
+        with sqlite3.connect(outside) as db:
+            db.execute("CREATE TABLE marker(value)")
+            db.execute("INSERT INTO marker VALUES ('preserve')")
+        original = outside.read_bytes()
+        sqlite_connect = sqlite3.connect
+
+        def replace_database(*args, **kwargs):
+            database = self.home / "state.db"
+            if database.exists():
+                database.rename(self.home / "saved.db")
+            database.symlink_to(outside)
+            return sqlite_connect(*args, **kwargs)
+
+        with patch("sqlite3.connect", replace_database):
+            self.assertEqual(self.command(["skills", "add", "--file", str(self.source)])[0], 1)
+        self.assertEqual(outside.read_bytes(), original)
+        self.assertFalse((self.home / "skills" / "revisar-docs").exists())
 
     def test_unavailable_no_success_or_backend_details(self):
         with patch(

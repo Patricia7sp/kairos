@@ -2240,6 +2240,13 @@ precede o movimento, committed exige observação da identidade e recuperação
 recusa cópias idênticas com inodes diferentes. Nunca reconstruir arquivo atual
 por suposição a partir do blob de um backup.
 
+A CLI mantém descritores do home e banco vivos até encerrar a conexão, abre
+SQLite pelo descritor do arquivo e revalida identidade antes de PRAGMAs ou
+migração. Sem acesso seguro a esses descritores, recusa com 69. Preparações
+abortadas próprias são retiradas por rename sem substituição para a área
+privada preservada, em vez de unlink: a plataforma não oferece exclusão
+condicional por inode, e uma troca na última janela não pode perder conteúdo.
+
 Rollback retira o diretório inteiro para área privada, conservando evidência
 e conteúdo. Edições posteriores recusam a retirada; edições concorrentes ao
 movimento são devolvidas sem substituição, ou ambas as versões ficam preservadas
