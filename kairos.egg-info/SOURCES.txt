@@ -82,6 +82,11 @@ kairos_domain/session.py
 kairos_domain/statemachine.py
 kairos_evals/__init__.py
 kairos_evals/recall.py
+kairos_filesystem/__init__.py
+kairos_filesystem/contract.py
+kairos_filesystem/descriptors.py
+kairos_filesystem/lock.py
+kairos_filesystem/tree.py
 kairos_gateway/__init__.py
 kairos_gateway/adapters/__init__.py
 kairos_gateway/adapters/config.py
@@ -457,6 +462,7 @@ tests/test_telegram_inbound.py
 tests/test_telegram_local_harness.py
 tests/test_tools.py
 tests/test_tools_inventory.py
+tests/test_tree_io.py
 tests/test_tui_host.py
 tests/test_turn_cost_persistence.py
 tests/test_usage_insights_api.py

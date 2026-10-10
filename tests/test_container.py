@@ -620,6 +620,67 @@ class RealImageTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_filesystem_capture_in_the_real_image(self):
+        result = self.run_in(
+            "-c",
+            "import os, tempfile, hashlib; from pathlib import Path; "
+            "from kairos_filesystem.contract import TreeLimits; "
+            "from kairos_filesystem.tree import capture_tree; "
+            "home = Path(tempfile.mkdtemp()); (home / 'tree').mkdir(); "
+            "(home / 'tree/file').write_bytes(b'bin\\x00'); "
+            "fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY); "
+            "snapshot = capture_tree(fd, 'tree', limits=TreeLimits(10, 10, 2, 1), include_contents=True); "
+            "os.close(fd); assert snapshot.contents == {'file': b'bin\\x00'}; "
+            "assert snapshot.entries[1].sha256 == hashlib.sha256(b'bin\\x00').hexdigest()",
+            entrypoint="/opt/kairos/.venv/bin/python",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_filesystem_rejects_real_bind_mount_on_same_device(self):
+        script = """
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+from kairos_filesystem.contract import FilesystemError, TreeLimits
+from kairos_filesystem.tree import capture_tree, observed_mount_id
+with tempfile.TemporaryDirectory() as tmp:
+    home = Path(tmp)
+    source = home / 'outside'
+    source.mkdir()
+    (source / 'preserve').write_bytes(b'keep')
+    tree = home / 'tree'
+    tree.mkdir()
+    mount = tree / 'mounted'
+    mount.mkdir()
+    subprocess.run(['mount', '--bind', str(source), str(mount)], check=True)
+    try:
+        parent = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
+        child = os.open(mount, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            assert os.fstat(parent).st_dev == os.fstat(child).st_dev
+            assert observed_mount_id(parent) != observed_mount_id(child)
+            try:
+                capture_tree(parent, 'tree', limits=TreeLimits(100, 100, 10, 3), include_contents=False)
+            except FilesystemError as error:
+                assert error.kind == 'conflict'
+            else:
+                raise AssertionError('bind mount aceito')
+            assert (source / 'preserve').read_bytes() == b'keep'
+        finally:
+            os.close(child)
+            os.close(parent)
+    finally:
+        subprocess.run(['umount', str(mount)], check=True)
+"""
+        result = self.run_in(
+            "-c",
+            script,
+            entrypoint="/opt/kairos/.venv/bin/python",
+            extra=("--privileged",),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     # -- o bug do gateway em dobro ----------------------------------------
 
     def test_o_gateway_sobe_UMA_vez_so(self):
