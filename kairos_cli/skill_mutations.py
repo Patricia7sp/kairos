@@ -15,7 +15,6 @@ from kairos_domain.ownership import Actor
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import (
     SkillMutationError,
-    SkillMutationRecord,
     require,
     validate_id,
     validate_name,
@@ -28,22 +27,27 @@ from kairos_skills.mutation_io import (
     same_entry,
 )
 from kairos_skills.mutations import SkillMutationService
+from kairos_skills.removal_contract import CommonRecord, SkillTreeRecord
 from kairos_state.connection import BUSY_TIMEOUT_MS, apply_wal_with_fallback
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
-def mutation_metadata(record: SkillMutationRecord) -> dict[str, object]:
-    return {
+def mutation_metadata(record: CommonRecord) -> dict[str, object]:
+    metadata = {
         "id": record.operation_id,
         "name": record.name,
         "action": record.action.value,
         "state": record.state.value,
         "origin": record.provenance.value,
-        "sha256": record.sha256,
         "created_at": record.draft.created_at,
         "reverts": record.reverts,
     }
+    if isinstance(record, SkillTreeRecord):
+        metadata["snapshot_id"] = record.draft.snapshot_id
+    else:
+        metadata["sha256"] = record.sha256
+    return metadata
 
 
 def _database_entry(directory: int, chain) -> bool:
@@ -113,9 +117,19 @@ def _history(home: Path, args):
         names = {
             row[0]
             for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('skill_mutation_operations','skill_mutation_events','skill_mutation_contents')"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('skill_mutation_operations','skill_mutation_events','skill_mutation_contents','skill_tree_operations','skill_tree_events','skill_tree_snapshots','skill_tree_blobs','skill_mutation_timeline')"
             )
         }
+        if names & {
+            "skill_tree_operations",
+            "skill_tree_events",
+            "skill_tree_snapshots",
+            "skill_tree_blobs",
+            "skill_mutation_timeline",
+        }:
+            return SkillMutationRepository(connection, home_id=catalog_home_id(home)).history(
+                name=args.name, limit=args.limit
+            )
         if not names:
             version_table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"

@@ -64,12 +64,22 @@ class SkillMutationService:
         ):
             self.repository.finish(operation_id, SkillMutationState.ABORTED)
 
+    def _assert_legacy_pending(self, name):
+        for record in self.repository.pending(name):
+            if record.action not in (SkillMutationAction.CREATE, SkillMutationAction.ROLLBACK):
+                raise SkillMutationError(
+                    "conflict",
+                    "Existe operação de árvore pendente; resolva seu ID antes de escrever.",
+                    operation_id=record.operation_id,
+                )
+
     def add(self, source: Path, *, actor: Actor):
         validate_actor(actor)
         creation = read_skill_creation(source)
         operation_id = uuid.uuid4().hex
         try:
             with skill_mutation_lock(self.home), SkillMutationFiles(self.home) as files:
+                self._assert_legacy_pending(creation.name)
                 reconcile_pending(self.repository, files, name=creation.name)
                 files.assert_name_available(creation.name)
                 entry = files.stage(operation_id, creation)
@@ -118,10 +128,18 @@ class SkillMutationService:
                 if previous is not None and previous.state is SkillMutationState.COMMITTED:
                     return previous
                 with SkillMutationFiles(self.home) as files:
+                    self._assert_legacy_pending(created.name)
                     reconcile_pending(self.repository, files, name=created.name)
                     previous = self.repository.latest_rollback(create_id)
                     if previous is not None and previous.state is SkillMutationState.COMMITTED:
                         return previous
+                    current = self.repository.current_installation(created.name)
+                    if current is None or current.operation_id != create_id:
+                        raise SkillMutationError(
+                            "conflict",
+                            "A criação não é a instalação corrente; arquivos preservados.",
+                            operation_id=None if current is None else current.operation_id,
+                        )
                     expected = expected_entry(self.repository, created)
                     if files.inspect_installed(created.name) != expected:
                         raise SkillMutationError(
