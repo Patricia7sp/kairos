@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+MAX_COMPONENT_BYTES = 255
+
 
 class FilesystemError(Exception):
     def __init__(self, kind: str, message: str):

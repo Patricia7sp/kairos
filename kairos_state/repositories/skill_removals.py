@@ -60,7 +60,6 @@ class SkillRemovalRepository:
         validate_hash(home_id)
         self._conn = connection
         self._home_id = home_id
-        register_skill_writer(connection)
 
     def _snapshot(self, snapshot_id: str) -> TreeCapture:
         length = self._conn.execute(
@@ -193,6 +192,8 @@ class SkillRemovalRepository:
             return self._snapshot(record.draft.snapshot_id)
 
     def _write(self, operation):
+        register_skill_writer(self._conn)
+
         def transaction():
             if self._conn.in_transaction:
                 raise SkillMutationError("io", "Mutação exige uma conexão sem transação pendente.")

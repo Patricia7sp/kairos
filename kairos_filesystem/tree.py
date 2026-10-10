@@ -12,7 +12,13 @@ import sys
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
 
-from kairos_filesystem.contract import FilesystemError, TreeCapture, TreeEntry, TreeLimits
+from kairos_filesystem.contract import (
+    MAX_COMPONENT_BYTES,
+    FilesystemError,
+    TreeCapture,
+    TreeEntry,
+    TreeLimits,
+)
 from kairos_filesystem.descriptors import check_chain, open_fd, same_entry
 
 MAX_LIMITS = TreeLimits(256 * 1024 * 1024, 256 * 1024 * 1024, 10000, 32)
@@ -40,6 +46,11 @@ def _name(name: str) -> None:
         and "\x00" not in name,
         "Nome deve identificar um filho imediato.",
     )
+    try:
+        encoded = os.fsencode(name)
+    except UnicodeError:
+        raise FilesystemError("input", "Componente POSIX inválido.") from None
+    _require(len(encoded) <= MAX_COMPONENT_BYTES, "Componente POSIX excede o limite de bytes.")
 
 
 def _limits(limits: TreeLimits) -> None:
@@ -275,11 +286,11 @@ def validate_capture(
         )
         _require(
             type(entry.device) is int
-            and entry.device >= 0
+            and 0 <= entry.device < 2**64
             and type(entry.inode) is int
-            and entry.inode > 0
+            and 0 < entry.inode < 2**64
             and type(entry.mount_id) is int
-            and entry.mount_id > 0,
+            and 0 < entry.mount_id < 2**64,
             "Identidade inválida.",
         )
         if entry.kind == "directory":

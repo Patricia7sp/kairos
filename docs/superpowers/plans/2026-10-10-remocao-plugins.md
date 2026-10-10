@@ -45,10 +45,14 @@ Este plano constitui uma entrega independente. O plano `2026-10-10-remocao-skill
 
   ```python
   self.assertEqual(before.contents, after.contents)
-  self.assertEqual([(e.path, e.mode) for e in before.entries],
-                   [(e.path, e.mode) for e in after.entries])
-  self.assertNotEqual((before.entries[0].device, before.entries[0].inode),
-                      (after.entries[0].device, after.entries[0].inode))
+  self.assertEqual(
+      [(e.path, e.mode) for e in before.entries],
+      [(e.path, e.mode) for e in after.entries],
+  )
+  self.assertNotEqual(
+      (before.entries[0].device, before.entries[0].inode),
+      (after.entries[0].device, after.entries[0].inode),
+  )
   ```
 
 - [ ] Acrescentar `test_bind_mount_identity_rejected`, `test_mount_observation_unavailable`, `test_replaced_child_preserved`, `test_acl_xattr_and_special_modes_rejected`, `test_lock_deadline_and_unsafe_entry`. Observar mount ID por `/proc/self/fdinfo`; testar classificação com identidade observada injetada e exercitar bind mount real no gate Docker privilegiado quando disponível. Uma recusa por falta de privilégio não conta como teste real de bind mount.

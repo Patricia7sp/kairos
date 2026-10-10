@@ -54,7 +54,6 @@ class SkillMutationRepository:
         validate_hash(home_id)
         self._conn = connection
         self._home_id = home_id
-        register_skill_writer(connection)
 
     @property
     def home_id(self):
@@ -493,6 +492,8 @@ class SkillMutationRepository:
         return self._prepare_tree(draft, lambda tree: tree.prepare_restore(draft))
 
     def _write(self, operation):
+        register_skill_writer(self._conn)
+
         def transaction():
             if self._conn.in_transaction:
                 raise SkillMutationError("io", "Mutação exige uma conexão sem transação pendente.")

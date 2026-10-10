@@ -57,6 +57,41 @@ class PluginRemovalTests(unittest.TestCase):
         for name in preserve:
             self.assertEqual((self.home / name).read_bytes(), b"preserved")
 
+    def test_large_deep_metadata_roundtrip_and_removal(self):
+        from contextlib import ExitStack
+
+        from kairos_plugins.removal_records import PLUGIN_LIMITS
+
+        with ExitStack() as stack:
+            fd = os.open(self.target, os.O_RDONLY | os.O_DIRECTORY)
+            stack.callback(os.close, fd)
+            for _ in range(30):
+                component = "d" * 255
+                os.mkdir(component, dir_fd=fd)
+                fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+                stack.callback(os.close, fd)
+            for index in range(1100):
+                file_fd = os.open(
+                    f"{index:04}" + "f" * 251,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=fd,
+                )
+                os.close(file_fd)
+        result = remove_plugin(self.home, self.target.name, confirmed=True)
+        self.assertFalse(self.target.exists())
+        operation = self.home / ".plugins-retired" / result.operation_id
+        self.assertGreater((operation / "metadata.json").stat().st_size, 8 * 1024 * 1024)
+        fd = os.open(operation, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            name, operation_id, capture = read_metadata(fd)
+        finally:
+            os.close(fd)
+        self.assertEqual((name, operation_id), (self.target.name, result.operation_id))
+        self.assertLess(len(capture.entries), PLUGIN_LIMITS.entries)
+        self.assertEqual(sum(entry.size for entry in capture.entries), 19)
+        self.assertEqual(remove_plugin(self.home, self.target.name, confirmed=True), result)
+
     def test_git_file_does_not_follow_pointer(self):
         outside = self.home / "external-git"
         outside.mkdir()

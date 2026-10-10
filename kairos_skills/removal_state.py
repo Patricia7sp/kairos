@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+import tempfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -30,6 +31,77 @@ def _database_entry(directory: int, chain) -> bool:
     return found
 
 
+def _stamp(info):
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _copy_database_file(fd: int, path: Path, size: int) -> None:
+    destination = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(destination, "wb") as output:
+        remaining = size
+        while remaining:
+            chunk = os.read(fd, min(65536, remaining))
+            if not chunk:
+                raise SkillMutationError("conflict", "Banco alterado durante leitura; recusado.")
+            output.write(chunk)
+            remaining -= len(chunk)
+
+
+def _reader_copy(stack: ExitStack, directory: int, chain) -> Path:
+    """Copia DB e WAL estáveis; SQLite só cria sidecars na cópia privada."""
+    temporary_root = Path(tempfile.gettempdir())
+    if temporary_root.resolve().is_relative_to(Path(os.readlink(f"/proc/self/fd/{directory}"))):
+        raise SkillMutationError("unavailable", "Diretório temporário externo indisponível.")
+    temporary = Path(
+        stack.enter_context(
+            tempfile.TemporaryDirectory(prefix="kairos-reader-", dir=temporary_root)
+        )
+    )
+    before_directory = _stamp(os.fstat(directory))
+    sources = {}
+    for name in ("state.db", "state.db-wal", "state.db-shm", "state.db-journal"):
+        try:
+            fd = open_fd(stack, name, os.O_RDONLY | os.O_NONBLOCK, parent=directory)
+        except FileNotFoundError:
+            continue
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SkillMutationError("conflict", "Entrada do banco insegura; leitura recusada.")
+        same_entry(directory, name, fd)
+        if name == "state.db-journal" and info.st_size:
+            raise SkillMutationError(
+                "conflict", "Journal pendente; leitura sem recuperação recusada."
+            )
+        sources[name] = (fd, info)
+    if "state.db" not in sources:
+        raise SkillMutationError("conflict", "Banco alterado durante leitura; recusado.")
+    for name in ("state.db", "state.db-wal"):
+        if name not in sources:
+            continue
+        fd, info = sources[name]
+        _copy_database_file(fd, temporary / name, info.st_size)
+    # Os intervalos de estabilidade de todos os arquivos devem se sobrepor:
+    # colher todas as provas antes de copiar e reconferir todas só no final.
+    for name, (fd, info) in sources.items():
+        same_entry(directory, name, fd)
+        if _stamp(os.fstat(fd)) != _stamp(info):
+            raise SkillMutationError("conflict", "Banco alterado durante leitura; recusado.")
+    if _stamp(os.fstat(directory)) != before_directory:
+        raise SkillMutationError(
+            "conflict", "Arquivos do banco alterados durante leitura; recusado."
+        )
+    _database_entry(directory, chain)
+    return temporary / "state.db"
+
+
 @contextmanager
 def database_connection(home: Path, *, write: bool = False):
     with ExitStack() as stack:
@@ -51,6 +123,13 @@ def database_connection(home: Path, *, write: bool = False):
         descriptor_path = Path(f"/proc/self/fd/{fd}")
         if not descriptor_path.exists():
             raise SkillMutationError("unavailable", "Abertura segura do banco indisponível.")
+        if not write:
+            try:
+                descriptor_path = _reader_copy(stack, directory, chain)
+            except OSError:
+                raise SkillMutationError(
+                    "io", "Não foi possível capturar o banco para leitura."
+                ) from None
         mode = "rw" if write else "ro"
         connection = sqlite3.connect(
             descriptor_path.as_uri() + "?mode=" + mode,
@@ -63,7 +142,7 @@ def database_connection(home: Path, *, write: bool = False):
         _database_entry(directory, chain)
         opened_path = connection.execute("PRAGMA database_list").fetchone()[2]
         opened = os.stat(opened_path, follow_symlinks=False)
-        if (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino):
+        if write and (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino):
             raise SkillMutationError("conflict", "Banco alterado durante abertura; recusado.")
         connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         if write:

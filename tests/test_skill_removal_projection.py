@@ -3,10 +3,13 @@
 import argparse
 import dataclasses
 import hashlib
+import os
+import sqlite3
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from skill_mutation_fixtures import creation_text
 from test_skill_mutation_state import creation_draft
@@ -151,6 +154,85 @@ class RemovalProjectionTests(unittest.TestCase):
         self.assertEqual(self.repo.history(limit=1), (restored,))
         self.assertEqual(self.repo.history(name="absent"), ())
         self.assertEqual(self.repo.latest_restore(removed.operation_id), restored)
+
+    def test_public_reader_closed_wal_does_not_change_home(self):
+        from kairos_skills.removal_state import database_connection, read_skill_repository
+
+        created = self.create()
+        self.db.close()
+        before = {path.name: path.read_bytes() for path in self.home.iterdir()}
+        self.assertNotIn("state.db-wal", before)
+        with database_connection(self.home) as reader:
+            self.assertEqual(read_skill_repository(reader, self.home).history(), (created,))
+            copied_database = Path(reader.execute("PRAGMA database_list").fetchone()[2])
+            self.assertEqual(copied_database.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(copied_database.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual({path.name: path.read_bytes() for path in self.home.iterdir()}, before)
+        self.assertFalse(copied_database.parent.exists())
+        self.assertEqual({path.name: path.read_bytes() for path in self.home.iterdir()}, before)
+
+    def test_public_reader_observes_wal_tombstone_without_writer_capability(self):
+        from kairos_skills.removal_state import (
+            database_connection,
+            read_skill_repository,
+            read_skill_tombstones,
+        )
+
+        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        removed = self.remove(origin=Provenance.BUNDLED)
+        before = {path.name: path.read_bytes() for path in self.home.iterdir()}
+        self.assertGreater(len(before["state.db-wal"]), 0)
+        with database_connection(self.home) as reader:
+            repository = read_skill_repository(reader, self.home)
+            self.assertEqual(repository.history(), (removed,))
+            self.assertEqual(repository.get(removed.operation_id), removed)
+            self.assertEqual(
+                repository.snapshot(removed.operation_id).contents,
+                {"SKILL.md": b"# Legacy\n\x00\xff"},
+            )
+            self.assertIsNone(repository.current_installation(self.name))
+            self.assertEqual(repository.current_removal(self.name), removed)
+            self.assertEqual(repository.bundled_tombstones(), frozenset({self.name}))
+            with self.assertRaises(sqlite3.OperationalError):
+                reader.execute("SELECT kairos_skill_writer_version()")
+            with self.assertRaises(sqlite3.OperationalError):
+                reader.execute("CREATE TABLE accidental_write(value)")
+        self.assertEqual(read_skill_tombstones(self.home), frozenset({self.name}))
+        self.assertEqual({path.name: path.read_bytes() for path in self.home.iterdir()}, before)
+
+    def test_public_reader_refuses_concurrent_wal_commit(self):
+        from kairos_skills.removal_state import database_connection, read_skill_repository
+
+        self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        original_read = os.read
+        source_inode = (self.home / "state.db").stat().st_ino
+        committed = []
+
+        def read_and_commit(fd, length):
+            data = original_read(fd, length)
+            if os.fstat(fd).st_ino == source_inode and not committed:
+                committed.append(self.remove(origin=Provenance.BUNDLED))
+            return data
+
+        with (
+            patch("kairos_skills.removal_state.os.read", read_and_commit),
+            self.assertRaises(SkillMutationError) as raised,
+            database_connection(self.home) as reader,
+        ):
+            read_skill_repository(reader, self.home).history()
+        self.assertEqual(raised.exception.kind, "conflict")
+        self.assertEqual(self.repo.history(), tuple(committed))
+
+    def test_public_reader_refuses_nonempty_rollback_journal(self):
+        from kairos_skills.removal_state import database_connection
+
+        self.db.close()
+        journal = self.home / "state.db-journal"
+        journal.write_bytes(b"unrecovered transaction")
+        before = {path.name: path.read_bytes() for path in self.home.iterdir()}
+        with self.assertRaises(SkillMutationError), database_connection(self.home) as reader:
+            reader.execute("SELECT * FROM schema_version").fetchall()
+        self.assertEqual({path.name: path.read_bytes() for path in self.home.iterdir()}, before)
 
     def test_pending_other_family_blocks_all_writers(self):
         self.create()

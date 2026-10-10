@@ -65,6 +65,63 @@ class CLIPluginRemovalTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertNotIn("../bad", err)
 
+    def test_unsafe_installed_state_is_operational_error(self):
+        target = self.plugin()
+        for kind in ("fifo", "hardlink", "mode"):
+            with self.subTest(kind=kind):
+                unsafe = target / kind
+                if kind == "fifo":
+                    os.mkfifo(unsafe)
+                elif kind == "hardlink":
+                    os.link(target / "bad.py", unsafe)
+                else:
+                    unsafe.write_bytes(b"private")
+                    unsafe.chmod(0o4600)
+                code, out, err = self.invoke(["plugins", "remove", "broken", "--yes"])
+                preserved = unsafe.exists()
+                unsafe.unlink()
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertFalse(json.loads(err)["retirado"])
+                self.assertTrue(preserved)
+
+    def test_terminal_metadata_rejects_impossible_posix_paths(self):
+        target = self.plugin()
+        (target / "bad.py").unlink()
+        filename = os.fsdecode(b"asset-\xff\\literal")
+        (target / filename).write_bytes(b"asset")
+        arguments = ["plugins", "remove", "broken", "--yes", "--json"]
+        for _ in range(2):
+            code, out, err = self.invoke(arguments)
+            self.assertEqual(code, 0, err)
+            self.assertTrue(json.loads(out)["removido"])
+        metadata = next((self.home / ".plugins-retired").glob("*/metadata.json"))
+        original = json.loads(metadata.read_text())
+        self.assertIn(filename, [entry["path"] for entry in original["entries"]])
+        for path in ("\ud800", "\udc7f", "é" * 128):
+            with self.subTest(path=repr(path)):
+                value = json.loads(json.dumps(original))
+                value["entries"][1]["path"] = path
+                metadata.write_text(json.dumps(value, ensure_ascii=True))
+                code, out, err = self.invoke(arguments)
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("residuo_id", json.loads(err))
+                self.assertNotIn("Traceback", err)
+
+    def test_invalid_name_in_private_metadata_is_operational_error(self):
+        self.plugin()
+        arguments = ["plugins", "remove", "broken", "--yes"]
+        self.assertEqual(self.invoke(arguments)[0], 0)
+        metadata = next((self.home / ".plugins-retired").glob("*/metadata.json"))
+        value = json.loads(metadata.read_text())
+        value["name"] = "../private-secret"
+        metadata.write_text(json.dumps(value))
+        code, out, err = self.invoke(arguments)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertNotIn("private-secret", err)
+
     def test_partial_stderr_json_no_success(self):
         self.plugin()
         with patch(

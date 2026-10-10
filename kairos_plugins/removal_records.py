@@ -9,12 +9,22 @@ import stat
 import uuid
 from dataclasses import asdict
 
-from kairos_filesystem.contract import FilesystemError, TreeCapture, TreeEntry, TreeLimits
+from kairos_filesystem.contract import (
+    MAX_COMPONENT_BYTES,
+    FilesystemError,
+    TreeCapture,
+    TreeEntry,
+    TreeLimits,
+)
 from kairos_filesystem.descriptors import same_entry
 from kairos_filesystem.tree import observed_mount_id, validate_capture
 
 PLUGIN_LIMITS = TreeLimits(256 * 1024 * 1024, 256 * 1024 * 1024, 10000, 32)
-MAX_METADATA = 8 * 1024 * 1024
+# Cada byte POSIX pode virar seis bytes JSON ASCII; 512 cobre chaves,
+# separadores, hash e identidades uint64 por entrada e o envelope externo.
+MAX_METADATA = 512 + PLUGIN_LIMITS.entries * (
+    PLUGIN_LIMITS.depth * (MAX_COMPONENT_BYTES * 6 + 1) + 512
+)
 
 
 def validate_name(name: str) -> None:

@@ -85,6 +85,8 @@ def _private(
 
 def _failure(exc, operation_id=None, retired=False):
     kind = exc.kind if isinstance(exc, FilesystemError) else "io"
+    if kind == "input":
+        kind = "conflict"
     message = (
         str(exc)
         if isinstance(exc, FilesystemError)
