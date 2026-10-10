@@ -317,24 +317,30 @@ def cmd_skills(args) -> int:
 
 
 def cmd_mcp(args) -> int:
-    from kairos_mcp import SERVER_TOOLS, UNPUBLISHED_TOOLS, mcp_available
-
-    if args.mcp_command == "list":
-        _emit(
-            {
-                "pacote mcp instalado": "sim" if mcp_available() else "não (integração é no-op)",
-                "ferramentas do servidor": list(SERVER_TOOLS),
-                "não publicadas": UNPUBLISHED_TOOLS,
-            },
-            as_json=args.json,
-        )
-        return ExitCode.OK
     if args.mcp_command == "serve":
         # Import tardio: o servidor carrega o gateway (adapters de plataforma);
         # `mcp list` não deve pagar esse custo.
         from kairos_mcp.serve import serve_stdio
 
         return serve_stdio(_home())
+    if args.mcp_command in {"list", "test", "remove"}:
+        from kairos_mcp.admin import McpAdminError, list_servers, remove_server, test_server
+
+        home = _home()
+        try:
+            if args.mcp_command == "list":
+                result = list_servers(home)
+            elif args.mcp_command == "test":
+                tools = test_server(home, args.name)
+                result = {"nome": args.name, "ferramentas": [tool["name"] for tool in tools]}
+            else:
+                cache_removed = remove_server(home, args.name)
+                result = {"nome": args.name, "removido": True, "cache_removido": cache_removed}
+        except McpAdminError as exc:
+            print(f"kairos: mcp: {exc}", file=sys.stderr)
+            return ExitCode.ERROR
+        _emit(result, as_json=args.json)
+        return ExitCode.OK
     return ExitCode.NOT_IMPLEMENTED
 
 

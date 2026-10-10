@@ -151,3 +151,24 @@ instalados coincidiram com os fontes. Merge exige nove checks remotos verdes;
 deploy e smoke no container publicado seguem o fluxo pós-merge.
 Índice automático por padrão, `/learn`, curador e workflows duráveis continuam pendentes.
 Não foram realizadas chamadas a provedores com credenciais reais.
+
+O recorte de administração MCP liga `mcp list`, `mcp test NOME` e
+`mcp remove NOME` à configuração do home. `list` mostra nome, transporte,
+validade e diagnóstico seguro opcional, inclusive entradas inválidas, sem
+iniciar servidores. `test` inicializa o servidor stdio e descobre ferramentas,
+sem invocá-las nem escrever cache; sua saída JSON é
+`{"nome": "NOME", "ferramentas": ["nome_da_ferramenta"]}`. `remove` exige o nome
+e remove a entrada e seu cache, preservando os demais dados; a saída JSON
+inclui `nome`, `removido: true` e `cache_removido`. Sucesso retorna 0; falhas
+operacionais retornam 1 com diagnóstico seguro em stderr. `--json` mantém
+o mesmo alcance das demais operações da CLI. `mcp serve` permanece disponível.
+
+Validação deste recorte em 2026-10-10: revisão independente e correções de
+preservação de aliases YAML aprovadas; suíte final com 3503 testes e 5999
+subtestes passando, 16 skips e 26 deselections (sem `runtime_live`). CI local
+completo, lint, lock, frontends e imagem verdes; integrações Docker offline
+com 26 passes e um skip por perfil AppArmor/seccomp indisponível. O smoke na
+imagem instalada verifica listagem sem spawn, descoberta sem `tools/call`,
+ausência de escrita em `test`, remoção restrita ao alvo, permissões e aliases
+preservados e recusa de YAML malformado. Transportes HTTP/SSE, instalação MCP,
+OAuth e catálogo curado continuam fora desta entrega.

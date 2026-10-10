@@ -204,7 +204,9 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
     """Argumentos específicos, onde o comando os exige."""
     import argparse
 
-    if command == "config" and subcommand == "show":
+    if command == "mcp" and subcommand in {"test", "remove"}:
+        parser.add_argument("name", metavar="NOME", help="nome do servidor configurado")
+    elif command == "config" and subcommand == "show":
         parser.add_argument("key", nargs="?", help="chave pontilhada")
     elif command == "skills" and subcommand == "add":
         parser.add_argument("--file", required=True, help="SKILL.md local (sem stdin ou URL)")
