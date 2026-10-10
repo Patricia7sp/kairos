@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import os
 import re
 import stat
+import struct
 from contextlib import ExitStack, contextmanager
 
 from kairos_filesystem.contract import FilesystemError, TreeCapture, TreeEntry, TreeLimits
@@ -83,12 +85,12 @@ def _metadata(fd: int, mount: int) -> os.stat_result:
     return value
 
 
-def _check_mount_chain(chain: list[tuple[int, str, int]]) -> None:
+def _check_mount_chain(chain: list[tuple[int, str, int]], mount: int) -> None:
     check_chain(chain)
     for parent, name, fd in chain:
         with ExitStack() as stack:
             current = open_fd(stack, name, os.O_PATH, parent=parent)
-            opened = os.fstat(fd)
+            opened = _metadata(fd, mount)
             observed = os.fstat(current)
             _require(
                 (opened.st_dev, opened.st_ino, observed_mount_id(fd))
@@ -182,7 +184,15 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
         entries.append(entry)
         handles[path] = (parent, component, fd, before)
         if directory:
-            for child in sorted(os.listdir(fd)):
+            children = []
+            with os.scandir(fd) as iterator:
+                for child in iterator:
+                    _require(
+                        len(children) < limits.entries - len(entries),
+                        "Limite de entradas excedido.",
+                    )
+                    children.append(child.name)
+            for child in sorted(children):
                 _name(child)
                 visit(fd, child, f"{path}/{child}" if path else child, depth + 1)
         _require(
@@ -195,7 +205,7 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
 
     visit(parent_fd, name, "", 0)
     chain = [(parent, component, fd) for parent, component, fd, _before in handles.values()]
-    _check_mount_chain(chain)
+    _check_mount_chain(chain, mount)
     for _parent, _component, fd, before in handles.values():
         _require(
             _stamp(before) == _stamp(_metadata(fd, mount)),
@@ -209,13 +219,13 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
     )
 
 
-def _check_path(path: str, edges: dict[str, tuple[int, str, int]]) -> None:
+def _check_path(path: str, edges: dict[str, tuple[int, str, int]], mount: int) -> None:
     chain = []
     while path:
         chain.append(edges[path])
         path = path.rpartition("/")[0]
     chain.append(edges[""])
-    _check_mount_chain(list(reversed(chain)))
+    _check_mount_chain(list(reversed(chain)), mount)
 
 
 def capture_tree(
@@ -326,26 +336,86 @@ def verify_tree(parent_fd: int, name: str, expected: TreeCapture) -> None:
     _matches(actual, expected)
 
 
+def _creation_watch(stack: ExitStack, parent: int) -> tuple[int, int]:
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        initialize = library.inotify_init1
+        initialize.argtypes = (ctypes.c_int,)
+        initialize.restype = ctypes.c_int
+        watch = library.inotify_add_watch
+        watch.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32)
+        watch.restype = ctypes.c_int
+        fd = initialize(os.O_NONBLOCK | os.O_CLOEXEC)
+        _require(fd >= 0, "Observação de criação indisponível.", "unavailable")
+        stack.callback(os.close, fd)
+        # CREATE, DELETE, MOVE, ATTRIB e mudanças do próprio pai; ONLYDIR.
+        descriptor = watch(fd, os.fsencode(f"/proc/self/fd/{parent}"), 0x01000FC4)
+        _require(descriptor >= 0, "Observação de criação indisponível.", "unavailable")
+        return fd, descriptor
+    except (AttributeError, OSError):
+        raise FilesystemError("unavailable", "Observação de criação indisponível.") from None
+
+
+def _verify_creation(watcher: int, descriptor: int, name: str) -> None:
+    created = 0
+    total = 0
+    while True:
+        try:
+            data = os.read(watcher, 65536)
+        except BlockingIOError:
+            break
+        _require(bool(data), "Observação de criação encerrada.", "unavailable")
+        total += len(data)
+        _require(total <= 65536, "Eventos de criação excederam o limite.", "conflict")
+        offset = 0
+        while offset < len(data):
+            _require(len(data) - offset >= 16, "Evento de criação inválido.", "unavailable")
+            wd, mask, _cookie, length = struct.unpack_from("=iIII", data, offset)
+            end = offset + 16 + length
+            _require(end <= len(data), "Evento de criação incompleto.", "unavailable")
+            component = data[offset + 16 : end].split(b"\x00", 1)[0]
+            # Perda de eventos/watch, remoção, movimento ou desmontagem do pai.
+            _require(
+                not mask & 0x0000EC00,
+                "Observação de criação perdeu a identidade do pai.",
+                "conflict",
+            )
+            _require(wd == descriptor, "Observação de criação divergente.", "conflict")
+            if component == os.fsencode(name):
+                _require(mask == 0x40000100, "Diretório substituído durante criação.", "conflict")
+                created += 1
+            offset = end
+    _require(created == 1, "Criação do diretório não comprovada.", "conflict")
+
+
+def _create_directory(stack: ExitStack, parent: int, name: str, mount: int) -> int:
+    with ExitStack() as observation:
+        watcher, descriptor = _creation_watch(observation, parent)
+        os.mkdir(name, 0o700, dir_fd=parent)
+        fd = open_fd(stack, name, os.O_RDONLY | os.O_DIRECTORY, parent=parent)
+        _verify_creation(watcher, descriptor, name)
+        _metadata(fd, mount)
+        _check_mount_chain([(parent, name, fd)], mount)
+        return fd
+
+
 def restore_tree(parent_fd: int, name: str, snapshot: TreeCapture) -> TreeCapture:
     _name(name)
     validate_capture(snapshot, require_contents=True)
     with _io_errors(), ExitStack() as stack:
         mount = observed_mount_id(parent_fd)
         try:
-            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            root = _create_directory(stack, parent_fd, name, mount)
         except FileExistsError:
             raise FilesystemError("conflict", "Destino ocupado; arquivos preservados.") from None
-        root = open_fd(stack, name, os.O_RDONLY | os.O_DIRECTORY, parent=parent_fd)
-        _metadata(root, mount)
         edges = {"": (parent_fd, name, root)}
         directories = {"": root}
         for entry in snapshot.entries[1:]:
             parent_path, _, component = entry.path.rpartition("/")
-            _check_path(parent_path, edges)
+            _check_path(parent_path, edges, mount)
             parent = directories[parent_path]
             if entry.kind == "directory":
-                os.mkdir(component, 0o700, dir_fd=parent)
-                fd = open_fd(stack, component, os.O_RDONLY | os.O_DIRECTORY, parent=parent)
+                fd = _create_directory(stack, parent, component, mount)
                 directories[entry.path] = fd
             else:
                 fd = open_fd(stack, component, os.O_WRONLY | os.O_CREAT | os.O_EXCL, parent=parent)
@@ -361,10 +431,10 @@ def restore_tree(parent_fd: int, name: str, snapshot: TreeCapture) -> TreeCaptur
         for entry in reversed(snapshot.entries):
             if entry.kind == "directory":
                 fd = directories[entry.path]
-                _check_path(entry.path, edges)
+                _check_path(entry.path, edges, mount)
                 os.fchmod(fd, entry.mode)
                 os.fsync(fd)
-        _check_mount_chain(list(edges.values()))
+        _check_mount_chain(list(edges.values()), mount)
         os.fsync(parent_fd)
         result = capture_tree(
             parent_fd, name, limits=_expected_limits(snapshot), include_contents=True
@@ -392,7 +462,7 @@ def delete_verified_tree(parent_fd: int, name: str, expected: TreeCapture) -> No
             expected.entries, key=lambda e: (e.path.count("/") + bool(e.path), e.path), reverse=True
         ):
             parent, component, fd, before = handles[entry.path]
-            _check_path(entry.path, edges)
+            _check_path(entry.path, edges, entry.mount_id)
             observed = _metadata(fd, entry.mount_id)
             _require(
                 (observed.st_dev, observed.st_ino, stat.S_IMODE(observed.st_mode))
@@ -409,7 +479,12 @@ def delete_verified_tree(parent_fd: int, name: str, expected: TreeCapture) -> No
                 same_entry(parent, component, fd)
                 os.unlink(component, dir_fd=parent)
             else:
-                _require(not os.listdir(fd), "Diretório alterado; resíduo preservado.", "conflict")
+                with os.scandir(fd) as iterator:
+                    _require(
+                        next(iterator, None) is None,
+                        "Diretório alterado; resíduo preservado.",
+                        "conflict",
+                    )
                 same_entry(parent, component, fd)
                 os.rmdir(component, dir_fd=parent)
             del edges[entry.path]

@@ -625,13 +625,17 @@ class RealImageTests(unittest.TestCase):
             "-c",
             "import os, tempfile, hashlib; from pathlib import Path; "
             "from kairos_filesystem.contract import TreeLimits; "
-            "from kairos_filesystem.tree import capture_tree; "
+            "from kairos_filesystem.tree import capture_tree, restore_tree, delete_verified_tree; "
             "home = Path(tempfile.mkdtemp()); (home / 'tree').mkdir(); "
             "(home / 'tree/file').write_bytes(b'bin\\x00'); "
             "fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY); "
             "snapshot = capture_tree(fd, 'tree', limits=TreeLimits(10, 10, 2, 1), include_contents=True); "
-            "os.close(fd); assert snapshot.contents == {'file': b'bin\\x00'}; "
-            "assert snapshot.entries[1].sha256 == hashlib.sha256(b'bin\\x00').hexdigest()",
+            "assert snapshot.contents == {'file': b'bin\\x00'}; "
+            "assert snapshot.entries[1].sha256 == hashlib.sha256(b'bin\\x00').hexdigest(); "
+            "restored = restore_tree(fd, 'copy', snapshot); "
+            "assert restored.contents == snapshot.contents; "
+            "delete_verified_tree(fd, 'copy', restored); "
+            "assert not (home / 'copy').exists(); os.close(fd)",
             entrypoint="/opt/kairos/.venv/bin/python",
         )
         self.assertEqual(result.returncode, 0, result.stderr)

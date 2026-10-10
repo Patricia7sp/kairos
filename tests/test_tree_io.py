@@ -343,3 +343,164 @@ class TreeIOTests(unittest.TestCase):
         ):
             self.capture()
         self.assertEqual((self.root / "child").read_bytes(), b"keep")
+
+    def test_entry_budget_bounds_directory_enumeration(self):
+        from contextlib import contextmanager
+
+        for index in range(20):
+            (self.root / str(index)).touch()
+        listed = 0
+        listdir = os.listdir
+        scandir = os.scandir
+
+        def list_all(fd):
+            nonlocal listed
+            result = listdir(fd)
+            listed += len(result)
+            return result
+
+        @contextmanager
+        def scan(fd):
+            nonlocal listed
+            with scandir(fd) as iterator:
+
+                def entries():
+                    nonlocal listed
+                    for entry in iterator:
+                        listed += 1
+                        yield entry
+
+                yield entries()
+
+        with (
+            patch("kairos_filesystem.tree.os.listdir", side_effect=list_all),
+            patch("kairos_filesystem.tree.os.scandir", side_effect=scan),
+            self.assertRaises(FilesystemError),
+        ):
+            capture_tree(self.parent, "tree", limits=TreeLimits(1, 1, 3, 1), include_contents=False)
+        self.assertLessEqual(listed, 3)
+
+    def test_restore_mount_subdirectory_before_file_creation(self):
+        self._restore_with_mounted_subdirectory(with_file=True)
+
+    def test_restore_mount_empty_subdirectory_before_chmod(self):
+        self._restore_with_mounted_subdirectory(with_file=False)
+
+    def _restore_with_mounted_subdirectory(self, *, with_file):
+        from kairos_filesystem.tree import observed_mount_id
+
+        sub = self.root / "sub"
+        sub.mkdir(mode=0o750)
+        if with_file:
+            (sub / "file").write_bytes(b"keep")
+        snap = self.capture()
+        mount = observed_mount_id(self.parent)
+        destination = self.home / "copy/sub"
+
+        def observe(fd):
+            if destination.exists() and os.fstat(fd).st_ino == destination.stat().st_ino:
+                return mount + 1
+            return mount
+
+        with (
+            patch("kairos_filesystem.tree.observed_mount_id", side_effect=observe),
+            self.assertRaises(FilesystemError),
+        ):
+            restore_tree(self.parent, "copy", snap)
+        self.assertFalse((destination / "file").exists())
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o700)
+
+    def test_restore_replaced_root_before_open_preserved(self):
+        self._restore_with_replaced_directory("copy")
+
+    def test_restore_replaced_subdirectory_before_open_preserved(self):
+        self._restore_with_replaced_directory("sub")
+
+    def _restore_with_replaced_directory(self, component):
+        (self.root / "sub").mkdir()
+        (self.root / "sub/file").write_bytes(b"keep")
+        snap = self.capture()
+        outside = self.home / "outside"
+        outside.mkdir(mode=0o750)
+        original = outside.stat()
+        mkdir = os.mkdir
+
+        def replace_created(name, mode=0o777, *, dir_fd=None):
+            mkdir(name, mode, dir_fd=dir_fd)
+            if name == component:
+                os.rename(name, "created", src_dir_fd=dir_fd, dst_dir_fd=self.parent)
+                os.rename("outside", name, src_dir_fd=self.parent, dst_dir_fd=dir_fd)
+
+        with (
+            patch("kairos_filesystem.tree.os.mkdir", side_effect=replace_created),
+            self.assertRaises(FilesystemError),
+        ):
+            restore_tree(self.parent, "copy", snap)
+        replaced = self.home / ("copy" if component == "copy" else "copy/sub")
+        self.assertEqual(replaced.stat().st_ino, original.st_ino)
+        self.assertEqual(list(replaced.iterdir()), [])
+        self.assertEqual(stat.S_IMODE(replaced.stat().st_mode), 0o750)
+
+    def test_restore_creation_observation_unavailable_before_mkdir(self):
+        snap = self.capture()
+        with (
+            patch("kairos_filesystem.tree.ctypes.CDLL", side_effect=OSError),
+            self.assertRaises(FilesystemError) as caught,
+        ):
+            restore_tree(self.parent, "copy", snap)
+        self.assertEqual(caught.exception.kind, "unavailable")
+        self.assertFalse((self.home / "copy").exists())
+
+    def test_restore_creation_event_overflow_preserves_empty_directory(self):
+        import struct
+
+        (self.root / "file").write_bytes(b"keep")
+        snap = self.capture()
+        read = os.read
+
+        def overflow(fd, count):
+            result = read(fd, count)
+            if os.readlink(f"/proc/self/fd/{fd}") == "anon_inode:inotify":
+                result += struct.pack("=iIII", -1, 0x4000, 0, 0)
+            return result
+
+        with (
+            patch("kairos_filesystem.tree.os.read", side_effect=overflow),
+            self.assertRaises(FilesystemError),
+        ):
+            restore_tree(self.parent, "copy", snap)
+        self.assertEqual(list((self.home / "copy").iterdir()), [])
+        self.assertEqual(stat.S_IMODE((self.home / "copy").stat().st_mode), 0o700)
+
+    def test_cleanup_checks_empty_directory_with_bounded_enumeration(self):
+        from contextlib import contextmanager
+
+        snap = self.capture()
+        scandir = os.scandir
+        scans = 0
+        listed = 0
+
+        @contextmanager
+        def scan(fd):
+            nonlocal scans, listed
+            scans += 1
+            if scans == 2:
+                for index in range(20):
+                    (self.root / str(index)).touch()
+            with scandir(fd) as iterator:
+
+                def entries():
+                    nonlocal listed
+                    for entry in iterator:
+                        listed += 1
+                        yield entry
+
+                yield entries()
+
+        with (
+            patch("kairos_filesystem.tree.os.scandir", side_effect=scan),
+            self.assertRaises(FilesystemError),
+        ):
+            delete_verified_tree(self.parent, "tree", snap)
+        self.assertEqual(listed, 1)
+        self.assertEqual(len(list(self.root.iterdir())), 20)
