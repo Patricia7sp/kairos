@@ -34,7 +34,7 @@ def manifest_json(capture: TreeCapture) -> str:
         [asdict(entry) for entry in capture.entries],
         sort_keys=True,
         separators=(",", ":"),
-        ensure_ascii=False,
+        ensure_ascii=True,
     )
 
 

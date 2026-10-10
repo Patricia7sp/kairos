@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -23,7 +24,10 @@ MAX_TREE_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_TREE_ENTRIES = 4096
 MAX_TREE_DEPTH = 32
-MAX_MANIFEST_BYTES = 20 * 1024 * 1024
+MAX_COMPONENT_BYTES = 255
+# Cada byte do nome POSIX pode ocupar seis bytes escapados no JSON ASCII.
+# A margem por entrada cobre chaves, separadores, hashes e identidades uint64.
+MAX_MANIFEST_BYTES = MAX_TREE_ENTRIES * (MAX_TREE_DEPTH * (MAX_COMPONENT_BYTES * 6 + 1) + 512)
 
 
 def validate_capture(capture: TreeCapture, *, contents: bool = False) -> None:
@@ -34,9 +38,10 @@ def validate_capture(capture: TreeCapture, *, contents: bool = False) -> None:
     total = 0
     for entry in capture.entries:
         require(type(entry) is TreeEntry and type(entry.path) is str)
-        require(len(entry.path.encode("utf-8")) <= 4096 and "\x00" not in entry.path)
+        require("\x00" not in entry.path)
         parts = entry.path.split("/") if entry.path else []
         require(len(parts) <= MAX_TREE_DEPTH and all(part not in ("", ".", "..") for part in parts))
+        require(all(len(os.fsencode(part)) <= MAX_COMPONENT_BYTES for part in parts))
         require(entry.path not in paths)
         require(type(entry.kind) is str and entry.kind in ("directory", "file"))
         require(type(entry.mode) is int and 0 <= entry.mode <= 0o777)

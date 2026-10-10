@@ -3,6 +3,7 @@
 import dataclasses
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import (
     SkillMutationAction,
     SkillMutationError,
+    SkillMutationRecord,
     SkillMutationState,
 )
 from kairos_state import connect
@@ -59,14 +61,17 @@ class RemovalStateTests(unittest.TestCase):
         self.legacy_before = self.legacy_evidence()
 
     def legacy_evidence(self):
+        records = tuple(
+            record for record in self.legacy.history() if isinstance(record, SkillMutationRecord)
+        )
         return (
-            self.legacy.history(),
+            records,
             self.legacy.content(self.created.operation_id),
             self.legacy.pending("pending"),
             tuple(tuple(row) for row in self.db.execute("SELECT * FROM skill_mutation_events")),
             tuple(
                 (record.operation_id, self.legacy.content(record.operation_id))
-                for record in self.legacy.history()
+                for record in records
             ),
         )
 
@@ -134,9 +139,17 @@ class RemovalStateTests(unittest.TestCase):
     def test_future_schema_refused(self):
         with self.db:
             self.db.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION + 1,))
+        queries = (
+            "SELECT * FROM skill_mutation_operations ORDER BY sequence",
+            "SELECT * FROM skill_mutation_contents ORDER BY sha256",
+            "SELECT * FROM skill_mutation_events ORDER BY sequence",
+            "SELECT * FROM schema_version",
+        )
+        before = tuple(tuple(tuple(row) for row in self.db.execute(query)) for query in queries)
         with self.assertRaises(sqlite3.DatabaseError):
             migrate(self.db)
-        self.assertEqual(self.legacy_before, self.legacy_evidence())
+        after = tuple(tuple(tuple(row) for row in self.db.execute(query)) for query in queries)
+        self.assertEqual(before, after)
 
     def test_timeline_import_and_new_events_have_one_order(self):
         repo = self.modern()
@@ -371,7 +384,12 @@ class RemovalStateTests(unittest.TestCase):
             restored_repo.snapshot(draft.operation_id).contents["scripts/run.bin"], b"\x00\xff"
         )
         restored_legacy = SkillMutationRepository(destination, home_id=self.home_id)
-        self.assertEqual(self.legacy_before[0], restored_legacy.history())
+        restored_records = tuple(
+            record
+            for record in restored_legacy.history()
+            if isinstance(record, SkillMutationRecord)
+        )
+        self.assertEqual(self.legacy_before[0], restored_records)
         self.assertEqual(self.legacy_before[1], restored_legacy.content(self.created.operation_id))
         self.assertEqual(self.legacy_before, self.legacy_evidence())
 
@@ -395,6 +413,80 @@ class RemovalStateTests(unittest.TestCase):
         with self.assertRaises(SkillMutationError) as caught:
             repo.snapshot(draft.operation_id)
         self.assertEqual(caught.exception.kind, "corrupt")
+
+    def test_deep_posix_paths_roundtrip_with_non_utf8_filename(self):
+        from kairos_filesystem.contract import TreeLimits
+        from kairos_filesystem.tree import capture_tree
+
+        repo = self.modern()
+        root = self.home / "deep"
+        root.mkdir()
+        (root / "SKILL.md").write_bytes(b"# Legacy\n")
+        parent_fd = os.open(self.home, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, parent_fd)
+        directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for _ in range(31):
+                component = "d" * 255
+                os.mkdir(component, dir_fd=directory_fd)
+                child_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = child_fd
+            name = b"\xff" + b"x" * 254
+            file_fd = os.open(
+                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory_fd
+            )
+            try:
+                os.write(file_fd, b"\x00\xff")
+            finally:
+                os.close(file_fd)
+        finally:
+            os.close(directory_fd)
+        capture = capture_tree(
+            parent_fd,
+            "deep",
+            limits=TreeLimits(64 * 1024 * 1024, 16 * 1024 * 1024, 4096, 32),
+            include_contents=True,
+        )
+        longest = max(capture.contents, key=len)
+        self.assertEqual(os.fsencode(longest.rpartition("/")[2]), name)
+        self.assertGreater(len(os.fsencode(longest)), 4096)
+        draft = self.draft(proof=capture)
+        repo.prepare_remove(draft, capture)
+        self.assertEqual(repo.snapshot(draft.operation_id), capture)
+
+    def test_snapshot_manifest_larger_than_twenty_mib_roundtrips(self):
+        from kairos_filesystem.contract import TreeCapture, TreeEntry
+
+        repo = self.modern()
+        entries = [self.capture().entries[0]]
+        data = b"# Legacy\n"
+        entries.append(
+            TreeEntry(
+                "SKILL.md", "file", 0o600, len(data), hashlib.sha256(data).hexdigest(), 1, 10, 3
+            )
+        )
+        path = ""
+        for depth in range(31):
+            path = path + "/" + "d" * 255 if path else "d" * 255
+            entries.append(TreeEntry(path, "directory", 0o700, 0, None, 1, 20 + depth, 3))
+        for index in range(4096 - len(entries)):
+            entries.append(
+                TreeEntry(
+                    path + f"/leaf-{index:04}", "directory", 0o700, 0, None, 1, 100 + index, 3
+                )
+            )
+        capture = TreeCapture(
+            tuple(sorted(entries, key=lambda entry: entry.path)), {"SKILL.md": data}
+        )
+        draft = self.draft(proof=capture)
+        repo.prepare_remove(draft, capture)
+        size = self.db.execute(
+            "SELECT length(CAST(manifest_json AS BLOB)) FROM skill_tree_snapshots WHERE snapshot_id=?",
+            (draft.operation_id,),
+        ).fetchone()[0]
+        self.assertGreater(size, 20 * 1024 * 1024)
+        self.assertEqual(repo.snapshot(draft.operation_id), capture)
 
     def test_snapshot_metadata_limits_are_inclusive_and_types_strict(self):
         from kairos_filesystem.contract import TreeCapture, TreeEntry

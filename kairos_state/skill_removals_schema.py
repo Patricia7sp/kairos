@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS skill_tree_blobs (
 );
 CREATE TABLE IF NOT EXISTS skill_tree_snapshots (
     snapshot_id TEXT PRIMARY KEY CHECK(length(snapshot_id)=32),
-    manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 20971520)
+    manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 202768384)
 );
 CREATE TABLE IF NOT EXISTS skill_tree_operations (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS skill_tree_operations (
     actor TEXT NOT NULL CHECK(actor='user_foreground'),
     created_at REAL NOT NULL CHECK(created_at>=0),
     provenance TEXT NOT NULL CHECK(provenance IN ('user','bundled')),
-    proof_json TEXT NOT NULL CHECK(length(CAST(proof_json AS BLOB)) BETWEEN 1 AND 20971520),
+    proof_json TEXT NOT NULL CHECK(length(CAST(proof_json AS BLOB)) BETWEEN 1 AND 202768384),
     snapshot_id TEXT NOT NULL REFERENCES skill_tree_snapshots(snapshot_id),
     reverts TEXT REFERENCES skill_tree_operations(operation_id),
     CHECK((action='remove' AND reverts IS NULL AND snapshot_id=operation_id)
