@@ -34,7 +34,7 @@
 
 Depende da tarefa 1 de `2026-10-10-remocao-plugins.md`, que produz `kairos_filesystem` e seus contratos. O journal da tarefa 1 abaixo pode ser desenvolvido em paralelo após aprovação das assinaturas; tarefas 2 e 3 dependem dele, tarefa 4 depende de todas. Agente A mantém filesystem/plugins; agente B mantém schema/repositórios; coordenador mantém serviços/CLI/sync e integra. Rever contrato e qualidade com agentes independentes a cada tarefa. Um arquivo tem somente um escritor por vez. Não mergear etapas incompletas de skills; entregar um PR coeso após gates. Método multiagentes já escolhido; execução aguarda revisão dos planos.
 
-### Tarefa 1: Contratos de remoção e journal aditivo
+### Task 1: Contratos de remoção e journal aditivo
 
 **Files:** Create `kairos_skills/removal_contract.py`, `kairos_state/skill_removals_schema.py`, `kairos_state/skill_writer.py`, `kairos_state/repositories/skill_removals.py`, `tests/test_skill_removal_state.py`; Modify `kairos_state/schema.py`, `kairos_state/migrations.py`, `kairos_state/connection.py`, `kairos_cli/skill_mutations.py`; regressão `tests/test_skill_mutation_state.py`, `tests/test_state.py`.
 
@@ -58,7 +58,7 @@ Depende da tarefa 1 de `2026-10-10-remocao-plugins.md`, que produz `kairos_files
 - [ ] Rodar `uv run pytest -q tests/test_skill_removal_state.py tests/test_skill_mutation_state.py tests/test_state.py`; exigir PASS, preservação do ledger antigo e recusa real da conexão sem capability.
 - [ ] Commit: `feat(skills): persiste snapshots e eventos de remoção reversível`.
 
-### Tarefa 2: Projeção e histórico comuns
+### Task 2: Projeção e histórico comuns
 
 **Files:** Modify `kairos_state/repositories/skill_mutations.py`, `kairos_skills/mutations.py`, `kairos_cli/skill_mutations.py`; Create `tests/test_skill_removal_projection.py`; regressão `tests/test_skill_mutation_rollback.py`, `tests/test_cli_skill_mutations.py`.
 
@@ -83,7 +83,7 @@ Depende da tarefa 1 de `2026-10-10-remocao-plugins.md`, que produz `kairos_files
 - [ ] Rodar `uv run pytest -q tests/test_skill_removal_projection.py tests/test_skill_removal_state.py tests/test_skill_mutation_rollback.py tests/test_cli_skill_mutations.py`; exigir PASS.
 - [ ] Commit: `feat(skills): coordena instalação e histórico entre os journals`.
 
-### Tarefa 3: Retirada, restauração e recuperação
+### Task 3: Retirada, restauração e recuperação
 
 **Files:** Create `kairos_skills/removal_io.py`, `kairos_skills/removal_origin.py`, `kairos_skills/removal_recovery.py`, `tests/test_skill_removal_io.py`, `tests/test_skill_removal_service.py`, `tests/test_skill_removal_recovery.py`; Modify `kairos_skills/mutations.py`, `kairos_skills/mutation_recovery.py`.
 
@@ -109,7 +109,7 @@ Depende da tarefa 1 de `2026-10-10-remocao-plugins.md`, que produz `kairos_files
 - [ ] Rodar `uv run pytest -q tests/test_skill_removal_io.py tests/test_skill_removal_service.py tests/test_skill_removal_recovery.py tests/test_skill_mutation_service.py tests/test_skill_mutation_rollback.py tests/test_skill_mutation_recovery.py`; exigir PASS inclusive subprocessos e preservação de todos os conflitos.
 - [ ] Commit: `feat(skills): remove e restaura árvores com recuperação durável`.
 
-### Tarefa 4: CLI, tombstones de sync e catálogo
+### Task 4: CLI, tombstones de sync e catálogo
 
 **Files:** Modify `kairos_cli/main.py`, `kairos_cli/handlers.py`, `kairos_cli/skill_mutations.py`, `kairos_skills/sync.py`, `docs/decisoes.md`; Create `kairos_skills/removal_state.py`, `tests/test_cli_skill_removal.py`, `tests/test_skill_removal_sync.py`; regressão `tests/test_cli_skills.py`, `tests/test_cli_skill_catalog.py`, `tests/test_skill_mutation_sync.py`, `tests/test_interaction_skill_catalog.py`.
 

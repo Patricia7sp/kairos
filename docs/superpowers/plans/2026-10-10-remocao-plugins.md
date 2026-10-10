@@ -32,7 +32,7 @@
 
 Este plano constitui uma entrega independente. O plano `2026-10-10-remocao-skills.md` depende somente dos helpers da tarefa 1; pode começar seu journal em paralelo depois de fixadas as interfaces. Um agente implementa helpers/plugins, outro implementa journal de skills, e o coordenador integra CLI/sync. Nenhum agente edita o mesmo arquivo em paralelo. Cada tarefa recebe revisão independente de contrato e qualidade, com correções antes da dependente. Método multiagentes já escolhido pelo usuário; implementação aguarda revisão dos planos.
 
-### Tarefa 1: Árvore segura e lock reutilizável
+### Task 1: Árvore segura e lock reutilizável
 
 **Files:** Create `kairos_filesystem/__init__.py`, `kairos_filesystem/contract.py`, `kairos_filesystem/descriptors.py`, `kairos_filesystem/tree.py`, `kairos_filesystem/lock.py`, `tests/test_tree_io.py`; Modify `kairos_skills/mutation_io.py`, `kairos_skills/mutation_lock.py`; regressão `tests/test_skill_mutation_io.py`. O pacote genérico não importa skills/plugins/ledger.
 
@@ -57,7 +57,7 @@ Este plano constitui uma entrega independente. O plano `2026-10-10-remocao-skill
 - [ ] Rodar `uv run pytest -q tests/test_tree_io.py tests/test_skill_mutation_io.py tests/test_skill_mutation_service.py tests/test_skill_mutation_sync.py`; exigir todos os testes elegíveis passando e nenhuma escrita fora das árvores autorizadas.
 - [ ] Commit: `feat(filesystem): valida árvores e locks para remoção segura`.
 
-### Tarefa 2: Serviço e CLI de remoção de plugins
+### Task 2: Serviço e CLI de remoção de plugins
 
 **Files:** Create `kairos_plugins/removal.py`, `kairos_plugins/removal_records.py`, `kairos_cli/plugin_mutations.py`, `tests/test_plugin_removal.py`, `tests/test_cli_plugin_removal.py`; Modify `kairos_cli/main.py`, `kairos_cli/handlers.py`, `docs/decisoes.md`. Regressão `tests/test_plugins.py`, `tests/test_plugin_hooks.py`. `removal_records.py` é responsável pela validação/leitura/escrita durável das provas privadas.
 

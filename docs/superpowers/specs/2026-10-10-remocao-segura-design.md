@@ -1,7 +1,7 @@
 # Remoção segura de plugins e remoção reversível de skills
 
 Data: 2026-10-10. Base: `main` em `7de35cae90d4540966160e10c2efc74a75f0d068`.
-Estado: especificação escrita aprovada pelo usuário em 2026-10-10; planos de implementação aguardam revisão.
+Estado: especificação e planos aprovados pelo usuário em 2026-10-10; execução multiagentes em andamento.
 
 ## Objetivo e referências
 
