@@ -216,13 +216,23 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("key", nargs="?", help="chave pontilhada")
     elif command == "skills" and subcommand == "add":
         parser.add_argument("--file", required=True, help="SKILL.md local (sem stdin ou URL)")
+    elif command == "skills" and subcommand == "remove":
+        parser.description = (
+            "Remove uma instalação com snapshot reversível. Exige origem comprovada por "
+            "autoria vigente ou bundle instalado íntegro; origem desconhecida, bundled "
+            "editada sem prova e hub sem identificação anterior são recusados."
+        )
+        parser.add_argument("name", metavar="NOME", help="filho imediato em skills/, kebab-case")
+        parser.add_argument("--yes", action="store_true", help="Confirma a remoção reversível")
     elif command == "skills" and subcommand == "history":
         parser.add_argument("--name", help="Nome da skill")
         parser.add_argument(
             "--limit", type=_skill_history_limit, default=20, help="1 a 100 (padrão 20)"
         )
     elif command == "skills" and subcommand == "rollback":
-        parser.add_argument("operation_id", metavar="ID", help="ID da criação no histórico")
+        parser.add_argument(
+            "operation_id", metavar="ID", help="ID de criação ou remoção concluída no histórico"
+        )
     elif command == "config" and subcommand == "set":
         parser.add_argument("key")
         parser.add_argument("value")

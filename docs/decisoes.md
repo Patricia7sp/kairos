@@ -2255,6 +2255,33 @@ de autoria, exclusão, manifesto ou opt-out. Snapshots de catálogo e cache de
 sessões anteriores permanecem intactos. Gestão autônoma, instalação do hub e
 `/learn` não são entregues por este recorte.
 
+## D-CLI.SKILL.REMOVE — remoção reversível de instalações comprovadas
+
+Referências: `_reversa_sdd/skills/tasks.md` (T-05/T-06/T-08/T-09),
+`skills/design.md`, D-10.5 e `2026-10-10-remocao-segura-design.md`.
+
+`skills remove NOME --yes` recusa sem confirmação antes de abrir banco ou
+criar lock. A retirada registra seu ID e um snapshot completo no SQLite,
+incluindo binários, arquivos ocultos, diretórios vazios e permissões ordinárias.
+`skills rollback ID` restaura uma remoção concluída no nome original sem
+sobrescrever outra instalação. Histórico e pendências usam a timeline comum
+com criações e seus rollbacks; snapshots anteriores continuam preservados.
+
+A origem precisa ser comprovada por autoria vigente neste home e identidade
+da instalação, ou pelo inventário completo do bundle instalado e manifesto v2.
+Origem desconhecida/organizacional, bundled editada sem prova de autoria e
+instalação de hub sem identificação anterior são recusadas. Isso não conclui
+o guard organizacional geral do legado nem oferece opção para contorná-lo.
+
+A sincronização lê exclusões persistentes sob o mesmo lock antes de copiar;
+a exclusão bundled sobrevive à ausência e volta do nome no bundle, inclusive
+após limpeza da entrada no manifesto. Apenas restore committed a encerra.
+Preparações e conflitos de ambas as famílias bloqueiam seeding. A consulta
+somente leitura não cria ou migra banco em homes antigos e recusa ledger
+incompleto, corrompido ou incompatível. O marcador `.no-bundled-skills` mantém
+seu significado e não é alterado pela remoção. Catálogos novos refletem a
+instalação corrente; snapshots e páginas já cacheadas de sessões permanecem.
+
 ## D-CLI.SKILL — consumo explícito de skills como contexto do turno
 
 O catálogo sob demanda acrescenta `--skills-catalog`, opt-in por turno único
