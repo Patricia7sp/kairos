@@ -693,3 +693,21 @@ class TreeIOTests(unittest.TestCase):
             restore_tree(self.parent, "copy", snapshot)
         self.assertEqual(allocations, [])
         self.assertEqual((self.home / "copy/SKILL.md").stat().st_size, 65537)
+
+    def test_restore_owns_contents_when_guard_mutates_caller_mapping(self):
+        (self.root / "file").write_bytes(b"original")
+        snapshot = self.capture()
+        contents = dict(snapshot.contents)
+
+        def mutate_caller():
+            target = self.home / "copy/file"
+            if target.exists() and target.read_bytes() == b"original":
+                snapshot.contents["file"] = b"changed!"
+
+        restored = restore_tree(self.parent, "copy", snapshot, guard=mutate_caller)
+        self.assertEqual(snapshot.contents["file"], b"changed!")
+        self.assertEqual((self.home / "copy/file").read_bytes(), contents["file"])
+        self.assertEqual(restored.contents, contents)
+        verify_tree(self.parent, "copy", restored)
+        snapshot.contents.clear()
+        self.assertEqual(restored.contents, contents)

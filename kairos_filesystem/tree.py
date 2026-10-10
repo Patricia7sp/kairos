@@ -467,6 +467,11 @@ def restore_tree(
     parent_fd: int, name: str, snapshot: TreeCapture, *, guard: Callable[[], None] | None = None
 ) -> TreeCapture:
     _name(name)
+    _require(
+        isinstance(snapshot, TreeCapture) and type(snapshot.contents) is dict,
+        "Snapshot com conteúdo inválido.",
+    )
+    snapshot = TreeCapture(snapshot.entries, dict(snapshot.contents))
     validate_capture(snapshot, require_contents=True)
     guard = _noop_guard if guard is None else guard
     with _io_errors(), ExitStack() as stack:
@@ -522,7 +527,7 @@ def restore_tree(
             "conflict",
         )
         guard()
-        return TreeCapture(result.entries, dict(snapshot.contents))
+        return TreeCapture(result.entries, snapshot.contents)
 
 
 def delete_verified_tree(
