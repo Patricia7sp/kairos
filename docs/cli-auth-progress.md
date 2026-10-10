@@ -131,7 +131,23 @@ O recorte atual implementa autoria manual: `skills add --file`, `history` e
 `rollback`, proveniência USER explícita, ledger append-only e recuperação
 observacional sem substituir versões. Testes exercitam arquivos/SQLite,
 interrupção real de processos, edições concorrentes e consumo pelo adapter
-local fictício. O sync compartilha o lock. Revisão independente, gates completos,
-merge, deploy e smoke instalado deste recorte ainda estão em andamento.
+local fictício. O sync compartilha o lock. A revisão independente identificou
+duas falhas críticas, corrigidas com testes RED→GREEN: troca concorrente do
+home/banco na abertura SQLite e exclusão de preparação abortada após troca do
+staging. Descritores permanecem vivos e a identidade é revalidada; preparações
+abortadas são movidas sem substituição para a área privada preservada.
+
+Após o reinício do host em 2026-10-10, os 28 arquivos do snapshot externo
+conferiram por SHA-256 e `git fsck` passou. O CI local completo, com Codex
+0.154.0 e SHA do pacote verificado, passou: 3477 testes Python, 5970 subtestes,
+25 testes de imagem e 25 subtestes, lint, shell, recall, lock e três frontends.
+Stub, worker e broker foram construídos; as sessões Docker offline tiveram
+26 testes passando e um skip por exigir perfil AppArmor/seccomp. Na suíte
+geral, 16 skips e 26 deselects; `runtime_live` permaneceu desabilitado.
+O smoke instalado na imagem, sem rede e com home/banco temporários, comprovou
+CLI, consumo pelo adapter, catálogo/cache, rollback, recusa de edição,
+recuperação após morte de processo e stdin intacto; hashes dos módulos
+instalados coincidiram com os fontes. Merge exige nove checks remotos verdes;
+deploy e smoke no container publicado seguem o fluxo pós-merge.
 Índice automático por padrão, `/learn`, curador e workflows duráveis continuam pendentes.
 Não foram realizadas chamadas a provedores com credenciais reais.
