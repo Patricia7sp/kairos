@@ -23,6 +23,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 from kairos_skills.mutation_lock import skill_mutation_lock
+from kairos_skills.removal_state import read_skill_tombstones
 from kairos_skills.runtime import validate_skill_name
 
 __all__ = [
@@ -148,6 +149,8 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
         return result
 
     if not bundled_dir.is_dir():
+        with skill_mutation_lock(user_dir.parent):
+            read_skill_tombstones(user_dir.parent)
         return result
 
     with _snapshot_bundle(bundled_dir) as bundled, skill_mutation_lock(user_dir.parent):
@@ -155,6 +158,7 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
 
 
 def _sync_discovered(bundled: dict[str, Path], user_dir: Path) -> SyncResult:
+    tombstones = read_skill_tombstones(user_dir.parent)
     if user_dir.is_symlink():
         raise ValueError("Diretório de skills não pode ser um link.")
     user_dir.mkdir(parents=True, exist_ok=True)
@@ -166,16 +170,21 @@ def _sync_discovered(bundled: dict[str, Path], user_dir: Path) -> SyncResult:
         TemporaryDirectory(prefix=".skill-sync-", dir=user_dir) as temporary,
         ExitStack() as rollback,
     ):
-        result = _sync_items(bundled, user_dir, manifest, Path(temporary), rollback)
+        result = _sync_items(
+            bundled, user_dir, manifest, Path(temporary), rollback, tombstones=tombstones
+        )
         write_manifest(manifest_path, manifest)
         rollback.pop_all()
         return result
 
 
-def _sync_items(bundled, user_dir, manifest, staging, rollback) -> SyncResult:
+def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones) -> SyncResult:
     result = SyncResult(total_bundled=len(bundled))
 
     for name, src in bundled.items():
+        if name in tombstones:
+            result.user_deleted.append(name)
+            continue
         dest = user_dir / name
         recorded = manifest.get(name)
         current = origin_hash(src)

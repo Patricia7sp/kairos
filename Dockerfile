@@ -78,6 +78,7 @@ COPY kairos_domain/ ./kairos_domain/
 COPY kairos_i18n/ ./kairos_i18n/
 COPY kairos_container/ ./kairos_container/
 COPY kairos_tools/ ./kairos_tools/
+COPY kairos_filesystem/ ./kairos_filesystem/
 COPY kairos_skills/ ./kairos_skills/
 COPY kairos_plugins/ ./kairos_plugins/
 COPY kairos_providers/ ./kairos_providers/

@@ -50,13 +50,27 @@ def reconcile_rollback(repository, files, record):
 
 
 def reconcile_pending(repository, files, *, name: str):
+    from kairos_skills.mutation_io import SkillMutationFiles
+    from kairos_skills.removal_contract import SkillTreeAction
+    from kairos_skills.removal_io import SkillRemovalFiles
+    from kairos_skills.removal_recovery import reconcile_tree_operation
+
     results = []
     for record in repository.pending(name):
         try:
             if record.action is SkillMutationAction.CREATE:
-                results.append(reconcile_create(repository, files, record))
+                handler, adapter = reconcile_create, SkillMutationFiles
+            elif record.action is SkillMutationAction.ROLLBACK:
+                handler, adapter = reconcile_rollback, SkillMutationFiles
+            elif record.action in (SkillTreeAction.REMOVE, SkillTreeAction.RESTORE):
+                handler, adapter = reconcile_tree_operation, SkillRemovalFiles
             else:
-                results.append(reconcile_rollback(repository, files, record))
+                raise SkillMutationError("corrupt", "Ação de skills desconhecida.")
+            if isinstance(files, adapter):
+                results.append(handler(repository, files, record))
+            else:
+                with adapter(files.home) as operation_files:
+                    results.append(handler(repository, operation_files, record))
         except SkillMutationError as error:
             if error.kind in ("conflict", "input"):
                 repository.finish(record.operation_id, SkillMutationState.CONFLICT)

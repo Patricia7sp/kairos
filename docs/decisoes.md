@@ -2255,6 +2255,33 @@ de autoria, exclusão, manifesto ou opt-out. Snapshots de catálogo e cache de
 sessões anteriores permanecem intactos. Gestão autônoma, instalação do hub e
 `/learn` não são entregues por este recorte.
 
+## D-CLI.SKILL.REMOVE — remoção reversível de instalações comprovadas
+
+Referências: `_reversa_sdd/skills/tasks.md` (T-05/T-06/T-08/T-09),
+`skills/design.md`, D-10.5 e `2026-10-10-remocao-segura-design.md`.
+
+`skills remove NOME --yes` recusa sem confirmação antes de abrir banco ou
+criar lock. A retirada registra seu ID e um snapshot completo no SQLite,
+incluindo binários, arquivos ocultos, diretórios vazios e permissões ordinárias.
+`skills rollback ID` restaura uma remoção concluída no nome original sem
+sobrescrever outra instalação. Histórico e pendências usam a timeline comum
+com criações e seus rollbacks; snapshots anteriores continuam preservados.
+
+A origem precisa ser comprovada por autoria vigente neste home e identidade
+da instalação, ou pelo inventário completo do bundle instalado e manifesto v2.
+Origem desconhecida/organizacional, bundled editada sem prova de autoria e
+instalação de hub sem identificação anterior são recusadas. Isso não conclui
+o guard organizacional geral do legado nem oferece opção para contorná-lo.
+
+A sincronização lê exclusões persistentes sob o mesmo lock antes de copiar;
+a exclusão bundled sobrevive à ausência e volta do nome no bundle, inclusive
+após limpeza da entrada no manifesto. Apenas restore committed a encerra.
+Preparações e conflitos de ambas as famílias bloqueiam seeding. A consulta
+somente leitura não cria ou migra banco em homes antigos e recusa ledger
+incompleto, corrompido ou incompatível. O marcador `.no-bundled-skills` mantém
+seu significado e não é alterado pela remoção. Catálogos novos refletem a
+instalação corrente; snapshots e páginas já cacheadas de sessões permanecem.
+
 ## D-CLI.SKILL — consumo explícito de skills como contexto do turno
 
 O catálogo sob demanda acrescenta `--skills-catalog`, opt-in por turno único
@@ -2302,3 +2329,24 @@ corrigir exige id imutável (ex.: `message_uid` ULID + `seq` de ordenação) e
 toca compressão, FTS, watermark, rewind e todos os consumidores — alcance
 muito além do schema. Fica registrado como dívida herdada consciente, a ser
 revisitada na Tarefa 05 (`hermes-state`) se ainda fizer sentido.
+
+
+### Remoção de instalações de plugins
+
+`kairos plugins remove NOME --yes` retira somente o filho imediato de
+`plugins/`, sem importar módulos, ler manifesto ou carregar configuração.
+`plugin-data/`, outros plugins e bundles permanecem preservados. Callbacks já
+carregados exigem reinício dos processos; o comando não oferece hot reload.
+
+A retirada usa lock e descritores, inventário limitado sem conteúdo e rename
+sem substituição. As provas imutáveis em `.plugins-retired/ID/` precedem o
+rename; só o resultado terminal durável comprova a remoção. Uma interrupção
+com original íntegro ainda instalado permite registrar aborto. Resíduos,
+conflitos e ausência sem resultado terminal recusam sucesso e não retomam
+limpeza automaticamente. O stderr JSON inclui `retirado` e `residuo_id` para
+inspeção de retirada parcial; não promete restaurar arquivos já apagados.
+
+Criação segura de diretórios privados exige filesystem local atestável
+(ext2/3/4, XFS, Btrfs ou tmpfs); overlay, FUSE e filesystems remotos são
+recusados. Entradas especiais, links, hardlinks e outros mounts também
+recusam a operação antes da exclusão.

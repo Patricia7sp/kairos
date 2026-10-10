@@ -18,7 +18,7 @@ class SkillMutationError(ValueError):
     """Erro público, sem valores da fonte ou exceções de backend."""
 
     def __init__(self, kind: str, message: str, *, operation_id: str | None = None):
-        if kind not in {"input", "conflict", "io", "corrupt", "unavailable"}:
+        if kind not in {"input", "conflict", "io", "corrupt", "unavailable", "denied"}:
             raise ValueError("Categoria de erro inválida.")
         super().__init__(message)
         self.kind = kind
@@ -54,7 +54,8 @@ def validate_hash(value: str) -> None:
 
 
 def validate_actor(actor: Actor) -> None:
-    require(actor is Actor.USER_FOREGROUND, "Autoria manual exige o usuário em primeiro plano.")
+    if actor is not Actor.USER_FOREGROUND:
+        raise SkillMutationError("denied", "Autoria manual exige o usuário em primeiro plano.")
 
 
 def _creation_parts(text: str) -> tuple[str, str, int]:

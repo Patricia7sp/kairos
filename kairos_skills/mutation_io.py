@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import ctypes
-import errno
 import os
 import re
 import stat
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
+from kairos_filesystem import descriptors
+from kairos_filesystem.contract import FilesystemError
 from kairos_skills.mutation_contract import (
     SkillDirectoryIdentity,
     SkillFilesystemEntry,
@@ -18,6 +18,8 @@ from kairos_skills.mutation_contract import (
     validate_name,
     validate_skill_creation,
 )
+
+ctypes = descriptors.ctypes
 
 
 @contextmanager
@@ -30,51 +32,39 @@ def io_errors(*, kind: str = "io"):
         ) from None
 
 
+@contextmanager
+def _filesystem_errors():
+    try:
+        yield
+    except FilesystemError as error:
+        raise SkillMutationError(error.kind, str(error)) from None
+
+
 def open_fd(stack: ExitStack, name, flags: int, *, parent: int | None = None, mode=0o600) -> int:
-    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_CLOEXEC, mode, dir_fd=parent)
-    stack.callback(os.close, fd)
-    return fd
+    with _filesystem_errors():
+        return descriptors.open_fd(stack, name, flags, parent=parent, mode=mode)
 
 
 def same_entry(parent: int, name: str, fd: int) -> None:
-    observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
-    opened = os.fstat(fd)
-    if (observed.st_dev, observed.st_ino) != (opened.st_dev, opened.st_ino):
-        raise SkillMutationError(
-            "conflict", "Entrada alterada durante a operação; arquivos preservados."
-        )
+    with _filesystem_errors():
+        descriptors.same_entry(parent, name, fd)
 
 
 def open_directory(
     stack: ExitStack, path: Path, *, create: bool = False
 ) -> tuple[int, list[tuple[int, str, int]]]:
-    path = Path(path).expanduser().absolute()
-    if ".." in path.parts:
-        raise SkillMutationError("input", "O caminho não pode conter escapes.")
-    fd = open_fd(stack, path.anchor, os.O_RDONLY | os.O_DIRECTORY)
-    chain = []
-    for part in path.parts[1:]:
-        try:
-            child = open_fd(stack, part, os.O_RDONLY | os.O_DIRECTORY, parent=fd)
-        except FileNotFoundError:
-            if not create:
-                raise
-            check_chain(chain)
-            try:
-                os.mkdir(part, 0o700, dir_fd=fd)
-                os.fsync(fd)
-            except FileExistsError:
-                pass
-            child = open_fd(stack, part, os.O_RDONLY | os.O_DIRECTORY, parent=fd)
-        chain.append((fd, part, child))
-        fd = child
-    check_chain(chain)
-    return fd, chain
+    with _filesystem_errors():
+        return descriptors.open_directory(stack, path, create=create)
 
 
 def check_chain(chain: list[tuple[int, str, int]]) -> None:
-    for parent, name, fd in chain:
-        same_entry(parent, name, fd)
+    with _filesystem_errors():
+        descriptors.check_chain(chain)
+
+
+def rename_no_replace(old_parent: int, old_name: str, new_parent: int, new_name: str) -> None:
+    with _filesystem_errors():
+        descriptors.rename_no_replace(old_parent, old_name, new_parent, new_name)
 
 
 def read_regular(parent: int, name: str, limit: int) -> tuple[bytes, os.stat_result]:
@@ -114,36 +104,6 @@ def read_skill_creation(source: Path):
             return validate_skill_creation(data.decode("utf-8"))
         except UnicodeError:
             raise SkillMutationError("input", "SKILL.md deve ser UTF-8 válido.") from None
-
-
-def rename_no_replace(old_parent: int, old_name: str, new_parent: int, new_name: str) -> None:
-    try:
-        function = ctypes.CDLL(None, use_errno=True).renameat2
-    except (AttributeError, OSError):
-        raise SkillMutationError(
-            "unavailable", "Publicação segura indisponível nesta plataforma."
-        ) from None
-    function.argtypes = (
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        ctypes.c_char_p,
-        ctypes.c_uint,
-    )
-    function.restype = ctypes.c_int
-    if function(old_parent, os.fsencode(old_name), new_parent, os.fsencode(new_name), 1) != 0:
-        number = ctypes.get_errno()
-        if number in (errno.ENOSYS, errno.EOPNOTSUPP, errno.EINVAL, errno.EXDEV):
-            raise SkillMutationError(
-                "unavailable", "Filesystem não oferece movimento seguro sem substituição."
-            )
-        if number in (errno.EEXIST, errno.ENOTEMPTY):
-            raise SkillMutationError(
-                "conflict", "O nome está ocupado; ambas as versões foram preservadas."
-            )
-        raise SkillMutationError("io", "Não foi possível mover a skill com segurança.")
-    os.fsync(old_parent)
-    os.fsync(new_parent)
 
 
 class SkillMutationFiles:

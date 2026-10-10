@@ -285,7 +285,7 @@ def cmd_skills(args) -> int:
     from kairos_skills.sync import sync_bundled_skills
 
     sub = args.skills_command
-    if sub in ("add", "history", "rollback"):
+    if sub in ("add", "history", "rollback", "remove"):
         from kairos_cli.skill_mutations import run_skill_mutation
 
         return run_skill_mutation(_home(), args)
@@ -345,10 +345,13 @@ def cmd_mcp(args) -> int:
 
 
 def cmd_plugins(args) -> int:
-    from kairos_plugins import EMITTED_HOOKS, VALID_HOOKS, disabled_from_config, load_plugins
+    if args.plugins_command == "remove":
+        from kairos_cli.plugin_mutations import run_plugin_removal
 
+        return run_plugin_removal(_home(), args)
     if args.plugins_command == "list":
         from kairos_cli.config import load_config
+        from kairos_plugins import EMITTED_HOOKS, VALID_HOOKS, disabled_from_config, load_plugins
 
         home = _home()
         try:

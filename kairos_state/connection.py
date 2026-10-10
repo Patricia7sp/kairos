@@ -61,6 +61,9 @@ def connect(
 
     conn = sqlite3.connect(str(path), timeout=timeout)
     conn.row_factory = sqlite3.Row
+    from kairos_state.skill_writer import register_skill_writer
+
+    register_skill_writer(conn)
 
     # ``foreign_keys`` é OFF por padrão no SQLite, e é por CONEXÃO. Sem isto,
     # toda FK declarada no schema é decorativa. Herdado do legado

@@ -19,6 +19,11 @@ from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 from kairos_state.shares_schema import SHARES_SCHEMA_SQL
 from kairos_state.skill_mutations_schema import SKILL_MUTATIONS_SCHEMA_SQL
+from kairos_state.skill_removals_schema import (
+    SKILL_REMOVALS_SCHEMA_SQL,
+    SKILL_REMOVALS_TRIGGERS_SQL,
+)
+from kairos_state.skill_writer import register_skill_writer
 from kairos_state.skills_schema import SKILLS_SCHEMA_SQL
 
 __all__ = [
@@ -90,6 +95,14 @@ def _v7_skill_mutations(conn: sqlite3.Connection) -> None:
     execute_schema(conn, SKILL_MUTATIONS_SCHEMA_SQL)
 
 
+def _v8_skill_removals(conn: sqlite3.Connection) -> None:
+    execute_schema(conn, SKILL_REMOVALS_SCHEMA_SQL)
+    conn.execute(
+        "INSERT INTO skill_mutation_timeline(legacy_event) SELECT sequence FROM skill_mutation_events ORDER BY sequence"
+    )
+    execute_schema(conn, SKILL_REMOVALS_TRIGGERS_SQL)
+
+
 #: Cada degrau é aplicado **uma vez**, em ordem, e grava a versão na mesma
 #: transação. Rodar duas vezes não altera o resultado (RF-17): a versão
 #: registrada faz o segundo passe não encontrar degrau pendente.
@@ -101,6 +114,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(5, "compartilhamento de conversas por link", _v5_shares_schema),
     Migration(6, "catálogo imutável e assets de skills por sessão", _v6_skills_schema),
     Migration(7, "journal reversível de autoria manual de skills", _v7_skill_mutations),
+    Migration(8, "snapshots binários e timeline de remoção de skills", _v8_skill_removals),
 )
 
 
@@ -115,9 +129,12 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
     if conn.in_transaction:
         raise sqlite3.OperationalError("cannot migrate inside an existing transaction")
 
+    register_skill_writer(conn)
     conn.execute("BEGIN IMMEDIATE")
     try:
         current = read_schema_version(conn)
+        if current is not None and current > _schema.SCHEMA_VERSION:
+            raise sqlite3.OperationalError("schema futuro não suportado")
         if current is None:
             current = 0
             conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
@@ -183,6 +200,11 @@ CANONICAL_TABLES = frozenset(
         "skill_mutation_operations",
         "skill_mutation_events",
         "skill_mutation_contents",
+        "skill_tree_operations",
+        "skill_tree_events",
+        "skill_tree_snapshots",
+        "skill_tree_blobs",
+        "skill_mutation_timeline",
     }
 )
 
@@ -249,6 +271,12 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
             "INSERT INTO messages_fts_trigram(rowid,content,tool_name,tool_calls) "
             "SELECT id,content,tool_name,tool_calls FROM messages_fts_trigram_src"
         )
+
+    if read_schema_version(conn) == _schema.SCHEMA_VERSION:
+        with conn:
+            execute_schema(conn, SKILL_MUTATIONS_SCHEMA_SQL)
+            execute_schema(conn, SKILL_REMOVALS_SCHEMA_SQL)
+            execute_schema(conn, SKILL_REMOVALS_TRIGGERS_SQL)
 
     depois = canonical_fingerprint(conn)
     if antes != depois:

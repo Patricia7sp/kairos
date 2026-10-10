@@ -5,6 +5,7 @@ kairos_container
 kairos_cron
 kairos_domain
 kairos_evals
+kairos_filesystem
 kairos_gateway
 kairos_i18n
 kairos_integration
