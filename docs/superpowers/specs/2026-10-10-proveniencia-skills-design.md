@@ -1,346 +1,239 @@
-# Proveniência de instalações e proteção organizacional de skills
+# Resolução de evidências e adoção de skills — fatia A
 
-Status: proposta para revisão; não autoriza implementação. Preparada com
-três investigações independentes de specs, código atual e autorização.
-Base: main `c77c92c6272fd3858e5d43df6faa12839d79154a`, após o PR #99.
+Status: proposta revisada, aguardando aprovação; nenhuma regra nova está
+implementada. Base: main `c77c92c6272fd3858e5d43df6faa12839d79154a` (PR #99).
+Esta revisão incorpora os seis apontamentos da revisão do PR #100.
 
-## Objetivo e entendimento
+## Objetivo e divisão
 
-Permitir identificar uma instalação existente, explicar suas permissões e
-registrar uma decisão explícita do usuário sobre instalações sem prova
-anterior. Aplicar proteção organizacional antes das mutações disponíveis.
-Preservar snapshots, histórico, restauração, tombstones e catálogos de turnos
-iniciados. A investigação e a preparação do design foram autorizadas; as
-regras novas deste documento ainda precisam de aprovação.
+Explicar a autoridade sobre uma instalação sem confundir autoria histórica,
+distribuição e permissão atual. Permitir adoção explícita e revogável de uma
+instalação antiga, conservando bytes, provas e contratos de recuperação.
 
-A recomendação para legado é adoção explícita, com confirmação e revogação,
-sem alegar que o usuário escreveu os arquivos anteriormente. Essa escolha
-foi apresentada à usuária separadamente e permanece uma proposta neste
-documento. Identificação sozinha nunca concede autorização.
+Dividir a entrega em fases com planos e gates de revisão próprios:
 
-Não entregar download/busca/update pelo hub, administração de organizações,
-pull de mirrors, edição por modelo, `/learn` ou curadoria automática neste
-recorte. Integrar o escritor de promoção já público não equivale a entregar
-um novo fluxo de aquisição. Não acrescentar ferramenta ao core.
+| Fase | Entrega | Gate antes da fase seguinte |
+|---|---|---|
+| A1 | Resolução e `identify` somente leitura | Revisão do comportamento observado; suíte local e CI exigidos pelo projeto |
+| A2 | `adopt`, `unadopt` e integração mínima com remove/restore/history | Revisão de linhagem e recuperação; suíte local, CI e backup/restauração |
+| B1 | Política organizacional local e guards ampliados | Spec e plano próprios aprovados; garantia limitada validada |
+| B2 | Coordenação das publicações de sync/quarentena | Plano próprio e tabela de recuperação exercitada na imagem |
 
-## Rastreabilidade e limites das fontes
+B1/B2 ficam na [proposta separada da fatia B](2026-10-11-politica-publicacao-skills-design.md).
+A aprovação de A não aprova B. Não haverá um plano único para todas as fases.
+A execução será multiagente, com propriedade de arquivos por tarefa.
 
-As fontes Reversa ficam em `../hermes-agent/_reversa_sdd/`, relativo à raiz
-do repositório principal. `source_ref`, `unit` e `enforced_at` continuam nas
-fontes; comentários novos de produto não substituem essa rastreabilidade.
+Em A2, validar primeiro a vertical `identify` + `adopt`, em fixtures isoladas.
+Essa vertical é um marco de revisão interno: não liberar o comando adopt em
+produção antes de unadopt e da integração de recuperação. Uma adoção não será
+armazenada como autoridade dormente que uma atualização posterior ativa sem
+nova confirmação. A1 pode ser entregue e revisada independentemente.
+
+Não alterar sync, promoção de quarentena, edição por modelo, `/learn`, hub,
+administração de organizações ou curadoria automática em A. A troca de inode
+pelo sync continua invalidando a prova anterior; A recusa com diagnóstico,
+sem prometer corregir publicações ainda fora do journal. Não adicionar tool.
+
+## Rastreabilidade: herdado e não herdado
+
+Fontes em `../hermes-agent/_reversa_sdd/`, relativo ao repositório principal.
+A rastreabilidade permanece em `source_ref`, `unit` e `enforced_at` nas fontes.
 
 | Fonte | Contrato herdado |
 |---|---|
-| `adrs/009-proveniencia-de-skill.md`, Decisão e Alternativas | Origem nasce no ato de escrita; frontmatter não escolhe propriedade; somente o fork background_review cria material auto-curável |
-| `skills/requirements.md`, RF-04 e regras de propriedade | Foreground pertence ao usuário; ausência de proveniência não autoriza curadoria |
-| `skills/tasks.md`, T-04 e TT-04/05/06 | Contexto de escrita explícito e teste por superfície; não generalizar cron/subagente como autoria autônoma |
-| `domain.md`, §2.3; `permissions.md`, §3.2/3.4 | Atores autônomos nunca fazem hard-delete; foreground ainda precisa passar pelos demais guards |
-| `skills/requirements.md`, portões e segurança; `skills/design.md`, matriz e fluxos alternativos | Proteção organizacional cobre delete/remove_file; não há exigência de proibir toda edição |
-| `skills/design.md`, HubLockFile; `skills/tasks.md`, T-27/TT-20/TM-05 | Origem de distribuição rastreável; quarentena obrigatória; hub não é ferramenta do agente |
-| `docs/decisoes.md`, D-09.SYNC e D-09.1–D-09.7 | Diretório completo, edição/exclusão local preservadas, author privado, manifesto MD5 sem autoridade de segurança |
-| D-CLI.SKILL.AUTHOR e D-CLI.SKILL.REMOVE | SQLite canônico, identidade observada, recuperação conservadora; guard org geral ainda pendente |
-| Specs de autoria, catálogo e remoção aprovadas | IDs/blobs anteriores imutáveis; restore conserva origem; rollback antigo não alcança instalação posterior |
+| `adrs/009-proveniencia-de-skill.md`, Decisão/Alternativas; `skills/requirements.md`, RF-04 | Origem nasce no ato de escrita; frontmatter não escolhe propriedade |
+| `skills/tasks.md`, T-04/TT-04/05/06 | Somente background_review cria SEDIMENT auto-curável; cron/subagente não basta |
+| `domain.md`, §2.3; `permissions.md`, §3.2/3.4 | Autônomos nunca fazem hard-delete; foreground passa pelos demais guards |
+| `skills/requirements.md:54`; `skills/design.md:93` | `_org_mirror_write_guard` em delete/remove_file; não exige veto geral à edição |
+| D-09.1–D-09.7, D-CLI.SKILL.AUTHOR/REMOVE | Edição/exclusão local preservadas; manifesto não é autoridade de segurança; SQLite/identidade/recuperação conservadores |
 
-As specs não definem enrollment organizacional, emissor, formato de política,
-administradores ou override. A política local descrita abaixo é uma decisão
-nova proposta para Kairos, não uma regra que já constava do Reversa. Seu
-escopo é restrição local; não autentica uma organização ou um distribuidor.
+### Não herdado: decisões propostas do Kairos
 
-Resolver duas inconsistências das fontes conservadoramente: ausência de
-contexto permanece protegida, enquanto classificação autônoma indevida é
-erro; a matriz explícita ação×portão prevalece sobre a contagem textual de
-quatro gates para delete, pois frontmatter de nova criação só cabe a create.
+Registradas em [docs/decisoes.md](../../decisoes.md), com status de proposta:
 
-## Situação atual
+- **D-CLI.SKILL.PROVENANCE:** identificar/adotar/revogar, três dimensões,
+  linhagem revogável e exclusão futura de sync independente do proprietário.
+- **D-CLI.SKILL.ORG:** política local futura, reserva conservadora de `_org`
+  e ampliação futura do veto a substituições; detalhes pertencem a B.
+- **D-09.GATES:** resolver a contagem contraditória pelas ações da matriz.
+  A matriz resulta em três guards para delete, pois frontmatter de criação
+  só cabe a create; não reescrever o Reversa nem alegar regra nova herdada.
 
-O journal comprova create USER e restore USER/BUNDLED por identidade corrente.
-Uma instalação fora do journal só pode ser removida quando corresponde à
-árvore completa do bundle atual do pacote e ao manifesto v2 íntegro.
+As fontes não definem enrollment, emissor, política administrativa ou override.
+A reserva de `_org` também não é formato normativo herdado. Em A, sua aplicação
+é somente uma recusa conservadora de alvo nesse namespace; não implementa
+mirror, consumo ou política externa e não conclui o guard organizacional geral.
 
-`ownership(name)` usa USER como fallback protetivo de curadoria. Remove
-deliberadamente não usa esse fallback como prova. Hub é canal de aquisição,
-não classe de proprietário; seus dados de source/trust são transitórios.
-A promoção pública ainda faz substituição sem o lock/journal compartilhado.
-Sync já compartilha lock e tombstones, mas uma publicação legítima pode trocar
-inode sem atualizar a instalação comprovada. O próximo design precisa
-coordenar esses escritores, não somente acrescentar um campo origin.
+## Resolução e primeira vertical A1
 
-## Alternativas e recomendação
+Separar três dimensões em toda resposta e registro novo:
 
-1. **Identificação somente leitura.** Explica as recusas existentes e tem
-   alcance pequeno, mas não permite administrar legado nem corrige a perda
-   de prova após publicação legítima.
-2. **Registro de instalação, adoção explícita e política independente.**
-   Recomendado: separa fatos e decisões, liga autoridade à identidade observada
-   e integra escritores atuais. Exige journal de publicações e recuperação.
-3. **Hub e administração organizacional completos.** Pode gerar novas provas
-   de aquisição, mas adiciona autenticação, redes, atualização e revogação
-   remotas. Depende desta fundação e fica para outro recorte.
+| Campo | Significado |
+|---|---|
+| `historical_creation_origin` | Ato original comprovado, ou desconhecido; adoção não o inventa |
+| `installation_source` | Local/bundle do pacote/aquisição comprovada/desconhecida; declaração não é prova |
+| `authorization_basis` | Escrita comprovada, adoção vigente ou nenhuma, sujeita aos vetos conhecidos |
 
-## Três dimensões independentes
-
-| Dimensão | Significado | O que não comprova |
-|---|---|---|
-| Autoria histórica | Ato de criação comprovado, ou desconhecida | Adoção posterior não prova autoria anterior |
-| Fonte da instalação | Local, bundle do pacote, quarentena com recibo, ou desconhecida | URL, trust_level ou manifesto isolados não conferem propriedade |
-| Autoridade/proteção atual | Permissão fundada em escrita comprovada ou adoção, mais vetos organizacionais | Foreground não dispensa veto; USER por default não é permissão |
-
-Manter `Provenance.USER/BUNDLED/SEDIMENT` com seu significado de propriedade
-e elegibilidade à curadoria. Não acrescentar HUB como proprietário nem usar
-USER para ocultar origem histórica desconhecida. O resultado da resolução
-expõe separadamente esses campos e a base da autorização.
-
-```mermaid
-flowchart LR
-  E[Journal e instalação observada] --> R[Resolução de evidências]
-  B[Bundle confiável do pacote] --> R
-  P[Política local do host] --> G[Guard organizacional]
-  H[Proteção histórica] --> G
-  R --> A[Decisão de autorização]
-  G --> A
-  A --> W[Escritor sob lock e journal]
-```
-
-## Autoridade da proteção organizacional
-
-Propor política local versionada, configurada na composição administrativa
-do host e lida por descritores. Seu caminho não vem de argumento da ferramenta,
-frontmatter, source do hub ou conteúdo do modelo. Deve ficar fora do home e
-dos workspaces graváveis pelo runtime; arquivo e cadeia precisam ser
-inacessíveis à escrita do usuário de execução ou estar em mount somente
-leitura atestado. Configuração incompatível/indisponível recusa mutações.
-Não considerar pathname convencional uma prova dessa separação.
-
-A configuração que seleciona a política, inclusive a decisão de não usar
-uma, integra essa mesma fronteira administrativa. Não permitir que argumento
-CLI, variável de ambiente gravável pelo modelo ou config do home desabilite,
-redirecione ou substitua uma política configurada. A composição administrativa
-deve atestar também sua própria configuração; atestar só o arquivo escolhido
-não basta. Um chamador de biblioteca sem composição confiável recusa escrita.
-
-A política reserva nomes planos por home canônico e organização. Um nome
-igual em outro home não recebe veto por coincidência. Seu formato tem versão,
-identificação da política, bindings de home e entradas únicas com nome e
-organization_id; rejeitar duplicatas, caminhos externos e coerções de tipo.
-IDs organizacionais são rótulos administrativos, não credenciais verificadas.
-
-Também reservar conservadoramente `skills/_org/` para mirrors. Essa convenção
-é proposta Kairos; as specs apenas exigem o veto de mirrors. Não implementar
-consumo ou pull desse namespace agora. Organização ativa/inativa e presença
-de sidecar não controlam o veto; symlink/mount nunca serve de autorização.
-
-Proteção já comprovada nos registros de uma instalação fica registrada de
-forma durável e não desaparece porque a política perdeu uma entrada, o marcador
-mudou ou o arquivo ficou indisponível. Revogação dessa proteção exige futuro
-contrato administrativo; não oferecer bypass, unprotect ou force nesta fase.
-Uma publicação autorizada conserva fatos de proteção herdados; identificar
-ou recusar uma operação não acrescenta um registro de instalação. Um reader
-não registra observações. Um escritor captura política e histórico
-sob lock, atesta novamente a fonte antes de cada efeito e recusa divergência.
-
-Não oferecer defesa contra administrador que reescreve código, banco e todas
-as provas, nem detecção de cópias arbitrárias de conteúdo organizacional em
-outra instalação. A fronteira protege o namespace e os bindings conhecidos,
-sem classificar conteúdo por heurística. A configuração opcional ausente
-significa que não há bindings externos configurados; vetos do namespace e do
-histórico continuam obrigatórios. Fonte configurada e ausente é erro.
-
-## Interface e efeitos propostos
+Manter USER/BUNDLED/SEDIMENT para propriedade e curadoria. Fallback USER
+protege legado da curadoria, mas não prova autoria nem autoriza remoção.
+URL, trust_level e conteúdo não conferem autoridade. Não acrescentar HUB
+como proprietário nem apagar desconhecimento histórico após adoção.
 
 ```bash
 kairos skills identify NOME --json
-kairos skills adopt NOME --yes --json
-kairos skills unadopt ID_DA_ADOCAO --yes --json
 ```
 
-`identify` consulta a instalação, provas existentes e política. Não cria home,
-banco, lock, migração, capability SQL escritora ou sidecars no home. Reutiliza
-a cópia privada estável DB+WAL da leitura entregue. Retorna autoria histórica,
-fonte, base de autorização, proteção, validade da identidade e motivos; não
-imprime conteúdo, credenciais ou caminho externo da política. A identificação
-de estado desconhecido é diagnóstico válido com `removivel=false`; corrupção
-ou impossibilidade de atestação são erros, não origem desconhecida normal.
+Consultar instalação e provas canônicas por cópia privada estável DB+WAL.
+Não criar home, banco, lock, migração, registro ou sidecar. Retornar os três
+campos, propriedade, instalação corrente, validade da identidade, proteção
+conhecida, `removivel` e motivos. Em A1, não há leitura de política externa.
+Para proteção não atestada, informar explicitamente o limite de cobertura;
+não produzir `org_guard_complete=true` ou inferir ausência de organização
+pelo conteúdo. Não imprimir arquivos, credenciais ou caminhos privados.
 
-`adopt` exige USER_FOREGROUND e confirmação antes de qualquer I/O. Registra
-um novo ato: o usuário assume a administração local daquela instalação.
-Autoria histórica e fonte permanecem desconhecidas quando faltam provas.
-Nunca fabrica create, concede SEDIMENT ou reclassifica um mirror protegido.
-A árvore deve ser regular, estável e atender aos limites de remoção; não
-exigir semver para SKILL.md legado. Registro liga home, identidade da raiz,
-inventário completo e snapshot aos bytes observados.
+Uma origem desconhecida é diagnóstico válido, com `removivel=false`.
+Ledger corrupto/incompatível ou identidade impossível de atestar são erros.
+Uma instalação sem journal só prova BUNDLED quando corresponde ao inventário
+completo do bundle confiável do pacote e ao manifesto v2 íntegro.
+Root arbitrária e hash MD5 do manifesto isolado não bastam.
 
-Após committed, a adoção autoriza remove daquela identidade, com propriedade
-USER por decisão atual e base explícita `user_adoption`. Edições internas não
-inventam autoria histórica nem mudam essa base; substituição da raiz invalida
-autoridade, mesmo byte-idêntica. Não transferir uma propriedade BUNDLED já
-comprovada para USER por adoção. Para uma instalação já comprovada e vigente,
-não criar outro registro ativador: informar a prova existente e conservar ID.
+## Adoção e revogação A2
 
-Repetir a mesma adoção concluída retorna seu ID quando a identidade e a
-projeção continuam vigentes. Uma instalação posterior exige decisão nova.
-Não aceitar `--origin`, `--actor`, `--force` ou fonte histórica fornecida pelo
-modelo como forma de escolher proprietário ou afastar proteção.
+```bash
+kairos skills adopt NOME --yes --json
+kairos skills unadopt NOME --yes --json
+kairos skills unadopt NOME --expect-adoption ID --yes --json
+```
 
-`unadopt` revoga somente a autoridade de uma adoção ainda corrente. Exige
-foreground, confirmação, ausência de pendências e identidade correspondente.
-Registra outro ID e preserva integralmente arquivos, modos, snapshot e provas.
-Depois, remove volta a exigir prova positiva; o fallback protetivo da curadoria
-continua. Restore de uma instalação adotada conserva também o ID da adoção
-fundadora: `unadopt` desse ID pode revogar a autoridade da identidade corrente
-derivada, após verificá-la. Não altera o evento RESTORE nem seus arquivos.
-Não revoga create/restore com autoridade independente, uma adoção nova ou
-instalação substituída fora dessa linhagem. Recusa quando a linhagem não estiver
-presente ou sua identidade corrente divergir; nunca agenda veto retroativo.
-Uma nova adoção explícita pode conceder nova autoridade. Rollback dos IDs de
-adoção/revogação é recusado com explicação; sua reversão administrativa tem
-este comando próprio, distinto da reversão de arquivos existente.
+Foreground e confirmação são verificados antes de abrir home/banco/criar lock.
+Os guards pertencem ao serviço, incluindo chamadas diretas; CLI não é a única
+fronteira. Preservar os vetos disponíveis e recusar namespace organizacional,
+proteção comprovada no histórico, pendências e árvore insegura. Essa proteção
+conservadora não detecta mirrors planos sem evidências nem autentica sua origem;
+o guard geral e a continuidade de política configurada dependem de B1.
 
-## Escritores e publicações
+Adopt registra o ato presente de assumir administração local, com ID A,
+home, identidade da raiz (device/inode), inventário e snapshot. Não cria um
+create fictício, não concede SEDIMENT, não exige semver de conteúdo legado
+e não reclassifica autoria histórica. A prova committed concede USER por
+decisão atual, com `authorization_basis=user_adoption` e `adoption_id=A`.
 
-Toda operação decide sobre destino e política na camada de serviço, inclusive
-chamadas diretas à biblioteca; guards só no parser CLI não bastam.
+Edições internas preservam essa base; substituição externa da raiz, mesmo
+byte-idêntica, invalida autoridade. Uma concessão USER/BUNDLED independente
+e vigente não muda por adopt: devolver a prova existente, sem novo ativador.
+Restore derivado de adoção revogada não é tal concessão e não impede readoção B.
+Repetição de adoção
+vigente devolve A; após revogação é necessário novo ato confirmado B.
+Não aceitar origem, ator ou force escolhidos pelo modelo.
 
-| Escritor atual | Integração necessária |
+Unadopt resolve pelo nome a autoridade corrente sob o lock comum. Captura ID
+da instalação I, adoção A, linhagem e raiz; revalida esses valores antes de
+registrar U. `--expect-adoption A` é uma condição de comparação para scripts:
+se a adoção corrente for B, recusar em vez de revogar B. Mesmo sem esse flag,
+uma mudança entre resolução e commit recusa; não selecionar outra autoridade
+durante a mesma operação. History e identify expõem A, I e sua vigência.
+
+Revogação altera somente autoridade: conserva bytes, modos, snapshots, IDs
+anteriores e tombstones. Nome ausente, concessão independente, adoção já
+revogada, raiz substituída, linhagem incompleta ou pendência recusam sem efeito.
+Revogar concessão sem instalação presente fica fora desta interface.
+Rollback de A/U recusa e indica unadopt/adopt; não reverte arquivos.
+
+## Linhagem: tabela de estados e invariantes
+
+| Transição | Instalação corrente | Autoridade | Efeito |
+|---|---|---|---|
+| Adopt A | I0, raiz D0/N0 | A vigente | Registra assunção; conserva arquivos |
+| Remove M | Ausente | A preservada na linhagem de M | Retira I0; snapshot conserva A |
+| Restore R de M | I1, raiz D1/N1 | A vigente transportada por R | Publica I1; não cria concessão independente |
+| Unadopt nome, esperando A | I1 validada | A revogada por U | Somente journal; conserva I1 |
+| Remove após U | I1 | Nenhuma autoridade derivada de A | Recusa, apesar de R committed |
+| Adopt B após U | I1 validada | B vigente | Nova decisão foreground; A continua revogada |
+| Unadopt esperando A após B | I1 | B permanece vigente | Recusa por comparação; não revoga B |
+
+Invariantes obrigatórias:
+
+1. RESTORE de adotada conserva `adoption_id=A`, histórico e fonte. R comprova
+   publicação/identidade; não converte desconhecida em autoria USER independente.
+2. Resolver linhagem e vigência antes de autorização. Nunca usar o simples
+   fato de R committed como fallback que contorne U.
+3. U registra nome/home, A, I corrente e device/inode observados. O conjunto
+   precisa corresponder à projeção e à árvore, sob lock, até o commit.
+4. U revoga A e autoridade dos seus descendentes restaurados. Não modifica
+   eventos de restore nem concessões independentes ou futuras.
+5. Restore de snapshot ligado a A revogada recusa: não ressuscitar autoridade
+   por outro remove antigo. Uma aquisição/criação independente segue suas
+   próprias provas; nunca é assumida por semelhança de nome ou conteúdo.
+6. Substituição não comprovada da raiz invalida a cadeia; edição interna não.
+   Linhagem ausente/corrupta nunca degrada para fallback autorizador.
+
+## Integração limitada dos escritores
+
+| Superfície em A2 | Mudança |
 |---|---|
-| Add | Conserva create USER e seu ID; verifica reserva/proteção antes de preparar/publicar |
-| Remove | Aceita prova vigente de escrita ou adoção; captura bytes atuais; veto organizacional precede retirada |
-| Rollback de create | Reavalia proteção corrente e ID antes de retirar; prova antiga não vence política nova |
-| Restore de remove | Conserva propriedade, fonte e base histórica; recusa reserva/destino ocupado; publica identidade nova |
-| Sync bundled | Mantém política de edição/exclusão; registra identidade de cada publicação autorizada sem inferir USER |
-| Promoção de quarentena | Exige contexto de escrita, guard, lock e publicação comprovada; destino ocupado não é apagado diretamente |
+| Remove | Resolver adoção vigente além das provas atuais; conservar A e fonte no snapshot |
+| Restore de remove | Revalidar A e vetos conhecidos; publicar identidade nova conservando a cadeia |
+| History/get/pending | Expor todas as famílias e IDs; ordenar pela sequência global |
+| Add/rollback de create | Manter suas provas independentes; compartilhar pendências/guards conservadores |
 
-Sync da raiz do pacote pode comprovar fonte BUNDLED pelo inventário completo.
-Sync de raiz arbitrária não ganha essa autoridade por usar a mesma função:
-registra fonte externa/desconhecida, sem autoria foreground ou autorização
-destrutiva implícitas. Toda substituição real cria ID de instalação novo;
-atualização meramente administrativa de metadados não muda ID corrente.
+Não refatorar publicação de sync/quarentena em A. Sync continua respeitando
+lock, pendências e exclusões; uma prova vencida não é renovada por inferência.
+Uma adoção posterior de raiz trocada exige novo ato e passa pelos guards.
 
-O contexto de um escritor interno não é um argumento de origem livre: a
-composição do sync atesta a raiz do pacote; autoria manual fixa foreground;
-promoção sem chamador identificado recusa. A API antiga de promoção deve
-falhar explicitamente se não puder estabelecer esse contexto. Uma fonte
-declarada no bundle pode ser informação de aquisição, nunca prova de USER,
-BUNDLED ou organização. Não persistir URL com segredo, query ou userinfo.
+Tombstones antigos mantêm significado. Como decisão nova proposta, remoções
+futuras de adotadas registram exclusão local de sync mesmo sem prova BUNDLED:
+se o bundle passar a oferecer esse nome, não ressuscitar a retirada. Somente
+restore committed encerra a exclusão vinculada. Não retroagir sobre remoções
+USER antigas nem apagar exclusão por adoção, revogação ou nova criação.
 
-Atualização exige instalação anterior ainda íntegra para a política de sync,
-ausência de vetos e publicação por descritores. Guard organizacional bloqueia
-troca destrutiva do destino materializado pelos escritores deste recorte.
-Isso não declara que toda edição in-place é proibida: edit/patch/write_file
-continuam fora da interface entregue e precisam de contrato próprio.
+## Persistência e recuperação de A2
 
-## Persistência, projeção e recuperação
+Família aditiva de adoção/revogação no SQLite canônico, com timeline comum,
+provas/snapshots imutáveis e capability atualizada. Não reescrever schema,
+IDs, metadata ou blobs antigos. Clientes antigos recusam capability nova
+antes de mutar; backup/reparo incluem todas as tabelas novas.
 
-Acrescentar família de registros de instalação/adoção/revogação ao SQLite
-canônico. Guardar provas e snapshots imutáveis; não reescrever eventos,
-conteúdos, IDs ou origem dos journals antigos. O plano detalhará a migração
-aditiva, constraints e integração da timeline; tabelas canônicas entram em
-backup/reparo e a capability escritora sobe junto ao contrato novo.
+Adopt prepara snapshot/prova duravelmente, revalida árvore e vetos e conclui.
+Recuperação: íntegra e autorizada conclui; ausente aborta sem reconstrução;
+divergente gera conflito preservando provas; veto conhecido novo aborta sem
+alterar arquivos; impossibilidade de atestação conserva pendência. Unadopt
+é transação de journal, sem movimento de arquivos. Pendências de qualquer
+família bloqueiam escritores comuns. Não limpar órfãos desconhecidos.
 
-A projeção comum distingue instalação presente, autoridade vigente, proteção
-e exclusão de sync. CREATE, RESTORE e publicação nova ativam identidades;
-ADOPT só passa a conferir autoridade à instalação observada antes sem prova.
-UNADOPT revoga essa autoridade sem retirar a instalação. Get/history/pending
-leem todas as famílias, pela sequência global, sem depender de timestamps.
+Restore reutiliza recuperação de remoção existente, conservando a linhagem
+também nos estados prepared. Se A for revogada ou surgir veto durante uma
+publicação inconclusa, não concluir autoridade nem retirar automaticamente
+árvore divergente/protegida; preservar versões em conflito. Não inferir
+concessão independente para resolver uma pendência.
 
-Ausência/partialidade de registro não cria autorização. Clientes antigos
-recusam schema/capability incompatível antes de tocar arquivos. Catálogos
-existentes e assets de turnos já iniciados permanecem imutáveis; identificação
-administrativa não acrescenta custo ao prompt nem exige tool nova.
+## Aceitação e gates por fase
 
-Adoção prepara snapshot e prova duravelmente, reconfere árvore/política e só
-então conclui. Recuperação com instalação íntegra e autorização corrente
-revalidada conclui; veto organizacional superveniente aborta a adoção sem
-alterar arquivos, enquanto política indisponível preserva a pendência e recusa
-recuperação até que possa ser atestada. Instalação ausente
-aborta sem reconstruí-la; instalação divergente gera conflito preservando
-provas. Revogação é transação de journal, sem mutação de arquivos. Pendências
-de qualquer família bloqueiam todos os escritores sob o lock comum.
+A1: comportamento real de identify em legado, USER/BUNDLED comprovados,
+conteúdo editado, root trocada, DB/WAL presentes/ausentes e ledger corrompido.
+Leitura não cria arquivos, migra banco ou altera DB/WAL; não concede USER por
+declaração. Validar subprocesso CLI e conteúdo de diagnóstico sanitizado.
 
-Publicação registra snapshot/provas antes de movimentar a árvore: original
-e staging esperados permitem abortar preservando original; destino novo com
-prova íntegra e original privado esperado permite concluir; divergência,
-ambos inesperados ou provas insuficientes preservam versões e geram conflito.
-Aplicar os seguintes estados observados, sempre com provas duráveis e política
-válida reconferidas:
+A2: validar a vertical identify/adopt preservando bytes/modos; negar sem
+confirmação antes de I/O; repetir A sem outro ativador; chamadas de biblioteca
+com os mesmos guards. Exercitar A→M→R→U→remove recusado, múltiplos restores,
+B após U e comparação esperando A. Concessão independente não é revogada.
+Testar root trocada e linhagem parcial; pendências cruzadas; SIGKILL/fsync nas
+fronteiras reais de adoção/restore; restauração de backup com hashes e BLOBs.
+Não escrever testes que leiam fonte nem congelar contagens de catálogo.
 
-| Publicação | Estado observado | Recuperação |
-|---|---|---|
-| Inicial | Destino ausente, staging esperado | Abortar; preservar destino ausente e limpar somente staging comprovado |
-| Inicial | Destino contém identidade nova esperada, staging ausente | Concluir publicação |
-| Substituição | Original esperado no destino, staging novo esperado | Abortar sem alterar original |
-| Substituição | Destino ausente, original privado esperado e staging novo esperado | Restaurar original e abortar |
-| Substituição | Destino novo esperado, original privado esperado e staging ausente | Concluir publicação; conservar snapshot do original |
-| Ambas | Identidade divergente, duplicada ou prova incompleta | Conflito; preservar versões e bloquear escritores |
+Códigos: 2 uso/nome inválido; 77 confirmação/ator/veto conhecido negados;
+69 primitiva atestável indisponível; 1 ausência/conflito/corrupção/falha.
+Sucesso de adopt/U exige registro committed real. JSON informa IDs correntes,
+linhagem e vigência; desconhecimento histórico permanece explícito.
 
-Se a política passar a vetar um destino já publicado antes de commit, não
-concluir nem retirar automaticamente a árvore protegida: registrar conflito.
-O plano detalhará apenas a implementação desses estados e testes de morte em
-cada fronteira. Órfãos desconhecidos não são adotados nem apagados por recuperação.
+Cada fase requer revisão independente, suíte integral local e CI verdes antes
+de merge, com opt-ins pertinentes à superfície. A1 não precisa de kill tests
+de publicação; A2 não valida policy nem se anuncia como guard org completo.
+Catálogos/assets de turnos iniciados e metadata antiga permanecem intactos.
 
-Tombstones existentes mantêm seu significado e não terminam por adoção,
-revogação ou publicação manual. Como decisão nova, remoções futuras também
-registram intenção local de exclusão do sync independentemente do proprietário:
-uma skill adotada sem origem comprovada não deve reaparecer se o bundle passar
-a oferecer seu nome. Restore committed encerra a exclusão vinculada; nenhuma
-reclassificação histórica é necessária. Não adicionar retroativamente exclusões
-a remoções USER antigas que não as registraram.
+## Próxima etapa
 
-## Diagnóstico e códigos de saída
-
-Conservar 2 para uso/nome inválido; 77 para ator/confirmação negados; 69 para
-primitiva/autoridade atestável indisponível; 1 para conflito, corrupção,
-ausência do alvo ou falha operacional. Política válida que proíbe a operação
-é autorização negada, com motivo organizacional sanitizado. Origem desconhecida
-sem adoção não é erro de sintaxe. Readers não transformam dados corruptos em
-diagnóstico normal. Sucesso de escrita exige efeito real e prova committed.
-
-JSON de adoção inclui operation_id, action, state, ownership,
-historical_creation_origin, installation_source e authorization_basis.
-Revogação informa seu ID, ID revogado e `authority_revoked=true` somente após
-commit. Mantém metadata antiga de create/remove/restore compatível, acrescentando
-campos explicativos sem mudar o significado dos registros já existentes.
-
-## Aceitação por comportamento
-
-- Identificar legado não registra USER comprovado; frontmatter/source/trust
-  declarados não concedem autoridade. Unknown continua protegido da curadoria.
-- Adoção confirmada preserva bytes/modos, tem ID real e autoriza somente aquela
-  identidade; sem confirmação não cria home/lock/banco. Revogação volta a
-  bloquear remoção sem retirar arquivos; nenhuma delas concede SEDIMENT.
-- Mirror ativo/inativo e binding externo recusam mutação; sidecar/marcador
-  ausente não libera. Política configurada indisponível/corrupta recusa;
-  mesma skill pessoal em outro home não é bloqueada apenas pelo nome.
-- Chamada direta a cada escritor passa pelos guards. Promoção não sobrescreve
-  destino ocupado; alteração de política durante staging recusa publicação.
-- Sync legítimo registra a identidade nova; remove funciona após atualização
-  comprovada; substituição externa byte-idêntica recusa. Root arbitrária nunca
-  comprova bundle do pacote.
-- Restore conserva propriedade e fonte, verifica proteção atual e não apaga
-  tombstone em falha. Adoção de bundled editada não apaga histórico ou exclusão;
-  remoção adotada não é ressuscitada pelo sync.
-- Pendências cruzadas bloqueiam escritores. SIGKILL e falhas de fsync nas
-  fronteiras de adoção/publicação exercitam reconciliação real; snapshots e
-  versões divergentes são preservados. Veto surgido após prepared impede
-  commit autorizador na recuperação; fonte indisponível mantém a pendência.
-- Restore de adotada conserva a linhagem revogável; unadopt verifica a
-  identidade derivada corrente, não alcança criação ou adoção independente
-  e não altera o snapshot nem os arquivos restaurados.
-- Readers preservam DB/WAL do home, não migram nem registram escritor; versões
-  antigas/modernas parciais e clientes incompatíveis recusam com diagnóstico.
-- IDs/blobs/metadata antigos e snapshots de catálogo mantêm contratos; backup
-  restaura banco, BLOBs, registros e volume com hashes/integridade verificados.
-
-## Limite da conclusão e próxima etapa
-
-Esse recorte conclui resolução/adoção e guards dos escritores atuais com uma
-autoridade local definida. Não declara pronto o T-04 em todas as superfícies
-futuras nem toda a matriz de skill_manage: ainda faltam as ações e contextos
-de escrita por modelo. Não chama uma proteção local de autenticação remota
-organizacional. A implementação do hub completo deve produzir recibos de
-aquisição verificáveis por esse contrato, sem ampliar propriedade por rótulo.
-
-Após revisão e aprovação desta spec, escrever plano de implementação com
-propriedade de arquivos por agente, revisão independente e gates integrais
-do projeto. A execução multiagente já foi escolhida pela usuária; aprovação
-da spec não autoriza pular a revisão do plano. Nenhuma mutação de produção ou
-adoção em lote é autorizada por este documento de design.
+Revisar esta spec A e as decisões propostas, depois aprovar um plano somente
+para A1. A2 terá plano/revisão próprios após o gate A1. B permanece proposta
+futura e exige aprovação separada. Este PR é documentação; não autoriza
+adoção em produção nem mutações em lote.

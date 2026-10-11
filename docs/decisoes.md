@@ -2319,6 +2319,98 @@ explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
 
 ---
 
+## D-CLI.SKILL.PROVENANCE — identificação e adoção explícita de instalações
+
+**Status: proposta; não implementada nem aprovada.** Referência de design:
+`docs/superpowers/specs/2026-10-10-proveniencia-skills-design.md`.
+Referências herdadas: `_reversa_sdd/adrs/009-proveniencia-de-skill.md`,
+Decisão e Alternativas; `skills/requirements.md` RF-04/RF-08;
+`skills/tasks.md` T-04–T-06/T-27; domínio §2.3;
+D-CLI.SKILL.AUTHOR e D-CLI.SKILL.REMOVE.
+
+Separar autoria histórica, fonte da instalação e autoridade atual. Adoção
+explícita concede administração local à instalação observada; não comprova
+que o usuário escreveu seus arquivos anteriormente e não concede SEDIMENT.
+Conteúdo, frontmatter, URL e rótulos de confiança não escolhem proprietário.
+A autoridade de uma fonte exige prova do escritor e de sua origem: chamar
+sync com uma raiz arbitrária não comprova BUNDLED, e declarar uma organização
+na aquisição não comprova proteção organizacional autenticada.
+
+A proposta separa entregas: primeiro identificação somente leitura; depois
+adoção/revogação e sua linhagem; publicações e continuidade das provas ficam
+para fatia própria. Revogação por nome resolve a adoção fundadora da
+instalação corrente, inclusive após restore derivado, e registra os IDs
+envolvidos. Não alcança uma instalação substituída, criação independente ou
+adoção posterior. Revogar autoridade preserva arquivos e histórico; restore
+não deve ressuscitar autoridade já revogada. A tabela de linhagem do design
+deve explicitar esses casos antes de implementação.
+
+Como decisão nova proposta para a fase A2, tombstones também
+registrariam a intenção local de exclusão do sync independentemente do
+proprietário. Isso impediria a reaparição de uma skill adotada quando um
+bundle posterior passasse a oferecer seu nome. Restore committed encerraria
+somente a exclusão vinculada. Não criar exclusões retroativas para remoções
+antigas que não as registraram nem mudar o significado dos tombstones atuais.
+
+## D-CLI.SKILL.ORG — continuidade de proteção por política local
+
+**Status: proposta; não implementada nem aprovada.** Referência de design:
+`docs/superpowers/specs/2026-10-11-politica-publicacao-skills-design.md`,
+com recusa conservadora de namespace na fatia A
+(`2026-10-10-proveniencia-skills-design.md`).
+Referências herdadas: `_reversa_sdd/skills/requirements.md:54`,
+`skills/design.md:93` e §Fluxos alternativos (`:115`);
+`permissions.md` §3.4; ADR 009, Consequências;
+D-CLI.SKILL.REMOVE.
+
+O contrato herdado exige veto a `delete` e `remove_file` de espelhos
+organizacionais. Não define enrollment, emissor, administradores, formato de
+política ou override. A política local por home e nome proposta para Kairos
+é decisão nova e ficará em fatia futura, junto à continuidade dos vetos
+registrados. Ela coordenaria os escritores participantes para que uma nova
+publicação ou ausência posterior de uma entrada não apagasse uma proteção
+comprovada. Não autentica uma organização remota.
+
+O limite real é continuidade da política entre operações cooperativas.
+Este recorte não estabelece isolamento da configuração e das provas contra
+o usuário de execução, o runtime ou ferramentas com acesso de escrita ao
+host. Não declarar resistência a adulteração nem endurecimento de runtime;
+essa garantia exigiria composição administrativa e isolamento próprios,
+fora da proposta. Nenhum argumento de adoção ou declaração no conteúdo
+poderia afastar um veto conhecido pelos serviços participantes.
+
+A reserva conservadora de `skills/_org/` é convenção nova proposta, não
+namespace definido pelas fontes. A fatia A propõe somente recusar alvos nesse
+namespace; consumo, mirrors e política externa ficam para a fatia B.
+Bloquear substituição destrutiva por sync ou promoção é uma
+ampliação futura do guard herdado: não equivale a afirmar que todas as ações
+`edit`, `patch` e `write_file` são proibidas. O design deve separar esse
+guard de substituição da matriz original. A fatia A mantém recusa de origem
+organizacional conhecida e exige adoção comprovada para autorizar instalação
+antes desconhecida, sem declarar concluído o guard organizacional geral.
+
+## D-09.GATES — matriz de ações prevalece sobre contagem textual
+
+**Status: proposta de interpretação; não implementada nem aprovada.**
+Referências: `_reversa_sdd/skills/requirements.md:53–54`,
+`skills/design.md:86–95`, `permissions.md` §3.4 e
+`skills/tasks.md` T-08 (`:62–65`). As fontes permanecem inalteradas.
+
+`skills/design.md:93` e `skills/requirements.md:54` confirmam
+`_org_mirror_write_guard` somente em `delete` e `remove_file`. A matriz
+explícita limita `_validate_frontmatter(new_skill=True)` a `create`;
+`_apply_skill_write_gate` cobre as seis mutações e
+`_background_review_preflight` cobre as cinco mutações de uma skill existente.
+Assim, `create` passa por dois portões e `delete` por três, preservando a
+ordem dos portões aplicáveis.
+
+A frase de `skills/design.md:95` e o critério de T-08 que contam quatro
+portões para `delete` conflitam com essa matriz. Propõe-se usar a cobertura
+explícita ação×portão como contrato e testar suas células quando forem
+implementadas, sem acrescentar validação de nova criação à exclusão para
+satisfazer a contagem textual. Guards novos de publicações ou de proteção
+local devem ser registrados como decisões novas, não atribuídos à fonte.
+
 ## Ainda em aberto
 
 ### `messages.id` continua não sendo estável
