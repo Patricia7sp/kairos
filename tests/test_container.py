@@ -651,10 +651,13 @@ import shutil
 import stat
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from kairos_domain.ownership import Actor
+from kairos_skills import identification
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.identification import identify_skill
+from kairos_skills.mutation_contract import SkillMutationError
 from kairos_skills.mutations import SkillMutationService
 from kairos_state import connect
 from kairos_state.migrations import migrate
@@ -732,6 +735,27 @@ with tempfile.TemporaryDirectory() as temporary:
         assert report.reasons == ('replaced_root',)
         assert report.current_installation_id == created.operation_id
         assert report.historical_creation_id == created.operation_id
+
+        original_capture = identification.read_installation_capture
+        after_rename = []
+
+        def capture_then_rename(home, name):
+            captured = original_capture(home, name)
+            target.rename(root / 'concurrent')
+            after_rename.append(inventory(home))
+            return captured
+
+        with patch.object(identification, 'read_installation_capture', capture_then_rename):
+            try:
+                identify_skill(home, 'user-fixture')
+            except SkillMutationError as error:
+                assert error.kind == 'conflict', error.kind
+                assert 'repita' in str(error).lower()
+                assert str(root) not in str(error)
+            else:
+                raise AssertionError('Desaparecimento concorrente nao foi recusado')
+        assert inventory(home) == after_rename[0]
+        assert (root / 'concurrent' / 'SKILL.md').read_bytes() == source.read_bytes()
     finally:
         db.close()
 """

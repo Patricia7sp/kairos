@@ -539,6 +539,41 @@ class SkillIdentificationTests(unittest.TestCase):
             self.assert_concurrent(lambda: identify_skill(self.home, self.name))
         self.assertEqual(target.read_bytes(), b"Edicao concorrente\n")
 
+    def test_target_renamed_after_first_capture_is_concurrent_conflict(self):
+        self.create()
+        original = identification.read_installation_capture
+        target = self.home / "skills" / self.name
+        after_rename = []
+
+        def capture_then_rename(home, name):
+            result = original(home, name)
+            if not after_rename:
+                target.rename(self.root / "renamed")
+                after_rename.append(self.home_inventory())
+            return result
+
+        with patch.object(identification, "read_installation_capture", capture_then_rename):
+            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+        self.assertEqual(self.home_inventory(), after_rename[0])
+        self.assertFalse(target.exists())
+        self.assertEqual(
+            (self.root / "renamed" / "SKILL.md").read_bytes(), self.source.read_bytes()
+        )
+
+    def test_stable_bundle_io_failure_is_preserved_without_home_effects(self):
+        self.bundle()
+        before = self.home_inventory()
+        with (
+            patch(
+                "kairos_skills.removal_origin.trusted_bundle_root",
+                return_value=self.root / "missing-bundle",
+            ),
+            self.assertRaises(SkillMutationError) as raised,
+        ):
+            identify_skill(self.home, self.name)
+        self.assertEqual(raised.exception.kind, "io")
+        self.assertEqual(self.home_inventory(), before)
+
     def test_home_chain_replacement_during_capture_is_refused(self):
         self.legacy()
         original = identification.capture_skill

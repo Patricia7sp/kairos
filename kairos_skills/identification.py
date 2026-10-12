@@ -89,10 +89,23 @@ def _installation_evidence(
             raise SkillMutationError("io", "Não foi possível ler o ledger de skills.") from None
 
 
+def _installation_changed_after_io(home: Path, name: str, captured: TreeCapture) -> bool:
+    try:
+        observed = read_installation_capture(home, name)
+    except SkillMutationError as error:
+        if error.kind == "conflict":
+            return True
+        if error.kind == "io":
+            return False
+        raise
+    return observed != captured
+
+
 def identify_skill(home: Path, name: str) -> SkillIdentification:
     """Diagnóstico do instante observado; remove deve revalidar suas próprias provas."""
     validate_name(name)
     home = Path(home)
+    captured = None
     try:
         evidence, database = _installation_evidence(home, name)
         captured = read_installation_capture(home, name)
@@ -102,6 +115,12 @@ def identify_skill(home: Path, name: str) -> SkillIdentification:
         if repeated != evidence or recaptured != captured:
             raise _changed()
     except SkillMutationError as error:
+        if (
+            error.kind == "io"
+            and captured is not None
+            and _installation_changed_after_io(home, name, captured)
+        ):
+            error = _changed()
         if error.kind == "conflict":
             raise SkillMutationError(
                 "conflict", str(error) + " Repita a consulta após verificar a instalação."
