@@ -282,9 +282,11 @@ def cmd_approvals(args) -> int:
 
 
 def cmd_skills(args) -> int:
-    from kairos_skills.sync import sync_bundled_skills
-
     sub = args.skills_command
+    if sub == "identify":
+        from kairos_cli.skill_identification import run_skill_identification
+
+        return run_skill_identification(_home(), args)
     if sub in ("add", "history", "rollback", "remove"):
         from kairos_cli.skill_mutations import run_skill_mutation
 
@@ -300,6 +302,8 @@ def cmd_skills(args) -> int:
         return ExitCode.OK
 
     if sub == "sync":
+        from kairos_skills.sync import sync_bundled_skills
+
         bundled = Path(__file__).resolve().parent.parent / "skills"
         r = sync_bundled_skills(bundled, user_dir)
         _emit(

@@ -552,12 +552,16 @@ class RealImageTests(unittest.TestCase):
                 f"imagem {cls.IMAGE} não construída — rode: docker build -t {cls.IMAGE} ."
             )
 
-    def run_in(self, *cmd, image=None, entrypoint="/bin/bash", extra=()):
+    def run_in(self, *cmd, image=None, entrypoint="/bin/bash", extra=(), input_text=None):
         args = ["docker", "run", "--rm", *extra]
+        if input_text is not None:
+            args.append("--interactive")
         if entrypoint:
             args += ["--entrypoint", entrypoint]
         args += [image or self.IMAGE, *cmd]
-        return subprocess.run(args, capture_output=True, text=True, timeout=120, check=False)
+        return subprocess.run(
+            args, input=input_text, capture_output=True, text=True, timeout=120, check=False
+        )
 
     # -- estrutura ---------------------------------------------------------
 
@@ -636,6 +640,128 @@ class RealImageTests(unittest.TestCase):
             "assert restored.contents == snapshot.contents; "
             "delete_verified_tree(fd, 'copy', restored); "
             "assert not (home / 'copy').exists(); os.close(fd)",
+            entrypoint="/opt/kairos/.venv/bin/python",
+            extra=("--tmpfs", "/tmp"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_identify_reads_tree_in_real_image_without_mutation(self):
+        script = """
+import shutil
+import stat
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+from kairos_domain.ownership import Actor
+from kairos_skills import identification
+from kairos_skills.catalog import catalog_home_id
+from kairos_skills.identification import identify_skill
+from kairos_skills.mutation_contract import SkillMutationError
+from kairos_skills.mutations import SkillMutationService
+from kairos_state import connect
+from kairos_state.migrations import migrate
+from kairos_state.repositories.skill_mutations import SkillMutationRepository
+
+
+def inventory(home):
+    result = {}
+    for path in (home, *sorted(home.rglob('*'))):
+        info = path.lstat()
+        result[str(path.relative_to(home))] = (
+            info.st_mode, info.st_dev, info.st_ino, info.st_nlink,
+            path.read_bytes() if stat.S_ISREG(info.st_mode) else None,
+        )
+    return result
+
+
+def observe(home, name):
+    before = inventory(home)
+    report = identify_skill(home, name)
+    assert inventory(home) == before
+    assert report.known_protection == ()
+    assert report.protection_coverage == 'namespace_and_recorded_only'
+    return report
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    home = root / 'home'
+    home.mkdir()
+    source = root / 'source.md'
+    source.write_text(
+        "---\\nname: user-fixture\\ndescription: Ficticia.\\n"
+        "version: '0.1.0'\\n---\\nProcedimento ficticio.\\n"
+    )
+    db = connect(home / 'state.db')
+    try:
+        migrate(db)
+        repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
+        service = SkillMutationService(home, repo)
+        created = service.add(source, actor=Actor.USER_FOREGROUND)
+        report = observe(home, 'user-fixture')
+        assert report.historical_creation_origin == 'user'
+        assert report.installation_source == 'local'
+        assert report.authorization_basis == 'proven_write'
+        assert report.identity_valid is True and report.removivel
+        assert report.current_installation_id == created.operation_id
+        assert report.historical_creation_id == created.operation_id
+
+        legacy = home / 'skills' / 'legacy-fixture'
+        legacy.mkdir()
+        (legacy / 'SKILL.md').write_bytes(b'# Legado sem semver\\n')
+        asset = legacy / 'run.bin'
+        asset.write_bytes(b'\\x00\\xff\\x01')
+        asset.chmod(0o751)
+        (legacy / 'empty').mkdir(mode=0o710)
+        report = observe(home, 'legacy-fixture')
+        assert report.historical_creation_origin == 'unknown'
+        assert report.installation_source == 'unknown'
+        assert report.authorization_basis == 'none'
+        assert report.ownership == 'user'
+        assert report.identity_valid is None and not report.removivel
+        assert asset.read_bytes() == b'\\x00\\xff\\x01'
+        assert stat.S_IMODE(asset.stat().st_mode) == 0o751
+        assert not list((legacy / 'empty').iterdir())
+
+        target = home / 'skills' / 'user-fixture'
+        target.rename(root / 'previous')
+        shutil.copytree(root / 'previous', target)
+        report = observe(home, 'user-fixture')
+        assert report.historical_creation_origin == 'unknown'
+        assert report.installation_source == 'unknown'
+        assert report.authorization_basis == 'none'
+        assert report.identity_valid is False and not report.removivel
+        assert report.reasons == ('replaced_root',)
+        assert report.current_installation_id == created.operation_id
+        assert report.historical_creation_id == created.operation_id
+
+        original_capture = identification.read_installation_capture
+        after_rename = []
+
+        def capture_then_rename(home, name):
+            captured = original_capture(home, name)
+            target.rename(root / 'concurrent')
+            after_rename.append(inventory(home))
+            return captured
+
+        with patch.object(identification, 'read_installation_capture', capture_then_rename):
+            try:
+                identify_skill(home, 'user-fixture')
+            except SkillMutationError as error:
+                assert error.kind == 'conflict', error.kind
+                assert 'repita' in str(error).lower()
+                assert str(root) not in str(error)
+            else:
+                raise AssertionError('Desaparecimento concorrente nao foi recusado')
+        assert inventory(home) == after_rename[0]
+        assert (root / 'concurrent' / 'SKILL.md').read_bytes() == source.read_bytes()
+    finally:
+        db.close()
+"""
+        result = self.run_in(
+            "-",
+            input_text=script,
             entrypoint="/opt/kairos/.venv/bin/python",
             extra=("--tmpfs", "/tmp"),
         )
