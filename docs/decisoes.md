@@ -2338,45 +2338,59 @@ na aquisição não comprova proteção organizacional autenticada.
 
 A proposta separa entregas: primeiro identificação somente leitura; depois
 adoção/revogação e sua linhagem; publicações e continuidade das provas ficam
-para fatia própria. A interface proposta para a identificação em A1 é:
+para fatia própria. A interface implementada para a identificação em A1 é:
 
 ```bash
 kairos skills identify revisar-docs
 kairos skills identify revisar-docs --json
 ```
 
-O diagnóstico separaria `historical_creation_origin`, `installation_source`
+O diagnóstico separa `historical_creation_origin`, `installation_source`
 e `authorization_basis`, além de propriedade, IDs da instalação e das provas,
 validade da identidade, proteção conhecida, pendências, `removivel` e motivos.
-Uma origem desconhecida seria um resultado válido, com autoridade `none` e
+Uma origem desconhecida é um resultado válido, com autoridade `none` e
 `removivel=false`: fallback USER protege legado da curadoria, mas não prova
-autoria nem autoriza remoção. Edições internas não invalidariam a prova da
-raiz; uma raiz substituída, mesmo byte-idêntica, não renovaria essa prova.
+autoria nem autoriza remoção. Edições internas não invalidam a prova da
+raiz; uma raiz substituída, mesmo byte-idêntica, não renova essa prova.
 
-A consulta não criaria home, banco, lock, migração, registro ou sidecar; não
-exibiria conteúdo, hashes, home IDs, device/inode nem caminhos privados.
+A consulta não cria home, banco, lock, migração, registro ou sidecar; não
+exibe conteúdo, hashes, home IDs, device/inode nem caminhos privados.
 Ausência, conflito concorrente, ledger corrupto/incompatível ou impossibilidade
-de atestar identidade seriam erros, sem JSON de sucesso. A resposta informaria
+de atestar identidade são erros, sem JSON de sucesso. A resposta informa
 `protection_coverage=namespace_and_recorded_only`: cobertura organizacional
 limitada ao namespace e às proteções registradas, sem leitura de política
-externa nem afirmação de guard organizacional completo. `removivel` seria
+externa nem afirmação de guard organizacional completo. `removivel` é
 diagnóstico condicionado ao instante observado e aos guards disponíveis;
-remove continuaria revalidando, sem transação conjunta prometida entre banco
+remove continua revalidando, sem transação conjunta prometida entre banco
 e árvore ou garantia de publicação derivada da consulta.
 
-`identify` usaria os nomes kebab-case aceitos pelo validador atual, antes de
-qualquer I/O. `list` poderia continuar exibindo diretórios legados como
-`Legacy_Skill`; consultá-los por `identify` seria erro de uso (exit 2), com
+`identify` usa os nomes kebab-case aceitos pelo validador atual, antes de
+qualquer I/O. `list` continua exibindo diretórios legados como
+`Legacy_Skill`; consultá-los por `identify` é erro de uso (exit 2), com
 explicação da restrição, sem renomear a instalação. `_org` também seria nome
 inválido, sem implementar reconhecimento organizacional. Conteúdo legado sem
-semver, em diretório com nome válido, continuaria consultável: essa liberdade
-de conteúdo não ampliaria os nomes aceitos. Os demais códigos propostos são
+semver, em diretório com nome válido, continua consultável: essa liberdade
+de conteúdo não amplia os nomes aceitos. Os demais códigos são
 77 para veto conhecido, 69 para primitiva atestável indisponível e 1 para
 ausência, conflito, corrupção ou falha.
 
-Esses exemplos e limites descrevem a proposta A1; a conclusão validada será
-registrada após os gates finais e o merge. A2 e a fatia B permanecem propostas
-com aprovação e planos próprios. Revogação por nome resolve a adoção fundadora da
+**Status A1: implementado na fase A1.** Entrega no
+[PR #102](https://github.com/Patricia7sp/kairos/pull/102), commit
+[`33b6e7705aed7a6d847e55251dc8ba4d0e74ac41`](https://github.com/Patricia7sp/kairos/commit/33b6e7705aed7a6d847e55251dc8ba4d0e74ac41),
+após revisão independente das tarefas e da branch, correções e re-revisões.
+A validação local final passou com 3.746 testes e 6.239 subtestes, além de
+28 testes e 26 subtestes da imagem real reconstruída, sem skip nessa etapa.
+O gate Docker offline passou com 26 testes; o opt-in de AppArmor/seccomp do
+host não foi executado. `runtime_live` permaneceu excluído sem credenciais.
+Os nove jobs de verificação do
+[CI do PR](https://github.com/Patricia7sp/kairos/actions/runs/38214100452)
+passaram antes do squash-merge; o diff resultante foi conferido e é idêntico
+ao conteúdo validado. Autoria histórica de uma instalação BUNDLED independente
+permanece desconhecida após restore, mesmo havendo criação USER anterior
+com o mesmo nome; o histórico anterior é preservado.
+
+A2 e a fatia B permanecem propostas com aprovação e planos próprios.
+Na proposta A2, revogação por nome resolve a adoção fundadora da
 instalação corrente, inclusive após restore derivado, e registra os IDs
 envolvidos. Não alcança uma instalação substituída, criação independente ou
 adoção posterior. Revogar autoridade preserva arquivos e histórico; restore
