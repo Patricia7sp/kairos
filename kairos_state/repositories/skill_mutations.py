@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 
 from kairos_domain.ownership import Actor, Provenance
+from kairos_skills.identification_contract import InstallationEvidence
 from kairos_skills.mutation_contract import (
     SkillDirectoryIdentity,
     SkillMutationAction,
@@ -47,6 +48,56 @@ def corrupt_errors():
 
 def identity_json(identity: SkillDirectoryIdentity) -> str:
     return json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
+
+
+def _project_committed_records(
+    records: tuple[CommonRecord, ...],
+) -> tuple[InstallationProof | None, SkillTreeRecord | None, bool, SkillMutationRecord | None]:
+    current = None
+    removed = None
+    bundled_removed = False
+    historical_creation = None
+    for record in records:
+        if record.action is SkillMutationAction.CREATE:
+            require(current is None)
+            identity = record.draft.identity
+            current = InstallationProof(
+                record.operation_id,
+                Provenance.USER,
+                identity.directory_dev,
+                identity.directory_ino,
+            )
+            historical_creation = record
+        elif record.action is SkillMutationAction.ROLLBACK:
+            require(current is not None and current.operation_id == record.reverts)
+            current = None
+            historical_creation = None
+        elif record.action is SkillTreeAction.REMOVE:
+            root = record.draft.proof.entries[0]
+            if current is None:
+                require(record.provenance is Provenance.BUNDLED)
+            else:
+                require(
+                    (current.provenance, current.device, current.inode)
+                    == (record.provenance, root.device, root.inode)
+                )
+            current = None
+            removed = record
+            if record.provenance is Provenance.BUNDLED:
+                bundled_removed = True
+        elif record.action is SkillTreeAction.RESTORE:
+            require(
+                current is None and removed is not None and removed.operation_id == record.reverts
+            )
+            root = record.draft.proof.entries[0]
+            current = InstallationProof(
+                record.operation_id, record.provenance, root.device, root.inode
+            )
+            removed = None
+            bundled_removed = False
+        else:
+            require(False)
+    return current, removed, bundled_removed, historical_creation
 
 
 class SkillMutationRepository:
@@ -315,64 +366,53 @@ class SkillMutationRepository:
         current = self.current_installation(name)
         return None if current is None else current.operation_id
 
-    def _projection(self, name: str):
+    def _projection_inputs(self, name: str) -> tuple[tuple[CommonRecord, ...], tuple[str, ...]]:
         validate_name(name)
         with corrupt_errors():
-            current = None
-            removed = None
-            bundled_removed = False
-            records = self._records(name)
             timeline = self._timeline()
             if timeline is not None:
-                by_id = {record.operation_id: record for record in records}
+                ids = dict.fromkeys(row[3] for row in timeline)
                 records = tuple(
+                    self._get_validated(operation_id, modern=True) for operation_id in ids
+                )
+                require(all(record is not None for record in records))
+                records = tuple(record for record in records if record.name == name)
+                by_id = {record.operation_id: record for record in records}
+                committed = tuple(
                     by_id[row[3]] for row in timeline if row[4] == "committed" and row[3] in by_id
                 )
             else:
-                records = tuple(
+                rows = self._conn.execute(
+                    "SELECT operation_id FROM skill_mutation_operations WHERE name=? ORDER BY sequence",
+                    (name,),
+                ).fetchall()
+                records = tuple(self._get_validated(row[0], modern=False) for row in rows)
+                require(all(record is not None for record in records))
+                committed = tuple(
                     record for record in records if record.state is SkillMutationState.COMMITTED
                 )
-            for record in records:
-                if record.action is SkillMutationAction.CREATE:
-                    require(current is None)
-                    identity = record.draft.identity
-                    current = InstallationProof(
-                        record.operation_id,
-                        Provenance.USER,
-                        identity.directory_dev,
-                        identity.directory_ino,
-                    )
-                elif record.action is SkillMutationAction.ROLLBACK:
-                    require(current is not None and current.operation_id == record.reverts)
-                    current = None
-                elif record.action is SkillTreeAction.REMOVE:
-                    root = record.draft.proof.entries[0]
-                    if current is None:
-                        require(record.provenance is Provenance.BUNDLED)
-                    else:
-                        require(
-                            (current.provenance, current.device, current.inode)
-                            == (record.provenance, root.device, root.inode)
-                        )
-                    current = None
-                    removed = record
-                    if record.provenance is Provenance.BUNDLED:
-                        bundled_removed = True
-                elif record.action is SkillTreeAction.RESTORE:
-                    require(
-                        current is None
-                        and removed is not None
-                        and removed.operation_id == record.reverts
-                    )
-                    root = record.draft.proof.entries[0]
-                    current = InstallationProof(
-                        record.operation_id, record.provenance, root.device, root.inode
-                    )
-                    removed = None
-                    bundled_removed = False
-                else:
-                    require(False)
-            return current, removed, bundled_removed
+            pending_ids = tuple(
+                record.operation_id
+                for record in records
+                if record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
+            )
+            return committed, pending_ids
+
+    def _projection(self, name: str):
+        records, _ = self._projection_inputs(name)
+        with corrupt_errors():
+            return _project_committed_records(records)[:3]
+
+    def installation_evidence(self, name: str) -> InstallationEvidence:
+        records, pending_ids = self._projection_inputs(name)
+        with corrupt_errors():
+            current, removed, _, historical_creation = _project_committed_records(records)
+            return InstallationEvidence(
+                current,
+                None if historical_creation is None else historical_creation.operation_id,
+                None if removed is None else removed.operation_id,
+                pending_ids,
+            )
 
     def current_installation(self, name: str) -> InstallationProof | None:
         return self._projection(name)[0]
