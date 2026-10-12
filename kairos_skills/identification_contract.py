@@ -22,3 +22,21 @@ class OriginEvidence:
     identity_valid: bool | None
     authorization_basis: str
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SkillIdentification:
+    name: str
+    historical_creation_origin: str
+    installation_source: str
+    authorization_basis: str
+    ownership: str
+    current_installation_id: str | None
+    historical_creation_id: str | None
+    current_removal_id: str | None
+    pending_operation_ids: tuple[str, ...]
+    identity_valid: bool | None
+    known_protection: tuple[str, ...]
+    protection_coverage: str
+    removivel: bool
+    reasons: tuple[str, ...]
