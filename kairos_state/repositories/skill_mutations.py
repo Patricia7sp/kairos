@@ -76,6 +76,7 @@ def _project_committed_records(
             root = record.draft.proof.entries[0]
             if current is None:
                 require(record.provenance is Provenance.BUNDLED)
+                historical_creation = None
             else:
                 require(
                     (current.provenance, current.device, current.inode)

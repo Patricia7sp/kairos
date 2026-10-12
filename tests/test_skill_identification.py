@@ -233,6 +233,60 @@ class SkillIdentificationTests(unittest.TestCase):
         self.assertIsNone(report.historical_creation_id)
         self.assertEqual(report.reasons, ())
 
+    def test_restored_independent_bundle_does_not_attribute_previous_user_creation(self):
+        created = self.create()
+        first_removal = self.service.remove(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
+        bundle = self.bundle()
+        target = self.home / "skills" / self.name
+        contents = (target / "SKILL.md").read_bytes()
+        self.assertNotEqual(contents, self.source.read_bytes())
+        with patch("kairos_skills.removal_origin.trusted_bundle_root", return_value=bundle):
+            report = self.observe()
+            self.assert_origin(
+                report,
+                historical="unknown",
+                source="package_bundle",
+                basis="verified_bundle",
+                ownership="bundled",
+                identity=None,
+                removable=True,
+            )
+            removed = self.service.remove(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
+        restored = self.service.rollback(removed.operation_id, actor=Actor.USER_FOREGROUND)
+        report = self.observe()
+        self.assert_origin(
+            report,
+            historical="unknown",
+            source="package_bundle",
+            basis="proven_write",
+            ownership="bundled",
+            identity=True,
+            removable=True,
+        )
+        evidence = self.repo.installation_evidence(self.name)
+        self.assertIs(evidence.current.provenance, Provenance.BUNDLED)
+        self.assertEqual(report.current_installation_id, restored.operation_id)
+        self.assertEqual(report.current_installation_id, evidence.current.operation_id)
+        self.assertIsNone(report.historical_creation_id)
+        self.assertEqual(report.historical_creation_id, evidence.historical_creation_id)
+        self.assertIsNone(report.current_removal_id)
+        self.assertEqual(report.current_removal_id, evidence.current_removal_id)
+        self.assertEqual(report.pending_operation_ids, ())
+        self.assertEqual(report.pending_operation_ids, evidence.pending_operation_ids)
+        self.assertEqual(report.reasons, ())
+        self.assertEqual((target / "SKILL.md").read_bytes(), contents)
+        history = self.repo.history(name=self.name)
+        for record in (created, first_removal, removed, restored):
+            self.assertIs(record.state, SkillMutationState.COMMITTED)
+            self.assertIn(record, history)
+        self.assertIs(removed.provenance, Provenance.BUNDLED)
+        self.assertIs(restored.provenance, Provenance.BUNDLED)
+        repeated_removal = self.service.remove(
+            self.name, actor=Actor.USER_FOREGROUND, confirmed=True
+        )
+        self.assertIs(repeated_removal.state, SkillMutationState.COMMITTED)
+        self.assertIs(repeated_removal.provenance, Provenance.BUNDLED)
+
     def test_byte_identical_replacement_keeps_ids_without_attributing_previous_origin(self):
         created = self.create()
         target = self.home / "skills" / self.name

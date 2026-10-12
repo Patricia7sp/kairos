@@ -125,6 +125,38 @@ class InstallationEvidenceTests(unittest.TestCase):
         self.assert_evidence(current=restored)
         self.assertIs(restored.provenance, Provenance.BUNDLED)
 
+    def test_independent_bundle_restore_does_not_inherit_previous_user_creation(self):
+        created = self.create()
+        first_removal = self.remove()
+        self.assert_evidence(creation=created, removed=first_removal)
+
+        bundle = self.root / "bundle"
+        bundled = bundle / self.name
+        bundled.mkdir(parents=True)
+        contents = b"# Conteudo BUNDLED independente\n"
+        (bundled / "SKILL.md").write_bytes(contents)
+        target = self.home / "skills" / self.name
+        shutil.copytree(bundled, target)
+        (target.parent / ".bundled_manifest").write_text(self.name + ":" + "0" * 32 + "\n")
+        with patch("kairos_skills.removal_origin.trusted_bundle_root", return_value=bundle):
+            removed = self.remove()
+        self.assertIs(removed.provenance, Provenance.BUNDLED)
+        self.assert_evidence(removed=removed, bundled=True)
+        self.assertEqual(self.repo._projection(self.name), (None, removed, True))
+        self.assertIn(self.name, self.repo.bundled_tombstones())
+
+        restored = self.restore(removed)
+        self.assert_evidence(current=restored)
+        self.assertIs(restored.provenance, Provenance.BUNDLED)
+        self.assertEqual(self.repo._projection(self.name)[1:], (None, False))
+        self.assertNotIn(self.name, self.repo.bundled_tombstones())
+        self.assertEqual((target / "SKILL.md").read_bytes(), contents)
+        history = self.repo.history(name=self.name)
+        for record in (created, first_removal, removed, restored):
+            self.assertIs(record.state, SkillMutationState.COMMITTED)
+            self.assertIn(record, history)
+            self.assertEqual(self.repo.get(record.operation_id), record)
+
     def test_pending_create_does_not_activate_identity(self):
         creation = read_skill_creation(self.source)
         operation_id = uuid.uuid4().hex
