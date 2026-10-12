@@ -302,18 +302,23 @@ class SkillMutationRepository:
         with corrupt_errors():
             return self._blob(record.draft)
 
-    def _records(self, name: str):
-        timeline = self._timeline()
+    def _load_validated_records(self, name: str, *, timeline) -> tuple[CommonRecord, ...]:
         if timeline is not None:
             ids = dict.fromkeys(row[3] for row in timeline)
-            records = tuple(self._get_validated(operation_id, modern=True) for operation_id in ids)
-            require(all(record is not None for record in records))
-            return tuple(record for record in records if record.name == name)
-        rows = self._conn.execute(
-            "SELECT operation_id FROM skill_mutation_operations WHERE name=? ORDER BY sequence",
-            (name,),
-        ).fetchall()
-        return tuple(self.get(row[0]) for row in rows)
+        else:
+            rows = self._conn.execute(
+                "SELECT operation_id FROM skill_mutation_operations WHERE name=? ORDER BY sequence",
+                (name,),
+            ).fetchall()
+            ids = tuple(row[0] for row in rows)
+        records = tuple(
+            self._get_validated(operation_id, modern=timeline is not None) for operation_id in ids
+        )
+        require(all(record is not None for record in records))
+        return tuple(record for record in records if record.name == name)
+
+    def _records(self, name: str):
+        return self._load_validated_records(name, timeline=self._timeline())
 
     def pending(self, name: str):
         validate_name(name)
@@ -370,24 +375,13 @@ class SkillMutationRepository:
         validate_name(name)
         with corrupt_errors():
             timeline = self._timeline()
+            records = self._load_validated_records(name, timeline=timeline)
             if timeline is not None:
-                ids = dict.fromkeys(row[3] for row in timeline)
-                records = tuple(
-                    self._get_validated(operation_id, modern=True) for operation_id in ids
-                )
-                require(all(record is not None for record in records))
-                records = tuple(record for record in records if record.name == name)
                 by_id = {record.operation_id: record for record in records}
                 committed = tuple(
                     by_id[row[3]] for row in timeline if row[4] == "committed" and row[3] in by_id
                 )
             else:
-                rows = self._conn.execute(
-                    "SELECT operation_id FROM skill_mutation_operations WHERE name=? ORDER BY sequence",
-                    (name,),
-                ).fetchall()
-                records = tuple(self._get_validated(row[0], modern=False) for row in rows)
-                require(all(record is not None for record in records))
                 committed = tuple(
                     record for record in records if record.state is SkillMutationState.COMMITTED
                 )
