@@ -2338,7 +2338,45 @@ na aquisição não comprova proteção organizacional autenticada.
 
 A proposta separa entregas: primeiro identificação somente leitura; depois
 adoção/revogação e sua linhagem; publicações e continuidade das provas ficam
-para fatia própria. Revogação por nome resolve a adoção fundadora da
+para fatia própria. A interface proposta para a identificação em A1 é:
+
+```bash
+kairos skills identify revisar-docs
+kairos skills identify revisar-docs --json
+```
+
+O diagnóstico separaria `historical_creation_origin`, `installation_source`
+e `authorization_basis`, além de propriedade, IDs da instalação e das provas,
+validade da identidade, proteção conhecida, pendências, `removivel` e motivos.
+Uma origem desconhecida seria um resultado válido, com autoridade `none` e
+`removivel=false`: fallback USER protege legado da curadoria, mas não prova
+autoria nem autoriza remoção. Edições internas não invalidariam a prova da
+raiz; uma raiz substituída, mesmo byte-idêntica, não renovaria essa prova.
+
+A consulta não criaria home, banco, lock, migração, registro ou sidecar; não
+exibiria conteúdo, hashes, home IDs, device/inode nem caminhos privados.
+Ausência, conflito concorrente, ledger corrupto/incompatível ou impossibilidade
+de atestar identidade seriam erros, sem JSON de sucesso. A resposta informaria
+`protection_coverage=namespace_and_recorded_only`: cobertura organizacional
+limitada ao namespace e às proteções registradas, sem leitura de política
+externa nem afirmação de guard organizacional completo. `removivel` seria
+diagnóstico condicionado ao instante observado e aos guards disponíveis;
+remove continuaria revalidando, sem transação conjunta prometida entre banco
+e árvore ou garantia de publicação derivada da consulta.
+
+`identify` usaria os nomes kebab-case aceitos pelo validador atual, antes de
+qualquer I/O. `list` poderia continuar exibindo diretórios legados como
+`Legacy_Skill`; consultá-los por `identify` seria erro de uso (exit 2), com
+explicação da restrição, sem renomear a instalação. `_org` também seria nome
+inválido, sem implementar reconhecimento organizacional. Conteúdo legado sem
+semver, em diretório com nome válido, continuaria consultável: essa liberdade
+de conteúdo não ampliaria os nomes aceitos. Os demais códigos propostos são
+77 para veto conhecido, 69 para primitiva atestável indisponível e 1 para
+ausência, conflito, corrupção ou falha.
+
+Esses exemplos e limites descrevem a proposta A1; a conclusão validada será
+registrada após os gates finais e o merge. A2 e a fatia B permanecem propostas
+com aprovação e planos próprios. Revogação por nome resolve a adoção fundadora da
 instalação corrente, inclusive após restore derivado, e registra os IDs
 envolvidos. Não alcança uma instalação substituída, criação independente ou
 adoção posterior. Revogar autoridade preserva arquivos e histórico; restore

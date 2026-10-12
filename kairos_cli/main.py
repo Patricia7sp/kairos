@@ -216,6 +216,13 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         parser.add_argument("key", nargs="?", help="chave pontilhada")
     elif command == "skills" and subcommand == "add":
         parser.add_argument("--file", required=True, help="SKILL.md local (sem stdin ou URL)")
+    elif command == "skills" and subcommand == "identify":
+        parser.description = (
+            "Consulta evidências da instalação, somente leitura. removivel é diagnóstico "
+            "do instante observado; remove revalida as provas e os guards disponíveis. "
+            "Cobertura organizacional limitada ao namespace e às proteções registradas."
+        )
+        parser.add_argument("name", metavar="NOME", help="filho imediato em skills/, kebab-case")
     elif command == "skills" and subcommand == "remove":
         parser.description = (
             "Remove uma instalação com snapshot reversível. Exige origem comprovada por "
