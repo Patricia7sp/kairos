@@ -133,6 +133,8 @@ class CliSkillIdentificationTests(unittest.TestCase):
                 "protection_coverage": "namespace_and_recorded_only",
                 "removivel": False,
                 "reasons": ["unknown_origin"],
+                "adoption_id": None,
+                "adoption_active": None,
             },
         )
         self.assertFalse((self.home / "state.db").exists())
@@ -159,6 +161,8 @@ class CliSkillIdentificationTests(unittest.TestCase):
                 "protection_coverage": "namespace_and_recorded_only",
                 "removivel": True,
                 "reasons": [],
+                "adoption_id": None,
+                "adoption_active": None,
             },
         )
         self.assertFalse(lock.exists())

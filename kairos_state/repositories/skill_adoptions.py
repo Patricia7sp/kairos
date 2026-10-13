@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from kairos_domain.ownership import Actor
 from kairos_filesystem.contract import TreeCapture
@@ -188,16 +189,24 @@ class SkillAdoptionRepository:
 
         return self._common._write(operation)
 
-    def commit_unadopt(self, draft: SkillAdoptionDraft) -> SkillAdoptionRecord:
+    def commit_unadopt(
+        self,
+        draft: SkillAdoptionDraft,
+        *,
+        revalidate: Callable[[], None] | None = None,
+    ) -> SkillAdoptionRecord:
         require(
             type(draft) is SkillAdoptionDraft
             and draft.action is SkillAdoptionAction.UNADOPT
             and draft.home_id == self._home_id
         )
+        require(revalidate is None or callable(revalidate))
 
         def operation():
             self._common._assert_no_pending(draft.name)
             self._validate_transition(draft)
+            if revalidate is not None:
+                revalidate()
             self._insert(draft)
             self._conn.execute(
                 "INSERT INTO skill_adoption_events(operation_id,state) VALUES (?,'committed')",

@@ -42,3 +42,5 @@ class SkillIdentification:
     protection_coverage: str
     removivel: bool
     reasons: tuple[str, ...]
+    adoption_id: str | None
+    adoption_active: bool | None
