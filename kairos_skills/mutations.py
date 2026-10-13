@@ -8,6 +8,11 @@ from pathlib import Path
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture
+from kairos_skills.adoption_contract import (
+    AdoptionAuthority,
+    SkillAdoptionAction,
+    SkillAdoptionRecord,
+)
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import (
     SkillMutationAction,
@@ -24,7 +29,7 @@ from kairos_skills.mutation_lock import skill_mutation_lock
 from kairos_skills.mutation_recovery import expected_entry, mark_conflict, reconcile_pending
 from kairos_skills.removal_contract import SkillTreeAction, SkillTreeDraft
 from kairos_skills.removal_io import SkillRemovalFiles
-from kairos_skills.removal_origin import prove_removal_origin
+from kairos_skills.removal_origin import prove_removal_origin, resolve_removal_origin
 from kairos_skills.removal_recovery import tree_matches
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
@@ -39,6 +44,116 @@ def operation_error(error, operation_id: str) -> SkillMutationError:
     return SkillMutationError(
         kind, message, operation_id=getattr(error, "operation_id", None) or operation_id
     )
+
+
+def _linked_adoption(repository, removed):
+    authority = removed.draft.adoption
+    if authority is None:
+        return None
+    founder = repository.get(authority.adoption_id)
+    if (
+        not isinstance(founder, SkillAdoptionRecord)
+        or founder.action is not SkillAdoptionAction.ADOPT
+        or founder.state is not SkillMutationState.COMMITTED
+        or founder.name != removed.name
+        or founder.draft.installation_source != removed.draft.installation_source
+    ):
+        raise SkillMutationError(
+            "corrupt", "Linhagem da remoção adotada está incompleta; restauração recusada."
+        )
+    return founder
+
+
+def _adoption_rollback_error(repository, record, operation_id):
+    if record.action is SkillAdoptionAction.UNADOPT:
+        inverse = "adopt"
+    else:
+        authority = repository.installation_evidence(record.name).adoption
+        inverse = (
+            "unadopt"
+            if authority is not None
+            and authority.adoption_id == record.operation_id
+            and authority.active
+            else "adopt"
+        )
+    return SkillMutationError(
+        "denied",
+        f"Adoção não é rollback de arquivo; use {inverse} para alterar a autoridade.",
+        operation_id=operation_id,
+    )
+
+
+def _removal_adoption(repository, name, current):
+    adoption = None if current is None else current.adoption
+    if adoption is None:
+        return None, None
+    if not adoption.active:
+        raise SkillMutationError(
+            "denied", "A adoção foi revogada; readoção confirmada é necessária."
+        )
+    evidence = repository.installation_evidence(name)
+    if evidence.adoption != adoption:
+        raise SkillMutationError("conflict", "A linhagem de adoção mudou; remoção recusada.")
+    founder = repository.get(adoption.adoption_id)
+    if (
+        not isinstance(founder, SkillAdoptionRecord)
+        or founder.action is not SkillAdoptionAction.ADOPT
+        or founder.state is not SkillMutationState.COMMITTED
+        or founder.name != name
+    ):
+        raise SkillMutationError("corrupt", "Linhagem de adoção incompleta; remoção recusada.")
+    return adoption, founder.draft.installation_source
+
+
+def _require_restore_authority(repository, removed, previous=None, *, pending_operation_id=None):
+    if removed.draft.adoption is None:
+        return
+    founder = _linked_adoption(repository, removed)
+    evidence = repository.installation_evidence(removed.name)
+    authority = evidence.adoption
+    if previous is None:
+        valid = (
+            evidence.current is None
+            and evidence.current_removal_id == removed.operation_id
+            and authority == removed.draft.adoption
+        )
+    else:
+        expected = AdoptionAuthority(
+            removed.draft.adoption.adoption_id, previous.operation_id, True
+        )
+        valid = (
+            previous.action is SkillTreeAction.RESTORE
+            and previous.reverts == removed.operation_id
+            and previous.draft.adoption == expected
+            and evidence.current is not None
+            and evidence.current.operation_id == previous.operation_id
+            and authority == expected
+        )
+    expected_pending = () if pending_operation_id is None else (pending_operation_id,)
+    if evidence.pending_operation_ids != expected_pending:
+        raise SkillMutationError(
+            "conflict",
+            "A adoção vinculada não está vigente para esta restauração; versões preservadas.",
+            operation_id=removed.operation_id,
+        )
+    if (
+        authority is not None
+        and authority.adoption_id == removed.draft.adoption.adoption_id
+        and not authority.active
+    ):
+        raise SkillMutationError(
+            "denied",
+            "A adoção vinculada foi revogada; versões preservadas.",
+            operation_id=removed.operation_id,
+        )
+    if not valid or authority is None:
+        raise SkillMutationError(
+            "conflict",
+            "A adoção vinculada não está vigente para esta restauração; versões preservadas.",
+            operation_id=removed.operation_id,
+        )
+    if founder.draft.installation_source != removed.draft.installation_source:
+        raise SkillMutationError("corrupt", "Origem da adoção vinculada diverge.")
 
 
 class SkillMutationService:
@@ -116,6 +231,8 @@ class SkillMutationService:
                 created = self.repository.get(create_id)
                 if created is not None and created.action is SkillTreeAction.REMOVE:
                     return self._restore_removed(created, actor=actor)
+                if isinstance(created, SkillAdoptionRecord):
+                    raise _adoption_rollback_error(self.repository, created, create_id)
                 require(
                     created is not None
                     and created.action is SkillMutationAction.CREATE
@@ -189,6 +306,7 @@ class SkillMutationService:
                 current = self.repository.current_installation(name)
                 if captured is None:
                     return self._repeat_removal(files, name, current)
+                adoption, source = _removal_adoption(self.repository, name, current)
                 provenance = prove_removal_origin(self.home, name, current, captured)
                 draft = SkillTreeDraft(
                     operation_id,
@@ -200,6 +318,9 @@ class SkillMutationService:
                     provenance,
                     TreeCapture(captured.entries, None),
                     operation_id,
+                    None,
+                    adoption,
+                    source,
                 )
                 record = self.repository.prepare_remove(draft, captured)
                 if files.capture_installed(name) != captured:
@@ -256,13 +377,19 @@ class SkillMutationService:
         operation_id = removed.operation_id
         try:
             previous = self.repository.latest_restore(removed.operation_id)
-            if previous is not None and previous.state is SkillMutationState.COMMITTED:
+            if (
+                removed.draft.adoption is None
+                and previous is not None
+                and previous.state is SkillMutationState.COMMITTED
+            ):
                 return previous
             with SkillRemovalFiles(self.home) as files:
                 reconcile_pending(self.repository, files, name=removed.name)
                 previous = self.repository.latest_restore(removed.operation_id)
                 if previous is not None and previous.state is SkillMutationState.COMMITTED:
+                    _require_restore_authority(self.repository, removed, previous)
                     return previous
+                _require_restore_authority(self.repository, removed)
                 current = self.repository.current_removal(removed.name)
                 installed = self.repository.current_installation(removed.name)
                 if (
@@ -290,6 +417,11 @@ class SkillMutationService:
                 snapshot = self.repository.snapshot(removed.operation_id)
                 operation_id = uuid.uuid4().hex
                 staged = files.stage(operation_id, snapshot)
+                adoption = (
+                    None
+                    if removed.draft.adoption is None
+                    else AdoptionAuthority(removed.draft.adoption.adoption_id, operation_id, True)
+                )
                 draft = SkillTreeDraft(
                     operation_id,
                     self.repository.home_id,
@@ -301,6 +433,8 @@ class SkillMutationService:
                     TreeCapture(staged.entries, None),
                     removed.operation_id,
                     removed.operation_id,
+                    adoption,
+                    removed.draft.installation_source if adoption is not None else None,
                 )
                 record = self.repository.prepare_restore(draft)
                 if not tree_matches(
@@ -312,6 +446,20 @@ class SkillMutationService:
                     mark_conflict(self.repository, record)
                 if files.capture_private(operation_id, retired=False) is not None:
                     mark_conflict(self.repository, record)
+                if adoption is not None:
+                    _require_restore_authority(
+                        self.repository,
+                        removed,
+                        pending_operation_id=operation_id,
+                    )
+                    restored_capture = files.capture_installed(removed.name)
+                    origin = resolve_removal_origin(self.home, removed.name, None, restored_capture)
+                    if origin.provenance is Provenance.BUNDLED or (
+                        origin.identity_valid is True and origin.provenance is Provenance.SEDIMENT
+                    ):
+                        mark_conflict(self.repository, record)
+                    if files.capture_installed(removed.name) != restored_capture:
+                        mark_conflict(self.repository, record)
                 files.sync_parents()
                 return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
         except (SkillMutationError, OSError) as error:

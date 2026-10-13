@@ -102,12 +102,26 @@ def _restore_adoption(removed, record, adoption):
     return record.draft.adoption
 
 
+def _track_removed_tombstone(record, legacy_bundled_removed, adopted_removals):
+    if record.provenance is Provenance.BUNDLED:
+        legacy_bundled_removed = True
+    if record.draft.adoption is not None:
+        adopted_removals.add(record.operation_id)
+    return legacy_bundled_removed
+
+
+def _clear_linked_adoption_tombstone(removed, adopted_removals):
+    if removed.draft.adoption is not None:
+        adopted_removals.discard(removed.operation_id)
+
+
 def _project_committed_records(
     records: tuple[CommonRecord, ...],
 ):
     current = None
     removed = None
-    bundled_removed = False
+    legacy_bundled_removed = False
+    adopted_removals = set()
     historical_creation = None
     adoption = None
     founders = {}
@@ -154,8 +168,9 @@ def _project_committed_records(
                     )
             current = None
             removed = record
-            if record.provenance is Provenance.BUNDLED or record.draft.adoption is not None:
-                bundled_removed = True
+            legacy_bundled_removed = _track_removed_tombstone(
+                record, legacy_bundled_removed, adopted_removals
+            )
         elif record.action is SkillTreeAction.RESTORE:
             require(
                 current is None and removed is not None and removed.operation_id == record.reverts
@@ -165,11 +180,21 @@ def _project_committed_records(
             current = InstallationProof(
                 record.operation_id, record.provenance, root.device, root.inode, adoption
             )
+            _clear_linked_adoption_tombstone(removed, adopted_removals)
             removed = None
-            bundled_removed = False
+            # Compatibilidade histórica: qualquer RESTORE committed encerra a
+            # projeção antiga de remoção BUNDLED. Exclusões por adoção têm
+            # identidade própria e só são encerradas pelo restore vinculado.
+            legacy_bundled_removed = False
         else:
             require(False)
-    return current, removed, bundled_removed, historical_creation, adoption
+    return (
+        current,
+        removed,
+        legacy_bundled_removed or bool(adopted_removals),
+        historical_creation,
+        adoption,
+    )
 
 
 def validate_skill_timeline(connection: sqlite3.Connection):
