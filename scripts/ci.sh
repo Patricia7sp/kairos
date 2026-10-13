@@ -30,6 +30,8 @@ skip() { printf '\n\033[1m▸ %s\033[0m\n  \033[33mpulado — %s\033[0m\n' "$1" 
 UV="${UV:-uv}"
 command -v "$UV" >/dev/null 2>&1 || UV="$HOME/.local/bin/uv"
 
+run "Cliente v8 para regressão de downgrade" env UV="$UV" bash scripts/prepare-skill-v8-client.sh
+
 run "Testes (unitários)" \
     "$UV" run pytest -q --deselect tests/test_container.py::RealImageTests
 

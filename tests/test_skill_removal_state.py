@@ -156,7 +156,7 @@ class RemovalStateTests(unittest.TestCase):
         imported = tuple(
             tuple(row)
             for row in self.db.execute(
-                "SELECT legacy_event,tree_event FROM skill_mutation_timeline ORDER BY sequence"
+                "SELECT legacy_event,tree_event FROM skill_authority_timeline ORDER BY sequence"
             )
         )
         self.assertEqual(imported, tuple((row[0], None) for row in self.legacy_before[3]))
@@ -165,7 +165,7 @@ class RemovalStateTests(unittest.TestCase):
         self.legacy.finish(self.pending.operation_id, SkillMutationState.ABORTED)
         repo.finish(draft.operation_id, SkillMutationState.COMMITTED)
         rows = self.db.execute(
-            "SELECT legacy_event,tree_event FROM skill_mutation_timeline ORDER BY sequence"
+            "SELECT legacy_event,tree_event FROM skill_authority_timeline ORDER BY sequence"
         ).fetchall()
         self.assertIsNotNone(rows[-3][1])
         self.assertIsNotNone(rows[-2][0])
@@ -216,12 +216,14 @@ class RemovalStateTests(unittest.TestCase):
         ):
             with self.subTest(values=values), self.assertRaises(sqlite3.IntegrityError), self.db:
                 self.db.execute(
-                    "INSERT INTO skill_mutation_timeline(legacy_event,tree_event) VALUES (?,?)",
+                    "INSERT INTO skill_authority_timeline(legacy_event,tree_event) VALUES (?,?)",
                     values,
                 )
-        self.db.execute("DROP TRIGGER skill_mutation_timeline_no_delete")
+        self.db.execute("DROP TRIGGER skill_authority_timeline_no_delete")
         with self.db:
-            self.db.execute("DELETE FROM skill_mutation_timeline WHERE tree_event=?", (tree_event,))
+            self.db.execute(
+                "DELETE FROM skill_authority_timeline WHERE tree_event=?", (tree_event,)
+            )
         with self.assertRaises(SkillMutationError):
             repo.get(draft.operation_id)
 
@@ -284,8 +286,8 @@ class RemovalStateTests(unittest.TestCase):
             "INSERT OR REPLACE INTO skill_tree_operations SELECT sequence,operation_id,home_id,action,'replaced',actor,created_at,provenance,proof_json,snapshot_id,reverts FROM skill_tree_operations",
             "INSERT OR REPLACE INTO skill_tree_operations SELECT sequence+100,operation_id,home_id,action,'replaced',actor,created_at,provenance,proof_json,snapshot_id,reverts FROM skill_tree_operations",
             "INSERT OR REPLACE INTO skill_tree_events SELECT sequence,operation_id,'committed' FROM skill_tree_events",
-            "INSERT OR REPLACE INTO skill_mutation_timeline SELECT sequence+100,legacy_event,tree_event FROM skill_mutation_timeline WHERE tree_event IS NOT NULL",
-            "INSERT OR REPLACE INTO skill_mutation_timeline SELECT sequence,NULL,999 FROM skill_mutation_timeline WHERE tree_event IS NOT NULL",
+            "INSERT OR REPLACE INTO skill_authority_timeline(sequence,legacy_event,tree_event) SELECT sequence+100,legacy_event,tree_event FROM skill_authority_timeline WHERE tree_event IS NOT NULL",
+            "INSERT OR REPLACE INTO skill_authority_timeline(sequence,legacy_event,tree_event) SELECT sequence,NULL,999 FROM skill_authority_timeline WHERE tree_event IS NOT NULL",
         )
         before = self.db.serialize()
         for sql in statements:
@@ -309,7 +311,7 @@ class RemovalStateTests(unittest.TestCase):
         )
         timeline = tuple(
             tuple(row)
-            for row in self.db.execute("SELECT * FROM skill_mutation_timeline ORDER BY sequence")
+            for row in self.db.execute("SELECT * FROM skill_authority_timeline ORDER BY sequence")
         )
         second = self.draft(name="second")
         repo.prepare_remove(second, self.capture())
@@ -325,7 +327,7 @@ class RemovalStateTests(unittest.TestCase):
             tuple(
                 tuple(row)
                 for row in self.db.execute(
-                    "SELECT * FROM skill_mutation_timeline ORDER BY sequence"
+                    "SELECT * FROM skill_authority_timeline ORDER BY sequence"
                 )
             )[:-1],
         )
@@ -355,7 +357,7 @@ class RemovalStateTests(unittest.TestCase):
             "INSERT INTO skill_mutation_contents SELECT * FROM skill_mutation_contents LIMIT 1",
             "INSERT INTO skill_tree_snapshots SELECT * FROM skill_tree_snapshots LIMIT 1",
             "INSERT INTO skill_tree_blobs SELECT * FROM skill_tree_blobs LIMIT 1",
-            "INSERT INTO skill_mutation_timeline SELECT * FROM skill_mutation_timeline LIMIT 1",
+            "INSERT INTO skill_authority_timeline SELECT * FROM skill_authority_timeline LIMIT 1",
         ):
             with self.subTest(sql=sql), self.assertRaises(sqlite3.OperationalError), legacy:
                 legacy.execute(sql)

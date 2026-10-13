@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kairos_domain.ownership import Provenance
+from kairos_skills.adoption_contract import AdoptionAuthority
 from kairos_skills.removal_contract import InstallationProof
 
 
@@ -14,6 +15,7 @@ class InstallationEvidence:
     historical_creation_id: str | None
     current_removal_id: str | None
     pending_operation_ids: tuple[str, ...]
+    adoption: AdoptionAuthority | None = None
 
 
 @dataclass(frozen=True)

@@ -458,13 +458,19 @@ class SkillIdentificationTests(unittest.TestCase):
                     self.assertEqual(raised.exception.kind, "input")
 
     def test_corrupt_and_incompatible_ledgers_are_errors_without_effects(self):
+        from kairos_state.schema import SCHEMA_VERSION
+
         self.create()
+        pristine = sqlite3.connect(":memory:")
+        self.addCleanup(pristine.close)
+        self.db.backup(pristine)
         for corrupt in ("partial", "incompatible"):
             with self.subTest(corrupt=corrupt):
+                pristine.backup(self.db)
                 if corrupt == "partial":
                     self.db.execute("DROP TABLE skill_tree_events")
                 else:
-                    self.db.execute("UPDATE schema_version SET version=9")
+                    self.db.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION + 1,))
                 self.db.commit()
                 before = self.home_inventory()
                 with self.assertRaises(SkillMutationError) as raised:

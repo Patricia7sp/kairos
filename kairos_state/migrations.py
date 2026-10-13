@@ -18,6 +18,12 @@ from kairos_state.cron_schema import CRON_SCHEMA_SQL
 from kairos_state.notepad_schema import NOTEPAD_SCHEMA_SQL
 from kairos_state.runtime_schema import RUNTIME_SCHEMA_SQL, execute_schema
 from kairos_state.shares_schema import SHARES_SCHEMA_SQL
+from kairos_state.skill_adoptions_schema import (
+    ADOPTION_TABLES,
+    migrate_adoptions,
+    repair_adoption_triggers,
+    validate_adoption_schema,
+)
 from kairos_state.skill_mutations_schema import SKILL_MUTATIONS_SCHEMA_SQL
 from kairos_state.skill_removals_schema import (
     SKILL_REMOVALS_SCHEMA_SQL,
@@ -115,6 +121,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(6, "catálogo imutável e assets de skills por sessão", _v6_skills_schema),
     Migration(7, "journal reversível de autoria manual de skills", _v7_skill_mutations),
     Migration(8, "snapshots binários e timeline de remoção de skills", _v8_skill_removals),
+    Migration(9, "adoção revogável e timeline canônica de autoridade", migrate_adoptions),
 )
 
 
@@ -146,11 +153,14 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
             migration.apply(conn)
             conn.execute("UPDATE schema_version SET version = ?", (migration.version,))
             current = migration.version
+        if current == 9:
+            validate_adoption_schema(conn)
     except BaseException:
         conn.rollback()
         raise
     else:
         conn.commit()
+    register_skill_writer(conn)
     return current
 
 
@@ -182,7 +192,7 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 
 #: Tabelas cujas linhas são o dado do usuário. O reparo pode recriar índices,
 #: gatilhos, tabelas FTS e objetos derivados — nunca tocar nestas.
-CANONICAL_TABLES = frozenset(
+CANONICAL_TABLES = ADOPTION_TABLES | frozenset(
     {
         "cron_notepad",
         "executions",
@@ -274,9 +284,8 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
 
     if read_schema_version(conn) == _schema.SCHEMA_VERSION:
         with conn:
-            execute_schema(conn, SKILL_MUTATIONS_SCHEMA_SQL)
-            execute_schema(conn, SKILL_REMOVALS_SCHEMA_SQL)
-            execute_schema(conn, SKILL_REMOVALS_TRIGGERS_SQL)
+            repair_adoption_triggers(conn)
+            validate_adoption_schema(conn)
 
     depois = canonical_fingerprint(conn)
     if antes != depois:

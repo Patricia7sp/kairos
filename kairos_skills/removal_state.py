@@ -14,6 +14,7 @@ from kairos_skills.mutation_contract import SkillMutationError
 from kairos_skills.mutation_io import check_chain, open_directory, open_fd, same_entry
 from kairos_state.connection import BUSY_TIMEOUT_MS, apply_wal_with_fallback
 from kairos_state.repositories.skill_mutations import SkillMutationRepository, corrupt_errors
+from kairos_state.skill_adoptions_schema import ADOPTION_TABLES
 from kairos_state.skill_writer import register_skill_writer
 
 
@@ -183,27 +184,34 @@ def read_skill_repository(connection: sqlite3.Connection, home: Path):
             if (
                 len(versions) != 1
                 or type(versions[0][0]) is not int
-                or not 0 <= versions[0][0] <= 8
+                or not 0 <= versions[0][0] <= 9
             ):
                 raise SkillMutationError(
                     "corrupt", "Versão do ledger incompatível; leitura recusada."
                 )
             version = versions[0][0]
-        families = names & (_LEGACY_TABLES | _TREE_TABLES)
+        families = names & (_LEGACY_TABLES | _TREE_TABLES | ADOPTION_TABLES)
         if not families:
             if version is not None and version >= 7:
                 raise SkillMutationError(
                     "corrupt", "Ledger de skills ausente em banco migrado; leitura recusada."
                 )
             return None
-        if names & _TREE_TABLES or version == 8:
+        if names & ADOPTION_TABLES or version == 9:
+            if not names >= ADOPTION_TABLES | _TREE_TABLES | _LEGACY_TABLES or version != 9:
+                raise SkillMutationError(
+                    "corrupt", "Ledger de adoção incompleto; leitura recusada."
+                )
+        elif names & _TREE_TABLES or version == 8:
             if not names >= _TREE_TABLES | _LEGACY_TABLES or version != 8:
                 raise SkillMutationError(
                     "corrupt", "Ledger de skills incompleto; leitura recusada."
                 )
         elif not names >= _LEGACY_TABLES:
             raise SkillMutationError("corrupt", "Ledger de skills incompleto; leitura recusada.")
-        return SkillMutationRepository(connection, home_id=catalog_home_id(home))
+        repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
+        repository._timeline()
+        return repository
 
 
 def read_skill_tombstones(home: Path) -> frozenset[str]:
@@ -226,6 +234,16 @@ def read_skill_tombstones(home: Path) -> frozenset[str]:
                 names.update(
                     row[0]
                     for row in connection.execute("SELECT DISTINCT name FROM skill_tree_operations")
+                )
+            adopted = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='skill_adoption_operations'"
+            ).fetchone()
+            if adopted is not None:
+                names.update(
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT DISTINCT name FROM skill_adoption_operations"
+                    )
                 )
             tombstones = repository.bundled_tombstones()
         for name in sorted(names):

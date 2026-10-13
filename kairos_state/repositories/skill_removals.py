@@ -9,6 +9,7 @@ from dataclasses import asdict
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture, TreeEntry
+from kairos_skills.adoption_contract import AdoptionAuthority, SkillAdoptionAction
 from kairos_skills.mutation_contract import (
     SkillMutationError,
     SkillMutationState,
@@ -118,6 +119,39 @@ class SkillRemovalRepository:
             "SELECT operation_id,home_id,action,name,actor,created_at,provenance,proof_json,snapshot_id,reverts FROM skill_tree_operations WHERE operation_id=?",
             (operation_id,),
         ).fetchone()
+        modern = (
+            self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='skill_authority_timeline'"
+            ).fetchone()
+            is not None
+        )
+        adoption = None
+        installation_source = None
+        if modern:
+            lineage = self._conn.execute(
+                "SELECT adoption_id,installation_id,installation_source FROM skill_tree_adoptions WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+            require(lineage is not None)
+            if lineage[0] is None:
+                require(lineage[1] is None and lineage[2] is None)
+            else:
+                adoption = AdoptionAuthority(lineage[0], lineage[1], True)
+                installation_source = lineage[2]
+                from kairos_state.repositories.skill_adoptions import SkillAdoptionRepository
+
+                founder = SkillAdoptionRepository(self._conn, home_id=self._home_id).get(
+                    adoption.adoption_id
+                )
+                require(
+                    founder is not None
+                    and founder.action is SkillAdoptionAction.ADOPT
+                    and founder.state is SkillMutationState.COMMITTED
+                )
+                require(
+                    (founder.name, founder.draft.installation_source)
+                    == (row[3], installation_source)
+                )
         draft = SkillTreeDraft(
             row[0],
             row[1],
@@ -129,6 +163,8 @@ class SkillRemovalRepository:
             _manifest(row[7]),
             row[8],
             row[9],
+            adoption,
+            installation_source,
         )
         require(draft.home_id == self._home_id)
         snapshot = self._snapshot(draft.snapshot_id)
@@ -136,8 +172,13 @@ class SkillRemovalRepository:
             require(draft.proof.entries == snapshot.entries)
         else:
             require(_inventory(draft.proof) == _inventory(snapshot))
+        query = (
+            "SELECT e.sequence,e.state,t.sequence FROM skill_tree_events e LEFT JOIN skill_authority_timeline t ON t.tree_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4"
+            if modern
+            else "SELECT e.sequence,e.state,t.sequence FROM skill_tree_events e LEFT JOIN skill_mutation_timeline t ON t.tree_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4"
+        )
         events = self._conn.execute(
-            "SELECT e.sequence,e.state,t.sequence FROM skill_tree_events e LEFT JOIN skill_mutation_timeline t ON t.tree_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4",
+            query,
             (operation_id,),
         ).fetchall()
         require(1 <= len(events) <= 3)
@@ -178,6 +219,10 @@ class SkillRemovalRepository:
                     and parent.state is SkillMutationState.COMMITTED
                 )
                 require((record.name, record.provenance) == (parent.name, parent.provenance))
+                require((record.draft.adoption is None) == (parent.draft.adoption is None))
+                if record.draft.adoption is not None:
+                    require(record.draft.adoption.adoption_id == parent.draft.adoption.adoption_id)
+                    require(record.draft.installation_source == parent.draft.installation_source)
                 first = self._conn.execute(
                     "SELECT operation_id FROM skill_tree_operations WHERE operation_id IN (?,?) ORDER BY sequence LIMIT 1",
                     (parent.operation_id, record.operation_id),
@@ -233,11 +278,43 @@ class SkillRemovalRepository:
                 draft.reverts,
             ),
         )
+        if (
+            self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='skill_tree_adoptions'"
+            ).fetchone()
+            is not None
+        ):
+            self._conn.execute(
+                "INSERT INTO skill_tree_adoptions(operation_id,adoption_id,installation_id,installation_source) VALUES (?,?,?,?)",
+                (
+                    draft.operation_id,
+                    None if draft.adoption is None else draft.adoption.adoption_id,
+                    None if draft.adoption is None else draft.adoption.installation_id,
+                    draft.installation_source,
+                ),
+            )
+        else:
+            require(draft.adoption is None)
         self._conn.execute(
             "INSERT INTO skill_tree_events(operation_id,state) VALUES (?,'prepared')",
             (draft.operation_id,),
         )
         return self.get(draft.operation_id)
+
+    def _store_snapshot(self, snapshot_id: str, snapshot: TreeCapture) -> None:
+        for entry in snapshot.entries:
+            if entry.kind == "file":
+                self._conn.execute(
+                    "INSERT INTO skill_tree_blobs(sha256,size_bytes,content) SELECT ?,?,? "
+                    "WHERE NOT EXISTS (SELECT 1 FROM skill_tree_blobs WHERE sha256=?)",
+                    (entry.sha256, entry.size, snapshot.contents[entry.path], entry.sha256),
+                )
+        self._conn.execute(
+            "INSERT INTO skill_tree_snapshots(snapshot_id,manifest_json) VALUES (?,?)",
+            (snapshot_id, manifest_json(snapshot)),
+        )
+        with corrupt_errors():
+            self._snapshot(snapshot_id)
 
     def prepare_remove(self, draft: SkillTreeDraft, snapshot: TreeCapture) -> SkillTreeRecord:
         require(
@@ -249,17 +326,7 @@ class SkillRemovalRepository:
         require(draft.proof.entries == snapshot.entries)
 
         def operation():
-            for entry in snapshot.entries:
-                if entry.kind == "file":
-                    self._conn.execute(
-                        "INSERT INTO skill_tree_blobs(sha256,size_bytes,content) SELECT ?,?,? "
-                        "WHERE NOT EXISTS (SELECT 1 FROM skill_tree_blobs WHERE sha256=?)",
-                        (entry.sha256, entry.size, snapshot.contents[entry.path], entry.sha256),
-                    )
-            self._conn.execute(
-                "INSERT INTO skill_tree_snapshots(snapshot_id,manifest_json) VALUES (?,?)",
-                (draft.snapshot_id, manifest_json(snapshot)),
-            )
+            self._store_snapshot(draft.snapshot_id, snapshot)
             return self._insert(draft)
 
         return self._write(operation)

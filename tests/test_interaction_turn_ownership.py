@@ -429,6 +429,7 @@ def service(
     clock=None,
     sleep=None,
     ttl: float = 300,
+    poll_interval: float = 0,
     refresh_interval: float | None = None,
     release_max_attempts: int = 5,
 ) -> InteractionService:
@@ -440,7 +441,7 @@ def service(
         messages=MessageRepository(connection),
         usage=usage or UsageRepository(connection),
         turn_leases=backend,
-        turn_lease_poll_interval=0,
+        turn_lease_poll_interval=poll_interval,
         turn_lease_ttl_seconds=ttl,
         turn_lease_refresh_interval=refresh_interval,
         turn_lease_clock=clock,
@@ -470,12 +471,14 @@ async def test_two_service_graphs_share_first_session_creation_and_fifo_history(
         first_connection,
         first_adapter,
         backend=SQLiteAsyncTurnLeaseBackend(db_path),
+        poll_interval=0.01,
         sessions=LeaseAssertingSessions(first_connection),
     )
     second = service(
         second_connection,
         second_adapter,
         backend=SQLiteAsyncTurnLeaseBackend(db_path),
+        poll_interval=0.01,
         sessions=LeaseAssertingSessions(second_connection),
     )
     try:
@@ -521,12 +524,14 @@ async def test_two_service_graphs_race_new_session_inside_durable_ownership(tmp_
         first_connection,
         ImmediateAdapter("resposta-a"),
         backend=SQLiteAsyncTurnLeaseBackend(db_path),
+        poll_interval=0.01,
         sessions=LeaseAssertingSessions(first_connection),
     )
     second = service(
         second_connection,
         ImmediateAdapter("resposta-b"),
         backend=SQLiteAsyncTurnLeaseBackend(db_path),
+        poll_interval=0.01,
         sessions=LeaseAssertingSessions(second_connection),
     )
     try:
