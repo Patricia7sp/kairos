@@ -645,6 +645,242 @@ class RealImageTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_skill_adoption_cli_lineage_and_A_B_comparison_in_real_image(self):
+        script = r"""
+import json
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+secret = 'real-image-private-sentinel'
+binary = b'\x00\xff\x80adoption-image'
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    home = root / 'home'
+    skill = home / 'skills' / 'legacy-image'
+    skill.mkdir(parents=True)
+    (skill / 'SKILL.md').write_text(secret, encoding='utf-8')
+    asset = skill / 'references' / 'private.bin'
+    asset.parent.mkdir()
+    asset.write_bytes(binary)
+    asset.chmod(0o641)
+    env = {**os.environ, 'KAIROS_HOME': str(home)}
+
+    def cli(*args):
+        result = subprocess.run(
+            ['kairos', *args], capture_output=True, text=True, env=env,
+            timeout=30, check=False,
+        )
+        assert secret not in result.stdout + result.stderr
+        assert str(root) not in result.stdout + result.stderr
+        return result
+
+    adopted = cli('skills', 'adopt', 'legacy-image', '--yes', '--json')
+    assert adopted.returncode == 0, adopted.stderr
+    adoption_a = json.loads(adopted.stdout)
+    assert adoption_a['state'] == 'committed'
+    assert adoption_a['adoption_active'] is True
+
+    removed = cli('skills', 'remove', 'legacy-image', '--yes', '--json')
+    assert removed.returncode == 0, removed.stderr
+    removal = json.loads(removed.stdout)
+    restored = cli('skills', 'rollback', removal['operation_id'], '--json')
+    assert restored.returncode == 0, restored.stderr
+    restore = json.loads(restored.stdout)
+    assert restore['state'] == 'committed'
+    assert (skill / 'references' / 'private.bin').read_bytes() == binary
+    assert (skill / 'references' / 'private.bin').stat().st_mode & 0o777 == 0o641
+
+    revoked = cli(
+        'skills', 'unadopt', 'legacy-image', '--yes',
+        '--expect-adoption', adoption_a['adoption_id'], '--json',
+    )
+    assert revoked.returncode == 0, revoked.stderr
+    assert json.loads(revoked.stdout)['adoption_active'] is False
+
+    denied_remove = cli('skills', 'remove', 'legacy-image', '--yes', '--json')
+    assert denied_remove.returncode == 77
+    assert denied_remove.stdout == ''
+    assert (skill / 'SKILL.md').read_text(encoding='utf-8') == secret
+    assert (skill / 'references' / 'private.bin').read_bytes() == binary
+
+    adopted_b_result = cli('skills', 'adopt', 'legacy-image', '--yes', '--json')
+    assert adopted_b_result.returncode == 0, adopted_b_result.stderr
+    adoption_b = json.loads(adopted_b_result.stdout)
+    assert adoption_b['adoption_id'] != adoption_a['adoption_id']
+    compare = cli(
+        'skills', 'unadopt', 'legacy-image', '--yes',
+        '--expect-adoption', adoption_a['adoption_id'], '--json',
+    )
+    assert compare.returncode == 1
+    assert compare.stdout == ''
+    identified = cli('skills', 'identify', 'legacy-image', '--json')
+    assert identified.returncode == 0, identified.stderr
+    report = json.loads(identified.stdout)
+    assert report['adoption_id'] == adoption_b['adoption_id']
+    assert report['adoption_active'] is True
+
+    history = cli('skills', 'history', '--json')
+    assert history.returncode == 0, history.stderr
+    actions = [event['action'] for event in json.loads(history.stdout)]
+    assert actions == ['adopt', 'unadopt', 'restore', 'remove', 'adopt']
+"""
+        result = self.run_in(
+            "-",
+            input_text=script,
+            entrypoint="/opt/kairos/.venv/bin/python",
+            extra=("--tmpfs", "/tmp", "--user", "10000:10000"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_sigkill_adoption_and_restore_boundaries_in_real_image(self):
+        script = r"""
+import json
+import os
+import select
+import signal
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+secret = 'real-image-recovery-sentinel'
+worker = r'''
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from kairos_domain.ownership import Actor
+from kairos_skills.adoptions import SkillAdoptionService
+from kairos_skills.catalog import catalog_home_id
+from kairos_skills.mutations import SkillMutationService
+from kairos_skills.removal_io import SkillRemovalFiles
+from kairos_state import connect
+from kairos_state.migrations import migrate
+from kairos_state.repositories.skill_mutations import SkillMutationRepository
+from kairos_state.repositories.skill_adoptions import SkillAdoptionRepository
+
+mode, raw_home, name, *extra = sys.argv[1:]
+home = Path(raw_home)
+database = connect(home / 'state.db')
+migrate(database)
+repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
+if mode == 'adopt':
+    original = SkillAdoptionRepository.prepare_adopt
+    def stop_after_prepare(repo, draft, snapshot):
+        result = original(repo, draft, snapshot)
+        print('BOUNDARY:' + draft.operation_id, flush=True)
+        input()
+        return result
+    with patch.object(SkillAdoptionRepository, 'prepare_adopt', stop_after_prepare):
+        SkillAdoptionService(home, repository).adopt(
+            name, actor=Actor.USER_FOREGROUND, confirmed=True
+        )
+else:
+    original = SkillRemovalFiles.publish
+    def stop_after_publish(files, operation_id, skill_name):
+        original(files, operation_id, skill_name)
+        print('BOUNDARY:' + operation_id, flush=True)
+        input()
+    service = SkillMutationService(home, repository)
+    with patch.object(SkillRemovalFiles, 'publish', stop_after_publish):
+        service.rollback(extra[0], actor=Actor.USER_FOREGROUND)
+'''
+
+def cli(home, *args):
+    env = {**os.environ, 'KAIROS_HOME': str(home)}
+    result = subprocess.run(
+        ['kairos', *args], capture_output=True, text=True, env=env,
+        timeout=30, check=False,
+    )
+    assert secret not in result.stdout + result.stderr
+    return result
+
+def interrupt(home, mode, name, *extra):
+    command = [
+        '/opt/kairos/.venv/bin/python', '-c', worker,
+        mode, str(home), name, *extra,
+    ]
+    env = {**os.environ, 'KAIROS_HOME': str(home)}
+    process = subprocess.Popen(
+        command, cwd='/opt/kairos', env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        ready, _, _ = select.select([process.stdout], [], [], 20)
+        assert ready, 'subprocesso não chegou à fronteira durável'
+        line = process.stdout.readline().strip()
+        assert line.startswith('BOUNDARY:'), line
+        os.kill(process.pid, signal.SIGKILL)
+        assert process.wait(timeout=5) == -signal.SIGKILL
+        return line.split(':', 1)[1]
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+
+def reconcile(home, name):
+    from kairos_skills.mutation_lock import skill_mutation_lock
+    from kairos_skills.mutation_recovery import reconcile_pending
+    from kairos_skills.removal_io import SkillRemovalFiles
+    from kairos_skills.catalog import catalog_home_id
+    from kairos_state import connect
+    from kairos_state.repositories.skill_mutations import SkillMutationRepository
+    database = connect(home / 'state.db')
+    try:
+        repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
+        with skill_mutation_lock(home), SkillRemovalFiles(home) as files:
+            return reconcile_pending(repository, files, name=name)
+    finally:
+        database.close()
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    home = root / 'home'
+    skill = home / 'skills' / 'legacy-recovery'
+    skill.mkdir(parents=True)
+    (skill / 'SKILL.md').write_text(secret, encoding='utf-8')
+    (skill / 'run.bin').write_bytes(b'\x00\xff')
+
+    adoption_id = interrupt(home, 'adopt', 'legacy-recovery')
+    assert reconcile(home, 'legacy-recovery')
+    identified = cli(home, 'skills', 'identify', 'legacy-recovery', '--json')
+    assert identified.returncode == 0, identified.stderr
+    assert json.loads(identified.stdout)['adoption_id'] == adoption_id
+    assert json.loads(identified.stdout)['adoption_active'] is True
+
+    removed = cli(home, 'skills', 'remove', 'legacy-recovery', '--yes', '--json')
+    assert removed.returncode == 0, removed.stderr
+    removal_id = json.loads(removed.stdout)['operation_id']
+    restore_id = interrupt(home, 'restore', 'legacy-recovery', removal_id)
+    assert reconcile(home, 'legacy-recovery')
+    history = cli(home, 'skills', 'history', '--json')
+    assert history.returncode == 0, history.stderr
+    events = json.loads(history.stdout)
+    restored = next(event for event in events if event['id'] == restore_id)
+    assert restored['action'] == 'restore'
+    assert restored['state'] == 'committed'
+    identified = cli(home, 'skills', 'identify', 'legacy-recovery', '--json')
+    assert identified.returncode == 0, identified.stderr
+    report = json.loads(identified.stdout)
+    assert report['adoption_id'] == adoption_id
+    assert report['adoption_active'] is True
+    assert (skill / 'SKILL.md').read_text(encoding='utf-8') == secret
+    assert (skill / 'run.bin').read_bytes() == b'\x00\xff'
+"""
+        result = self.run_in(
+            "-",
+            input_text=script,
+            entrypoint="/opt/kairos/.venv/bin/python",
+            extra=("--tmpfs", "/tmp", "--user", "10000:10000"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_identify_reads_tree_in_real_image_without_mutation(self):
         script = """
 import shutil

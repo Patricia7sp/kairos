@@ -126,11 +126,13 @@ def _adoption_record_for_identification(*, home, name, evidence, database, captu
     with io_errors():
         try:
             with database_connection(home, write=False) as connection:
-                repository = None if connection is None else read_skill_repository(connection, home)
-                if repository is None:
+                if connection is None:
                     raise SkillMutationError("corrupt", "Linhagem de adoção ausente.")
                 if _database_fingerprint(connection) != database:
                     raise _changed()
+                repository = read_skill_repository(connection, home)
+                if repository is None:
+                    raise SkillMutationError("corrupt", "Linhagem de adoção ausente.")
                 record = _read_adoption_record(repository, adoption.adoption_id)
         except sqlite3.DatabaseError:
             raise SkillMutationError("io", "Não foi possível ler o ledger de skills.") from None

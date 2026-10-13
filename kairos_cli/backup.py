@@ -2,11 +2,43 @@
 
 import json
 import os
+import sqlite3
 import sys
 import tarfile
 import tempfile
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+
+
+def _archive_home(home: Path, archive: Path) -> int:
+    excludes = {"__pycache__", ".cache", ".pytest_cache"}
+    database = home / "state.db"
+    files = 0
+    with tempfile.TemporaryDirectory(prefix="kairos-backup-state-") as temporary:
+        snapshot = Path(temporary) / "state.db"
+        if database.exists():
+            with (
+                closing(
+                    sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+                ) as source,
+                closing(sqlite3.connect(snapshot)) as destination,
+            ):
+                source.backup(destination)
+            snapshot.chmod(database.stat().st_mode & 0o777)
+        with tarfile.open(archive, "w:gz") as tar:
+            for path in sorted(home.rglob("*")):
+                relative = path.relative_to(home)
+                if any(part in excludes for part in relative.parts):
+                    continue
+                if relative.as_posix() in {"state.db-wal", "state.db-shm", "state.db-journal"}:
+                    continue
+                if not path.is_file() and not (path.is_dir() and not path.is_symlink()):
+                    continue
+                archived = snapshot if path == database and snapshot.exists() else path
+                tar.add(archived, arcname=str(relative), recursive=False)
+                files += archived.is_file()
+    return files
 
 
 async def run_backup(home: Path, args) -> int:
@@ -24,22 +56,12 @@ async def run_backup(home: Path, args) -> int:
         os.close(fd)
         archive = Path(tmp_path)
 
-    excludes = {"__pycache__", ".cache", ".pytest_cache"}
-    with tarfile.open(archive, "w:gz") as tar:
-        for p in sorted(home.rglob("*")):
-            if not p.is_file():
-                continue
-            rel = p.relative_to(home)
-            if any(part in excludes for part in rel.parts):
-                continue
-            tar.add(p, arcname=str(rel))
-
-    size = archive.stat().st_size
-    files = sum(
-        1
-        for _ in home.rglob("*")
-        if _.is_file() and not any(part in excludes for part in _.relative_to(home).parts)
-    )
+    try:
+        files = _archive_home(home, archive)
+        size = archive.stat().st_size
+    except (OSError, sqlite3.DatabaseError, tarfile.TarError):
+        print("kairos: não foi possível criar o backup com segurança.", file=sys.stderr)
+        return 1
 
     as_json = getattr(args, "json", False)
     if as_json:

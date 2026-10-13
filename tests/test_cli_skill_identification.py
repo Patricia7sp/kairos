@@ -186,18 +186,38 @@ class CliSkillIdentificationTests(unittest.TestCase):
         self.assertIn("organizacional", stdout.lower())
         self.assertIn("limitada", stdout.lower())
 
-    def test_help_exposes_identify_without_adoption_commands(self):
+    def test_help_exposes_identify_and_adoption_commands(self):
         code, stdout, stderr = self.command(["skills", "--help"])
         self.assertEqual((code, stderr), (0, ""))
-        for command in ("identify", "add", "history", "list", "remove", "rollback"):
+        for command in (
+            "identify",
+            "add",
+            "adopt",
+            "history",
+            "list",
+            "remove",
+            "rollback",
+            "unadopt",
+        ):
             with self.subTest(command=command):
                 self.assertIn(command, stdout)
-        self.assertNotIn("adopt", stdout)
         code, stdout, stderr = self.command(["skills", "identify", "--help"])
         self.assertEqual((code, stderr), (0, ""))
         self.assertIn("NOME", stdout)
         self.assertIn("kebab-case", stdout)
         self.assertIn("somente leitura", stdout)
+        self.assertFalse(self.home.exists())
+        code, stdout, stderr = self.command(["skills", "adopt", "--help"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("NOME", stdout)
+        self.assertIn("--yes", stdout)
+        self.assertNotIn("--expect-adoption", stdout)
+        self.assertFalse(self.home.exists())
+        code, stdout, stderr = self.command(["skills", "unadopt", "--help"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertIn("NOME", stdout)
+        self.assertIn("--yes", stdout)
+        self.assertIn("--expect-adoption ID", stdout)
         self.assertFalse(self.home.exists())
 
     def test_identify_requires_name_and_rejects_unknown_options_without_io(self):

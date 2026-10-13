@@ -61,8 +61,11 @@ externos não participam de uma transação única com o serviço.
 O ledger append-only em `state.db` retém conteúdo integral, hashes e eventos,
 mesmo após rollback. Inclua o banco e os diretórios instalados/privados em sua
 política de backup: backup SQLite conserva o ledger, mas não é snapshot dos
-arquivos. O tar do backup atual também não é um snapshot atômico. Restaurar
-o banco sobre arquivos divergentes não autoriza sobrescrevê-los. A área
+arquivos. `kairos backup` inclui uma cópia SQLite consistente de `state.db`,
+sem WAL/SHM/journal ativos, e preserva os modos dos diretórios privados. O tar
+não captura banco e arquivos numa transação conjunta; restaurar o banco sobre
+arquivos divergentes não autoriza sobrescrevê-los. Falha na cópia do banco
+recusa o backup sem resposta de sucesso. A área
 `.skill-mutations/staging/ID` contém preparações; conteúdo desconhecido não é
 promovido nem removido automaticamente. Área privada e instalação precisam
 estar no mesmo filesystem; sem lock ou rename seguro, o comando recusa com 69.
@@ -74,6 +77,42 @@ conflito/I/O/corrupção e recurso indisponível. Os avisos mostram ID e metadat
 sem corpo, autor ou caminho absoluto. A criação fica disponível para `--skill`
 imediatamente e para catálogo de sessão nova; rollback conserva snapshots e
 páginas históricas. Este recorte é autoria manual, sem `/learn` ou curador.
+
+## Adotar uma skill local existente
+
+Uma skill legada pode ser assumida explicitamente, sem criar uma instalação ou
+atribuir autoria histórica:
+
+```bash
+kairos skills identify revisar-docs --json
+kairos skills adopt revisar-docs --yes --json
+kairos skills unadopt revisar-docs --yes --expect-adoption ID_DA_ADOCAO --json
+kairos skills history --name revisar-docs --json
+```
+
+`adopt` e `unadopt` só aceitam a skill instalada no home local e exigem
+`--yes`. A adoção registra autoridade foreground; ela não infere autor, origem,
+versão de conteúdo ou proteção organizacional. Uma concessão independente já
+comprovada é devolvida sem novo evento de adoção. `unadopt` revoga apenas essa
+autoridade: conserva arquivos, modos, snapshots e eventos anteriores. Depois
+da revogação, uma nova adoção foreground é necessária antes de remover ou
+restaurar uma árvore vinculada.
+
+`--expect-adoption ID` é um guard opcional de comparação para `unadopt`: a
+revogação só ocorre se o ID ainda for a adoção vigente. Um ID inválido retorna
+2; uma adoção vigente diferente retorna 1 e não grava revogação. Rollback de
+eventos `adopt` e `unadopt` recusa com 77 e orienta usar o comando inverso de
+autoridade, pois essas operações não revertem arquivos. A CLI retorna 77 para
+confirmação ou veto conhecido, 69 quando uma primitiva segura está indisponível
+e 1 para ausência, divergência ou falha. O JSON inclui IDs, linhagem e validade,
+sem snapshots, conteúdo ou caminhos privados.
+
+O histórico combina criação, remoção, restauração, adoção, revogação e rollback
+em ordem global. Cada evento mantém a validade observada quando foi registrado;
+uma revogação posterior não reclassifica o evento `adopt` anterior. Backups
+SQLite consistentes preservam os registros e blobs binários. A restauração de
+arquivos com nome ou bytes iguais não cria uma nova prova: a identidade da raiz
+e os vínculos do home continuam sendo verificados antes de qualquer mutação.
 
 ## Usar uma skill instalada
 

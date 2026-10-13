@@ -287,6 +287,10 @@ def cmd_skills(args) -> int:
         from kairos_cli.skill_identification import run_skill_identification
 
         return run_skill_identification(_home(), args)
+    if sub in ("adopt", "unadopt"):
+        from kairos_cli.skill_adoptions import run_skill_adoption
+
+        return run_skill_adoption(_home(), args)
     if sub in ("add", "history", "rollback", "remove"):
         from kairos_cli.skill_mutations import run_skill_mutation
 

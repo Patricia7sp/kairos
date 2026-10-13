@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from kairos_domain.ownership import Actor
+from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionRecord
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import (
     SkillMutationError,
@@ -29,6 +30,42 @@ from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
 def mutation_metadata(record: CommonRecord) -> dict[str, object]:
+    if isinstance(record, SkillAdoptionRecord):
+        draft = record.draft
+        committed = record.state.value == "committed"
+        active_at_event = (
+            committed and draft.action is SkillAdoptionAction.ADOPT if committed else None
+        )
+        identity_valid = True if committed else None
+        lineage_valid = True if committed else None
+        return {
+            "id": record.operation_id,
+            "operation_id": record.operation_id,
+            "name": record.name,
+            "action": record.action.value,
+            "state": record.state.value,
+            "origin": None,
+            "created_at": draft.created_at,
+            "reverts": None,
+            "installation_id": draft.installation_id,
+            "adoption_id": draft.adoption_id,
+            "lineage": {
+                "installation_id": draft.installation_id,
+                "adoption_id": draft.adoption_id,
+                "valid": lineage_valid,
+            },
+            "validity": {
+                "identity_valid": identity_valid,
+                "adoption_active": active_at_event,
+            },
+            "identity_valid": identity_valid,
+            "adoption_active": active_at_event,
+            "historical_creation_origin": "unknown",
+            "installation_source": draft.installation_source,
+            "authorization_basis": (
+                "user_adoption" if active_at_event is True else "none" if committed else None
+            ),
+        }
     metadata = {
         "id": record.operation_id,
         "name": record.name,
