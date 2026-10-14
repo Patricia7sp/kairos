@@ -2431,7 +2431,10 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status: proposta; não implementada nem aprovada.** Referência de design:
+**Status: design B1 aprovado em 2026-10-14; implementação pendente. B2 permanece
+proposta não aprovada.** O recorte aprovado está em
+`docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`;
+seu plano aguarda revisão. Referência de design geral:
 `docs/superpowers/specs/2026-10-11-politica-publicacao-skills-design.md`,
 com recusa conservadora de namespace na fatia A
 (`2026-10-10-proveniencia-skills-design.md`).

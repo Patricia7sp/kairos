@@ -1,6 +1,7 @@
 # B1 — política organizacional nos serviços de skills
 
-Status: proposta para revisão; não aprovada nem implementada.
+Status: spec aprovada pelo usuário em 2026-10-14; implementação pendente.
+O plano B1 terá revisão própria antes da execução. B2 permanece separado.
 
 Complementa a [proposta B1/B2](2026-10-11-politica-publicacao-skills-design.md)
 e separa B1 da coordenação de publicação de B2. A2 foi integrada por
