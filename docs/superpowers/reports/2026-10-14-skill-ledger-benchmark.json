@@ -1,0 +1,458 @@
+{
+  "python": "3.11.16",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+  "script_sha256": "1995a9269151fe4ee4e6b10ddb0a6f072fb0c6fb1cfab573685e0dad8d17cbfb",
+  "method": "7 amostras por padr\u00e3o; cache aquecido; perfil separado; fixtures locais reais",
+  "scenarios": [
+    {
+      "prefix_operations": 0,
+      "revoked_adoption_cycles": 0,
+      "seed_seconds": 0.09101374200000123,
+      "database_bytes": 552960,
+      "timeline_events": 2,
+      "measurements": {
+        "installation_evidence": {
+          "samples_ms": [
+            0.665731,
+            0.649548,
+            0.641574,
+            0.645896,
+            0.647749,
+            0.638019,
+            0.659967
+          ],
+          "median_ms": 0.647749,
+          "min_ms": 0.638019,
+          "max_ms": 0.665731,
+          "calls_one_profiled_operation": {
+            "_get_validated": 1,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 1,
+            "validate_skill_timeline": 1
+          }
+        },
+        "history_limit_20": {
+          "samples_ms": [
+            1.283669,
+            1.290122,
+            1.492586,
+            1.631928,
+            1.467975,
+            1.29865,
+            1.288794
+          ],
+          "median_ms": 1.29865,
+          "min_ms": 1.283669,
+          "max_ms": 1.631928,
+          "calls_one_profiled_operation": {
+            "_get_validated": 2,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 2,
+            "validate_skill_timeline": 2
+          }
+        },
+        "identify_skill": {
+          "samples_ms": [
+            31.878303,
+            31.872431,
+            31.70456,
+            31.394765,
+            31.850041,
+            32.863912,
+            31.926746
+          ],
+          "median_ms": 31.872431,
+          "min_ms": 31.394765,
+          "max_ms": 32.863912,
+          "calls_one_profiled_operation": {
+            "_get_validated": 5,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 9,
+            "validate_skill_timeline": 9
+          }
+        },
+        "idempotent_adopt": {
+          "samples_ms": [
+            42.586231,
+            41.8881,
+            43.358998,
+            47.727559,
+            55.420385,
+            52.619157,
+            44.382197
+          ],
+          "median_ms": 44.382197,
+          "min_ms": 41.8881,
+          "max_ms": 55.420385,
+          "calls_one_profiled_operation": {
+            "_get_validated": 10,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 14,
+            "validate_skill_timeline": 14
+          }
+        }
+      },
+      "database_and_root_preserved": true
+    },
+    {
+      "prefix_operations": 100,
+      "revoked_adoption_cycles": 0,
+      "seed_seconds": 2.4278965420000134,
+      "database_bytes": 651264,
+      "timeline_events": 202,
+      "measurements": {
+        "installation_evidence": {
+          "samples_ms": [
+            94.106552,
+            91.849952,
+            92.355539,
+            94.069192,
+            102.904276,
+            92.942573,
+            95.38158
+          ],
+          "median_ms": 94.069192,
+          "min_ms": 91.849952,
+          "max_ms": 102.904276,
+          "calls_one_profiled_operation": {
+            "_get_validated": 101,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 1,
+            "validate_skill_timeline": 1
+          }
+        },
+        "history_limit_20": {
+          "samples_ms": [
+            182.703965,
+            196.17162,
+            195.254899,
+            212.982787,
+            233.778728,
+            205.474921,
+            208.177168
+          ],
+          "median_ms": 205.474921,
+          "min_ms": 182.703965,
+          "max_ms": 233.778728,
+          "calls_one_profiled_operation": {
+            "_get_validated": 202,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 2,
+            "validate_skill_timeline": 2
+          }
+        },
+        "identify_skill": {
+          "samples_ms": [
+            437.335129,
+            465.018786,
+            442.39583,
+            420.900851,
+            424.838177,
+            579.542202,
+            684.66444
+          ],
+          "median_ms": 442.39583,
+          "min_ms": 420.900851,
+          "max_ms": 684.66444,
+          "calls_one_profiled_operation": {
+            "_get_validated": 405,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 9,
+            "validate_skill_timeline": 9
+          }
+        },
+        "idempotent_adopt": {
+          "samples_ms": [
+            1526.328407,
+            1330.062291,
+            781.609418,
+            806.703348,
+            856.774438,
+            907.050086,
+            956.557662
+          ],
+          "median_ms": 907.050086,
+          "min_ms": 781.609418,
+          "max_ms": 1526.328407,
+          "calls_one_profiled_operation": {
+            "_get_validated": 810,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 14,
+            "validate_skill_timeline": 14
+          }
+        }
+      },
+      "database_and_root_preserved": true
+    },
+    {
+      "prefix_operations": 1000,
+      "revoked_adoption_cycles": 0,
+      "seed_seconds": 28.932925051999973,
+      "database_bytes": 1613824,
+      "timeline_events": 2002,
+      "measurements": {
+        "installation_evidence": {
+          "samples_ms": [
+            1602.744472,
+            1318.386343,
+            1079.340194,
+            1084.912088,
+            1062.955914,
+            1138.458465,
+            1179.95859
+          ],
+          "median_ms": 1138.458465,
+          "min_ms": 1062.955914,
+          "max_ms": 1602.744472,
+          "calls_one_profiled_operation": {
+            "_get_validated": 1001,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 1,
+            "validate_skill_timeline": 1
+          }
+        },
+        "history_limit_20": {
+          "samples_ms": [
+            2221.267961,
+            2840.126394,
+            2970.192836,
+            2215.99355,
+            2276.874945,
+            2785.671182,
+            2076.031769
+          ],
+          "median_ms": 2276.874945,
+          "min_ms": 2076.031769,
+          "max_ms": 2970.192836,
+          "calls_one_profiled_operation": {
+            "_get_validated": 2002,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 2,
+            "validate_skill_timeline": 2
+          }
+        },
+        "identify_skill": {
+          "samples_ms": [
+            5470.796902,
+            4855.878248,
+            4541.831794,
+            4667.666638,
+            4909.674623,
+            4573.035497,
+            4512.267867
+          ],
+          "median_ms": 4667.666638,
+          "min_ms": 4512.267867,
+          "max_ms": 5470.796902,
+          "calls_one_profiled_operation": {
+            "_get_validated": 4005,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 9,
+            "validate_skill_timeline": 9
+          }
+        },
+        "idempotent_adopt": {
+          "samples_ms": [
+            8865.550329,
+            9081.391183,
+            9013.078205,
+            9632.835431,
+            9630.063502,
+            9139.283326,
+            9247.621837
+          ],
+          "median_ms": 9139.283326,
+          "min_ms": 8865.550329,
+          "max_ms": 9632.835431,
+          "calls_one_profiled_operation": {
+            "_get_validated": 8010,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 14,
+            "validate_skill_timeline": 14
+          }
+        }
+      },
+      "database_and_root_preserved": true
+    },
+    {
+      "prefix_operations": 0,
+      "revoked_adoption_cycles": 20,
+      "seed_seconds": 6.470244582000021,
+      "database_bytes": 573440,
+      "timeline_events": 82,
+      "measurements": {
+        "installation_evidence": {
+          "samples_ms": [
+            19.110064,
+            19.067689,
+            18.972045,
+            19.195876,
+            18.782602,
+            19.32974,
+            18.880311
+          ],
+          "median_ms": 19.067689,
+          "min_ms": 18.782602,
+          "max_ms": 19.32974,
+          "calls_one_profiled_operation": {
+            "_get_validated": 41,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 1,
+            "validate_skill_timeline": 1
+          }
+        },
+        "history_limit_20": {
+          "samples_ms": [
+            37.860426,
+            42.566318,
+            42.388177,
+            42.165474,
+            39.262266,
+            42.651213,
+            41.175811
+          ],
+          "median_ms": 42.165474,
+          "min_ms": 37.860426,
+          "max_ms": 42.651213,
+          "calls_one_profiled_operation": {
+            "_get_validated": 82,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 2,
+            "validate_skill_timeline": 2
+          }
+        },
+        "identify_skill": {
+          "samples_ms": [
+            206.016823,
+            208.286582,
+            217.583862,
+            200.380363,
+            143.656491,
+            135.623759,
+            126.91161
+          ],
+          "median_ms": 200.380363,
+          "min_ms": 126.91161,
+          "max_ms": 217.583862,
+          "calls_one_profiled_operation": {
+            "_get_validated": 165,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 9,
+            "validate_skill_timeline": 9
+          }
+        },
+        "idempotent_adopt": {
+          "samples_ms": [
+            205.701456,
+            199.258184,
+            199.563756,
+            208.189698,
+            207.715942,
+            219.938317,
+            224.348246
+          ],
+          "median_ms": 207.715942,
+          "min_ms": 199.258184,
+          "max_ms": 224.348246,
+          "calls_one_profiled_operation": {
+            "_get_validated": 330,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 14,
+            "validate_skill_timeline": 14
+          }
+        }
+      },
+      "database_and_root_preserved": true
+    },
+    {
+      "prefix_operations": 0,
+      "revoked_adoption_cycles": 100,
+      "seed_seconds": 132.83678043699996,
+      "database_bytes": 737280,
+      "timeline_events": 402,
+      "measurements": {
+        "installation_evidence": {
+          "samples_ms": [
+            170.932315,
+            169.154492,
+            160.942637,
+            135.395617,
+            84.587041,
+            85.097508,
+            86.276299
+          ],
+          "median_ms": 135.395617,
+          "min_ms": 84.587041,
+          "max_ms": 170.932315,
+          "calls_one_profiled_operation": {
+            "_get_validated": 201,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 1,
+            "validate_skill_timeline": 1
+          }
+        },
+        "history_limit_20": {
+          "samples_ms": [
+            161.172928,
+            162.146819,
+            166.447129,
+            165.102994,
+            164.035806,
+            164.709461,
+            161.952856
+          ],
+          "median_ms": 164.035806,
+          "min_ms": 161.172928,
+          "max_ms": 166.447129,
+          "calls_one_profiled_operation": {
+            "_get_validated": 402,
+            "_reader_copy": 0,
+            "validate_adoption_schema": 2,
+            "validate_skill_timeline": 2
+          }
+        },
+        "identify_skill": {
+          "samples_ms": [
+            387.939893,
+            395.437074,
+            393.246967,
+            435.543653,
+            441.460889,
+            391.49991,
+            386.913008
+          ],
+          "median_ms": 393.246967,
+          "min_ms": 386.913008,
+          "max_ms": 441.460889,
+          "calls_one_profiled_operation": {
+            "_get_validated": 805,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 9,
+            "validate_skill_timeline": 9
+          }
+        },
+        "idempotent_adopt": {
+          "samples_ms": [
+            743.875276,
+            811.512748,
+            1114.212235,
+            854.288377,
+            755.872565,
+            1288.119963,
+            1028.649773
+          ],
+          "median_ms": 854.288377,
+          "min_ms": 743.875276,
+          "max_ms": 1288.119963,
+          "calls_one_profiled_operation": {
+            "_get_validated": 1610,
+            "_reader_copy": 4,
+            "validate_adoption_schema": 14,
+            "validate_skill_timeline": 14
+          }
+        }
+      },
+      "database_and_root_preserved": true
+    }
+  ]
+}
