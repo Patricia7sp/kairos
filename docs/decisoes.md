@@ -2321,7 +2321,11 @@ explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
 
 ## D-CLI.SKILL.PROVENANCE — identificação e adoção explícita de instalações
 
-**Status: proposta; não implementada nem aprovada.** Referência de design:
+**Status:** identificação A1 implementada; adoção/revogação A2 implementadas nesta
+branch. O aceite local e os nove jobs remotos do commit `5b84049` passaram
+([CI](https://github.com/Patricia7sp/kairos/actions/runs/38485360298)).
+Ajustes posteriores são revalidados em seu próprio commit. B1/B2 continuam
+propostas; esta entrada não afirma merge ou aprovação de produção. Referência de design:
 `docs/superpowers/specs/2026-10-10-proveniencia-skills-design.md`.
 Referências herdadas: `_reversa_sdd/adrs/009-proveniencia-de-skill.md`,
 Decisão e Alternativas; `skills/requirements.md` RF-04/RF-08;
@@ -2336,9 +2340,9 @@ A autoridade de uma fonte exige prova do escritor e de sua origem: chamar
 sync com uma raiz arbitrária não comprova BUNDLED, e declarar uma organização
 na aquisição não comprova proteção organizacional autenticada.
 
-A proposta separa entregas: primeiro identificação somente leitura; depois
-adoção/revogação e sua linhagem; publicações e continuidade das provas ficam
-para fatia própria. A interface implementada para a identificação em A1 é:
+A entrega foi fatiada: A1 introduziu identificação somente leitura; A2 acrescenta
+adoção/revogação e sua linhagem. Publicações e continuidade de proteção por
+política permanecem nas propostas B1/B2. A interface de identificação é:
 
 ```bash
 kairos skills identify revisar-docs
@@ -2389,20 +2393,41 @@ ao conteúdo validado. Autoria histórica de uma instalação BUNDLED independen
 permanece desconhecida após restore, mesmo havendo criação USER anterior
 com o mesmo nome; o histórico anterior é preservado.
 
-A2 e a fatia B permanecem propostas com aprovação e planos próprios.
-Na proposta A2, revogação por nome resolve a adoção fundadora da
-instalação corrente, inclusive após restore derivado, e registra os IDs
-envolvidos. Não alcança uma instalação substituída, criação independente ou
-adoção posterior. Revogar autoridade preserva arquivos e histórico; restore
-não deve ressuscitar autoridade já revogada. A tabela de linhagem do design
-deve explicitar esses casos antes de implementação.
+**Status A2: implementado nesta branch `feat/cli-skills-adoption`.** A interface
+`skills adopt`/`skills unadopt` exige confirmação explícita; `--expect-adoption`
+protege a revogação contra troca concorrente da adoção vigente. A/U alteram
+somente autoridade e conservam arquivos, modos, snapshots e eventos anteriores.
+O histórico global registra a validade observada em cada evento, sem reclassificar
+o `adopt` após uma revogação.
 
-Como decisão nova proposta para a fase A2, tombstones também
-registrariam a intenção local de exclusão do sync independentemente do
-proprietário. Isso impediria a reaparição de uma skill adotada quando um
-bundle posterior passasse a oferecer seu nome. Restore committed encerraria
-somente a exclusão vinculada. Não criar exclusões retroativas para remoções
-antigas que não as registraram nem mudar o significado dos tombstones atuais.
+A linhagem vincula a adoção fundadora à instalação observada; remoção e restore
+preservam A/source, e o restore committed recebe uma nova identidade de instalação.
+Restore derivado não ressuscita uma adoção revogada. A identidade da raiz e o
+binding canônico do home são revalidados, inclusive após backup: nomes ou bytes
+iguais não renovam autoridade. A exclusão associada a remoção adotada é mantida
+separada do significado dos tombstones bundled antigos e só é encerrada pelo
+restore committed vinculado. Não são criadas exclusões retroativas para remoções
+anteriores.
+
+O backup público conserva modos dos diretórios privados e arquiva uma cópia
+SQLite consistente de `state.db`, sem seus sidecars ativos. Um checkpoint
+concorrente não perde o ledger confirmado; banco inválido recusa sem resposta
+de sucesso. Banco e arquivos não têm snapshot conjunto: divergência após
+restauração continua recusada sem renovar identidade ou autoridade.
+
+O gate local da imagem real passou com 30 testes e 26 subtestes, sem skips
+(`RealImageTests`, em 2026-10-13). O CI local completo passou com 3.831 testes e 6.309 subtestes, Ruff, shellcheck,
+recall, lockfile e os três frontends (239 testes e TypeScript). O complemento
+Docker offline passou com 26 testes; AppArmor/seccomp permaneceu sem opt-in.
+A revisão independente final encontrou uma falha no backup público, corrigida
+com testes RED→GREEN de checkpoint concorrente e banco inválido, seguidos
+por nova suíte integral e reconstrução da imagem. Os nove jobs remotos do
+commit `5b84049` passaram no [run 38485360298](https://github.com/Patricia7sp/kairos/actions/runs/38485360298),
+com deploy pulado pela condição de PR. Ajustes posteriores exigem novos checks;
+não há autorização de merge, deploy ou operação em home de produção.
+Detalhes e limites em [aceite A2](superpowers/reports/2026-10-13-cli-skills-adoption.md). A2 não cria prova SEDIMENT nem estabelece política
+organizacional geral. B1/B2 continuam propostas com seus próprios escopos e
+gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 

@@ -368,10 +368,10 @@ class RemovalProjectionTests(unittest.TestCase):
 
     def test_missing_timeline_reference_blocks_projection_and_history(self):
         created = self.create()
-        self.db.execute("DROP TRIGGER skill_mutation_timeline_no_delete")
+        self.db.execute("DROP TRIGGER skill_authority_timeline_no_delete")
         with self.db:
             self.db.execute(
-                "DELETE FROM skill_mutation_timeline WHERE legacy_event=(SELECT MAX(sequence) FROM skill_mutation_events)"
+                "DELETE FROM skill_authority_timeline WHERE legacy_event=(SELECT MAX(sequence) FROM skill_mutation_events)"
             )
         for read in (
             lambda: self.repo.current_installation(self.name),
@@ -383,10 +383,10 @@ class RemovalProjectionTests(unittest.TestCase):
 
     def test_orphan_operation_blocks_history_and_projection(self):
         created = self.create()
-        self.db.execute("DROP TRIGGER skill_mutation_timeline_no_delete")
+        self.db.execute("DROP TRIGGER skill_authority_timeline_no_delete")
         self.db.execute("DROP TRIGGER skill_mutation_events_no_delete")
         with self.db:
-            self.db.execute("DELETE FROM skill_mutation_timeline")
+            self.db.execute("DELETE FROM skill_authority_timeline")
             self.db.execute("DELETE FROM skill_mutation_events")
         for read in (self.repo.history, lambda: self.repo.current_installation(self.name)):
             with self.subTest(read=read), self.assertRaises(SkillMutationError):

@@ -126,16 +126,19 @@ class RemovalSyncTests(unittest.TestCase):
                 self.assertFalse((self.home / "skills").exists())
 
     def test_corrupt_or_incompatible_ledger_refuses_seeding(self):
+        from kairos_state.schema import SCHEMA_VERSION
+
         self.repository()
-        for statement in (
-            "UPDATE schema_version SET version=9",
-            "UPDATE schema_version SET version=8",
-            "DROP TABLE skill_tree_snapshots",
+        pristine = sqlite3.connect(":memory:")
+        self.addCleanup(pristine.close)
+        self.db.backup(pristine)
+        for statement, parameters in (
+            ("UPDATE schema_version SET version=?", (SCHEMA_VERSION + 1,)),
+            ("DROP TABLE skill_tree_snapshots", ()),
         ):
+            pristine.backup(self.db)
             with self.db:
-                self.db.execute(statement)
-            if statement.startswith("UPDATE schema_version SET version=8"):
-                continue
+                self.db.execute(statement, parameters)
             with self.subTest(statement=statement):
                 with self.assertRaises(SkillMutationError):
                     sync_bundled_skills(self.bundle, self.home / "skills")

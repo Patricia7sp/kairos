@@ -392,7 +392,12 @@ COMMANDS: tuple[Command, ...] = (
         "skills",
         "Skills do agente",
         _c("add", "Cria uma skill de um SKILL.md local", status=Status.IMPLEMENTED),
-        _c("history", "Histórico de criações, remoções e reversões", status=Status.IMPLEMENTED),
+        _c("adopt", "Assume a administração local de uma instalação", status=Status.IMPLEMENTED),
+        _c(
+            "history",
+            "Histórico global de autoria, remoção, restauração e adoção",
+            status=Status.IMPLEMENTED,
+        ),
         _c(
             "identify",
             "Identifica evidências da instalação, somente leitura",
@@ -402,6 +407,7 @@ COMMANDS: tuple[Command, ...] = (
         _sub("list", "Lista as skills"),
         _c("remove", "Remove uma skill com snapshot reversível", status=Status.IMPLEMENTED),
         _c("rollback", "Reverte criação ou restaura remoção comprovada", status=Status.IMPLEMENTED),
+        _c("unadopt", "Revoga uma adoção sem alterar os arquivos", status=Status.IMPLEMENTED),
         _sub("tap", "Fontes de skill"),
         status=Status.IMPLEMENTED,
         unit="skills",

@@ -10,6 +10,11 @@ from enum import StrEnum
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture, TreeEntry
+from kairos_skills.adoption_contract import (
+    INSTALLATION_SOURCES,
+    AdoptionAuthority,
+    SkillAdoptionRecord,
+)
 from kairos_skills.mutation_contract import (
     SkillMutationRecord,
     SkillMutationState,
@@ -93,6 +98,8 @@ class SkillTreeDraft:
     proof: TreeCapture
     snapshot_id: str
     reverts: str | None = None
+    adoption: AdoptionAuthority | None = None
+    installation_source: str | None = None
 
     def __post_init__(self):
         validate_actor(self.actor)
@@ -111,6 +118,16 @@ class SkillTreeDraft:
             and self.provenance in (Provenance.USER, Provenance.BUNDLED)
         )
         validate_capture(self.proof)
+        if self.adoption is None:
+            require(self.installation_source is None)
+        else:
+            require(type(self.adoption) is AdoptionAuthority and self.adoption.active)
+            require(
+                self.provenance is Provenance.USER
+                and self.installation_source in INSTALLATION_SOURCES
+            )
+            if self.action is SkillTreeAction.RESTORE:
+                require(self.adoption.installation_id == self.operation_id)
         if self.action is SkillTreeAction.REMOVE:
             require(self.snapshot_id == self.operation_id and self.reverts is None)
         else:
@@ -157,6 +174,7 @@ class InstallationProof:
     provenance: Provenance
     device: int
     inode: int
+    adoption: AdoptionAuthority | None = None
 
     def __post_init__(self):
         validate_id(self.operation_id)
@@ -166,6 +184,12 @@ class InstallationProof:
         )
         require(type(self.device) is int and 0 <= self.device < 2**64)
         require(type(self.inode) is int and 0 < self.inode < 2**64)
+        if self.adoption is not None:
+            require(type(self.adoption) is AdoptionAuthority)
+            require(
+                self.adoption.installation_id == self.operation_id
+                and self.provenance is Provenance.USER
+            )
 
 
-CommonRecord = SkillMutationRecord | SkillTreeRecord
+CommonRecord = SkillMutationRecord | SkillTreeRecord | SkillAdoptionRecord

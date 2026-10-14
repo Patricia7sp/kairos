@@ -231,6 +231,20 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         )
         parser.add_argument("name", metavar="NOME", help="filho imediato em skills/, kebab-case")
         parser.add_argument("--yes", action="store_true", help="Confirma a remoção reversível")
+    elif command == "skills" and subcommand in {"adopt", "unadopt"}:
+        action = "A adoção" if subcommand == "adopt" else "A revogação"
+        parser.description = (
+            f"{action} altera somente a autoridade local da instalação; os arquivos e seu "
+            "histórico permanecem preservados. Exige usuário em primeiro plano e --yes."
+        )
+        parser.add_argument("name", metavar="NOME", help="filho imediato em skills/, kebab-case")
+        parser.add_argument("--yes", action="store_true", help="Confirma a alteração de autoridade")
+        if subcommand == "unadopt":
+            parser.add_argument(
+                "--expect-adoption",
+                metavar="ID",
+                help="Revoga somente se este ainda for o ID da adoção vigente",
+            )
     elif command == "skills" and subcommand == "history":
         parser.add_argument("--name", help="Nome da skill")
         parser.add_argument(
