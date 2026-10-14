@@ -108,7 +108,7 @@ class SkillAdoptionService:
                     "denied", "A proveniência registrada não pode ser adotada."
                 )
             if origin.identity_valid is not True or origin.provenance is not current.provenance:
-                raise _conflict("A prova independente mudou durante a adoção.")
+                raise _conflict("Não foi possível validar a prova independente para adoção.")
             return self._return_existing(name, before, captured, None, origin)
         if current is None and origin.provenance is Provenance.BUNDLED:
             return self._return_existing(name, before, captured, None, origin)

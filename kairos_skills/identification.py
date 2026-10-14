@@ -113,7 +113,7 @@ def _read_adoption_record(repository, adoption_id):
     return repository.get(adoption_id)
 
 
-def _adoption_record_for_identification(*, home, name, evidence, database, captured, origin):
+def _adoption_record_for_identification(*, home, name, evidence, database, captured):
     adoption = evidence.adoption
     if (
         evidence.current is None
@@ -121,8 +121,6 @@ def _adoption_record_for_identification(*, home, name, evidence, database, captu
         or adoption.installation_id != evidence.current.operation_id
     ):
         return None, None
-    if origin.identity_valid is not True:
-        return adoption, None
     with io_errors():
         try:
             with database_connection(home, write=False) as connection:
@@ -248,6 +246,5 @@ def identify_skill(home: Path, name: str) -> SkillIdentification:
         evidence=evidence,
         database=database,
         captured=captured,
-        origin=origin,
     )
     return _make_identification(name, evidence, origin, adoption, adoption_record)

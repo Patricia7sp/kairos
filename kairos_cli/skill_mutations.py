@@ -33,9 +33,7 @@ def mutation_metadata(record: CommonRecord) -> dict[str, object]:
     if isinstance(record, SkillAdoptionRecord):
         draft = record.draft
         committed = record.state.value == "committed"
-        active_at_event = (
-            committed and draft.action is SkillAdoptionAction.ADOPT if committed else None
-        )
+        active_at_event = draft.action is SkillAdoptionAction.ADOPT if committed else None
         identity_valid = True if committed else None
         lineage_valid = True if committed else None
         return {

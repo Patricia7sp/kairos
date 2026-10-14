@@ -2322,7 +2322,9 @@ explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
 ## D-CLI.SKILL.PROVENANCE — identificação e adoção explícita de instalações
 
 **Status:** identificação A1 implementada; adoção/revogação A2 implementadas nesta
-branch. A validação integrada da branch ainda está pendente. B1/B2 continuam
+branch. O aceite local e os nove jobs remotos do commit `5b84049` passaram
+([CI](https://github.com/Patricia7sp/kairos/actions/runs/38485360298)).
+Ajustes posteriores são revalidados em seu próprio commit. B1/B2 continuam
 propostas; esta entrada não afirma merge ou aprovação de produção. Referência de design:
 `docs/superpowers/specs/2026-10-10-proveniencia-skills-design.md`.
 Referências herdadas: `_reversa_sdd/adrs/009-proveniencia-de-skill.md`,
@@ -2419,8 +2421,10 @@ recall, lockfile e os três frontends (239 testes e TypeScript). O complemento
 Docker offline passou com 26 testes; AppArmor/seccomp permaneceu sem opt-in.
 A revisão independente final encontrou uma falha no backup público, corrigida
 com testes RED→GREEN de checkpoint concorrente e banco inválido, seguidos
-por nova suíte integral e reconstrução da imagem. O CI remoto continua
-pendente; não há autorização de merge, deploy ou operação em home de produção.
+por nova suíte integral e reconstrução da imagem. Os nove jobs remotos do
+commit `5b84049` passaram no [run 38485360298](https://github.com/Patricia7sp/kairos/actions/runs/38485360298),
+com deploy pulado pela condição de PR. Ajustes posteriores exigem novos checks;
+não há autorização de merge, deploy ou operação em home de produção.
 Detalhes e limites em [aceite A2](superpowers/reports/2026-10-13-cli-skills-adoption.md). A2 não cria prova SEDIMENT nem estabelece política
 organizacional geral. B1/B2 continuam propostas com seus próprios escopos e
 gates.

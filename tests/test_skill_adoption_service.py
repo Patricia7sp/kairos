@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture
-from kairos_skills.adoption_contract import SkillAdoptionAction
+from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionDraft
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.identification import identify_skill
 from kairos_skills.mutation_contract import (
@@ -235,6 +235,46 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         self.assertNotEqual(second.operation_id, first.operation_id)
         self.assertEqual(second.draft.installation_id, second.operation_id)
         self.assertEqual(identify_skill(self.home, self.name).adoption_id, second.operation_id)
+
+    def test_replaced_root_preserves_recorded_source_without_authority(self):
+        self.legacy()
+        repository = self.ledger()
+        operation_id = uuid.uuid4().hex
+        with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
+            captured = files.capture_installed(self.name)
+            root = captured.entries[0]
+            draft = SkillAdoptionDraft(
+                operation_id=operation_id,
+                home_id=repository.home_id,
+                action=SkillAdoptionAction.ADOPT,
+                name=self.name,
+                actor=Actor.USER_FOREGROUND,
+                created_at=time.time(),
+                adoption_id=operation_id,
+                installation_id=operation_id,
+                device=root.device,
+                inode=root.inode,
+                installation_source="verified_acquisition",
+                snapshot_id=operation_id,
+            )
+            SkillAdoptionRepository(self.database, home_id=repository.home_id).prepare_adopt(
+                draft, captured
+            )
+            founder = repository.finish(operation_id, SkillMutationState.COMMITTED)
+
+        initial = identify_skill(self.home, self.name)
+        self.assertEqual(initial.installation_source, "verified_acquisition")
+        self.assertTrue(initial.adoption_active)
+        self.target.rename(self.root / "previous")
+        shutil.copytree(self.root / "previous", self.target)
+        replaced = identify_skill(self.home, self.name)
+        self.assertEqual(replaced.installation_source, "verified_acquisition")
+        self.assertFalse(replaced.identity_valid)
+        self.assertFalse(replaced.adoption_active)
+        self.assertFalse(replaced.removivel)
+        self.assertEqual(replaced.authorization_basis, "none")
+        self.assertEqual(replaced.adoption_id, operation_id)
+        self.assertEqual(repository.get(operation_id), founder)
 
     def test_identify_rechecks_root_after_founder_read(self):
         self.legacy()
