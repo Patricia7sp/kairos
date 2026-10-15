@@ -2415,6 +2415,23 @@ concorrente não perde o ledger confirmado; banco inválido recusa sem resposta
 de sucesso. Banco e arquivos não têm snapshot conjunto: divergência após
 restauração continua recusada sem renovar identidade ou autoridade.
 
+A correção da fronteira do backup, conforme os comentários
+[#104 r4267112756](https://github.com/Patricia7sp/kairos/pull/104#discussion_r4267112756)
+e [#104 r4267112766](https://github.com/Patricia7sp/kairos/pull/104#discussion_r4267112766),
+recusa `state.db` não regular sem seguir links, com diagnóstico distinto de
+banco ilegível. A entrada lógica é visitada mesmo se o banco surgir após a
+enumeração; cada `state.db` arquivado vem da API SQLite `backup()`, incluindo
+WAL confirmado, nunca do arquivo vivo. Criação antes do ponto único de
+snapshot pode ser aceita; desaparecimento ou troca de identidade do banco
+observado, ou aparecimento após uma decisão por ausência, recusa a operação.
+Falhas removem o arquivo parcial desta execução sem imprimir sucesso; um
+`--output` preexistente só é substituído depois de concluir o backup.
+O destino não pode ser o banco ou seus sidecars. Após decidir pela ausência
+do banco, mudança de namespace do home recusa conservadoramente a captura,
+inclusive quando o banco é criado e removido entre verificações; outras
+criações/remoções concorrentes também podem exigir nova tentativa.
+Contrato e limites na [spec de fronteira](superpowers/specs/2026-10-14-backup-state-db-fronteira-design.md).
+
 O gate local da imagem real passou com 30 testes e 26 subtestes, sem skips
 (`RealImageTests`, em 2026-10-13). O CI local completo passou com 3.831 testes e 6.309 subtestes, Ruff, shellcheck,
 recall, lockfile e os três frontends (239 testes e TypeScript). O complemento
