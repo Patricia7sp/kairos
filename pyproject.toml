@@ -24,6 +24,10 @@ kairos = "kairos_cli.main:main"
 
 [project.optional-dependencies]
 dev = [
+    # >=7.13: a partir daí o coverage instala um `.pth` permanente que habilita a
+    # medição de subprocessos quando `COVERAGE_PROCESS_START` está definido — sem
+    # ele o número de cobertura da suíte sai artificialmente baixo.
+    "coverage>=7.13",
     "httpx2>=2.0.0",
     "pytest>=8",
     "ruff>=0.16",
@@ -46,6 +50,45 @@ markers = [
     "integration: exige Docker; pulado quando a imagem não foi construída",
     "runtime_live: exige opt-in, autenticação Codex dedicada e pode consumir turnos",
 ]
+
+# Cobertura para o Sonar (advisory). Enumeramos os pacotes de produção em vez de
+# usar a raiz "." porque o `.venv` fica dentro do repositório e a raiz acabaria
+# medindo site-packages de terceiros. Pacote novo precisa entrar nesta lista.
+[tool.coverage.run]
+source = [
+    "kairos_acp",
+    "kairos_agent",
+    "kairos_cli",
+    "kairos_container",
+    "kairos_cron",
+    "kairos_domain",
+    "kairos_evals",
+    "kairos_filesystem",
+    "kairos_gateway",
+    "kairos_i18n",
+    "kairos_integration",
+    "kairos_mcp",
+    "kairos_memory",
+    "kairos_observability",
+    "kairos_plugins",
+    "kairos_providers",
+    "kairos_runtime",
+    "kairos_security",
+    "kairos_skills",
+    "kairos_state",
+    "kairos_tools",
+    "kairos_tui_host",
+    "kairos_web",
+]
+# Modo paralelo: cada processo — inclusive subprocessos instrumentados pelo `.pth`
+# que o próprio coverage instala (>=7.13) quando `COVERAGE_PROCESS_START` está no
+# ambiente — grava o próprio data file; o `coverage combine` junta tudo antes do `xml`.
+parallel = true
+branch = false
+relative_files = true
+# A exclusão é espelhada em sonar-project.properties (sonar.exclusions); as duas
+# pontas têm de andar juntas.
+omit = ["tests/*", "skills/*", "ui-tui/*", "web/*", "apps/*"]
 
 [tool.ruff]
 target-version = "py311"
