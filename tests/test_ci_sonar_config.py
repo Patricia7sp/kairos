@@ -142,5 +142,27 @@ class SonarWorkflowTests(unittest.TestCase):
             )
 
 
+class LocalParityTests(unittest.TestCase):
+    """`scripts/ci.sh` espelha a cobertura e o scan condicional do CI.
+
+    Lê o script como dado de configuração (é receita, não código de produção).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO / "scripts" / "ci.sh").read_text(encoding="utf-8")
+
+    def test_gera_cobertura(self):
+        self.assertIn("coverage run", self.text)
+        self.assertIn("coverage xml", self.text)
+
+    def test_scan_do_sonar_e_condicional(self):
+        self.assertIn("sonar-scanner", self.text)
+        self.assertIn("SONAR_TOKEN", self.text)
+        # Sem as ferramentas, o caminho é um `skip` — o mesmo padrão dos skips
+        # de shellcheck/npm, nunca falha nem finge análise.
+        self.assertRegex(self.text, r'skip\s+"Sonar[^\n]*')
+
+
 if __name__ == "__main__":
     unittest.main()
