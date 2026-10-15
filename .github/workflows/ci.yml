@@ -45,8 +45,25 @@ jobs:
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: "22"
-      - name: pytest
-        run: uv run pytest -q -m "not runtime_live" --deselect tests/test_container.py::RealImageTests
+      # Cobertura consumida pelo job `sonar` (advisory). O `coverage` (>=7.13)
+      # instala um `.pth` permanente que mede subprocessos quando
+      # COVERAGE_PROCESS_START aponta para um arquivo de config. COVERAGE_FILE
+      # absoluto impede que filhos com cwd em tempdir deixem `.coverage.*` fora
+      # do repositório e sumam do `combine`. Não se roda a suíte duas vezes: o
+      # job `sonar` só consome o `coverage.xml`.
+      - name: pytest (com cobertura)
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
+        run: |
+          uv run coverage run -m pytest -q -m "not runtime_live" --deselect tests/test_container.py::RealImageTests
+          uv run coverage combine
+          uv run coverage xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: error
 
   lint:
     name: Lint (ruff)
@@ -197,6 +214,34 @@ jobs:
       # resolve com `--frozen`. Barato de checar, caro de descobrir depois.
       - name: uv lock --check
         run: uv lock --check
+
+  # SonarQube Cloud: observabilidade de cobertura/duplicação/complexidade.
+  # ADVISORY — não bloqueia merge e NÃO entra em `deploy.needs`. Consome o
+  # `coverage.xml` do job `tests` por artefato; nunca reexecuta a suíte. Sem
+  # `SONAR_TOKEN` (PR de fork) o passo é pulado com aviso explícito — nunca
+  # reporta análise que não ocorreu. Ver docs/decisoes.md, D-CI.SONAR.
+  sonar:
+    name: SonarQube Cloud (advisory)
+    needs: [tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # O sonar precisa do histórico para resolver "código novo" e SCM blame.
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage
+      - name: Análise SonarQube Cloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+      - name: Sem token — análise pulada
+        if: env.SONAR_TOKEN == ''
+        run: |
+          echo "análise Sonar pulada: SONAR_TOKEN ausente (PR de fork ou segredo não configurado)"
 
   # Pós-merge: com todos os jobs acima verdes na main, dispara o deploy da
   # stack no Komodo (scripts/komodo-deploy.sh: DeployStack via API REST e poll

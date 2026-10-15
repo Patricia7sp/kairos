@@ -8,9 +8,12 @@ nunca congela listas de regras nem contagens.
 
 from __future__ import annotations
 
+import re
 import tomllib
 import unittest
 from pathlib import Path
+
+import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 SONAR = REPO / "sonar-project.properties"
@@ -89,6 +92,54 @@ class SonarPropertiesTests(unittest.TestCase):
         self.assertTrue(recursos, "multicriteria sem resourceKey")
         for chave, valor in recursos.items():
             self.assertIn(".py", valor, chave)
+
+
+class SonarWorkflowTests(unittest.TestCase):
+    """Invariantes do job `sonar` no workflow, lidas como dado."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = WORKFLOW.read_text(encoding="utf-8")
+        cls.workflow = yaml.safe_load(cls.text)
+        cls.jobs = cls.workflow["jobs"]
+
+    def _steps(self, job: str) -> list[dict]:
+        return self.jobs[job].get("steps", [])
+
+    def test_sonar_depende_do_job_de_testes(self):
+        self.assertIn("tests", self.jobs["sonar"].get("needs", []))
+
+    def test_sonar_nao_reexecuta_a_suite(self):
+        for step in self._steps("sonar"):
+            comando = step.get("run", "")
+            self.assertNotIn("pytest", comando, "o job sonar não deve reexecutar a suíte")
+
+    def test_sonar_nao_bloqueia_o_deploy(self):
+        self.assertNotIn("sonar", self.jobs["deploy"].get("needs", []))
+
+    def test_artefato_de_cobertura_liga_os_dois_jobs(self):
+        uploads = [
+            step["with"].get("name")
+            for step in self._steps("tests")
+            if "upload-artifact" in step.get("uses", "")
+        ]
+        downloads = [
+            step["with"].get("name")
+            for step in self._steps("sonar")
+            if "download-artifact" in step.get("uses", "")
+        ]
+        self.assertIn("coverage", uploads)
+        self.assertIn("coverage", downloads)
+
+    def test_actions_fixadas_por_sha(self):
+        usos = re.findall(r"uses:\s*(\S+)", self.text)
+        self.assertTrue(usos)
+        for uso in usos:
+            self.assertRegex(
+                uso,
+                r"^[^@]+@[0-9a-f]{40}$",
+                f"action não fixada por SHA (40 hex): {uso}",
+            )
 
 
 if __name__ == "__main__":

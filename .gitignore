@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# cobertura (gerada no CI `tests` e localmente por scripts/ci.sh)
+.coverage
+.coverage.*
+coverage.xml
 *.db
 *.db-wal
 *.db-shm
