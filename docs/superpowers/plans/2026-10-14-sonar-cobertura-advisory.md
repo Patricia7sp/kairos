@@ -88,11 +88,11 @@ surgir divergência. `multiprocessing` aparece majoritariamente como
 documentados. O `source` enumera os pacotes de produção (em vez de `.`) porque o
 `.venv` fica dentro do repositório e a raiz mediria site-packages de terceiros.
 
-- [ ] **1. Escrever o teste de captura (RED).** `tests/test_coverage_harness.py`, `unittest.TestCase`, **opt-in** por env (`KAIROS_COVERAGE_HARNESS=1`) e `skip` se `coverage` ausente — padrão dos testes de integração do repo. Contrato: com um `.coveragerc` temporário apontando `source` para um módulo real, rodar `coverage run --parallel-mode` sobre um driver que spawna um **subprocesso** Python executando uma função do módulo sob teste; depois `coverage combine` + `coverage json` e **afirmar que as linhas do filho aparecem executadas** no relatório combinado (contagem de linhas cobertas, não mera presença do arquivo). Exportar `COVERAGE_PROCESS_START` (caminho do covrc) e `COVERAGE_FILE` (absoluto) no ambiente do driver e do filho. Um caso negativo (sem `COVERAGE_PROCESS_START`) prova que o filho não é medido — o contraste é o contrato. Sem o `.pth` instalado, o caso positivo falha — é o RED.
-- [ ] **2. Rodar RED:** `KAIROS_COVERAGE_HARNESS=1 .venv/bin/python -m pytest -q tests/test_coverage_harness.py`. Falha esperada: `coverage` ausente / `.pth` fora do lugar / filho fora do relatório. Não aceitar falha de infraestrutura como RED.
-- [ ] **3. Implementar.** Adicionar `coverage>=7.13` a `dev`; `[tool.coverage.run]`. `uv lock` atualizado junto da dependência (job `lockfile` do CI exige). Confirmar que `coverage run -m pytest` propaga o exit code do pytest e que `parallel=true` + `combine` não perde dados de processos concorrentes.
-- [ ] **4. Rodar GREEN e Ruff:** `KAIROS_COVERAGE_HARNESS=1 .venv/bin/python -m pytest -q tests/test_coverage_harness.py`; `.venv/bin/ruff check tests/test_coverage_harness.py` e `.venv/bin/ruff format --check` (Ruff não lê TOML).
-- [ ] **5. Commit:** `test(coverage): prova captura de subprocessos pelo .pth nativo`.
+- [x] **1. Escrever o teste de captura (RED).** `tests/test_coverage_harness.py`, `unittest.TestCase`, **opt-in** por env (`KAIROS_COVERAGE_HARNESS=1`) e `skip` se `coverage` ausente — padrão dos testes de integração do repo. Contrato: com um `.coveragerc` temporário apontando `source` para um módulo real, rodar `coverage run --parallel-mode` sobre um driver que spawna um **subprocesso** Python executando uma função do módulo sob teste; depois `coverage combine` + `coverage json` e **afirmar que as linhas do filho aparecem executadas** no relatório combinado (contagem de linhas cobertas, não mera presença do arquivo). Exportar `COVERAGE_PROCESS_START` (caminho do covrc) e `COVERAGE_FILE` (absoluto) no ambiente do driver e do filho. Um caso negativo (sem `COVERAGE_PROCESS_START`) prova que o filho não é medido — o contraste é o contrato. Sem o `.pth` instalado, o caso positivo falha — é o RED.
+- [x] **2. Rodar RED:** `KAIROS_COVERAGE_HARNESS=1 .venv/bin/python -m pytest -q tests/test_coverage_harness.py`. Falha esperada: `coverage` ausente / `.pth` fora do lugar / filho fora do relatório. Não aceitar falha de infraestrutura como RED.
+- [x] **3. Implementar.** Adicionar `coverage>=7.13` a `dev`; `[tool.coverage.run]`. `uv lock` atualizado junto da dependência (job `lockfile` do CI exige). Confirmar que `coverage run -m pytest` propaga o exit code do pytest e que `parallel=true` + `combine` não perde dados de processos concorrentes.
+- [x] **4. Rodar GREEN e Ruff:** `KAIROS_COVERAGE_HARNESS=1 .venv/bin/python -m pytest -q tests/test_coverage_harness.py`; `.venv/bin/ruff check tests/test_coverage_harness.py` e `.venv/bin/ruff format --check` (Ruff não lê TOML).
+- [x] **5. Commit:** `test(coverage): prova captura de subprocessos pelo .pth nativo`.
 
 ## Tarefa 2: propriedades do Sonar, exclusões e decisão
 
@@ -114,11 +114,11 @@ sonar.qualitygate.wait=false
 # sonar.issue.ignore.multicriteria.* — uma por decisão deliberada do pyproject.toml
 ```
 
-- [ ] **1. Escrever testes de configuração.** `tests/test_ci_sonar_config.py` lê `pyproject.toml` e `sonar-project.properties` **como dado** e afirma invariantes: (a) todo caminho em `sonar.exclusions` cobre `skills` (paridade com `extend-exclude`); (b) `sonar.python.coverage.reportPaths` aponta para `coverage.xml`; (c) `sonar.qualitygate.wait` é `false`; (d) `sonar.cpd.exclusions` inclui `tests`. Nada de congelar número de regras nem listar todas as chaves.
-- [ ] **2. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py` — `properties` ausente.
-- [ ] **3. Implementar propriedades e decisão.** Criar o `properties` com as exclusões derivadas do `pyproject.toml` (fonte única, comentário cruzado) e os `multicriteria` mapeando cada família deliberada (import tardio `PLC0415`, `E501`, `RUF001-003`) à regra Sonar equivalente, com motivo. Em `docs/decisoes.md`, nova subseção `D-CI.SONAR` sob a área de CI: racional (free/público, sem self-hosted), escopo advisory, hierarquia **Ruff > Sonar**, e o cuidado com cobertura de subprocesso.
-- [ ] **4. Rodar GREEN e Ruff:** teste acima; `.venv/bin/ruff check tests/test_ci_sonar_config.py` e format.
-- [ ] **5. Commit:** `docs(ci): configura análise SonarQube Cloud advisory`.
+- [x] **1. Escrever testes de configuração.** `tests/test_ci_sonar_config.py` lê `pyproject.toml` e `sonar-project.properties` **como dado** e afirma invariantes: (a) todo caminho em `sonar.exclusions` cobre `skills` (paridade com `extend-exclude`); (b) `sonar.python.coverage.reportPaths` aponta para `coverage.xml`; (c) `sonar.qualitygate.wait` é `false`; (d) `sonar.cpd.exclusions` inclui `tests`. Nada de congelar número de regras nem listar todas as chaves.
+- [x] **2. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py` — `properties` ausente.
+- [x] **3. Implementar propriedades e decisão.** Criar o `properties` com as exclusões derivadas do `pyproject.toml` (fonte única, comentário cruzado) e os `multicriteria` mapeando cada família deliberada (import tardio `PLC0415`, `E501`, `RUF001-003`) à regra Sonar equivalente, com motivo. Em `docs/decisoes.md`, nova subseção `D-CI.SONAR` sob a área de CI: racional (free/público, sem self-hosted), escopo advisory, hierarquia **Ruff > Sonar**, e o cuidado com cobertura de subprocesso.
+- [x] **4. Rodar GREEN e Ruff:** teste acima; `.venv/bin/ruff check tests/test_ci_sonar_config.py` e format.
+- [x] **5. Commit:** `docs(ci): configura análise SonarQube Cloud advisory`.
 
 ## Tarefa 3: job `sonar` no CI e artefato de cobertura
 
@@ -155,12 +155,12 @@ SHAs fixados (resolvidos em 2026-10-14): `upload-artifact`
 `9000827ccba6bdab643e8b6fd33ac0654aef8333` (v8.0.2), `sonarqube-scan-action`
 `d209202bc7d53ff1cc128f7f907dac145c9d6ae9` (v8.3.0).
 
-- [ ] **1. Escrever/estender testes de configuração.** Afirmar, como dado: (a) o job `sonar` depende de `tests` e **não** contém passo `pytest`; (b) `sonar` não aparece em `deploy.needs`; (c) o job `tests` publica artefato `coverage` e o `sonar` o baixa; (d) todo `uses:` do arquivo é `@<sha40>` (regex), cumprindo a regra "fixadas por SHA". Não congelar nomes de action além do necessário.
-- [ ] **2. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py` — job/artefato ausentes.
-- [ ] **3. Implementar o CI.** No job `tests`: habilitar `.pth` (`uv run python scripts/coverage-enable-subprocesses.py`), trocar `uv run pytest` por `coverage run` (preservando `-m`, `--deselect` e o setup de Node já existente), exportar `COVERAGE_PROCESS_START`/`COVERAGE_FILE` absolutos, `combine`/`xml`, upload de artefato. No job `sonar`: `checkout` com `fetch-depth: 0`, baixar artefato, definir `SONAR_TOKEN` em `env` de job e usar passo condicional `if: env.SONAR_TOKEN != ''` (o contexto `secrets` não vale em `if`), com a action oficial **fixada por SHA**; **sem token, pular com `echo` explícito** ("análise Sonar pulada: SONAR_TOKEN ausente"), nunca falhar nem reportar análise falsa. `timeout-minutes` curto; sem Docker. Atualizar o comentário-cabeçalho do job explicando que é advisory e por quê.
-- [ ] **4. Rodar GREEN:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py tests/test_coverage_harness.py`.
-- [ ] **5. Validar o YAML.** Se houver `actionlint` disponível, rodar; senão, o teste de configuração é a barreira. Confirmar que o `tests` job continua passando localmente (tarefa 4).
-- [ ] **6. Commit:** `ci(sonar): adiciona job advisory consumindo cobertura`.
+- [x] **1. Escrever/estender testes de configuração.** Afirmar, como dado: (a) o job `sonar` depende de `tests` e **não** contém passo `pytest`; (b) `sonar` não aparece em `deploy.needs`; (c) o job `tests` publica artefato `coverage` e o `sonar` o baixa; (d) todo `uses:` do arquivo é `@<sha40>` (regex), cumprindo a regra "fixadas por SHA". Não congelar nomes de action além do necessário.
+- [x] **2. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py` — job/artefato ausentes.
+- [x] **3. Implementar o CI.** No job `tests`: habilitar `.pth` (`uv run python scripts/coverage-enable-subprocesses.py`), trocar `uv run pytest` por `coverage run` (preservando `-m`, `--deselect` e o setup de Node já existente), exportar `COVERAGE_PROCESS_START`/`COVERAGE_FILE` absolutos, `combine`/`xml`, upload de artefato. No job `sonar`: `checkout` com `fetch-depth: 0`, baixar artefato, definir `SONAR_TOKEN` em `env` de job e usar passo condicional `if: env.SONAR_TOKEN != ''` (o contexto `secrets` não vale em `if`), com a action oficial **fixada por SHA**; **sem token, pular com `echo` explícito** ("análise Sonar pulada: SONAR_TOKEN ausente"), nunca falhar nem reportar análise falsa. `timeout-minutes` curto; sem Docker. Atualizar o comentário-cabeçalho do job explicando que é advisory e por quê.
+- [x] **4. Rodar GREEN:** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py tests/test_coverage_harness.py`.
+- [x] **5. Validar o YAML.** Se houver `actionlint` disponível, rodar; senão, o teste de configuração é a barreira. Confirmar que o `tests` job continua passando localmente (tarefa 4).
+- [x] **6. Commit:** `ci(sonar): adiciona job advisory consumindo cobertura`.
 
 ## Tarefa 4: paridade local e aceite
 
@@ -168,12 +168,12 @@ SHAs fixados (resolvidos em 2026-10-14): `upload-artifact`
 
 **Interfaces consumidas:** script de harness (tarefa 1), `properties` (tarefa 2), job (tarefa 3).
 
-- [ ] **1. Escrever teste de paridade.** Estender `tests/test_ci_sonar_config.py` para afirmar que `scripts/ci.sh` gera `coverage.xml` (procura o comando `coverage` no script, como dado) e que o scan do Sonar é condicional a `sonar-scanner`/`SONAR_TOKEN` — mesma forma dos `skip` de shellcheck/npm já existentes.
-- [ ] **2. Rodar RED:** teste falha — `ci.sh` ainda sem cobertura/sonar.
-- [ ] **3. Implementar a paridade.** Em `scripts/ci.sh`: rodar a suíte sob `coverage run`, `combine`, `xml`; depois, `if command -v sonar-scanner && [ -n "${SONAR_TOKEN:-}" ]` → `run "Sonar (análise)" sonar-scanner`; senão `skip "Sonar" "sonar-scanner/SONAR_TOKEN ausente"`. Manter `--fast` coerente (cobertura roda no `--fast`; o scan é pulado sem token).
-- [ ] **4. Rodar GREEN e aceite local.** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py tests/test_coverage_harness.py`; depois `scripts/ci.sh --fast` integral com `coverage.xml` gerado e `skip` explícito do Sonar; `uv run ruff check .` e `--check`. Conferir que o `coverage.xml` cita módulos de produção e **não** só o harness.
+- [x] **1. Escrever teste de paridade.** Estender `tests/test_ci_sonar_config.py` para afirmar que `scripts/ci.sh` gera `coverage.xml` (procura o comando `coverage` no script, como dado) e que o scan do Sonar é condicional a `sonar-scanner`/`SONAR_TOKEN` — mesma forma dos `skip` de shellcheck/npm já existentes.
+- [x] **2. Rodar RED:** teste falha — `ci.sh` ainda sem cobertura/sonar.
+- [x] **3. Implementar a paridade.** Em `scripts/ci.sh`: rodar a suíte sob `coverage run`, `combine`, `xml`; depois, `if command -v sonar-scanner && [ -n "${SONAR_TOKEN:-}" ]` → `run "Sonar (análise)" sonar-scanner`; senão `skip "Sonar" "sonar-scanner/SONAR_TOKEN ausente"`. Manter `--fast` coerente (cobertura roda no `--fast`; o scan é pulado sem token).
+- [x] **4. Rodar GREEN e aceite local.** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py tests/test_coverage_harness.py`; depois `scripts/ci.sh --fast` integral com `coverage.xml` gerado e `skip` explícito do Sonar; `uv run ruff check .` e `--check`. Conferir que o `coverage.xml` cita módulos de produção e **não** só o harness.
 - [ ] **5. Commit e PR em rascunho:** `ci(sonar): espelha cobertura e análise no CI local`. Descrição em português com limites, evidências e o item de aprovação pendente (criação do projeto no SonarCloud + `SONAR_TOKEN`). Executar CI remoto; conferir jobs verdes. Não fazer merge antes da aprovação explícita para criar o projeto/segredo.
-- [ ] **6. Relatório de aceite.** Registrar em `docs/superpowers/reports/2026-10-14-sonar-advisory.md`: comandos, hashes, o que foi validado, e o que **permanece pendente por depender da chave** (primeiro scan real, decoração de PR, calibragem fina dos `multicriteria`).
+- [x] **6. Relatório de aceite.** Registrar em `docs/superpowers/reports/2026-10-14-sonar-advisory.md`: comandos, hashes, o que foi validado, e o que **permanece pendente por depender da chave** (primeiro scan real, decoração de PR, calibragem fina dos `multicriteria`).
 
 ## Autorrevisão e handoff
 
