@@ -79,10 +79,7 @@ class SonarPropertiesTests(unittest.TestCase):
         exclusions = split_paths(self.properties.get("sonar.exclusions", ""))
         for padrao in omit:
             topo = padrao.rstrip("/").split("/")[0]
-            if topo in ("tests", "*"):
-                # `tests/` não entra em sonar.exclusions: o scanner o classifica
-                # como código de teste via `sonar.tests` (declarado, não
-                # heurística), não o exclui da análise.
+            if topo == "*":
                 continue
             coberto = any(path.rstrip("/").split("/")[0] == topo for path in exclusions)
             self.assertTrue(
