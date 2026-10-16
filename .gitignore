@@ -24,3 +24,6 @@ node_modules/
 
 # artefatos locais do companion visual de brainstorming
 .superpowers/
+
+# diretório de trabalho do sonar-scanner (gerado a cada análise local)
+.scannerwork/
