@@ -42,12 +42,14 @@ backup retorna 0. Restauração desse arquivo é silenciosamente incompleta.
 
 ## Contrato corrigido
 
-Invariantes observáveis de `_archive_home` / `run_backup`:
+Contratos observáveis de `_archive_home` / `run_backup`, limitados às
+verificações discretas descritas abaixo. O descritor não vincula o handle
+interno do SQLite ao inode observado; a corrida ABA residual não é coberta.
 
 1. **`state.db` regular, sem seguir links.** A entrada `<home>/state.db` é
    validada por `lstat` (sem resolver). Ausente durante toda a observação →
    o tar segue sem `state.db` e o backup pode concluir (home novo é legítimo).
-   Presente e não-regular em qualquer ponto — symlink, FIFO, socket, device —
+   Presente e não-regular em uma verificação — symlink, FIFO, socket, device —
    → **recusa integral**: exit 1, stderr com mensagem própria e sanitizada
    (sem caminho do alvo, sem conteúdo), sem envelope JSON de sucesso, sem
    nenhuma cópia do alvo em nenhum arquivo. Symlink é recusado
@@ -57,12 +59,12 @@ Invariantes observáveis de `_archive_home` / `run_backup`:
    Obtido pela API `backup()` do `sqlite3` no ponto em que o laço alcança a
    entrada, incluindo páginas confirmadas residentes no WAL. O arquivo vivo
    nunca entra no tar no lugar do snapshot.
-3. **Transição depois do ponto de snapshot é recusa.** Um banco que surge
+3. **Transição observada depois do ponto de snapshot é recusa.** Um banco que surge
    antes desse ponto pode entrar no backup pela API SQLite, desde que seja
-   regular e estável em identidade durante a captura. Se já havia banco na
-   observação inicial, desaparecimento ou troca de identidade recusa. Depois
+   regular e estável em identidade nas verificações da captura. Se já havia banco na
+   observação inicial, desaparecimento ou troca de identidade observados recusam. Depois
    da decisão no ponto único, aparecimento de banco antes ausente,
-   desaparecimento ou troca até o encerramento do backup recusa por inteiro
+   desaparecimento ou troca detectados até o encerramento do backup recusam por inteiro
    (exit 1). Escritas SQLite e checkpoints no mesmo inode continuam permitidos.
    O arquivo vivo nunca substitui o snapshot, mesmo se o banco só aparecer
    depois da enumeração inicial dos arquivos.
@@ -129,8 +131,9 @@ código atual (RED) e passam após a correção (GREEN).
 - Comando de restauração não existe no Kairos (a descrição do grupo `backup`
   em `commands.py` promete mais do que há); esta correção não cria um —
   "restauração" aqui é extrair o tarball e abrir o `state.db`.
-- Hardlink de `state.db` (`nlink > 1`) não entra nesta correção: o conteúdo
-  é o mesmo arquivo, sem cruzamento de fronteira por path.
+- Hardlink de `state.db` (`nlink > 1`) continua aceito. Pode ser outro nome
+  para um arquivo também acessível fora do home; regularidade e identidade
+  não comprovam origem nem confinamento do conteúdo.
 - Checksum/manifesto do archive, criptografia e lock de home durante backup
   ficam fora.
 - Relação com o B1: a Tarefa 2 do plano
@@ -159,7 +162,47 @@ código atual (RED) e passam após a correção (GREEN).
   evitando substituir WAL/SHM/journal de uma conexão ainda aberta.
 - Após decidir pela ausência de banco, a captura conserva também mtime/ctime
   do diretório do home. Mudança de namespace recusa conservadoramente o
-  backup, inclusive criação seguida de remoção entre duas verificações.
+  backup, inclusive criação seguida de remoção entre duas verificações
+  quando houver mudança observável desses timestamps.
   Isso pode recusar outras criações/remoções concorrentes no home; uma nova
   tentativa com namespace estável é necessária. Não é monitoramento contínuo
   nem fronteira contra manipulação hostil pelo mesmo UID.
+
+## Revisão de limites em 2026-10-16
+
+- **ABA confirmada; limitação residual aceita para este recorte.** SQLite
+  resolve `/proc/self/fd/N` para um nome e abre seu próprio handle. O
+  descritor mantido pelo comando só fixa a identidade das verificações,
+  feitas antes/depois da conexão, nos callbacks de 64 páginas e ao final.
+  Uma substituição por symlink durante a resolução do nome, restaurada após
+  a abertura e antes do próximo check, pode copiar um banco externo com
+  sucesso. Isso exige escrita no home e interleaving preciso; a garantia
+  cobre entradas inválidas e divergências observadas, não confinamento
+  contra um escritor concorrente com essas permissões. O relatório registra
+  a reprodução determinística. Fechar essa janela exige vínculo atestado
+  com o arquivo realmente usado pela conexão; procurar apenas um fd com o
+  inode esperado é insuficiente, pois o observador já mantém esse fd aberto.
+- **Sidecars:** WAL/SHM/journal são acessados pelo nome pelo SQLite, sem
+  atestação de identidade pelo comando. A validação de formato/checksum
+  feita pelo SQLite não equivale a verificar origem ou confinamento. A
+  exclusão desses arquivos do tar não impede sua leitura durante o snapshot.
+- **Ausência:** timestamps do diretório são um detector conservador de
+  mudança, não um contador de eventos. Granularidade e suporte do kernel e
+  filesystem podem ocultar criação seguida de remoção no mesmo tick.
+  [Multigrain timestamps](https://cdn.kernel.org/doc/html/latest/filesystems/multigrain-ts.html)
+  reduzem essa janela onde suportados; não há garantia universal por versão
+  do kernel. Outras alterações no nível imediato do home também recusam e
+  podem exigir nova tentativa com namespace estável.
+- **Plataforma:** captura de `state.db` depende de Linux com
+  `/proc/self/fd` acessível e das operações de descritores usadas aqui.
+  Não há fallback de snapshot por caminho no macOS ou sem procfs; o comando
+  retorna erro, sem publicar o archive.
+- **Saída:** o archive publicado é um arquivo novo de `mkstemp`, modo 0600
+  no máximo (a umask pode restringir mais). Ao substituir `--output`, dono,
+  modo e demais metadados do destino anterior não são preservados. A publicação exige criar o
+  temporário e renomeá-lo no diretório pai; poder escrever somente no
+  arquivo anterior não basta. Falhas continuam com diagnóstico sanitizado.
+- **Alias do destino:** a exclusão de caminhos de saída usa `absolute()`,
+  sem canonicalizar symlinks. Um destino anterior acessível dentro do home
+  por outro caminho pode entrar como membro do tar. Não há deduplicação por
+  identidade de arquivo nesta correção.
