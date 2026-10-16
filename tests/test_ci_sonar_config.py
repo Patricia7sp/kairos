@@ -54,6 +54,15 @@ class SonarPropertiesTests(unittest.TestCase):
         for chave in ("sonar.projectKey", "sonar.organization"):
             self.assertTrue(self.properties.get(chave), f"{chave} vazio")
 
+    def test_diretorio_de_testes_declarado(self):
+        testes = split_paths(self.properties.get("sonar.tests", ""))
+        self.assertIn(
+            "tests",
+            testes,
+            "sem sonar.tests o scanner classifica por heurística e pode contar "
+            "tests/** como código-fonte a cobrir (Quality Gate 0% on New Code)",
+        )
+
     def test_exclusoes_cobrem_o_extend_exclude_do_ruff(self):
         ruff_excludes = self.pyproject["tool"]["ruff"]["extend-exclude"]
         exclusions = split_paths(self.properties.get("sonar.exclusions", ""))
@@ -72,8 +81,8 @@ class SonarPropertiesTests(unittest.TestCase):
             topo = padrao.rstrip("/").split("/")[0]
             if topo in ("tests", "*"):
                 # `tests/` não entra em sonar.exclusions: o scanner o classifica
-                # como código de teste (heurística, ver WARN "sonar.tests"), não
-                # o exclui da análise.
+                # como código de teste via `sonar.tests` (declarado, não
+                # heurística), não o exclui da análise.
                 continue
             coberto = any(path.rstrip("/").split("/")[0] == topo for path in exclusions)
             self.assertTrue(
