@@ -85,11 +85,45 @@ data file de cobertura corrompido** ("1 file errored" no `combine`); o `combine`
 e o `xml` continuam em exit 0 e o relatório é gerado a partir dos data files
 íntegros.
 
-## Pendências dependentes da chave (aprovação explícita antes)
+## Pendências dependentes da chave (aprovação explícita antes) — atualização pós-PR 106
 
-- Criação do projeto no SonarCloud e configuração de `SONAR_TOKEN` como segredo
-  (`projectKey`/`organization` estão provisórios como `kairos`).
-- Primeiro scan real, e a partir dele a decoração de PR.
+- [x] Criação do projeto no SonarCloud (`Patricia7sp_kairos`, org `patricia7sp`)
+  e configuração de `SONAR_TOKEN` como segredo — feito pelo usuário; chaves
+  reais em `sonar-project.properties` (`f6f5f72`).
+- [x] Primeiro scan real e decoração de PR — PR 106 (`feat/sonar-advisory`):
+  três rodadas até o verde, documentadas abaixo.
 - Calibragem fina dos `multicriteria` (confirmado só `python:S103` para linhas
   longas; import tardio `PLC0415` e unicode ambíguo `RUF001-003` aguardam
   contraparte Sonar confirmada).
+
+## Pós-PR 106 — três fixes até o Quality Gate verde
+
+O check `SonarCloud Code Analysis` reprovou em três rodadas, cada uma com
+causa distinta e fix próprio (todos com teste de invariante RED→GREEN em
+`tests/test_ci_sonar_config.py` + ruff limpo):
+
+1. **`daba6f9` — basenames ambíguos no `coverage.xml`.** O log do scanner:
+   `ERROR Cannot resolve the file path '__init__.py' ..., ambiguity, the file
+   exists in several 'source'` + `Cannot resolve 19 file paths, ignoring
+   coverage measures`. Causa: `[tool.coverage.run] source` com N pacotes faz
+   o `coverage xml` relativizar cada filename à sua raiz, entregando basename
+   puro ao Sonar. Fix: `source = ["."]` (paths qualificados; provado local:
+   316/316 únicos, `auth.py` desambiguado em 3 pacotes, 0 arquivos de
+   `.venv/docker/scripts/tests/skills`, line-rate `0.8911`) + `omit` ampliado
+   (`docker/*`, `scripts/*`, `.venv/*`) espelhado em `sonar.exclusões` e
+   `.gitignore` (`.scannerwork/`).
+2. **`70f7cc3` — testes novos contados como fonte a cobrir.** Com o XML
+   legível, o gate seguia `0.0% Coverage on New Code`: a API do SonarCloud
+   mostrava 174 `new_lines_to_cover`, todos em `tests/test_ci_sonar_config.py`
+   (105) + `tests/test_coverage_harness.py` (69) — a heurística de
+   `sonar.tests` não os classificou (o próprio scanner emite WARN pedindo a
+   declaração). Fix: `sonar.tests=tests` explícito.
+3. **`6165921` — dupla indexação.** Com `sources=.` + `sonar.tests=tests`, o
+   scanner abortou (exit 3): `File tests/... can't be indexed twice ... disjoint
+   sets for main and test files`. Fix: `tests/**` em `sonar.exclusions` (a
+   exclusão resolve a disjunção; issues em teste já eram ruído, ver
+   `sonar.cpd.exclusions`).
+
+Estado final no PR 106: `Quality Gate passed` — 0 new issues, 0 security
+hotspots, 0.0% duplicação em código novo; os 11 jobs do CI em SUCCESS
+(`deploy` pulado, como esperado fora da `main`).
