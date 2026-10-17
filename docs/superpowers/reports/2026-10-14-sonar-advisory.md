@@ -155,3 +155,30 @@ evidências desta retomada ficam em
 `.superpowers/evidence/sonar-integration-20261017/`; os resultados finais
 do CI remoto e do Sonar serão conferidos após o push e registrados na
 descrição do PR, vinculados ao SHA analisado.
+
+### Correção da coleta fora do cwd — revisão independente
+
+A revisão de `185440e..508c1aa` encontrou perda de cobertura quando o filho
+Python inicia em outro diretório: `source = ["."]` era resolvido contra o cwd
+do filho, embora o arquivo de configuração fosse absoluto. O novo teste usa
+o `pyproject.toml` real e um módulo temporário chamado pelo filho: antes da
+correção, apenas a declaração da função aparecia coberta (1/3 linhas).
+
+O CI e o script local agora exportam `KAIROS_COVERAGE_ROOT` absoluto; o
+`source` interpola essa raiz, com `.` como padrão para uso manual na raiz.
+Os padrões de `omit` também independem do cwd: a segunda reprodução encontrou
+uma dependência em `.venv` indevidamente medida, corrigida pelo prefixo `*/`.
+As duas falhas foram observadas antes das respectivas correções. O teste
+confere o corpo inteiro coberto, a exclusão da dependência e o caminho único
+`probe_pkg/worker.py` no JSON combinado e no XML. Não foi necessário adicionar
+`[tool.coverage.paths]`.
+
+Os 20 testes específicos passaram com o harness habilitado, sem skips. O
+teste que congelava `source == ["."]` foi substituído por essa prova de
+comportamento. A suíte completa e o scanner precisam validar o novo diff;
+o Quality Gate aprovado em `508c1aa` não é atribuído à correção posterior.
+
+Achado menor adiado da revisão: falta um teste de configuração específico
+para impedir a remoção de `tests/**` das exclusões de fontes. A configuração
+atual mantém a disjunção, e o scanner a validou. A calibragem de regras Sonar
+sem contraparte confirmada continua fora deste recorte.

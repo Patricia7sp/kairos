@@ -55,6 +55,7 @@ jobs:
         env:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
           COVERAGE_FILE: ${{ github.workspace }}/.coverage
+          KAIROS_COVERAGE_ROOT: ${{ github.workspace }}
         run: |
           uv run coverage run -m pytest -q -m "not runtime_live" --deselect tests/test_container.py::RealImageTests
           uv run coverage combine

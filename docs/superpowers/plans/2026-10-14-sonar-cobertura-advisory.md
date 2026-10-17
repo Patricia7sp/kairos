@@ -188,3 +188,11 @@ As quatro tarefas foram implementadas. O usuário configurou o projeto e o
 segredo antes do primeiro scan real. Em 2026-10-17 autorizou integrar o
 Sonar daqui para frente; a retomada atualiza a branch com a `main`, confere
 as evidências e conclui o aceite e a entrega do PR #106.
+
+Na revisão de encerramento, a raiz única passou a ser interpolada de
+`KAIROS_COVERAGE_ROOT`, exportada como caminho absoluto no CI e no script
+local. Os padrões de exclusão recebem prefixo `*/` para também independerem
+do cwd dos filhos. O novo teste usa a configuração real com filho em outro
+diretório; os dois defeitos foram reproduzidos em RED e corrigidos em GREEN.
+O relatório registra o achado menor adiado e o aceite final fica vinculado
+ao SHA na descrição do PR.

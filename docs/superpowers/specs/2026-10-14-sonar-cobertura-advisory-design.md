@@ -89,13 +89,17 @@ Do `AGENTS.md`:
 
 - `[tool.coverage.run]`: `branch = false` (linha primeiro — branch dobra o
   ruído sem mudar a decisão de review); `parallel = true`;
-  `source = ["."]`; `relative_files = true`. A raiz única mantém os caminhos
+  `source = ["${KAIROS_COVERAGE_ROOT-.}"]`; `relative_files = true`. O CI
+  exporta a raiz absoluta em `KAIROS_COVERAGE_ROOT`, para que filhos com outro
+  diretório de trabalho meçam o mesmo projeto. A raiz única mantém os caminhos
   completos dos módulos no XML, evitando basenames ambíguos entre pacotes.
   A configuração final usa caminhos relativos, sem precisar de
   `[tool.coverage.paths]`; o ajuste após o primeiro scan está no relatório.
-- `omit`: `tests/*`, `skills/*`, frontends, `docker/*`, `scripts/*` e `.venv/*`.
+- `omit`: testes, skills, frontends, Docker, scripts e ambiente virtual, com
+  padrões `*/tests/*`, `*/.venv/*` e equivalentes que independem do cwd.
 - Fluxo no job `tests` (sem alterar a seleção atual de testes): exportar
-  `COVERAGE_PROCESS_START=<repo>/pyproject.toml` e `COVERAGE_FILE=<repo>/.coverage`
+  `KAIROS_COVERAGE_ROOT=<repo>`, `COVERAGE_PROCESS_START=<repo>/pyproject.toml`
+  e `COVERAGE_FILE=<repo>/.coverage`
   (absolutos) → `coverage run -m pytest -q -m "not runtime_live" --deselect
   tests/test_container.py::RealImageTests` → `coverage combine` → `coverage xml`
   → `actions/upload-artifact` (pinado por SHA) com `coverage.xml`. O
@@ -123,6 +127,9 @@ Do `AGENTS.md`:
    afirmar que os módulos executados **no filho** aparecem no relatório
    combinado. No arranjo sem o `.pth`, o teste falha (RED) — é a prova de que
    o número não é artificialmente baixo.
+   A configuração real também é exercitada com filho em cwd externo: o corpo
+   executado só no filho precisa aparecer, dependências em `.venv` ficam fora
+   e os caminhos do XML permanecem relativos e únicos após o `combine`.
 2. **Sem token não falha nem mente.** O passo do job é pulado com mensagem
    explícita; nenhuma saída de "análise concluída" é produzida.
 3. **Paridade local.** `scripts/ci.sh --fast` gera `coverage.xml` e reporta

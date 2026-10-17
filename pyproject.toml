@@ -58,7 +58,9 @@ markers = [
 # fica fora pelo `omit`, não por enumeração — pacote novo não precisa entrar
 # em lista alguma.
 [tool.coverage.run]
-source = ["."]
+# CI exporta a raiz absoluta: subprocessos podem mudar o cwd antes de carregar
+# esta configuração pelo .pth. Sem ela, "." passa a apontar para outro projeto.
+source = ["${KAIROS_COVERAGE_ROOT-.}"]
 # Modo paralelo: cada processo — inclusive subprocessos instrumentados pelo `.pth`
 # que o próprio coverage instala (>=7.13) quando `COVERAGE_PROCESS_START` está no
 # ambiente — grava o próprio data file; o `coverage combine` junta tudo antes do `xml`.
@@ -70,7 +72,8 @@ relative_files = true
 # migração, nunca executados pela suíte): sem o omit entrariam no XML com 0% e
 # arrastariam a cobertura do Sonar. `.venv/` fica fora aqui porque o coverage
 # não lê `.gitignore`.
-omit = ["tests/*", "skills/*", "ui-tui/*", "web/*", "apps/*", "docker/*", "scripts/*", ".venv/*"]
+# O prefixo */ mantém as exclusões válidas também nos filhos com cwd externo.
+omit = ["*/tests/*", "*/skills/*", "*/ui-tui/*", "*/web/*", "*/apps/*", "*/docker/*", "*/scripts/*", "*/.venv/*"]
 
 [tool.ruff]
 target-version = "py311"

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -139,6 +140,60 @@ class SubprocessCoverageTests(unittest.TestCase):
         _, summary = self._with_probe(process_start=False)
         covered = 0 if summary is None else summary["covered_lines"]
         self.assertEqual(covered, 0, "filho capturado mesmo sem COVERAGE_PROCESS_START")
+
+    def test_project_config_measures_child_outside_project_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project = root / "project"
+            project.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            self._lay_out_probe(project)
+            dependency = project / ".venv"
+            dependency.mkdir()
+            (dependency / "dependency.py").write_text("value = 'dependency'\n", encoding="utf-8")
+            child = CHILD + "; import dependency; assert dependency.value == 'dependency'"
+            (project / "driver.py").write_text(
+                "import probe_pkg.worker\n"
+                "import subprocess, sys\n"
+                f"subprocess.run([sys.executable, '-c', {child!r}], "
+                f"cwd={str(outside)!r}, check=True)\n",
+                encoding="utf-8",
+            )
+            config = REPO / "pyproject.toml"
+            env = self._environment(project, config, process_start=True)
+            env["KAIROS_COVERAGE_ROOT"] = str(project)
+            env["PYTHONPATH"] = os.pathsep.join((str(project), str(dependency)))
+            for arguments in (
+                ["run", "driver.py"],
+                ["combine"],
+                ["json", "-o", "report.json"],
+                ["xml", "-o", "coverage.xml"],
+            ):
+                result = _run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "coverage",
+                        arguments[0],
+                        f"--rcfile={config}",
+                        *arguments[1:],
+                    ],
+                    cwd=project,
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads((project / "report.json").read_text(encoding="utf-8"))
+            workers = [name for name in data["files"] if name.endswith("probe_pkg/worker.py")]
+            self.assertEqual(workers, ["probe_pkg/worker.py"])
+            summary = data["files"][workers[0]]["summary"]
+            self.assertEqual(summary["covered_lines"], summary["num_statements"])
+            self.assertFalse(any(".venv/" in name for name in data["files"]), data["files"])
+            filenames = re.findall(
+                r'<class\b[^>]*\bfilename="([^"]+)"',
+                (project / "coverage.xml").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(filenames.count("probe_pkg/worker.py"), 1)
 
 
 if __name__ == "__main__":

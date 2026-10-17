@@ -78,7 +78,7 @@ class SonarPropertiesTests(unittest.TestCase):
         omit = self.pyproject["tool"]["coverage"]["run"]["omit"]
         exclusions = split_paths(self.properties.get("sonar.exclusions", ""))
         for padrao in omit:
-            topo = padrao.rstrip("/").split("/")[0]
+            topo = padrao.removeprefix("*/").rstrip("/").split("/")[0]
             if topo == "*":
                 continue
             coberto = any(path.rstrip("/").split("/")[0] == topo for path in exclusions)
@@ -86,15 +86,6 @@ class SonarPropertiesTests(unittest.TestCase):
                 coberto,
                 f"{padrao!r} (omit da cobertura) fora de sonar.exclusions",
             )
-
-    def test_source_unica_na_raiz(self):
-        source = self.pyproject["tool"]["coverage"]["run"]["source"]
-        self.assertEqual(
-            source,
-            ["."],
-            "o coverage xml relativiza filenames às raízes de `source`; N raízes "
-            "geram basenames ambíguos que o Sonar ignora ('exists in several source')",
-        )
 
     def test_duplicacao_exclui_testes(self):
         cpd = split_paths(self.properties.get("sonar.cpd.exclusions", ""))

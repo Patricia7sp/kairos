@@ -37,6 +37,7 @@ run "Cliente v8 para regressão de downgrade" env UV="$UV" bash scripts/prepare-
 # subprocesso; o `COVERAGE_FILE` absoluto mantém os data files no repositório.
 : "${COVERAGE_PROCESS_START:=$PWD/pyproject.toml}"
 : "${COVERAGE_FILE:=$PWD/.coverage}"
+export KAIROS_COVERAGE_ROOT="$PWD"
 export COVERAGE_PROCESS_START COVERAGE_FILE
 
 run "Testes (unitários, com cobertura)" \
