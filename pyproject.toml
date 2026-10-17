@@ -24,6 +24,10 @@ kairos = "kairos_cli.main:main"
 
 [project.optional-dependencies]
 dev = [
+    # >=7.13: a partir daí o coverage instala um `.pth` permanente que habilita a
+    # medição de subprocessos quando `COVERAGE_PROCESS_START` está definido — sem
+    # ele o número de cobertura da suíte sai artificialmente baixo.
+    "coverage>=7.13",
     "httpx2>=2.0.0",
     "pytest>=8",
     "ruff>=0.16",
@@ -46,6 +50,30 @@ markers = [
     "integration: exige Docker; pulado quando a imagem não foi construída",
     "runtime_live: exige opt-in, autenticação Codex dedicada e pode consumir turnos",
 ]
+
+# Cobertura para o Sonar (advisory). A raiz "." é `source` única de propósito:
+# o `coverage xml` escreve cada filename relativo às raízes de `source`, e com
+# N pacotes como sources o Sonar recebe `auth.py` ambíguo ("exists in several
+# 'source'") e ignora a cobertura desses arquivos. O `.venv` (dentro do repo)
+# fica fora pelo `omit`, não por enumeração — pacote novo não precisa entrar
+# em lista alguma.
+[tool.coverage.run]
+# CI exporta a raiz absoluta: subprocessos podem mudar o cwd antes de carregar
+# esta configuração pelo .pth. Sem ela, "." passa a apontar para outro projeto.
+source = ["${KAIROS_COVERAGE_ROOT-.}"]
+# Modo paralelo: cada processo — inclusive subprocessos instrumentados pelo `.pth`
+# que o próprio coverage instala (>=7.13) quando `COVERAGE_PROCESS_START` está no
+# ambiente — grava o próprio data file; o `coverage combine` junta tudo antes do `xml`.
+parallel = true
+branch = false
+relative_files = true
+# A exclusão é espelhada em sonar-project.properties (sonar.exclusions); as duas
+# pontas têm de andar juntas. `docker/` e `scripts/` são receita (diagnósticos e
+# migração, nunca executados pela suíte): sem o omit entrariam no XML com 0% e
+# arrastariam a cobertura do Sonar. `.venv/` fica fora aqui porque o coverage
+# não lê `.gitignore`.
+# O prefixo */ mantém as exclusões válidas também nos filhos com cwd externo.
+omit = ["*/tests/*", "*/skills/*", "*/ui-tui/*", "*/web/*", "*/apps/*", "*/docker/*", "*/scripts/*", "*/.venv/*"]
 
 [tool.ruff]
 target-version = "py311"
