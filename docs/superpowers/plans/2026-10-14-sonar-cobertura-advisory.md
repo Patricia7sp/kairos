@@ -172,7 +172,7 @@ SHAs fixados (resolvidos em 2026-10-14): `upload-artifact`
 - [x] **2. Rodar RED:** teste falha — `ci.sh` ainda sem cobertura/sonar.
 - [x] **3. Implementar a paridade.** Em `scripts/ci.sh`: rodar a suíte sob `coverage run`, `combine`, `xml`; depois, `if command -v sonar-scanner && [ -n "${SONAR_TOKEN:-}" ]` → `run "Sonar (análise)" sonar-scanner`; senão `skip "Sonar" "sonar-scanner/SONAR_TOKEN ausente"`. Manter `--fast` coerente (cobertura roda no `--fast`; o scan é pulado sem token).
 - [x] **4. Rodar GREEN e aceite local.** `.venv/bin/python -m pytest -q tests/test_ci_sonar_config.py tests/test_coverage_harness.py`; depois `scripts/ci.sh --fast` integral com `coverage.xml` gerado e `skip` explícito do Sonar; `uv run ruff check .` e `--check`. Conferir que o `coverage.xml` cita módulos de produção e **não** só o harness.
-- [ ] **5. Commit e PR em rascunho:** `ci(sonar): espelha cobertura e análise no CI local`. Descrição em português com limites, evidências e o item de aprovação pendente (criação do projeto no SonarCloud + `SONAR_TOKEN`). Executar CI remoto; conferir jobs verdes. Não fazer merge antes da aprovação explícita para criar o projeto/segredo.
+- [x] **5. Commit e PR em rascunho:** PR #106 criado; projeto `Patricia7sp_kairos` e `SONAR_TOKEN` configurados pelo usuário. Primeiro scan real e CI remoto aprovados no head `9ef8c68`, conforme o relatório. A atualização com a `main` exige validação própria antes do merge.
 - [x] **6. Relatório de aceite.** Registrar em `docs/superpowers/reports/2026-10-14-sonar-advisory.md`: comandos, hashes, o que foi validado, e o que **permanece pendente por depender da chave** (primeiro scan real, decoração de PR, calibragem fina dos `multicriteria`).
 
 ## Autorrevisão e handoff
@@ -184,6 +184,7 @@ paridade local, aceite e relatório (4). Os cinco itens de Review Focus têm
 casos nas tarefas indicadas. O plano não cria projeto no SonarCloud, não ativa
 gate bloqueante, não adiciona self-hosted, CodeQL ou mutação.
 
-Execução recomendada: nativa, quatro tarefas sequenciais, com aprovação
-explícita do usuário antes do primeiro scan real com token. O usuário aprovou
-a spec; este plano aguarda revisão antes da implementação.
+As quatro tarefas foram implementadas. O usuário configurou o projeto e o
+segredo antes do primeiro scan real. Em 2026-10-17 autorizou integrar o
+Sonar daqui para frente; a retomada atualiza a branch com a `main`, confere
+as evidências e conclui o aceite e a entrega do PR #106.

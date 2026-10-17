@@ -1,6 +1,6 @@
 # SonarQube Cloud como observabilidade de qualidade (advisory)
 
-Status: especificação; aguarda aprovação antes da implementação.
+Status: implementada no PR #106; integração na `main` em validação.
 Base: `main` em `d730822`. Correção independente. Não altera garantias de
 runtime; é ferramenta de CI.
 
@@ -89,11 +89,11 @@ Do `AGENTS.md`:
 
 - `[tool.coverage.run]`: `branch = false` (linha primeiro — branch dobra o
   ruído sem mudar a decisão de review); `parallel = true`;
-  `source = ["kairos_cli", "kairos_skills", "kairos_state", "kairos_filesystem", ...]`;
-  `relative_files = true`.
-- `[tool.coverage.paths]` normaliza o venv do CI e o local para o mesmo path
-  de fonte (senão o Sonar não casa o `coverage.xml` com os arquivos).
-- `omit`: `tests/*`, `skills/*`, frontends e gerados.
+  `source = ["."]`; `relative_files = true`. A raiz única mantém os caminhos
+  completos dos módulos no XML, evitando basenames ambíguos entre pacotes.
+  A configuração final usa caminhos relativos, sem precisar de
+  `[tool.coverage.paths]`; o ajuste após o primeiro scan está no relatório.
+- `omit`: `tests/*`, `skills/*`, frontends, `docker/*`, `scripts/*` e `.venv/*`.
 - Fluxo no job `tests` (sem alterar a seleção atual de testes): exportar
   `COVERAGE_PROCESS_START=<repo>/pyproject.toml` e `COVERAGE_FILE=<repo>/.coverage`
   (absolutos) → `coverage run -m pytest -q -m "not runtime_live" --deselect

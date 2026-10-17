@@ -124,6 +124,34 @@ causa distinta e fix próprio (todos com teste de invariante RED→GREEN em
    exclusão resolve a disjunção; issues em teste já eram ruído, ver
    `sonar.cpd.exclusions`).
 
-Estado final no PR 106: `Quality Gate passed` — 0 new issues, 0 security
+Estado do head `9ef8c68` no PR 106: `Quality Gate passed` — 0 new issues, 0 security
 hotspots, 0.0% duplicação em código novo; os 11 jobs do CI em SUCCESS
 (`deploy` pulado, como esperado fora da `main`).
+
+## Retomada para integração contínua — 2026-10-17
+
+O PR #106 ainda não estava integrado e não havia tido deploy. O usuário
+autorizou tornar a análise parte das próximas entregas. A branch recebeu
+`origin/main` em `185440e`, incluindo os ajustes de backup dos PRs #105 e
+#107, por merge local `2296e9c`, sem conflitos.
+
+O workflow mantém o escopo consultivo aprovado: executa em PRs, pushes da
+`main` e acionamento manual, consome a cobertura do job de testes, pula o
+scan explicitamente sem token e não entra em `deploy.needs`. O `AGENTS.md`
+passa a exigir conferência do Quality Gate e da revisão analisada antes de
+relatar aprovação Sonar. O contrato de cobertura desta spec foi alinhado
+à raiz única e às exclusões já implementadas.
+
+Os testes específicos foram reexecutados com
+`KAIROS_COVERAGE_HARNESS=1 .venv/bin/python -m pytest -q
+tests/test_ci_sonar_config.py tests/test_coverage_harness.py`: 20 passaram
+em 1,31 s, sem skips. A suíte local com cobertura e opt-in do harness foi
+iniciada com Python 3.11.16, Codex 0.154.0 no PATH e umask 0022. Os dados
+anteriores de cobertura foram preservados fora do diretório de coleta
+antes da execução; não entram no novo `combine`.
+
+Os resultados anteriores do Sonar não são atribuídos à atualização. As
+evidências desta retomada ficam em
+`.superpowers/evidence/sonar-integration-20261017/`; os resultados finais
+do CI remoto e do Sonar serão conferidos após o push e registrados na
+descrição do PR, vinculados ao SHA analisado.
