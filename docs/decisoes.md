@@ -2415,6 +2415,46 @@ concorrente não perde o ledger confirmado; banco inválido recusa sem resposta
 de sucesso. Banco e arquivos não têm snapshot conjunto: divergência após
 restauração continua recusada sem renovar identidade ou autoridade.
 
+A correção da fronteira do backup, conforme os comentários
+[#104 r4267112756](https://github.com/Patricia7sp/kairos/pull/104#discussion_r4267112756)
+e [#104 r4267112766](https://github.com/Patricia7sp/kairos/pull/104#discussion_r4267112766),
+recusa `state.db` não regular sem seguir links, com diagnóstico distinto de
+banco ilegível. A entrada lógica é visitada mesmo se o banco surgir após a
+enumeração; cada `state.db` arquivado vem da API SQLite `backup()`, incluindo
+WAL confirmado, nunca do arquivo vivo. Criação antes do ponto único de
+snapshot pode ser aceita; desaparecimento ou troca de identidade do banco
+detectados pelas verificações, ou aparecimento observado após uma decisão
+por ausência, recusam a operação.
+Falhas removem o arquivo parcial desta execução sem imprimir sucesso; um
+`--output` preexistente só é substituído depois de concluir o backup.
+O destino não pode ser o banco ou seus sidecars. Após decidir pela ausência
+do banco, mudança de namespace do home recusa conservadoramente a captura,
+quando há alteração observável de mtime/ctime, inclusive se o banco é criado
+e removido entre verificações; outras criações/remoções concorrentes também
+podem exigir nova tentativa.
+Timestamps não são contadores de eventos: granularidade e suporte do kernel
+e filesystem podem ocultar mudanças transitórias no mesmo tick.
+
+**Limite residual confirmado em 2026-10-16:** SQLite resolve o nome de
+`/proc/self/fd/N` e abre seu próprio handle. O descritor observado não fixa
+o que a conexão lê; uma troca ABA durante essa resolução, desfeita antes do
+próximo check, pode arquivar conteúdo externo. As verificações recusam
+divergências observadas, sem garantir confinamento contra quem escreve no
+home. WAL/SHM/journal também são abertos por nome sem atestação própria;
+checksums não comprovam sua origem. Hardlinks continuam aceitos, inclusive
+com outros nomes fora do home. Fechar essas janelas exige outro vínculo
+com os handles reais da conexão; varrer fds à procura do inode esperado
+não basta, pois o descritor de observação já está aberto.
+
+A captura do banco exige Linux com `/proc/self/fd` acessível, sem fallback
+por caminho em outras plataformas. O archive publicado usa o modo no máximo
+0600 de `mkstemp` (a umask pode restringir mais) e os metadados do novo arquivo;
+substituir um `--output` anterior não preserva dono ou modo. Criar o temporário e publicar
+por rename exige escrita no diretório pai. A exclusão do destino usa
+`absolute()`: um arquivo anterior alcançado por alias com symlink pode ser
+incluído no tar. Esses limites não são alegados como corrigidos pelo PR.
+Contrato e limites na [spec de fronteira](superpowers/specs/2026-10-14-backup-state-db-fronteira-design.md).
+
 O gate local da imagem real passou com 30 testes e 26 subtestes, sem skips
 (`RealImageTests`, em 2026-10-13). O CI local completo passou com 3.831 testes e 6.309 subtestes, Ruff, shellcheck,
 recall, lockfile e os três frontends (239 testes e TypeScript). O complemento
