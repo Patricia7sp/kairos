@@ -65,7 +65,13 @@ arquivos. `kairos backup` inclui uma cópia SQLite consistente de `state.db`,
 sem WAL/SHM/journal ativos, e preserva os modos dos diretórios privados. O tar
 não captura banco e arquivos numa transação conjunta; restaurar o banco sobre
 arquivos divergentes não autoriza sobrescrevê-los. Falha na cópia do banco
-recusa o backup sem resposta de sucesso. A área
+recusa o backup sem resposta de sucesso. A captura do banco exige Linux com
+`/proc/self/fd` acessível. O archive novo tem modo no máximo 0600 (a umask
+pode restringir mais); `--output` substitui os metadados do arquivo anterior e exige escrita no
+diretório pai. As verificações de identidade são discretas: não impedem
+trocas ABA por quem pode escrever no home, nem atestam os sidecars abertos
+pelo SQLite. Se houver recusa por alteração concorrente, tente novamente
+com o home estável. A área
 `.skill-mutations/staging/ID` contém preparações; conteúdo desconhecido não é
 promovido nem removido automaticamente. Área privada e instalação precisam
 estar no mesmo filesystem; sem lock ou rename seguro, o comando recusa com 69.
