@@ -50,7 +50,7 @@ Usar o worktree existente `removal_design`, branch `chore/fechamento-a2-planejam
 
 Não fazer refatoração geral dos serviços. Conexões, lock comum e captura de árvores continuam usando os módulos atuais. Reutilizar `kairos_filesystem.descriptors` e a validação por montagem já disponível onde se observa uma cadeia de descritores.
 
-## Tarefa 1: contexto, parser e observação estável da política
+## Task 1: contexto, parser e observação estável da política
 
 **Files:** criar os dois primeiros módulos da tabela; criar `tests/test_skill_org_policy.py`.
 
@@ -82,7 +82,7 @@ class OrgPolicySession:
 
 `OrgPolicyReceipt` contém apenas rótulos/estado dos bindings do home/nome solicitado, convertidos em `OrgProtectionBinding`; o próprio recibo não inclui caminhos de homes nem fonte e pode ser reconstruído do banco. `observation_id` é UUID4 hex; `source_digest` é SHA-256 dos bytes, `None` só em modo `none`. Uma sessão só atende o home observado, tem duração explícita via context manager e recusa uso depois de fechada. Construção de contexto valida modo/path; construção de sessão valida a fonte antes de qualquer chamada mutante.
 
-- [ ] **1. Escrever testes de parser e seleção.** Casos: `version=true`, 0, 2; objetos com chaves repetidas ou desconhecidas em ambos os níveis; UTF-8/JSON inválido; bindings sem `active` ou com tipo incorreto; nome inválido; ID de organização vazio, Unicode, 65 caracteres; par home/nome duplicado mesmo com organização diferente. Assertar `SkillMutationError.kind == "input"`. Ausência da variável produz `none`; vazio/relativo recusa; nenhum diretório é criado.
+- [x] **1. Escrever testes de parser e seleção.** Casos: `version=true`, 0, 2; objetos com chaves repetidas ou desconhecidas em ambos os níveis; UTF-8/JSON inválido; bindings sem `active` ou com tipo incorreto; nome inválido; ID de organização vazio, Unicode, 65 caracteres; par home/nome duplicado mesmo com organização diferente. Assertar `SkillMutationError.kind == "input"`. Ausência da variável produz `none`; vazio/relativo recusa; nenhum diretório é criado.
 
   Exemplo obrigatório em `unittest.TestCase`, importando a função pública:
 
@@ -92,14 +92,14 @@ class OrgPolicySession:
           parse_org_policy(b'{"version":true,"bindings":[]}')
       self.assertEqual(caught.exception.kind, "input")
   ```
-- [ ] **2. Escrever testes de observação e falhas.** Arquivo ausente/ilegível → `unavailable`; arquivo acima de 1 MiB, symlink/hardlink/FIFO → `input` sem bloqueio; trocar inode mantendo bytes, modificar fonte ou renomear ancestral depois da abertura → `conflict` em `revalidate()`. Usar subprocesso com timeout para FIFO; erros de permissão podem usar falha `EACCES` na operação de abertura. Assertar fonte sentinela ausente de mensagem/log.
-- [ ] **3. Escrever testes de home/namespace.** Dois homes com mesmo nome recebem bindings distintos; home ausente no documento não é criado; home alvo por symlink ou com `..` recusa; ancestral existente de home ausente por symlink recusa. Validar grafia original antes de construir `Path`, que elimina alguns componentes lexicais. Preservar `catalog_home_id` dos homes válidos já existentes.
-- [ ] **4. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_skill_org_policy.py`. Falha esperada: módulos/interfaces ainda ausentes; não aceitar falha de infraestrutura como RED.
-- [ ] **5. Implementar as interfaces acima.** Ler bytes por descritores sem seguir links; validar tamanho/tipo/nlink antes da leitura, EOF e stat depois; parser detecta duplicatas com `object_pairs_hook`. Validar cadeias existentes sem criar homes ausentes. Manter observação de identidade, montagem, cadeia e digest; revalidar antes de emitir recibo e em chamada explícita. `none` ainda valida o home observado e a vida da sessão.
-- [ ] **6. Rodar GREEN e Ruff:** teste completo acima; `.venv/bin/ruff check kairos_skills/org_policy*.py tests/test_skill_org_policy.py` e format nos mesmos arquivos. Esperado: todos passam. Conferir erros sanitizados com `assertLogs`/captura estruturada; não usar `console.error` ou suprimir falhas.
-- [ ] **7. Commit:** `feat(skills): observa política organizacional por descritores`.
+- [x] **2. Escrever testes de observação e falhas.** Arquivo ausente/ilegível → `unavailable`; arquivo acima de 1 MiB, symlink/hardlink/FIFO → `input` sem bloqueio; trocar inode mantendo bytes, modificar fonte ou renomear ancestral depois da abertura → `conflict` em `revalidate()`. Usar subprocesso com timeout para FIFO; erros de permissão podem usar falha `EACCES` na operação de abertura. Assertar fonte sentinela ausente de mensagem/log.
+- [x] **3. Escrever testes de home/namespace.** Dois homes com mesmo nome recebem bindings distintos; home ausente no documento não é criado; home alvo por symlink ou com `..` recusa; ancestral existente de home ausente por symlink recusa. Validar grafia original antes de construir `Path`, que elimina alguns componentes lexicais. Preservar `catalog_home_id` dos homes válidos já existentes.
+- [x] **4. Rodar RED:** `.venv/bin/python -m pytest -q tests/test_skill_org_policy.py`. Falha esperada: módulos/interfaces ainda ausentes; não aceitar falha de infraestrutura como RED.
+- [x] **5. Implementar as interfaces acima.** Ler bytes por descritores sem seguir links; validar tamanho/tipo/nlink antes da leitura, EOF e stat depois; parser detecta duplicatas com `object_pairs_hook`. Validar cadeias existentes sem criar homes ausentes. Manter observação de identidade, montagem, cadeia e digest; revalidar antes de emitir recibo e em chamada explícita. `none` ainda valida o home observado e a vida da sessão.
+- [x] **6. Rodar GREEN e Ruff:** teste completo acima; `.venv/bin/ruff check kairos_skills/org_policy*.py tests/test_skill_org_policy.py` e format nos mesmos arquivos. Esperado: todos passam. Conferir erros sanitizados com `assertLogs`/captura estruturada; não usar `console.error` ou suprimir falhas.
+- [x] **7. Commit:** `feat(skills): observa política organizacional por descritores`.
 
-## Tarefa 2: journal de proteção e compatibilidade do estado
+## Task 2: journal de proteção e compatibilidade do estado
 
 **Files:** criar schema/repositório da tabela; modificar `kairos_state/{migrations,skill_writer,skill_adoptions_schema}.py`, `kairos_state/repositories/{skill_mutations,skill_removals}.py`, `kairos_skills/removal_state.py`, `kairos_cli/backup.py`; criar `tests/test_skill_org_state.py` e `tests/test_skill_org_backup.py`; adaptar fixtures afetadas de estado/backup. A ativação padrão em `kairos_state/schema.py` pertence à tarefa 3.
 
@@ -157,7 +157,7 @@ SkillMutationRepository.prepare_restore(draft,
 - [ ] **7. Commit:** `feat(state): registra proteção organizacional junto à instalação`.
   Os commits das tarefas 2 e 3 devem entrar no mesmo merge: a tarefa 2 isolada é preparação interna, sem migração alcançável pelo caminho padrão; não fazer release, merge ou deploy dela separadamente.
 
-## Tarefa 3: serviços, diagnóstico e recuperação com guard obrigatório
+## Task 3: serviços, diagnóstico e recuperação com guard obrigatório
 
 **Files:** criar `kairos_skills/org_policy_guard.py`; modificar `kairos_state/schema.py`, `kairos_skills/{mutations,adoptions,identification,identification_contract,mutation_recovery,removal_recovery,adoption_recovery}.py`, `kairos_cli/{skill_mutations,skill_adoptions,skill_identification}.py`; adaptar chamadores e testes de serviços; criar `tests/test_skill_org_services.py`, `tests/test_skill_org_recovery.py`, `tests/test_cli_skill_org_policy.py`.
 
@@ -205,7 +205,7 @@ Todas as recuperações chamadas por `reconcile_pending`, inclusive chamadas dir
 - [ ] **7. Rodar GREEN:** `umask 0022 && .venv/bin/python -m pytest -q tests/test_skill_org_services.py tests/test_skill_org_recovery.py tests/test_cli_skill_org_policy.py tests/test_skill_adoption_*.py tests/test_skill_identification*.py tests/test_skill_mutation_*.py tests/test_cli_skill_*.py`. Confirmar caminhos reais de recuperação e ausência de skips inesperados; executar também `umask 0077 && .venv/bin/python -m pytest -q tests/test_skill_org_*.py tests/test_cli_skill_org_policy.py` para os testes novos, que não dependem da umask.
 - [ ] **8. Commit:** `feat(skills): aplica veto organizacional em serviços e recuperação`.
 
-## Tarefa 4: sync, promoção e aceite integrado
+## Task 4: sync, promoção e aceite integrado
 
 **Files:** modificar `kairos_skills/{sync,hub}.py`, `kairos_cli/handlers.py`, `docs/decisoes.md`; criar `tests/test_skill_org_publication.py`, `docs/superpowers/reports/2026-10-14-politica-organizacional-b1.md`; adaptar testes existentes de sync/hub e atualizar manual/metadata CLI pertinente encontrado nos adaptadores.
 
@@ -250,6 +250,6 @@ Antes de cada commit de implementação, Root revisa o diff da tarefa contra a s
 
 Cobertura conferida: fonte/configuração, home, namespace e sanitização (1); continuidade, capability, backup e migração (2); ação×guard, diagnóstico e recuperação (3); escritores legados e gates locais/remotos (4). Os cinco itens de Review Focus têm casos explícitos nas tarefas indicadas. As interfaces produzidas são usadas com as mesmas assinaturas nas tarefas dependentes. O plano não implementa B2, não otimiza leitores e não muda a garantia de mesmo UID.
 
-Execução recomendada: nativa, quatro tarefas sequenciais com commits verificáveis e uma revisão independente final. O usuário aprovou a spec; este plano aguarda revisão antes da implementação.
+Execução recomendada: nativa, quatro tarefas sequenciais com commits verificáveis e uma revisão independente final. O usuário aprovou a spec e revisou o plano sem impedimento de execução em 2026-10-14.
 
 Revisão do usuário em 2026-10-14: sem impedimento de execução; incorporar migração/reparo explícitos dos writer triggers, grafia pública de cobertura, merge conjunto das tarefas 2/3 e testes de construção sem sessão. Na tarefa 4, registrar em `docs/decisoes.md` a incompatibilidade deliberada: clientes v8/v9 não escrevem em famílias antigas nem novas de banco v10; atualização exige todos os escritores participantes compatíveis.
