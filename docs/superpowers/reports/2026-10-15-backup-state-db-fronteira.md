@@ -239,6 +239,53 @@ Os jobs remotos do ajuste serão conferidos após o push. Resultados de
 `c4bfaf2` não são atribuídos automaticamente ao novo commit. Merge e
 deploy permanecem fora desta retomada.
 
+## Continuidade em 2026-10-17
+
+O PR #105 foi integrado por squash em `7ba1e6c` às 13:56 UTC. O
+[pipeline pós-merge](https://github.com/Patricia7sp/kairos/actions/runs/39038660276)
+concluiu os nove jobs de verificação e o deploy no Komodo com sucesso.
+O log do deploy registra o update `6ad37f85055379d024463cce` concluído às
+14:01 UTC, mas não informa o commit implantado (`commit '?'`). Esse log,
+isoladamente, não atesta o SHA em execução.
+O diff do squash não contém arquivos removidos.
+
+O detalhe menor de orientação ficou para um ajuste separado: a mensagem
+agora manda conferir `state.db`, os diretórios do home e o destino de saída,
+corrigir entradas inválidas antes de repetir e usar o home estável em caso
+de alteração concorrente. O manual recebeu a mesma orientação. Nenhuma
+lógica de captura ou garantia de segurança foi alterada; o limite ABA
+permanece.
+
+Revisão independente somente leitura por GPT-6 Luna, raciocínio high,
+do diff de produção e manual: sem achados. O revisor verificou os caminhos
+de recusa e a coerência com os limites documentados; não executou a suíte.
+Root executou os 25 testes de backup e dez subtestes com sucesso, sem
+skips. A tentativa no sandbox falhou no bind do socket Unix da fixture;
+a execução autorizada fora dele passou em 10,94 s. Ruff check, format
+check do arquivo de produção e `git diff --check` passaram.
+
+`scripts/ci.sh --fast`, com Python 3.11.16, terminou com exit 1: a suíte
+passou 3.847 testes e 6.319 subtestes, com 16 skips e 31 deselecionados,
+mas os testes
+`test_real_binary_initialize_start_and_resume_compatibility_probe` e
+`test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death`
+recusaram o Codex 0.163.0 encontrado no PATH. Os demais checks passaram:
+Ruff check e format (648 arquivos), shellcheck, recall (20 testes), lockfile,
+os três TypeScript e 239 testes Vitest.
+
+O Codex 0.154.0 foi obtido do release oficial, com SHA-256 conferido contra
+o pin do Dockerfile. Somente os dois testes afetados pelo binário foram
+reexecutados com essa versão e passaram em 2,25 s, exit 0. Produção, testes,
+dependências e configuração não mudaram entre as execuções. Essas
+evidências combinadas cobrem os 3.849 testes; não representam uma execução
+única do script com exit 0. Logs locais persistidos:
+`.superpowers/evidence/backup-20261017-ci.log` e
+`.superpowers/evidence/backup-20261017-codex-pinned.log`.
+Docker e integração local foram pulados pelo `--fast`; a imagem
+`kairos:test` não estava disponível no daemon desta retomada. A validação
+remota do ajuste será consultada após o push, sem atribuir a ele os
+resultados do PR #105. O ajuste não inclui novo merge ou deploy.
+
 ## Apêndice: sonda ABA reproduzível
 
 Sonda manual de diagnóstico, fora da suíte. Atua somente nos dois bancos
