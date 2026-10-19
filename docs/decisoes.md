@@ -735,6 +735,51 @@ silenciado — e o teste que fixava a string exata do `useradd` quebrou junto,
 o que o expôs como específico demais: agora afirma a **propriedade**, não a
 ordem das flags.
 
+### D-CI.SONAR — Análise SonarQube Cloud, advisory e subordinada ao Ruff
+
+O CI mede lint (Ruff), testes e build, mas não enxerga **cobertura em código
+novo**, duplicação e complexidade por PR. O SonarQube Cloud entra como
+**observabilidade**, não como segundo lint nem gate de vaidade.
+
+O repositório é público, então o produto certo é o **SonarQube Cloud** (plano
+gratuito para projetos públicos). **Não** entra servidor self-hosted: o
+Community Build analisa só a branch principal (PR/branch é recurso pago), exige
+Postgres e upgrade mensal — custo operacional sem retorno.
+
+Decisões que a integração respeita:
+
+- **Ruff continua sendo a autoridade de lint.** O conjunto de regras do
+  `pyproject.toml` é deliberado (import tardio `PLC0415`, `E501`,
+  `RUF001-003`). O Sonar não reabre esses temas: onde há contraparte Sonar
+  confirmada, a regra é silenciada via `sonar.issue.ignore.multicriteria`, com
+  o motivo do Ruff citado (começa pelo `python:S103`, espelho do `E501`).
+  Silenciar um padrão deliberado é a resposta — nunca "corrigir" o padrão para
+  agradar o Sonar.
+- **Advisory, nunca gate.** `sonar.qualitygate.wait=false`: o job reporta e
+  **não** bloqueia merge, e **não** entra em `deploy.needs`. Ligar um gate
+  bloqueante fica documentado, não ativado.
+- **Não rodar a suíte duas vezes.** O job `sonar` **consome** o `coverage.xml`
+  do job `tests` por artefato; não executa `pytest`.
+- **Cobertura inclui subprocessos.** 44 dos 210 arquivos de teste spawnam
+  processos; sem instrumentar o filho o número sairia artificialmente baixo.
+  O `coverage` (>=7.13) instala um `.pth` permanente que chama
+  `process_startup()` quando `COVERAGE_PROCESS_START` está no ambiente — não há
+  enabler manual. (`scripts/coverage-enable-subprocesses.py` foi cogitado e
+  **descartado**: o `.pth` nativo o tornaria redundante e instrumentaria o
+  filho duas vezes. Divergência registrada na spec.)
+- **Sem token, sem scan — nunca finge.** PR de fork não recebe `SONAR_TOKEN`.
+  O passo é condicional e, sem token, o job passa sem scanear, com mensagem
+  explícita de que a análise foi pulada. Nunca reportar sucesso de análise que
+  não ocorreu.
+- **Sinal para humano, não para loop.** Cobertura do Sonar é sinal para
+  revisão; não é alvo de otimização por agente autônomo — perseguir o número
+  produz teste de fachada.
+
+Pendência de aprovação: criar o projeto no SonarCloud (confirmar
+`sonar.projectKey`/`sonar.organization`) e cadastrar o segredo `SONAR_TOKEN`.
+Até lá, a calibragem fina dos `multicriteria` e a decoração de PR ficam para o
+primeiro scan real.
+
 ---
 
 ## Tarefa 08 — tools

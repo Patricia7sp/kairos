@@ -70,8 +70,9 @@ recusa o backup sem resposta de sucesso. A captura do banco exige Linux com
 pode restringir mais); `--output` substitui os metadados do arquivo anterior e exige escrita no
 diretório pai. As verificações de identidade são discretas: não impedem
 trocas ABA por quem pode escrever no home, nem atestam os sidecars abertos
-pelo SQLite. Se houver recusa por alteração concorrente, tente novamente
-com o home estável. A área
+pelo SQLite. Em caso de recusa, confira `state.db`, os diretórios do home e
+o destino de saída; corrija entradas inválidas antes de repetir. Se houve
+alteração concorrente, tente novamente com o home estável. A área
 `.skill-mutations/staging/ID` contém preparações; conteúdo desconhecido não é
 promovido nem removido automaticamente. Área privada e instalação precisam
 estar no mesmo filesystem; sem lock ou rename seguro, o comando recusa com 69.

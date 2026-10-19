@@ -174,7 +174,9 @@ async def run_backup(home: Path, args) -> int:
     except (BackupBoundaryError, FilesystemError):
         print(
             "kairos: fronteira de state.db inválida ou alterada; backup recusado. "
-            "Confira state.db e os diretórios do home; tente novamente com o home estável.",
+            "Confira state.db, os diretórios do home e o destino de saída. "
+            "Corrija entradas inválidas antes de repetir; se houve alteração concorrente, "
+            "tente novamente com o home estável.",
             file=sys.stderr,
         )
         return 1

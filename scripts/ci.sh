@@ -32,8 +32,26 @@ command -v "$UV" >/dev/null 2>&1 || UV="$HOME/.local/bin/uv"
 
 run "Cliente v8 para regressão de downgrade" env UV="$UV" bash scripts/prepare-skill-v8-client.sh
 
-run "Testes (unitários)" \
-    "$UV" run pytest -q --deselect tests/test_container.py::RealImageTests
+# Cobertura para o Sonar (advisory), espelhando o job `tests` do CI. O
+# `COVERAGE_PROCESS_START` ativa o `.pth` permanente do coverage em cada
+# subprocesso; o `COVERAGE_FILE` absoluto mantém os data files no repositório.
+: "${COVERAGE_PROCESS_START:=$PWD/pyproject.toml}"
+: "${COVERAGE_FILE:=$PWD/.coverage}"
+export KAIROS_COVERAGE_ROOT="$PWD"
+export COVERAGE_PROCESS_START COVERAGE_FILE
+
+run "Testes (unitários, com cobertura)" \
+    "$UV" run coverage run -m pytest -q --deselect tests/test_container.py::RealImageTests
+run "Combinar cobertura"       "$UV" run coverage combine
+run "Relatório de cobertura"   "$UV" run coverage xml
+
+# O scanner só roda com binário E token; sem eles, skip explícito — mesma forma
+# dos skips de shellcheck/npm. Nunca reportar análise que não ocorreu.
+if command -v sonar-scanner >/dev/null 2>&1 && [ -n "${SONAR_TOKEN:-}" ]; then
+  run "Sonar (análise)" sonar-scanner
+else
+  skip "Sonar (análise)" "sonar-scanner ou SONAR_TOKEN ausente"
+fi
 
 run "Lint (ruff check)"  "$UV" run ruff check .
 run "Lint (ruff format)" "$UV" run ruff format --check .

@@ -110,10 +110,15 @@ docker build -f docker/external-sandbox/Dockerfile -t kairos:external-sandbox . 
 
 ## CI
 
-`.github/workflows/ci.yml` — um workflow, 8 jobs por ferramenta (não por
-superfície): testes, lint, shell, dockerfile, imagem+integração, frontends,
-gate de recall, `uv lock --check`. Actions fixadas por **SHA**, nunca por tag.
-Na `main`, um nono job `deploy` — atrás deles, só a main — chama a API do Komodo
+`.github/workflows/ci.yml` — um workflow com jobs por ferramenta: testes,
+lint, shell, dockerfile, imagem+integração, sessões Docker isoladas, frontends,
+gate de recall, `uv lock --check` e SonarQube Cloud consultivo. Actions
+fixadas por **SHA**, nunca por tag. O Sonar roda em PRs e na `main`, consome
+a cobertura do job de testes e fica fora de `deploy.needs` nesta fase.
+Sem `SONAR_TOKEN`, o scan é pulado explicitamente. Ao relatar aprovação do
+Sonar, confira o Quality Gate e a revisão analisada no SonarCloud; sucesso
+do job de envio ou de outros checks não comprova aprovação da análise.
+Na `main`, o job `deploy` — atrás das verificações obrigatórias — chama a API do Komodo
 (`scripts/komodo-deploy.sh`); o smoke pós-deploy (`scripts/smoke-deploy.sh`)
 roda no host, como action/procedure do Komodo. Detalhes: `docs/ci-cd-komodo.md`.
 
