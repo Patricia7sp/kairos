@@ -73,6 +73,31 @@ def _snapshot_database(directory, descriptor, chain, snapshot):
         check()
         with closing(sqlite3.connect(snapshot)) as destination:
             source.backup(destination, pages=64, progress=check)
+            objects = {
+                row[0]
+                for row in destination.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+                )
+            }
+            from kairos_state.skill_org_schema import ORG_OBJECTS, validate_org_schema
+
+            versions = (
+                destination.execute("SELECT version FROM schema_version").fetchall()
+                if "schema_version" in objects
+                else []
+            )
+            if "schema_version" in objects and (
+                len(versions) != 1 or type(versions[0][0]) is not int or versions[0][0] < 0
+            ):
+                raise sqlite3.DatabaseError("versão do snapshot inválida")
+            if objects & ORG_OBJECTS or any(row[0] >= 10 for row in versions):
+                from kairos_state.repositories.skill_mutations import validate_skill_timeline
+
+                validate_org_schema(destination)
+                try:
+                    validate_skill_timeline(destination)
+                except ValueError:
+                    raise sqlite3.DatabaseError("snapshot de skills incoerente") from None
     check()
     snapshot.chmod(os.fstat(descriptor).st_mode & 0o777)
 

@@ -263,6 +263,12 @@ def _expected_skill_triggers() -> tuple[tuple[str, str, str], ...]:
 
 def repair_adoption_triggers(connection: sqlite3.Connection) -> None:
     """Reconstrói apenas guards conhecidos; não apaga triggers desconhecidos."""
+    version = connection.execute("SELECT version FROM schema_version").fetchone()[0]
+    if version == 10:
+        from kairos_state.skill_org_schema import repair_org_triggers
+
+        repair_org_triggers(connection)
+        return
     expected = _expected_skill_triggers()
     nested = connection.in_transaction
     if nested:
@@ -308,7 +314,13 @@ def validate_adoption_schema(connection: sqlite3.Connection) -> None:
     }
     if not tables >= ADOPTION_TABLES:
         raise sqlite3.DatabaseError("schema de adoção incompleto")
-    expected_triggers = _expected_skill_triggers()
+    version = connection.execute("SELECT version FROM schema_version").fetchone()[0]
+    if version == 10:
+        from kairos_state.skill_org_schema import expected_org_triggers
+
+        expected_triggers = expected_org_triggers()
+    else:
+        expected_triggers = _expected_skill_triggers()
     guarded_tables = {row[1] for row in expected_triggers}
     observed_triggers = tuple(
         tuple(row)
