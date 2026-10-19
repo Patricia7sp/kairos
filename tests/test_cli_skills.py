@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from skill_org_fixtures import personal_policy
 from test_chat_search_loop import RoundGateway, answer_round, make_service
 from test_chat_tool_approval import mutator_round
 from test_interaction_skills import skill_payload
@@ -121,13 +122,13 @@ def test_selecao_preserva_ordem_e_nao_duplica(installed, tmp_path):
     assert [s["name"] for s in selected] == ["segunda", "primeira"]
 
 
-def test_skill_sincronizada_de_categoria_chega_ao_adapter(installed, tmp_path):
+def test_skill_sincronizada_de_categoria_chega_ao_adapter(installed, tmp_path, request):
     bundle = tmp_path / "bundle"
     source = bundle / "documentos" / "revisar-docs"
     source.mkdir(parents=True)
     text = skill_text(body="Procedimento categorizado fictício.")
     (source / "SKILL.md").write_text(text)
-    sync_bundled_skills(bundle, tmp_path / "skills")
+    sync_bundled_skills(bundle, tmp_path / "skills", policy=personal_policy(request, tmp_path))
     gateway, _ = installed()
     assert main(["run", "--skill", "revisar-docs", "--no-experiences", "pedido"]) == 0
     selected, _ = skill_payload(gateway.requests[0].messages[-1])

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_receipt
 from test_skill_mutation_state import creation_draft
 
 from kairos_cli.skill_mutations import _history, mutation_metadata
@@ -45,7 +46,7 @@ class RemovalProjectionTests(unittest.TestCase):
 
     def create(self):
         draft = creation_draft(self.home)
-        self.repo.prepare(draft, creation_text())
+        self.repo.prepare(draft, creation_text(), policy_receipt=personal_receipt(draft, self.repo))
         return self.repo.finish(draft.operation_id, SkillMutationState.COMMITTED)
 
     def capture(self, inode=2, data=b"# Legacy\n\x00\xff"):
@@ -112,7 +113,7 @@ class RemovalProjectionTests(unittest.TestCase):
 
     def restore(self, removed):
         draft = self.restore_draft(removed)
-        self.repo.prepare_restore(draft)
+        self.repo.prepare_restore(draft, policy_receipt=personal_receipt(draft, self.repo))
         return self.repo.finish(draft.operation_id, SkillMutationState.COMMITTED)
 
     def test_remove_deactivates_create_and_restore_activates_new_identity(self):
@@ -144,7 +145,10 @@ class RemovalProjectionTests(unittest.TestCase):
             self.repo.snapshot(second.operation_id).contents["SKILL.md"], b"# Edited\n"
         )
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare_restore(self.restore_draft(first))
+            self.repo.prepare_restore(
+                (fixture_draft := self.restore_draft(first)),
+                policy_receipt=personal_receipt(fixture_draft, self.repo),
+            )
 
     def test_history_orders_families_by_global_sequence(self):
         created = self.create()
@@ -242,7 +246,11 @@ class RemovalProjectionTests(unittest.TestCase):
             if state is SkillMutationState.CONFLICT:
                 self.repo.finish(pending.operation_id, state)
             with self.subTest(state=state), self.assertRaises(SkillMutationError):
-                self.repo.prepare(creation_draft(self.home), creation_text())
+                self.repo.prepare(
+                    (fixture_draft := creation_draft(self.home)),
+                    creation_text(),
+                    policy_receipt=personal_receipt(fixture_draft, self.repo),
+                )
             with self.subTest(state=state), self.assertRaises(SkillMutationError):
                 self.remove()
         self.repo.finish(pending.operation_id, SkillMutationState.ABORTED)
@@ -250,7 +258,7 @@ class RemovalProjectionTests(unittest.TestCase):
 
     def test_legacy_pending_blocks_tree_prepare(self):
         draft = creation_draft(self.home)
-        self.repo.prepare(draft, creation_text())
+        self.repo.prepare(draft, creation_text(), policy_receipt=personal_receipt(draft, self.repo))
         with self.assertRaises(SkillMutationError):
             self.remove(origin=Provenance.BUNDLED)
         self.assertEqual(self.repo.history(), (self.repo.get(draft.operation_id),))
@@ -274,7 +282,9 @@ class RemovalProjectionTests(unittest.TestCase):
             reverts=created.operation_id,
         )
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(rollback, creation_text())
+            self.repo.prepare(
+                rollback, creation_text(), policy_receipt=personal_receipt(rollback, self.repo)
+            )
         self.assertEqual(
             self.repo.current_installation(self.name).operation_id, restored.operation_id
         )
@@ -287,7 +297,10 @@ class RemovalProjectionTests(unittest.TestCase):
         self.assertEqual(self.repo.current_installation(self.name).operation_id, newer.operation_id)
         self.assertEqual(self.repo.current_removal(self.name).operation_id, removed.operation_id)
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare_restore(self.restore_draft(removed))
+            self.repo.prepare_restore(
+                (fixture_draft := self.restore_draft(removed)),
+                policy_receipt=personal_receipt(fixture_draft, self.repo),
+            )
         self.assertEqual(
             self.repo.snapshot(removed.operation_id).contents["SKILL.md"], b"# Legacy\n\x00\xff"
         )
@@ -335,13 +348,13 @@ class RemovalProjectionTests(unittest.TestCase):
         )
 
         aborted = self.restore_draft(manual)
-        self.repo.prepare_restore(aborted)
+        self.repo.prepare_restore(aborted, policy_receipt=personal_receipt(aborted, self.repo))
         self.assertIn(self.name, self.repo.bundled_tombstones())
         self.repo.finish(aborted.operation_id, SkillMutationState.ABORTED)
         self.assertIn(self.name, self.repo.bundled_tombstones())
 
         restored = self.restore_draft(manual, inode=30)
-        self.repo.prepare_restore(restored)
+        self.repo.prepare_restore(restored, policy_receipt=personal_receipt(restored, self.repo))
         self.repo.finish(restored.operation_id, SkillMutationState.CONFLICT)
         self.assertIn(self.name, self.repo.bundled_tombstones())
         self.repo.finish(restored.operation_id, SkillMutationState.COMMITTED)
@@ -406,7 +419,9 @@ class RemovalProjectionTests(unittest.TestCase):
         self.db.create_function("kairos_skill_writer_version", 0, None)
         repo = SkillMutationRepository(self.db, home_id=self.repo.home_id)
         draft = creation_draft(self.home, validate_skill_creation(creation_text(name="other")))
-        repo.prepare(draft, creation_text(name="other"))
+        repo.prepare(
+            draft, creation_text(name="other"), policy_receipt=personal_receipt(draft, repo)
+        )
         self.assertEqual(repo.pending("other")[0].operation_id, draft.operation_id)
 
 
@@ -498,7 +513,7 @@ class RemovalWriterGuardTests(unittest.TestCase):
             action=SkillTreeAction.RESTORE,
             reverts=removed.operation_id,
         )
-        self.repo.prepare_restore(restore)
+        self.repo.prepare_restore(restore, policy_receipt=personal_receipt(restore, self.repo))
         self.repo.finish(restore_id, SkillMutationState.COMMITTED)
         before = self.repo.history()
         with self.assertRaises(SkillMutationError):

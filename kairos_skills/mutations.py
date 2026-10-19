@@ -22,11 +22,13 @@ from kairos_skills.mutation_contract import (
     require,
     validate_actor,
     validate_id,
-    validate_name,
 )
 from kairos_skills.mutation_io import SkillMutationFiles, read_skill_creation
 from kairos_skills.mutation_lock import skill_mutation_lock
 from kairos_skills.mutation_recovery import expected_entry, mark_conflict, reconcile_pending
+from kairos_skills.org_policy import OrgPolicySession
+from kairos_skills.org_policy_contract import OrgPolicyAction
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 from kairos_skills.removal_contract import SkillTreeAction, SkillTreeDraft
 from kairos_skills.removal_io import SkillRemovalFiles
 from kairos_skills.removal_origin import prove_removal_origin, resolve_removal_origin
@@ -157,13 +159,20 @@ def _require_restore_authority(repository, removed, previous=None, *, pending_op
 
 
 class SkillMutationService:
-    def __init__(self, home: Path, repository: SkillMutationRepository):
+    def __init__(
+        self, home: Path, repository: SkillMutationRepository, *, policy: OrgPolicySession
+    ):
         self.home = Path(home).expanduser().absolute()
         require(".." not in self.home.parts, "Home não pode conter escapes.")
         require(
             repository.home_id == catalog_home_id(self.home), "Ledger pertence a outra instalação."
         )
+        attest_policy_home(policy, self.home)
+        self.policy = policy
         self.repository = repository
+
+    def _check(self, name, action):
+        return repository_guard(self.policy, self.repository).check(name, action)
 
     def history(self, *, name: str | None = None, limit: int = 20):
         return self.repository.history(name=name, limit=limit)
@@ -177,7 +186,9 @@ class SkillMutationService:
             raise SkillMutationError(
                 "conflict", "Staging alterado; conteúdo preservado.", operation_id=operation_id
             )
+        self.policy.revalidate()
         files.discard_staging(operation_id, expected)
+        self.policy.revalidate()
         record = self.repository.get(operation_id)
         if record is not None and record.state in (
             SkillMutationState.PREPARED,
@@ -187,11 +198,13 @@ class SkillMutationService:
 
     def add(self, source: Path, *, actor: Actor):
         validate_actor(actor)
+        self.policy.revalidate()
         creation = read_skill_creation(source)
+        self._check(creation.name, OrgPolicyAction.CREATE)
         operation_id = uuid.uuid4().hex
         try:
             with skill_mutation_lock(self.home), SkillMutationFiles(self.home) as files:
-                reconcile_pending(self.repository, files, name=creation.name)
+                reconcile_pending(self.repository, files, name=creation.name, policy=self.policy)
                 files.assert_name_available(creation.name)
                 entry = files.stage(operation_id, creation)
                 attempted = False
@@ -207,13 +220,16 @@ class SkillMutationService:
                         creation.sha256,
                         creation.size_bytes,
                     )
-                    self.repository.prepare(draft, creation.text)
+                    receipt = self._check(creation.name, OrgPolicyAction.CREATE)
+                    self.repository.prepare(draft, creation.text, policy_receipt=receipt)
                     attempted = True
+                    self._check(creation.name, OrgPolicyAction.CREATE)
                     files.publish(operation_id, creation.name)
                     if files.inspect_installed(creation.name) != entry:
                         raise SkillMutationError(
                             "conflict", "Publicação divergiu; conteúdo preservado."
                         )
+                    self._check(creation.name, OrgPolicyAction.CREATE)
                     return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
                 except (SkillMutationError, OSError):
                     if not attempted:
@@ -225,6 +241,7 @@ class SkillMutationService:
     def rollback(self, create_id: str, *, actor: Actor):
         validate_actor(actor)
         validate_id(create_id)
+        self.policy.revalidate()
         operation_id = create_id
         try:
             with skill_mutation_lock(self.home):
@@ -239,11 +256,12 @@ class SkillMutationService:
                     and created.state is SkillMutationState.COMMITTED,
                     "Informe o ID de uma criação concluída neste home.",
                 )
+                self._check(created.name, OrgPolicyAction.ROLLBACK_CREATE)
                 previous = self.repository.latest_rollback(create_id)
                 if previous is not None and previous.state is SkillMutationState.COMMITTED:
                     return previous
                 with SkillMutationFiles(self.home) as files:
-                    reconcile_pending(self.repository, files, name=created.name)
+                    reconcile_pending(self.repository, files, name=created.name, policy=self.policy)
                     previous = self.repository.latest_rollback(create_id)
                     if previous is not None and previous.state is SkillMutationState.COMMITTED:
                         return previous
@@ -273,7 +291,9 @@ class SkillMutationService:
                         expected.creation.size_bytes,
                         create_id,
                     )
+                    self._check(created.name, OrgPolicyAction.ROLLBACK_CREATE)
                     self.repository.prepare(draft, expected.creation.text)
+                    self._check(created.name, OrgPolicyAction.ROLLBACK_CREATE)
                     files.retire(created.name, operation_id)
                     try:
                         unchanged = files.inspect_private(operation_id, retired=True) == expected
@@ -289,6 +309,7 @@ class SkillMutationService:
                         )
                     if not files.installed_name_absent(created.name):
                         mark_conflict(self.repository, self.repository.get(operation_id))
+                    self._check(created.name, OrgPolicyAction.ROLLBACK_CREATE)
                     return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
         except (SkillMutationError, OSError) as error:
             raise operation_error(error, operation_id) from None
@@ -297,11 +318,11 @@ class SkillMutationService:
         validate_actor(actor)
         if confirmed is not True:
             raise SkillMutationError("denied", "Remoção exige confirmação explícita --yes.")
-        validate_name(name)
+        self._check(name, OrgPolicyAction.REMOVE)
         operation_id = uuid.uuid4().hex
         try:
             with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
-                reconcile_pending(self.repository, files, name=name)
+                reconcile_pending(self.repository, files, name=name, policy=self.policy)
                 captured = files.capture_installed(name)
                 current = self.repository.current_installation(name)
                 if captured is None:
@@ -322,9 +343,11 @@ class SkillMutationService:
                     adoption,
                     source,
                 )
+                self._check(name, OrgPolicyAction.REMOVE)
                 record = self.repository.prepare_remove(draft, captured)
                 if files.capture_installed(name) != captured:
                     mark_conflict(self.repository, record)
+                self._check(name, OrgPolicyAction.REMOVE)
                 files.retire(name, operation_id)
                 try:
                     unchanged = tree_matches(
@@ -339,6 +362,7 @@ class SkillMutationService:
                         if files.retired_owned(
                             operation_id, draft.proof
                         ) and files.installed_name_absent(name):
+                            self._check(name, OrgPolicyAction.REMOVE)
                             files.return_retired(operation_id, name)
                     except SkillMutationError as error:
                         if error.kind not in ("input", "conflict"):
@@ -346,7 +370,9 @@ class SkillMutationService:
                     mark_conflict(self.repository, record)
                 if not files.installed_name_absent(name):
                     mark_conflict(self.repository, record)
+                self._check(name, OrgPolicyAction.REMOVE)
                 files.sync_parents()
+                self._check(name, OrgPolicyAction.REMOVE)
                 return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
         except (SkillMutationError, OSError) as error:
             raise operation_error(error, operation_id) from None
@@ -374,6 +400,7 @@ class SkillMutationService:
 
     def _restore_removed(self, removed, *, actor: Actor):
         require(removed.state is SkillMutationState.COMMITTED, "Informe o ID de remoção concluída.")
+        self._check(removed.name, OrgPolicyAction.RESTORE)
         operation_id = removed.operation_id
         try:
             previous = self.repository.latest_restore(removed.operation_id)
@@ -384,7 +411,7 @@ class SkillMutationService:
             ):
                 return previous
             with SkillRemovalFiles(self.home) as files:
-                reconcile_pending(self.repository, files, name=removed.name)
+                reconcile_pending(self.repository, files, name=removed.name, policy=self.policy)
                 previous = self.repository.latest_restore(removed.operation_id)
                 if previous is not None and previous.state is SkillMutationState.COMMITTED:
                     _require_restore_authority(self.repository, removed, previous)
@@ -436,11 +463,13 @@ class SkillMutationService:
                     adoption,
                     removed.draft.installation_source if adoption is not None else None,
                 )
-                record = self.repository.prepare_restore(draft)
+                receipt = self._check(removed.name, OrgPolicyAction.RESTORE)
+                record = self.repository.prepare_restore(draft, policy_receipt=receipt)
                 if not tree_matches(
                     files.capture_private(operation_id, retired=False), record, snapshot
                 ):
                     mark_conflict(self.repository, record)
+                self._check(removed.name, OrgPolicyAction.RESTORE)
                 files.publish(operation_id, removed.name)
                 if not tree_matches(files.capture_installed(removed.name), record, snapshot):
                     mark_conflict(self.repository, record)
@@ -460,7 +489,9 @@ class SkillMutationService:
                         mark_conflict(self.repository, record)
                     if files.capture_installed(removed.name) != restored_capture:
                         mark_conflict(self.repository, record)
+                self._check(removed.name, OrgPolicyAction.RESTORE)
                 files.sync_parents()
+                self._check(removed.name, OrgPolicyAction.RESTORE)
                 return self.repository.finish(operation_id, SkillMutationState.COMMITTED)
         except (SkillMutationError, OSError) as error:
             raise operation_error(error, operation_id) from None
@@ -470,6 +501,7 @@ class SkillMutationService:
         if not files.directory_owned(draft.operation_id, expected.identity, retired=True):
             mark_conflict(self.repository, record)
         try:
+            self._check(draft.name, OrgPolicyAction.ROLLBACK_CREATE)
             files.restore(draft.operation_id, draft.name)
         except SkillMutationError as error:
             if error.kind == "conflict":
@@ -477,4 +509,5 @@ class SkillMutationService:
             raise
         if not files.directory_owned(draft.name, expected.identity):
             mark_conflict(self.repository, record)
+        self._check(draft.name, OrgPolicyAction.ROLLBACK_CREATE)
         self.repository.finish(draft.operation_id, SkillMutationState.ABORTED)

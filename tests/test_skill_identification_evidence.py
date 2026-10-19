@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy, personal_receipt
 
 import kairos_filesystem.tree as tree_io
 import kairos_skills.removal_origin as origin
@@ -53,7 +54,9 @@ class InstallationEvidenceTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         migrate(self.db)
         self.repo = SkillMutationRepository(self.db, home_id=catalog_home_id(self.home))
-        self.service = SkillMutationService(self.home, self.repo)
+        self.service = SkillMutationService(
+            self.home, self.repo, policy=personal_policy(self, self.home)
+        )
 
     def create(self):
         return self.service.add(self.source, actor=Actor.USER_FOREGROUND)
@@ -173,7 +176,9 @@ class InstallationEvidenceTests(unittest.TestCase):
                 creation.sha256,
                 creation.size_bytes,
             )
-            self.repo.prepare(draft, creation.text)
+            self.repo.prepare(
+                draft, creation.text, policy_receipt=personal_receipt(draft, self.repo)
+            )
         for state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT):
             if state is SkillMutationState.CONFLICT:
                 self.repo.finish(operation_id, state)
@@ -293,7 +298,7 @@ class OriginEvidenceTests(unittest.TestCase):
                     source=source,
                     db=db,
                     repo=repo,
-                    service=SkillMutationService(home, repo),
+                    service=SkillMutationService(home, repo, policy=personal_policy(self, home)),
                     current=None,
                 )
                 yield fixture

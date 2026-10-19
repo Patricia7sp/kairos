@@ -26,6 +26,9 @@ from kairos_skills.mutation_contract import (
     validate_name,
 )
 from kairos_skills.mutation_lock import skill_mutation_lock
+from kairos_skills.org_policy import OrgPolicySession
+from kairos_skills.org_policy_contract import OrgPolicyAction
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 from kairos_skills.removal_origin import resolve_removal_origin
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
@@ -72,14 +75,21 @@ def _conflict(message: str, *, operation_id: str | None = None) -> SkillMutation
 class SkillAdoptionService:
     """Assume ou revoga administração local sem alterar a árvore instalada."""
 
-    def __init__(self, home: Path, repository: SkillMutationRepository):
+    def __init__(
+        self, home: Path, repository: SkillMutationRepository, *, policy: OrgPolicySession
+    ):
         self.home = Path(home).expanduser().absolute()
         require(".." not in self.home.parts, "Home não pode conter escapes.")
         require(
             repository.home_id == catalog_home_id(self.home),
             "Ledger pertence a outra instalação.",
         )
+        attest_policy_home(policy, self.home)
+        self.policy = policy
         self.repository = repository
+
+    def _check(self, name, action):
+        return repository_guard(self.policy, self.repository).check(name, action)
 
     @staticmethod
     def _validate_call(name: str, actor: Actor, confirmed: bool) -> None:
@@ -122,7 +132,7 @@ class SkillAdoptionService:
         record: SkillAdoptionRecord | None,
         origin: OriginEvidence,
     ) -> SkillAdoptionResult:
-        identification = identify_skill(self.home, name)
+        identification = identify_skill(self.home, name, policy=self.policy)
         latest = self.repository.installation_evidence(name)
         recaptured = read_installation_capture(self.home, name)
         expected_installation = None if before.current is None else before.current.operation_id
@@ -154,7 +164,7 @@ class SkillAdoptionService:
         captured: TreeCapture,
         record: SkillAdoptionRecord,
     ) -> SkillAdoptionResult:
-        identification = identify_skill(self.home, name)
+        identification = identify_skill(self.home, name, policy=self.policy)
         evidence = self.repository.installation_evidence(name)
         recaptured = read_installation_capture(self.home, name)
         current = evidence.current
@@ -217,6 +227,7 @@ class SkillAdoptionService:
     ) -> SkillAdoptionRecord:
         try:
             self._revalidate_prepared(name, operation_id, before, captured)
+            self._check(name, OrgPolicyAction.ADOPT)
             committed = self.repository.finish(operation_id, SkillMutationState.COMMITTED)
         except SkillMutationError as error:
             kind = error.kind
@@ -236,6 +247,7 @@ class SkillAdoptionService:
 
     def adopt(self, name: str, *, actor: Actor, confirmed: bool = False) -> SkillAdoptionResult:
         self._validate_call(name, actor, confirmed)
+        self._check(name, OrgPolicyAction.ADOPT)
         operation_id = uuid.uuid4().hex
         try:
             with skill_mutation_lock(self.home):
@@ -286,6 +298,7 @@ class SkillAdoptionService:
                     operation_id,
                 )
                 adoption_repository = self.repository._adoption_repository()
+                self._check(name, OrgPolicyAction.ADOPT)
                 adoption_repository.prepare_adopt(draft, captured)
 
                 committed = self._commit_prepared_adoption(name, operation_id, before, captured)
@@ -306,6 +319,7 @@ class SkillAdoptionService:
         expect_adoption: str | None = None,
     ) -> SkillAdoptionRecord:
         self._validate_call(name, actor, confirmed)
+        self._check(name, OrgPolicyAction.UNADOPT)
         if expect_adoption is not None:
             validate_id(expect_adoption)
 
@@ -351,6 +365,7 @@ class SkillAdoptionService:
                 )
 
                 def revalidate_before_unadopt() -> None:
+                    self._check(name, OrgPolicyAction.UNADOPT)
                     try:
                         recaptured = read_installation_capture(self.home, name)
                     except SkillMutationError as error:

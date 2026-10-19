@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_receipt
 from test_skill_mutation_state import creation_draft
 
 from kairos_domain.ownership import Actor, Provenance
@@ -39,16 +40,22 @@ class RemovalStateTests(unittest.TestCase):
         self.home_id = catalog_home_id(self.home)
         self.legacy = SkillMutationRepository(self.db, home_id=self.home_id)
         self.created = creation_draft(self.home)
-        self.legacy.prepare(self.created, creation_text())
+        self.legacy.prepare(
+            self.created,
+            creation_text(),
+            policy_receipt=personal_receipt(self.created, self.legacy),
+        )
         self.legacy.finish(self.created.operation_id, SkillMutationState.COMMITTED)
         from kairos_skills.mutation_contract import validate_skill_creation
 
         text = creation_text(name="pending")
         self.pending = creation_draft(self.home, validate_skill_creation(text))
-        self.legacy.prepare(self.pending, text)
+        self.legacy.prepare(
+            self.pending, text, policy_receipt=personal_receipt(self.pending, self.legacy)
+        )
         prior_text = creation_text(name="rolled-back")
         prior = creation_draft(self.home, validate_skill_creation(prior_text))
-        self.legacy.prepare(prior, prior_text)
+        self.legacy.prepare(prior, prior_text, policy_receipt=personal_receipt(prior, self.legacy))
         self.legacy.finish(prior.operation_id, SkillMutationState.COMMITTED)
         rollback = dataclasses.replace(
             prior,
@@ -56,7 +63,9 @@ class RemovalStateTests(unittest.TestCase):
             action=SkillMutationAction.ROLLBACK,
             reverts=prior.operation_id,
         )
-        self.legacy.prepare(rollback, prior_text)
+        self.legacy.prepare(
+            rollback, prior_text, policy_receipt=personal_receipt(rollback, self.legacy)
+        )
         self.legacy.finish(rollback.operation_id, SkillMutationState.COMMITTED)
         self.legacy_before = self.legacy_evidence()
 
@@ -547,11 +556,14 @@ class RemovalStateTests(unittest.TestCase):
             provenance=Provenance.BUNDLED,
         )
         with self.assertRaises(SkillMutationError):
-            repo.prepare_restore(restore)
+            repo.prepare_restore(restore, policy_receipt=personal_receipt(restore, repo))
         repo.finish(removal.operation_id, SkillMutationState.COMMITTED)
         before = canonical_fingerprint(self.db)
         with self.assertRaises(SkillMutationError):
-            repo.prepare_restore(dataclasses.replace(restore, provenance=Provenance.USER))
+            repo.prepare_restore(
+                (fixture_draft := dataclasses.replace(restore, provenance=Provenance.USER)),
+                policy_receipt=personal_receipt(fixture_draft, repo),
+            )
         altered = dataclasses.replace(
             restore.proof,
             entries=tuple(
@@ -560,9 +572,12 @@ class RemovalStateTests(unittest.TestCase):
             ),
         )
         with self.assertRaises(SkillMutationError):
-            repo.prepare_restore(dataclasses.replace(restore, proof=altered))
+            repo.prepare_restore(
+                (fixture_draft := dataclasses.replace(restore, proof=altered)),
+                policy_receipt=personal_receipt(fixture_draft, repo),
+            )
         self.assertEqual(before, canonical_fingerprint(self.db))
-        record = repo.prepare_restore(restore)
+        record = repo.prepare_restore(restore, policy_receipt=personal_receipt(restore, repo))
         self.assertIs(record.provenance, Provenance.BUNDLED)
 
     def test_restore_uses_original_snapshot_and_new_proof(self):
@@ -586,7 +601,7 @@ class RemovalStateTests(unittest.TestCase):
             snapshot_id=draft.operation_id,
             reverts=draft.operation_id,
         )
-        record = repo.prepare_restore(restore)
+        record = repo.prepare_restore(restore, policy_receipt=personal_receipt(restore, repo))
         self.assertEqual(record.draft.proof.entries, proof.entries)
         self.assertEqual(repo.snapshot(restore.operation_id), self.capture())
         self.assertEqual(

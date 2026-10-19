@@ -89,11 +89,11 @@ def _stamp(info):
     )
 
 
-def _existing_chain(stack: ExitStack, path: Path):
-    root = open_fd(stack, path.anchor, os.O_RDONLY | os.O_DIRECTORY)
-    chain = []
-    parent = root
-    for component in path.parts[1:]:
+def _existing_chain(stack: ExitStack, path: Path, chain=None):
+    if chain is None:
+        chain = []
+    parent = chain[-1][2] if chain else open_fd(stack, path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    for component in path.parts[len(chain) + 1 :]:
         try:
             child = open_fd(stack, component, os.O_RDONLY | os.O_DIRECTORY, parent=parent)
         except FileNotFoundError:
@@ -140,7 +140,9 @@ class OrgPolicySession:
         self._bindings = ()
         self._digest = None
         self._observation_id = uuid.uuid4().hex
-        self._chain = _existing_chain(stack, self._home)
+        self._stack = stack
+        self._home_chain = _existing_chain(stack, self._home)
+        self._chain = list(self._home_chain)
         if context.mode == "file":
             parent, chain = open_directory(stack, context.source.parent)
             self._chain.extend(chain)
@@ -165,6 +167,17 @@ class OrgPolicySession:
     def context(self):
         return self._context
 
+    def _observe_home_growth(self):
+        if len(self._home_chain) == len(self._home.parts) - 1:
+            return
+        previous_length = len(self._home_chain)
+        _existing_chain(self._stack, self._home, self._home_chain)
+        for edge in self._home_chain[previous_length:]:
+            self._chain.append(edge)
+            for fd in (edge[0], edge[2]):
+                if fd not in self._mounts:
+                    self._mounts[fd] = observed_mount_id(fd)
+
     def revalidate(self) -> None:
         try:
             if self._closed:
@@ -178,7 +191,7 @@ class OrgPolicySession:
                     current = open_fd(stack, name, os.O_PATH, parent=parent)
                     if observed_mount_id(current) != self._mounts[fd]:
                         _refuse("conflict", "changed_mount")
-                _existing_chain(stack, self._home)
+            self._observe_home_growth()
             if self._source is not None:
                 parent, name, fd, stamp = self._source
                 same_entry(parent, name, fd)

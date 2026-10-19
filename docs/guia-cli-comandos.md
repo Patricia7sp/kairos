@@ -121,6 +121,30 @@ SQLite consistentes preservam os registros e blobs binários. A restauração de
 arquivos com nome ou bytes iguais não cria uma nova prova: a identidade da raiz
 e os vínculos do home continuam sendo verificados antes de qualquer mutação.
 
+## Política organizacional de skills
+
+`KAIROS_SKILL_ORG_POLICY=/caminho/absoluto/politica.json` seleciona uma política
+local. Sem a variável, os serviços ainda respeitam namespace e proteções já
+registradas. Valor vazio/relativo, JSON inválido ou fonte inacessível recusa a
+operação; não há fallback. O formato completo está na [spec B1](superpowers/specs/2026-10-14-politica-organizacional-b1-design.md).
+
+Bindings por home/nome impedem remoção, rollback destrutivo, adoção e substituição
+por sync/promoção, inclusive com `--yes` ou `active=false`. Uma criação ou
+restauração autorizada registra o binding junto à conclusão da instalação.
+Depois disso, retirar o binding, trocar o inode ou revogar adoção não libera o
+nome. Não há comando para remover a proteção nesta etapa.
+
+`skills identify NOME --json` informa `organization_policy` e/ou
+`organization_recorded` em `known_protection`. A cobertura é `policy_and_recorded`
+com fonte configurada ou `namespace_and_recorded_only` sem ela. Uma consulta ou
+recusa não grava binding: `organization_observation_not_persisted` explica essa
+limitação quando aplicável. A saída não contém caminho ou conteúdo da política.
+
+O estado v10 exige escritores compatíveis, inclusive para as tabelas anteriores;
+clientes v8/v9 não podem gravá-lo. Atualize todos os escritores participantes
+antes de usar a migração. A política coordena serviços cooperativos; não cria
+isolamento contra quem pode alterar banco, código ou configuração no mesmo UID.
+
 ## Usar uma skill instalada
 
 ```bash
@@ -138,8 +162,13 @@ de alterar as skills instaladas.
 Edições locais, skills sem origem registrada e exclusões feitas pelo usuário
 são preservadas. A migração do manifesto antigo é conservadora. O marcador
 `<KAIROS_HOME>/skills/.no-bundled-skills` mantém o opt-out. Em uma falha observada
-na cópia ou gravação do manifesto, as alterações desse sync são revertidas;
-isso não constitui recuperação após interrupção abrupta do processo.
+na cópia ou gravação do manifesto, o sync tenta compensar as alterações com
+revalidação de política e identidades. Se a compensação for vetada, preserva as
+versões na área privada e retorna erro; não apague esses resíduos antes de
+investigar. Isso não constitui recuperação após interrupção abrupta do processo.
+Alvos organizacionais ficam em `blocked`, com `failed=true` e saída 77; cópias
+pessoais concluídas anteriormente aparecem no resultado parcial. O lote não é
+atômico, e o alvo vetado não é reportado como copiado ou atualizado.
 
 ```bash
 kairos run --session trabalho --skill revisar-docs "Revise este texto: ..."

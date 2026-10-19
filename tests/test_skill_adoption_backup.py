@@ -20,6 +20,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
+from skill_org_fixtures import personal_operation, personal_policy
+
 from kairos_cli.backup import run_backup
 from kairos_domain.ownership import Actor
 from kairos_skills.adoption_contract import SkillAdoptionAction
@@ -56,7 +58,8 @@ CANONICAL_TABLE_QUERIES = (
 )
 
 
-def _stopped_adoption(home, name, pipe):
+@personal_operation
+def _stopped_adoption(home, name, pipe, *, policy):
     database = connect(home / "state.db")
     migrate(database)
     repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
@@ -69,22 +72,23 @@ def _stopped_adoption(home, name, pipe):
         return record
 
     with patch.object(SkillAdoptionRepository, "prepare_adopt", prepare):
-        SkillAdoptionService(home, repository).adopt(
+        SkillAdoptionService(home, repository, policy=policy).adopt(
             name,
             actor=Actor.USER_FOREGROUND,
             confirmed=True,
         )
 
 
-def _stopped_restore(home, name, remove_id, pipe):
+@personal_operation
+def _stopped_restore(home, name, remove_id, pipe, *, policy):
     database = connect(home / "state.db")
     migrate(database)
     repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
-    service = SkillMutationService(home, repository)
+    service = SkillMutationService(home, repository, policy=policy)
     original = repository.prepare_restore
 
-    def prepare(draft):
-        record = original(draft)
+    def prepare(draft, **kwargs):
+        record = original(draft, **kwargs)
         pipe.send(draft.operation_id)
         pipe.recv()
         return record
@@ -216,7 +220,9 @@ class SkillAdoptionBackupTests(unittest.TestCase):
         try:
             repository = SkillMutationRepository(database, home_id=catalog_home_id(self.home))
             with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
-                return reconcile_pending(repository, files, name=name)
+                return reconcile_pending(
+                    repository, files, name=name, policy=personal_policy(self, files.home)
+                )
         finally:
             database.close()
 
@@ -470,7 +476,9 @@ class SkillAdoptionBackupTests(unittest.TestCase):
 
         from kairos_skills.identification import identify_skill
 
-        identified = identify_skill(self.home, "legacy-backup")
+        identified = identify_skill(
+            self.home, "legacy-backup", policy=personal_policy(self, self.home)
+        )
         self.assertFalse(identified.identity_valid)
         self.assertFalse(identified.adoption_active)
         self.assertEqual(identified.authorization_basis, "none")

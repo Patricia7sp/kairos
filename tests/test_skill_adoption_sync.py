@@ -4,6 +4,7 @@ import unittest
 
 import test_skill_adoption_service as adoption_fixtures
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy
 
 from kairos_domain.ownership import Actor
 from kairos_skills.mutation_contract import SkillMutationState
@@ -18,8 +19,12 @@ class SkillAdoptionSyncTests(unittest.TestCase):
         adoption_fixtures.SkillAdoptionServiceTests.setUp(self)
         adoption_fixtures.SkillAdoptionServiceTests.legacy(self)
         self.repository = adoption_fixtures.SkillAdoptionServiceTests.ledger(self)
-        self.adoptions = adoption_fixtures.adoption_service_type()(self.home, self.repository)
-        self.mutations = SkillMutationService(self.home, self.repository)
+        self.adoptions = adoption_fixtures.adoption_service_type()(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
+        self.mutations = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
 
     def legacy(self):
         return adoption_fixtures.SkillAdoptionServiceTests.legacy(self)
@@ -41,7 +46,11 @@ class SkillAdoptionSyncTests(unittest.TestCase):
         _, removed = self.adopted_removal()
         future = self.bundle()
 
-        result = sync_bundled_skills(future, self.home / "skills")
+        result = sync_bundled_skills(
+            future,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
 
         self.assertEqual(removed.name, self.name)
         self.assertIn(self.name, self.repository.bundled_tombstones())
@@ -71,7 +80,11 @@ class SkillAdoptionSyncTests(unittest.TestCase):
 
         self.assertIn(self.name, self.repository.bundled_tombstones())
         future = self.bundle()
-        result = sync_bundled_skills(future, self.home / "skills")
+        result = sync_bundled_skills(
+            future,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         self.assertIn(self.name, result.user_deleted)
         self.assertTrue(self.target.exists())
 
@@ -100,7 +113,11 @@ class SkillAdoptionSyncTests(unittest.TestCase):
         self.assertNotEqual(created.operation_id, removed_user.operation_id)
 
         future = self.bundle()
-        result = sync_bundled_skills(future, self.home / "skills")
+        result = sync_bundled_skills(
+            future,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
 
         self.assertIn(self.name, self.repository.bundled_tombstones())
         self.assertIn(self.name, result.user_deleted)
@@ -113,7 +130,11 @@ class SkillAdoptionSyncTests(unittest.TestCase):
         self.mutations.remove(independent.name, actor=Actor.USER_FOREGROUND, confirmed=True)
         future = self.bundle(independent.name)
 
-        result = sync_bundled_skills(future, self.home / "skills")
+        result = sync_bundled_skills(
+            future,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
 
         self.assertNotIn(independent.name, self.repository.bundled_tombstones())
         self.assertIn(independent.name, result.copied)

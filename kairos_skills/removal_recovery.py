@@ -8,6 +8,7 @@ from kairos_skills.adoption_contract import (
 )
 from kairos_skills.mutation_contract import SkillMutationError, SkillMutationState
 from kairos_skills.mutation_recovery import mark_conflict
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 from kairos_skills.removal_contract import SkillTreeAction, SkillTreeRecord
 from kairos_skills.removal_origin import resolve_removal_origin
 
@@ -78,8 +79,13 @@ def _linked_restore_authority(repository, record):
     return removed
 
 
-def reconcile_tree_operation(repository, files, record: SkillTreeRecord) -> SkillTreeRecord:
+def reconcile_tree_operation(
+    repository, files, record: SkillTreeRecord, *, policy
+) -> SkillTreeRecord:
+    attest_policy_home(policy, files.home)
+    guard = repository_guard(policy, repository)
     try:
+        guard.check_recovery(record)
         if record.action is SkillTreeAction.REMOVE:
             _linked_remove_authority(repository, record)
         elif record.action is SkillTreeAction.RESTORE:
@@ -119,7 +125,9 @@ def reconcile_tree_operation(repository, files, record: SkillTreeRecord) -> Skil
                 or repository.installation_evidence(record.name) != evidence
             ):
                 return mark_conflict(repository, record)
+        guard.check_recovery(record)
         files.sync_parents()
+        guard.check_recovery(record)
         return repository.finish(record.operation_id, state)
     except SkillMutationError as error:
         if error.kind in ("input", "conflict"):

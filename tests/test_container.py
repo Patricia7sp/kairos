@@ -737,6 +737,8 @@ with tempfile.TemporaryDirectory() as temporary:
 
     def test_sigkill_adoption_and_restore_boundaries_in_real_image(self):
         script = r"""
+from kairos_skills.org_policy import observe_org_policy
+from kairos_skills.org_policy_contract import OrgPolicyContext
 import json
 import os
 import select
@@ -745,68 +747,19 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
 secret = 'real-image-recovery-sentinel'
-worker = r'''
-import sys
-from pathlib import Path
-from unittest.mock import patch
-from kairos_domain.ownership import Actor
-from kairos_skills.adoptions import SkillAdoptionService
-from kairos_skills.catalog import catalog_home_id
-from kairos_skills.mutations import SkillMutationService
-from kairos_skills.removal_io import SkillRemovalFiles
-from kairos_state import connect
-from kairos_state.migrations import migrate
-from kairos_state.repositories.skill_mutations import SkillMutationRepository
-from kairos_state.repositories.skill_adoptions import SkillAdoptionRepository
-
-mode, raw_home, name, *extra = sys.argv[1:]
-home = Path(raw_home)
-database = connect(home / 'state.db')
-migrate(database)
-repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
-if mode == 'adopt':
-    original = SkillAdoptionRepository.prepare_adopt
-    def stop_after_prepare(repo, draft, snapshot):
-        result = original(repo, draft, snapshot)
-        print('BOUNDARY:' + draft.operation_id, flush=True)
-        input()
-        return result
-    with patch.object(SkillAdoptionRepository, 'prepare_adopt', stop_after_prepare):
-        SkillAdoptionService(home, repository).adopt(
-            name, actor=Actor.USER_FOREGROUND, confirmed=True
-        )
-else:
-    original = SkillRemovalFiles.publish
-    def stop_after_publish(files, operation_id, skill_name):
-        original(files, operation_id, skill_name)
-        print('BOUNDARY:' + operation_id, flush=True)
-        input()
-    service = SkillMutationService(home, repository)
-    with patch.object(SkillRemovalFiles, 'publish', stop_after_publish):
-        service.rollback(extra[0], actor=Actor.USER_FOREGROUND)
-'''
+worker = "from kairos_skills.org_policy import observe_org_policy\nfrom kairos_skills.org_policy_contract import OrgPolicyContext\nimport sys\nfrom pathlib import Path\nfrom unittest.mock import patch\nfrom kairos_domain.ownership import Actor\nfrom kairos_skills.adoptions import SkillAdoptionService\nfrom kairos_skills.catalog import catalog_home_id\nfrom kairos_skills.mutations import SkillMutationService\nfrom kairos_skills.removal_io import SkillRemovalFiles\nfrom kairos_state import connect\nfrom kairos_state.migrations import migrate\nfrom kairos_state.repositories.skill_mutations import SkillMutationRepository\nfrom kairos_state.repositories.skill_adoptions import SkillAdoptionRepository\nmode, raw_home, name, *extra = sys.argv[1:]\nhome = Path(raw_home)\nwith observe_org_policy(OrgPolicyContext('none', None), home) as policy:\n    database = connect(home / 'state.db')\n    migrate(database)\n    repository = SkillMutationRepository(database, home_id=catalog_home_id(home))\n    if mode == 'adopt':\n        original = SkillAdoptionRepository.prepare_adopt\n\n        def stop_after_prepare(repo, draft, snapshot):\n            result = original(repo, draft, snapshot)\n            print('BOUNDARY:' + draft.operation_id, flush=True)\n            input()\n            return result\n        with patch.object(SkillAdoptionRepository, 'prepare_adopt', stop_after_prepare):\n            SkillAdoptionService(home, repository, policy=policy).adopt(name, actor=Actor.USER_FOREGROUND, confirmed=True)\n    else:\n        original = SkillRemovalFiles.publish\n\n        def stop_after_publish(files, operation_id, skill_name):\n            original(files, operation_id, skill_name)\n            print('BOUNDARY:' + operation_id, flush=True)\n            input()\n        service = SkillMutationService(home, repository, policy=policy)\n        with patch.object(SkillRemovalFiles, 'publish', stop_after_publish):\n            service.rollback(extra[0], actor=Actor.USER_FOREGROUND)\n"
 
 def cli(home, *args):
     env = {**os.environ, 'KAIROS_HOME': str(home)}
-    result = subprocess.run(
-        ['kairos', *args], capture_output=True, text=True, env=env,
-        timeout=30, check=False,
-    )
+    result = subprocess.run(['kairos', *args], capture_output=True, text=True, env=env, timeout=30, check=False)
     assert secret not in result.stdout + result.stderr
     return result
 
 def interrupt(home, mode, name, *extra):
-    command = [
-        '/opt/kairos/.venv/bin/python', '-c', worker,
-        mode, str(home), name, *extra,
-    ]
+    command = ['/opt/kairos/.venv/bin/python', '-c', worker, mode, str(home), name, *extra]
     env = {**os.environ, 'KAIROS_HOME': str(home)}
-    process = subprocess.Popen(
-        command, cwd='/opt/kairos', env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True,
-    )
+    process = subprocess.Popen(command, cwd='/opt/kairos', env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         ready, _, _ = select.select([process.stdout], [], [], 20)
         assert ready, 'subprocesso não chegou à fronteira durável'
@@ -825,20 +778,20 @@ def interrupt(home, mode, name, *extra):
             process.stderr.close()
 
 def reconcile(home, name):
-    from kairos_skills.mutation_lock import skill_mutation_lock
-    from kairos_skills.mutation_recovery import reconcile_pending
-    from kairos_skills.removal_io import SkillRemovalFiles
-    from kairos_skills.catalog import catalog_home_id
-    from kairos_state import connect
-    from kairos_state.repositories.skill_mutations import SkillMutationRepository
-    database = connect(home / 'state.db')
-    try:
-        repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
-        with skill_mutation_lock(home), SkillRemovalFiles(home) as files:
-            return reconcile_pending(repository, files, name=name)
-    finally:
-        database.close()
-
+    with observe_org_policy(OrgPolicyContext('none', None), home) as policy:
+        from kairos_skills.mutation_lock import skill_mutation_lock
+        from kairos_skills.mutation_recovery import reconcile_pending
+        from kairos_skills.removal_io import SkillRemovalFiles
+        from kairos_skills.catalog import catalog_home_id
+        from kairos_state import connect
+        from kairos_state.repositories.skill_mutations import SkillMutationRepository
+        database = connect(home / 'state.db')
+        try:
+            repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
+            with skill_mutation_lock(home), SkillRemovalFiles(home) as files:
+                return reconcile_pending(repository, files, name=name, policy=policy)
+        finally:
+            database.close()
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     home = root / 'home'
@@ -846,14 +799,12 @@ with tempfile.TemporaryDirectory() as temporary:
     skill.mkdir(parents=True)
     (skill / 'SKILL.md').write_text(secret, encoding='utf-8')
     (skill / 'run.bin').write_bytes(b'\x00\xff')
-
     adoption_id = interrupt(home, 'adopt', 'legacy-recovery')
     assert reconcile(home, 'legacy-recovery')
     identified = cli(home, 'skills', 'identify', 'legacy-recovery', '--json')
     assert identified.returncode == 0, identified.stderr
     assert json.loads(identified.stdout)['adoption_id'] == adoption_id
     assert json.loads(identified.stdout)['adoption_active'] is True
-
     removed = cli(home, 'skills', 'remove', 'legacy-recovery', '--yes', '--json')
     assert removed.returncode == 0, removed.stderr
     removal_id = json.loads(removed.stdout)['operation_id']
@@ -862,7 +813,7 @@ with tempfile.TemporaryDirectory() as temporary:
     history = cli(home, 'skills', 'history', '--json')
     assert history.returncode == 0, history.stderr
     events = json.loads(history.stdout)
-    restored = next(event for event in events if event['id'] == restore_id)
+    restored = next((event for event in events if event['id'] == restore_id))
     assert restored['action'] == 'restore'
     assert restored['state'] == 'committed'
     identified = cli(home, 'skills', 'identify', 'legacy-recovery', '--json')
@@ -882,13 +833,14 @@ with tempfile.TemporaryDirectory() as temporary:
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_identify_reads_tree_in_real_image_without_mutation(self):
-        script = """
+        script = r"""
+from kairos_skills.org_policy import observe_org_policy
+from kairos_skills.org_policy_contract import OrgPolicyContext
 import shutil
 import stat
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-
 from kairos_domain.ownership import Actor
 from kairos_skills import identification
 from kairos_skills.catalog import catalog_home_id
@@ -899,101 +851,89 @@ from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
-
 def inventory(home):
     result = {}
     for path in (home, *sorted(home.rglob('*'))):
         info = path.lstat()
-        result[str(path.relative_to(home))] = (
-            info.st_mode, info.st_dev, info.st_ino, info.st_nlink,
-            path.read_bytes() if stat.S_ISREG(info.st_mode) else None,
-        )
+        result[str(path.relative_to(home))] = (info.st_mode, info.st_dev, info.st_ino, info.st_nlink, path.read_bytes() if stat.S_ISREG(info.st_mode) else None)
     return result
 
-
 def observe(home, name):
-    before = inventory(home)
-    report = identify_skill(home, name)
-    assert inventory(home) == before
-    assert report.known_protection == ()
-    assert report.protection_coverage == 'namespace_and_recorded_only'
-    return report
-
-
+    with observe_org_policy(OrgPolicyContext('none', None), home) as policy:
+        before = inventory(home)
+        report = identify_skill(home, name, policy=policy)
+        assert inventory(home) == before
+        assert report.known_protection == ()
+        assert report.protection_coverage == 'namespace_and_recorded_only'
+        return report
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     home = root / 'home'
-    home.mkdir()
-    source = root / 'source.md'
-    source.write_text(
-        "---\\nname: user-fixture\\ndescription: Ficticia.\\n"
-        "version: '0.1.0'\\n---\\nProcedimento ficticio.\\n"
-    )
-    db = connect(home / 'state.db')
-    try:
-        migrate(db)
-        repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
-        service = SkillMutationService(home, repo)
-        created = service.add(source, actor=Actor.USER_FOREGROUND)
-        report = observe(home, 'user-fixture')
-        assert report.historical_creation_origin == 'user'
-        assert report.installation_source == 'local'
-        assert report.authorization_basis == 'proven_write'
-        assert report.identity_valid is True and report.removivel
-        assert report.current_installation_id == created.operation_id
-        assert report.historical_creation_id == created.operation_id
+    with observe_org_policy(OrgPolicyContext('none', None), home) as policy:
+        home.mkdir()
+        source = root / 'source.md'
+        source.write_text("---\nname: user-fixture\ndescription: Ficticia.\nversion: '0.1.0'\n---\nProcedimento ficticio.\n")
+        db = connect(home / 'state.db')
+        try:
+            migrate(db)
+            repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
+            service = SkillMutationService(home, repo, policy=policy)
+            created = service.add(source, actor=Actor.USER_FOREGROUND)
+            report = observe(home, 'user-fixture')
+            assert report.historical_creation_origin == 'user'
+            assert report.installation_source == 'local'
+            assert report.authorization_basis == 'proven_write'
+            assert report.identity_valid is True and report.removivel
+            assert report.current_installation_id == created.operation_id
+            assert report.historical_creation_id == created.operation_id
+            legacy = home / 'skills' / 'legacy-fixture'
+            legacy.mkdir()
+            (legacy / 'SKILL.md').write_bytes(b'# Legado sem semver\n')
+            asset = legacy / 'run.bin'
+            asset.write_bytes(b'\x00\xff\x01')
+            asset.chmod(489)
+            (legacy / 'empty').mkdir(mode=456)
+            report = observe(home, 'legacy-fixture')
+            assert report.historical_creation_origin == 'unknown'
+            assert report.installation_source == 'unknown'
+            assert report.authorization_basis == 'none'
+            assert report.ownership == 'user'
+            assert report.identity_valid is None and (not report.removivel)
+            assert asset.read_bytes() == b'\x00\xff\x01'
+            assert stat.S_IMODE(asset.stat().st_mode) == 489
+            assert not list((legacy / 'empty').iterdir())
+            target = home / 'skills' / 'user-fixture'
+            target.rename(root / 'previous')
+            shutil.copytree(root / 'previous', target)
+            report = observe(home, 'user-fixture')
+            assert report.historical_creation_origin == 'unknown'
+            assert report.installation_source == 'unknown'
+            assert report.authorization_basis == 'none'
+            assert report.identity_valid is False and (not report.removivel)
+            assert report.reasons == ('replaced_root',)
+            assert report.current_installation_id == created.operation_id
+            assert report.historical_creation_id == created.operation_id
+            original_capture = identification.read_installation_capture
+            after_rename = []
 
-        legacy = home / 'skills' / 'legacy-fixture'
-        legacy.mkdir()
-        (legacy / 'SKILL.md').write_bytes(b'# Legado sem semver\\n')
-        asset = legacy / 'run.bin'
-        asset.write_bytes(b'\\x00\\xff\\x01')
-        asset.chmod(0o751)
-        (legacy / 'empty').mkdir(mode=0o710)
-        report = observe(home, 'legacy-fixture')
-        assert report.historical_creation_origin == 'unknown'
-        assert report.installation_source == 'unknown'
-        assert report.authorization_basis == 'none'
-        assert report.ownership == 'user'
-        assert report.identity_valid is None and not report.removivel
-        assert asset.read_bytes() == b'\\x00\\xff\\x01'
-        assert stat.S_IMODE(asset.stat().st_mode) == 0o751
-        assert not list((legacy / 'empty').iterdir())
-
-        target = home / 'skills' / 'user-fixture'
-        target.rename(root / 'previous')
-        shutil.copytree(root / 'previous', target)
-        report = observe(home, 'user-fixture')
-        assert report.historical_creation_origin == 'unknown'
-        assert report.installation_source == 'unknown'
-        assert report.authorization_basis == 'none'
-        assert report.identity_valid is False and not report.removivel
-        assert report.reasons == ('replaced_root',)
-        assert report.current_installation_id == created.operation_id
-        assert report.historical_creation_id == created.operation_id
-
-        original_capture = identification.read_installation_capture
-        after_rename = []
-
-        def capture_then_rename(home, name):
-            captured = original_capture(home, name)
-            target.rename(root / 'concurrent')
-            after_rename.append(inventory(home))
-            return captured
-
-        with patch.object(identification, 'read_installation_capture', capture_then_rename):
-            try:
-                identify_skill(home, 'user-fixture')
-            except SkillMutationError as error:
-                assert error.kind == 'conflict', error.kind
-                assert 'repita' in str(error).lower()
-                assert str(root) not in str(error)
-            else:
-                raise AssertionError('Desaparecimento concorrente nao foi recusado')
-        assert inventory(home) == after_rename[0]
-        assert (root / 'concurrent' / 'SKILL.md').read_bytes() == source.read_bytes()
-    finally:
-        db.close()
+            def capture_then_rename(home, name):
+                captured = original_capture(home, name)
+                target.rename(root / 'concurrent')
+                after_rename.append(inventory(home))
+                return captured
+            with patch.object(identification, 'read_installation_capture', capture_then_rename):
+                try:
+                    identify_skill(home, 'user-fixture', policy=policy)
+                except SkillMutationError as error:
+                    assert error.kind == 'conflict', error.kind
+                    assert 'repita' in str(error).lower()
+                    assert str(root) not in str(error)
+                else:
+                    raise AssertionError('Desaparecimento concorrente nao foi recusado')
+            assert inventory(home) == after_rename[0]
+            assert (root / 'concurrent' / 'SKILL.md').read_bytes() == source.read_bytes()
+        finally:
+            db.close()
 """
         result = self.run_in(
             "-",

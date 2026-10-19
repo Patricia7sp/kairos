@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import test_skill_removal_projection as projection_fixtures
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy, personal_receipt, personal_sync_operation
 from test_skill_mutation_io import hold_lock
 from test_skill_mutation_state import creation_draft
 
@@ -22,7 +23,8 @@ from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
-def guarded_sync(bundle, home, pipe):
+@personal_sync_operation
+def guarded_sync(bundle, home, pipe, *, policy):
     from contextlib import contextmanager
 
     from kairos_skills import sync
@@ -45,7 +47,7 @@ def guarded_sync(bundle, home, pipe):
         patch.object(sync, "_snapshot_bundle", snapshot),
         patch.object(sync, "read_skill_tombstones", read),
     ):
-        result = sync.sync_bundled_skills(bundle, home / "skills")
+        result = sync.sync_bundled_skills(bundle, home / "skills", policy=policy)
     pipe.send(result.copied)
 
 
@@ -76,20 +78,32 @@ class RemovalSyncTests(unittest.TestCase):
 
         self.repository()
         with patch("kairos_skills.removal_origin.trusted_bundle_root", return_value=self.bundle):
-            return SkillMutationService(self.home, self.repo).remove(
-                self.name, actor=Actor.USER_FOREGROUND, confirmed=True
-            )
+            return SkillMutationService(
+                self.home, self.repo, policy=personal_policy(self, self.home)
+            ).remove(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
 
     def test_tombstone_survives_bundle_disappearance_and_reappearance(self):
-        sync_bundled_skills(self.bundle, self.home / "skills")
+        sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         removed = self.remove()
         before = self.repo.snapshot(removed.operation_id).contents
         saved = self.root / "saved-bundle"
         self.source.rename(saved)
-        sync_bundled_skills(self.bundle, self.home / "skills")
+        sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         self.assertNotIn(self.name, read_manifest(self.home / "skills" / MANIFEST_NAME))
         saved.rename(self.source)
-        result = sync_bundled_skills(self.bundle, self.home / "skills")
+        result = sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         self.assertFalse((self.home / "skills" / self.name).exists())
         self.assertEqual(result.user_deleted, [self.name])
         from kairos_skills.removal_state import read_skill_tombstones
@@ -98,15 +112,28 @@ class RemovalSyncTests(unittest.TestCase):
         self.assertEqual(self.repo.snapshot(removed.operation_id).contents, before)
 
     def test_sync_does_not_seed_during_pending_restore(self):
-        sync_bundled_skills(self.bundle, self.home / "skills")
+        sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         removed = self.remove()
         self.repo.prepare_restore(
-            projection_fixtures.RemovalProjectionTests.restore_draft(self, removed)
+            (
+                fixture_draft := projection_fixtures.RemovalProjectionTests.restore_draft(
+                    self, removed
+                )
+            ),
+            policy_receipt=personal_receipt(fixture_draft, self.repo),
         )
         (self.source / "SKILL.md").write_bytes(b"new bundle")
         before = (self.home / "skills" / MANIFEST_NAME).read_bytes()
         with self.assertRaises(SkillMutationError) as raised:
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         self.assertEqual(raised.exception.kind, "conflict")
         self.assertFalse((self.home / "skills" / self.name).exists())
         self.assertEqual((self.home / "skills" / MANIFEST_NAME).read_bytes(), before)
@@ -114,14 +141,18 @@ class RemovalSyncTests(unittest.TestCase):
     def test_common_pending_blocks_sync_even_with_empty_bundle(self):
         repo = self.repository()
         draft = creation_draft(self.home, name="revisar-docs")
-        repo.prepare(draft, creation_text())
+        repo.prepare(draft, creation_text(), policy_receipt=personal_receipt(draft, repo))
         self.source.rename(self.root / "saved-bundle")
         for state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT):
             if state is SkillMutationState.CONFLICT:
                 repo.finish(draft.operation_id, state)
             with self.subTest(state=state):
                 with self.assertRaises(SkillMutationError) as raised:
-                    sync_bundled_skills(self.bundle, self.home / "skills")
+                    sync_bundled_skills(
+                        self.bundle,
+                        self.home / "skills",
+                        policy=personal_policy(self, ((self.home / "skills").parent)),
+                    )
                 self.assertEqual(raised.exception.operation_id, draft.operation_id)
                 self.assertFalse((self.home / "skills").exists())
 
@@ -141,7 +172,11 @@ class RemovalSyncTests(unittest.TestCase):
                 self.db.execute(statement, parameters)
             with self.subTest(statement=statement):
                 with self.assertRaises(SkillMutationError):
-                    sync_bundled_skills(self.bundle, self.home / "skills")
+                    sync_bundled_skills(
+                        self.bundle,
+                        self.home / "skills",
+                        policy=personal_policy(self, ((self.home / "skills").parent)),
+                    )
                 self.assertFalse((self.home / "skills").exists())
 
     def test_old_home_read_does_not_create_or_migrate_database(self):
@@ -167,37 +202,57 @@ class RemovalSyncTests(unittest.TestCase):
         database = self.home / "state.db"
         database.symlink_to(outside)
         with self.assertRaises(SkillMutationError):
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         database.unlink()
         os.link(outside, database)
         with self.assertRaises(SkillMutationError):
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         self.assertEqual(outside.read_bytes(), b"private marker")
         self.assertFalse((self.home / "skills").exists())
 
     def test_missing_bundle_cannot_hide_pending_operations(self):
         repo = self.repository()
         draft = creation_draft(self.home)
-        repo.prepare(draft, creation_text())
+        repo.prepare(draft, creation_text(), policy_receipt=personal_receipt(draft, repo))
         self.source.rename(self.root / "saved-bundle")
         self.bundle.rmdir()
         with self.assertRaises(SkillMutationError) as raised:
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         self.assertEqual(raised.exception.operation_id, draft.operation_id)
         self.assertFalse((self.home / "skills").exists())
 
     def test_restore_committed_allows_sync_without_overwriting_edits(self):
-        sync_bundled_skills(self.bundle, self.home / "skills")
+        sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         removed = self.remove()
         from kairos_skills.mutations import SkillMutationService
 
-        SkillMutationService(self.home, self.repo).rollback(
-            removed.operation_id, actor=Actor.USER_FOREGROUND
-        )
+        SkillMutationService(
+            self.home, self.repo, policy=personal_policy(self, self.home)
+        ).rollback(removed.operation_id, actor=Actor.USER_FOREGROUND)
         installed = self.home / "skills" / self.name / "SKILL.md"
         installed.write_bytes(b"local edit")
         (self.source / "SKILL.md").write_bytes(b"bundle update")
-        result = sync_bundled_skills(self.bundle, self.home / "skills")
+        result = sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         self.assertEqual(result.user_modified, [self.name])
         self.assertEqual(installed.read_bytes(), b"local edit")
         from kairos_skills.removal_state import read_skill_tombstones
@@ -222,7 +277,11 @@ class RemovalSyncTests(unittest.TestCase):
         with self.assertRaises(SkillMutationError):
             read_skill_tombstones(self.home)
         with self.assertRaises(SkillMutationError):
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         self.assertFalse((self.home / "skills").exists())
 
     def test_sync_and_remove_share_lock(self):

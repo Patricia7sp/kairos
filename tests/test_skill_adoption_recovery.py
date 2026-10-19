@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+from skill_org_fixtures import personal_operation, personal_policy, personal_receipt
+
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture
 from kairos_skills.adoption_contract import AdoptionAuthority
@@ -38,10 +40,11 @@ def stop_at_boundary(pipe, operation_id):
     pipe.recv()
 
 
-def stopped_adoption(home, name, phase, pipe):
+@personal_operation
+def stopped_adoption(home, name, phase, pipe, *, policy):
     database = connect(home / "state.db")
     repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
-    service = SkillAdoptionService(home, repository)
+    service = SkillAdoptionService(home, repository, policy=policy)
     original_prepare = SkillAdoptionRepository.prepare_adopt
     original_finish = SkillAdoptionRepository.finish
     original_snapshot = SkillRemovalRepository._store_snapshot
@@ -75,16 +78,17 @@ def stopped_adoption(home, name, phase, pipe):
     database.close()
 
 
-def stopped_restore(home, name, remove_id, phase, pipe):
+@personal_operation
+def stopped_restore(home, name, remove_id, phase, pipe, *, policy):
     database = connect(home / "state.db")
     repository = SkillMutationRepository(database, home_id=catalog_home_id(home))
-    service = SkillMutationService(home, repository)
+    service = SkillMutationService(home, repository, policy=policy)
     original_prepare = repository.prepare_restore
     original_publish = SkillRemovalFiles.publish
     original_finish = repository.finish
 
-    def prepare(draft):
-        result = original_prepare(draft)
+    def prepare(draft, **kwargs):
+        result = original_prepare(draft, **kwargs)
         if phase == "prepared":
             stop_at_boundary(pipe, draft.operation_id)
         return result
@@ -134,8 +138,12 @@ class SkillAdoptionRecoveryTests(unittest.TestCase):
         migrate(self.database)
         self.addCleanup(self.database.close)
         self.repository = SkillMutationRepository(self.database, home_id=catalog_home_id(self.home))
-        self.adoptions = SkillAdoptionService(self.home, self.repository)
-        self.mutations = SkillMutationService(self.home, self.repository)
+        self.adoptions = SkillAdoptionService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
+        self.mutations = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
 
     def tree_state(self, root=None):
         root = self.target if root is None else root
@@ -176,7 +184,9 @@ class SkillAdoptionRecoveryTests(unittest.TestCase):
         try:
             repository = SkillMutationRepository(database, home_id=catalog_home_id(self.home))
             with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
-                return reconcile_pending(repository, files, name=self.name)
+                return reconcile_pending(
+                    repository, files, name=self.name, policy=personal_policy(self, files.home)
+                )
         finally:
             database.close()
 
@@ -194,8 +204,12 @@ class SkillAdoptionRecoveryTests(unittest.TestCase):
         self.database = connect(self.home / "state.db")
         self.addCleanup(self.database.close)
         self.repository = SkillMutationRepository(self.database, home_id=catalog_home_id(self.home))
-        self.adoptions = SkillAdoptionService(self.home, self.repository)
-        self.mutations = SkillMutationService(self.home, self.repository)
+        self.adoptions = SkillAdoptionService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
+        self.mutations = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
 
     def test_SIGKILL_adoption_durable_boundaries(self):
         for phase in (
@@ -342,7 +356,9 @@ class SkillAdoptionRecoveryTests(unittest.TestCase):
             patch("kairos_filesystem.tree.os.listxattr", side_effect=OSError("unavailable")),
             self.assertRaises(SkillMutationError) as raised,
         ):
-            reconcile_pending(self.repository, files, name=self.name)
+            reconcile_pending(
+                self.repository, files, name=self.name, policy=personal_policy(self, files.home)
+            )
 
         self.assertEqual(raised.exception.kind, "unavailable")
         self.assertIs(self.repository.get(operation_id).state, SkillMutationState.PREPARED)
@@ -373,7 +389,9 @@ class SkillAdoptionRecoveryTests(unittest.TestCase):
                 AdoptionAuthority(adoption.operation_id, operation_id, True),
                 adoption.draft.installation_source,
             )
-            self.repository._tree_repository().prepare_restore(draft)
+            self.repository._tree_repository().prepare_restore(
+                draft, policy_receipt=personal_receipt(draft, self.repository._tree_repository())
+            )
             return operation_id, files
         except BaseException:
             files.__exit__(None, None, None)

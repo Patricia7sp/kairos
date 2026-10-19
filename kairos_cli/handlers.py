@@ -306,20 +306,35 @@ def cmd_skills(args) -> int:
         return ExitCode.OK
 
     if sub == "sync":
+        from kairos_skills.mutation_contract import SkillMutationError
+        from kairos_skills.org_policy import observe_org_policy, org_policy_context
         from kairos_skills.sync import sync_bundled_skills
 
         bundled = Path(__file__).resolve().parent.parent / "skills"
-        r = sync_bundled_skills(bundled, user_dir)
+        try:
+            with observe_org_policy(org_policy_context(os.environ), user_dir.parent) as policy:
+                r = sync_bundled_skills(bundled, user_dir, policy=policy)
+        except SkillMutationError as error:
+            print("kairos: " + str(error), file=sys.stderr)
+            return {"input": 2, "unavailable": 69, "denied": 77}.get(error.kind, 1)
+        except (OSError, ValueError):
+            print(
+                "kairos: sincronização não pôde ser concluída; versões preservadas.",
+                file=sys.stderr,
+            )
+            return 1
         _emit(
             {
                 "copiadas": r.copied,
                 "atualizadas": r.updated,
                 "preservadas (editadas pelo usuário)": r.user_modified,
                 "respeitadas (apagadas pelo usuário)": r.user_deleted,
+                "blocked": r.blocked,
+                "failed": r.failed,
             },
             as_json=args.json,
         )
-        return ExitCode.OK
+        return 77 if r.blocked else ExitCode.OK
 
     return ExitCode.NOT_IMPLEMENTED
 

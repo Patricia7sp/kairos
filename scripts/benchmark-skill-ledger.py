@@ -25,6 +25,8 @@ from kairos_skills.mutation_contract import (
     SkillMutationState,
     validate_skill_creation,
 )
+from kairos_skills.org_policy import observe_org_policy
+from kairos_skills.org_policy_contract import OrgPolicyContext
 from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
@@ -75,22 +77,23 @@ def seed_adoptions(home, cycles):
     (target / "SKILL.md").write_bytes(b"Legacy fixture without semver.\n")
     connection = connect(home / "state.db")
     try:
-        repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
-        service = SkillAdoptionService(home, repository)
-        for _ in range(cycles):
-            result = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
-            if result.record is None:
-                raise RuntimeError("Fixture não criou adoção.")
-            service.unadopt(
-                TARGET,
-                actor=Actor.USER_FOREGROUND,
-                confirmed=True,
-                expect_adoption=result.record.operation_id,
-            )
-        adopted = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
-        if adopted.record is None:
-            raise RuntimeError("Fixture não criou adoção final.")
-        return adopted.record.operation_id
+        with observe_org_policy(OrgPolicyContext("none", None), home) as policy:
+            repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
+            service = SkillAdoptionService(home, repository, policy=policy)
+            for _ in range(cycles):
+                result = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
+                if result.record is None:
+                    raise RuntimeError("Fixture não criou adoção.")
+                service.unadopt(
+                    TARGET,
+                    actor=Actor.USER_FOREGROUND,
+                    confirmed=True,
+                    expect_adoption=result.record.operation_id,
+                )
+            adopted = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
+            if adopted.record is None:
+                raise RuntimeError("Fixture não criou adoção final.")
+            return adopted.record.operation_id
     finally:
         connection.close()
 
@@ -128,50 +131,51 @@ def scenario(prefix, cycles, samples):
         root_before = (home / "skills" / TARGET).stat()
         connection = connect(home / "state.db")
         try:
-            repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
-            service = SkillAdoptionService(home, repository)
-            metadata = {
-                "prefix_operations": prefix,
-                "revoked_adoption_cycles": cycles,
-                "seed_seconds": seed_seconds,
-                "database_bytes": (home / "state.db").stat().st_size,
-                "timeline_events": connection.execute(
-                    "SELECT COUNT(*) FROM skill_authority_timeline"
-                ).fetchone()[0],
-            }
+            with observe_org_policy(OrgPolicyContext("none", None), home) as policy:
+                repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
+                service = SkillAdoptionService(home, repository, policy=policy)
+                metadata = {
+                    "prefix_operations": prefix,
+                    "revoked_adoption_cycles": cycles,
+                    "seed_seconds": seed_seconds,
+                    "database_bytes": (home / "state.db").stat().st_size,
+                    "timeline_events": connection.execute(
+                        "SELECT COUNT(*) FROM skill_authority_timeline"
+                    ).fetchone()[0],
+                }
 
-            def evidence():
-                value = repository.installation_evidence(TARGET)
-                if value.adoption is None or not value.adoption.active:
-                    raise RuntimeError("Evidência vigente ausente.")
+                def evidence():
+                    value = repository.installation_evidence(TARGET)
+                    if value.adoption is None or not value.adoption.active:
+                        raise RuntimeError("Evidência vigente ausente.")
 
-            def history():
-                value = repository.history(name=TARGET, limit=20)
-                if not value or value[0].operation_id != adoption_id:
-                    raise RuntimeError("Histórico não preservou adoção final.")
+                def history():
+                    value = repository.history(name=TARGET, limit=20)
+                    if not value or value[0].operation_id != adoption_id:
+                        raise RuntimeError("Histórico não preservou adoção final.")
 
-            def identify():
-                value = identify_skill(home, TARGET)
-                if (
-                    value.adoption_active is not True
-                    or value.authorization_basis != "user_adoption"
-                ):
-                    raise RuntimeError("Identify não preservou autoridade vigente.")
+                def identify():
+                    value = identify_skill(home, TARGET, policy=policy)
+                    if (
+                        value.adoption_active is not True
+                        or value.authorization_basis != "user_adoption"
+                    ):
+                        raise RuntimeError("Identify não preservou autoridade vigente.")
 
-            def idempotent_adopt():
-                value = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
-                if value.record is None or value.record.operation_id != adoption_id:
-                    raise RuntimeError("Adopt não foi idempotente.")
+                def idempotent_adopt():
+                    value = service.adopt(TARGET, actor=Actor.USER_FOREGROUND, confirmed=True)
+                    if value.record is None or value.record.operation_id != adoption_id:
+                        raise RuntimeError("Adopt não foi idempotente.")
 
-            operations = {
-                "installation_evidence": evidence,
-                "history_limit_20": history,
-                "identify_skill": identify,
-                "idempotent_adopt": idempotent_adopt,
-            }
-            metadata["measurements"] = {
-                name: measure(operation, samples) for name, operation in operations.items()
-            }
+                operations = {
+                    "installation_evidence": evidence,
+                    "history_limit_20": history,
+                    "identify_skill": identify,
+                    "idempotent_adopt": idempotent_adopt,
+                }
+                metadata["measurements"] = {
+                    name: measure(operation, samples) for name, operation in operations.items()
+                }
         finally:
             connection.close()
         root_after = (home / "skills" / TARGET).stat()

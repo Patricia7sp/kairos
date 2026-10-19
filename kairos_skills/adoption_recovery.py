@@ -3,6 +3,7 @@
 from kairos_domain.ownership import Provenance
 from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionRecord
 from kairos_skills.mutation_contract import SkillMutationError, SkillMutationState
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 from kairos_skills.removal_origin import resolve_removal_origin
 
 
@@ -54,12 +55,14 @@ def _attest_prepared(repository, files, record: SkillAdoptionRecord) -> str:
     return "veto" if _new_veto(latest, latest_origin) else "ready"
 
 
-def reconcile_adoption_operation(repository, files, record: SkillAdoptionRecord):
+def reconcile_adoption_operation(repository, files, record: SkillAdoptionRecord, *, policy):
     """Conclui A só quando a mesma raiz e inventário continuam autorizados.
 
     O chamador deve manter o lock comum de mutações durante a reconciliação.
     A operação nunca cria, restaura ou altera arquivos da skill.
     """
+    attest_policy_home(policy, files.home)
+    guard = repository_guard(policy, repository)
     if (
         type(record) is not SkillAdoptionRecord
         or record.action is not SkillAdoptionAction.ADOPT
@@ -69,8 +72,10 @@ def reconcile_adoption_operation(repository, files, record: SkillAdoptionRecord)
         raise SkillMutationError("input", "Informe uma adoção preparada deste ledger.")
     operation_id = record.operation_id
     try:
+        guard.check_recovery(record)
         outcome = _attest_prepared(repository, files, record)
         state = SkillMutationState.COMMITTED if outcome == "ready" else SkillMutationState.ABORTED
+        guard.check_recovery(record)
         return repository.finish(operation_id, state)
     except SkillMutationError as error:
         if error.kind in ("unavailable", "io"):
