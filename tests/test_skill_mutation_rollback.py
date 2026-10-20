@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import test_skill_mutation_service as service_fixtures
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_operation, personal_policy, personal_receipt
 
 from kairos_domain.ownership import Actor
 from kairos_skills.catalog import catalog_home_id
@@ -22,16 +23,17 @@ from kairos_state import connect
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
-def stopped_rollback(home, create_id, phase, pipe):
+@personal_operation
+def stopped_rollback(home, create_id, phase, pipe, *, policy):
     db = connect(home / "state.db")
     repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
-    service = SkillMutationService(home, repo)
+    service = SkillMutationService(home, repo, policy=policy)
     original_prepare = repo.prepare
     original_retire = SkillMutationFiles.retire
     original_restore = SkillMutationFiles.restore
 
-    def prepare(draft, text):
-        result = original_prepare(draft, text)
+    def prepare(draft, text, **kwargs):
+        result = original_prepare(draft, text, **kwargs)
         if phase == "prepare":
             pipe.send(draft.operation_id)
             pipe.recv()
@@ -266,7 +268,11 @@ class RollbackTests(unittest.TestCase):
         from kairos_skills.mutation_contract import validate_skill_creation
 
         creation = validate_skill_creation(creation_text(name="other"))
-        prepared = self.repo.prepare(creation_draft(self.home, creation), creation.text)
+        prepared = self.repo.prepare(
+            (fixture_draft := creation_draft(self.home, creation)),
+            creation.text,
+            policy_receipt=personal_receipt(fixture_draft, self.repo),
+        )
         with self.assertRaises(SkillMutationError):
             self.service.rollback(prepared.operation_id, actor=Actor.USER_FOREGROUND)
         other = SkillMutationRepository(self.db, home_id="0" * 64)
@@ -334,7 +340,9 @@ class RollbackTests(unittest.TestCase):
         try:
             repo = SkillMutationRepository(db, home_id=catalog_home_id(self.home))
             with skill_mutation_lock(self.home), SkillMutationFiles(self.home) as files:
-                return reconcile_pending(repo, files, name=self.created.name)
+                return reconcile_pending(
+                    repo, files, name=self.created.name, policy=personal_policy(self, files.home)
+                )
         finally:
             db.close()
 

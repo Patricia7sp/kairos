@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from kairos_skills.mutation_io import (
     read_skill_creation,
 )
 from kairos_skills.mutations import SkillMutationService
+from kairos_skills.org_policy import observe_org_policy, org_policy_context
 from kairos_skills.removal_contract import CommonRecord, SkillTreeAction, SkillTreeRecord
 from kairos_skills.removal_state import database_connection, read_skill_repository
 from kairos_state.migrations import migrate
@@ -132,12 +134,12 @@ def _validate_mutation(home: Path, args):
     return None
 
 
-def _write_mutation(home: Path, args, source):
+def _write_mutation(home: Path, args, source, *, policy):
     command = args.skills_command
     with _database_connection(home, write=True) as connection:
         migrate(connection)
         repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
-        service = SkillMutationService(home, repository)
+        service = SkillMutationService(home, repository, policy=policy)
         if command == "add":
             record = service.add(source, actor=Actor.USER_FOREGROUND)
         elif command == "remove":
@@ -164,8 +166,9 @@ def run_skill_mutation(home: Path, args: argparse.Namespace) -> int:
                 validate_name(args.name)
             records = [mutation_metadata(record) for record in _history(home, args)]
         else:
-            source = _validate_mutation(home, args)
-            records = _write_mutation(home, args, source)
+            with observe_org_policy(org_policy_context(os.environ), home) as policy:
+                source = _validate_mutation(home, args)
+                records = _write_mutation(home, args, source, policy=policy)
         _emit(records, as_json=args.json, history=command == "history")
         return 0
     except SkillMutationError as error:

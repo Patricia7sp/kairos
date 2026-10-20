@@ -11,6 +11,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from skill_org_fixtures import personal_policy, personal_receipt
+
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture
 from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionDraft
@@ -71,7 +73,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         return SkillMutationRepository(database, home_id=catalog_home_id(home))
 
     def service(self):
-        return adoption_service_type()(self.home, self.ledger())
+        return adoption_service_type()(
+            self.home, self.ledger(), policy=personal_policy(self, self.home)
+        )
 
     def legacy(self, *, name=None):
         target = self.home / "skills" / (name or self.name)
@@ -107,7 +111,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
     def test_denied_before_home_database_or_lock_access(self):
         repository = _empty_repository(self.home)
         self.addCleanup(repository._conn.close)
-        service = adoption_service_type()(self.home, repository)
+        service = adoption_service_type()(
+            self.home, repository, policy=personal_policy(self, self.home)
+        )
         denied = (
             (lambda: service.adopt(self.name, actor=Actor.CURATOR, confirmed=True), "denied"),
             (
@@ -177,9 +183,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         source.write_text(
             "---\nname: revisar-docs\ndescription: Legado.\nversion: '0.1.0'\n---\nCorpo.\n"
         )
-        created = SkillMutationService(self.home, self.repository).add(
-            source, actor=Actor.USER_FOREGROUND
-        )
+        created = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        ).add(source, actor=Actor.USER_FOREGROUND)
         before = self.repository.history(name=self.name)
         user = self.service().adopt(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
         self.assertIsNone(user.record)
@@ -196,9 +202,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         (bundled.parent / ".bundled_manifest").write_text(self.name + ":" + "0" * 32 + "\n")
         package_repository = self.ledger_for(bundled_home)
         with patch("kairos_skills.removal_origin.trusted_bundle_root", return_value=bundle):
-            package = adoption_service_type()(bundled_home, package_repository).adopt(
-                self.name, actor=Actor.USER_FOREGROUND, confirmed=True
-            )
+            package = adoption_service_type()(
+                bundled_home, package_repository, policy=personal_policy(self, bundled_home)
+            ).adopt(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
         self.assertIsNone(package.record)
         self.assertEqual(package.identification.authorization_basis, "verified_bundle")
         self.assertEqual(package.identification.ownership, Provenance.BUNDLED.value)
@@ -221,20 +227,25 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         service = self.service()
         first = service.adopt(self.name, actor=Actor.USER_FOREGROUND, confirmed=True).record
         (self.target / "SKILL.md").write_bytes(b"Internal edit, no frontmatter\n")
-        identified = identify_skill(self.home, self.name)
+        identified = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(identified.authorization_basis, "user_adoption")
         self.assertTrue(identified.adoption_active)
         self.assertEqual(identified.adoption_id, first.operation_id)
 
         self.target.rename(self.root / "previous")
         shutil.copytree(self.root / "previous", self.target)
-        replaced = identify_skill(self.home, self.name)
+        replaced = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(replaced.authorization_basis, "none")
         self.assertFalse(replaced.adoption_active)
         second = service.adopt(self.name, actor=Actor.USER_FOREGROUND, confirmed=True).record
         self.assertNotEqual(second.operation_id, first.operation_id)
         self.assertEqual(second.draft.installation_id, second.operation_id)
-        self.assertEqual(identify_skill(self.home, self.name).adoption_id, second.operation_id)
+        self.assertEqual(
+            identify_skill(
+                self.home, self.name, policy=personal_policy(self, self.home)
+            ).adoption_id,
+            second.operation_id,
+        )
 
     def test_replaced_root_preserves_recorded_source_without_authority(self):
         self.legacy()
@@ -262,12 +273,12 @@ class SkillAdoptionServiceTests(unittest.TestCase):
             )
             founder = repository.finish(operation_id, SkillMutationState.COMMITTED)
 
-        initial = identify_skill(self.home, self.name)
+        initial = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(initial.installation_source, "verified_acquisition")
         self.assertTrue(initial.adoption_active)
         self.target.rename(self.root / "previous")
         shutil.copytree(self.root / "previous", self.target)
-        replaced = identify_skill(self.home, self.name)
+        replaced = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(replaced.installation_source, "verified_acquisition")
         self.assertFalse(replaced.identity_valid)
         self.assertFalse(replaced.adoption_active)
@@ -292,7 +303,7 @@ class SkillAdoptionServiceTests(unittest.TestCase):
             patch("kairos_skills.identification._read_adoption_record", replace_root_after_read),
             self.assertRaises(SkillMutationError) as caught,
         ):
-            identify_skill(self.home, self.name)
+            identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
 
         self.assertEqual(caught.exception.kind, "conflict", str(caught.exception))
 
@@ -307,7 +318,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         self.assertIs(revoked.state, SkillMutationState.COMMITTED)
         self.assertEqual(self.inventory(), before_files)
         self.assertEqual(self.repository.snapshot(adopted.operation_id), snapshot)
-        identification = identify_skill(self.home, self.name)
+        identification = identify_skill(
+            self.home, self.name, policy=personal_policy(self, self.home)
+        )
         self.assertEqual(identification.current_installation_id, adopted.draft.installation_id)
         self.assertEqual(identification.adoption_id, adopted.operation_id)
         self.assertFalse(identification.adoption_active)
@@ -351,7 +364,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
                 reverts=remove_id,
                 adoption=replace(removal_draft.adoption, installation_id=restore_id),
             )
-            self.repository.prepare_restore(restore_draft)
+            self.repository.prepare_restore(
+                restore_draft, policy_receipt=personal_receipt(restore_draft, self.repository)
+            )
             files.publish(restore_id, self.name)
             files.sync_parents()
             restored = self.repository.finish(restore_id, SkillMutationState.COMMITTED)
@@ -362,7 +377,7 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         self.assertEqual(evidence.adoption.installation_id, restored.operation_id)
         self.assertTrue(evidence.adoption.active)
 
-        identified = identify_skill(self.home, self.name)
+        identified = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(identified.adoption_id, founder.operation_id)
         self.assertEqual(identified.current_installation_id, restored.operation_id)
         self.assertTrue(identified.adoption_active)
@@ -383,7 +398,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         )
         self.assertIs(revoked.action, SkillAdoptionAction.UNADOPT)
         self.assertIs(revoked.state, SkillMutationState.COMMITTED)
-        after_unadopt = identify_skill(self.home, self.name)
+        after_unadopt = identify_skill(
+            self.home, self.name, policy=personal_policy(self, self.home)
+        )
         self.assertEqual(after_unadopt.adoption_id, founder.operation_id)
         self.assertEqual(after_unadopt.current_installation_id, restored.operation_id)
         self.assertFalse(after_unadopt.adoption_active)
@@ -409,8 +426,17 @@ class SkillAdoptionServiceTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.kind, "conflict")
         self.assertEqual(self.repository.history(name=self.name), before)
-        self.assertEqual(identify_skill(self.home, self.name).adoption_id, second.operation_id)
-        self.assertTrue(identify_skill(self.home, self.name).adoption_active)
+        self.assertEqual(
+            identify_skill(
+                self.home, self.name, policy=personal_policy(self, self.home)
+            ).adoption_id,
+            second.operation_id,
+        )
+        self.assertTrue(
+            identify_skill(
+                self.home, self.name, policy=personal_policy(self, self.home)
+            ).adoption_active
+        )
 
     def test_change_before_commit_refused_without_expectation(self):
         self.legacy()
@@ -431,7 +457,11 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.kind, "conflict")
         self.assertEqual(self.repository.history(name=self.name), (adopted,))
         self.assertEqual((self.target / "SKILL.md").read_bytes(), b"Concurrent edit\n")
-        self.assertTrue(identify_skill(self.home, self.name).adoption_active)
+        self.assertTrue(
+            identify_skill(
+                self.home, self.name, policy=personal_policy(self, self.home)
+            ).adoption_active
+        )
 
     def test_unsafe_tree_after_prepare_becomes_conflict(self):
         self.legacy()
@@ -494,9 +524,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         source.write_text(
             "---\nname: revisar-docs\ndescription: Independente.\nversion: '0.1.0'\n---\nCorpo.\n"
         )
-        created = SkillMutationService(self.home, self.repository).add(
-            source, actor=Actor.USER_FOREGROUND
-        )
+        created = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        ).add(source, actor=Actor.USER_FOREGROUND)
         service = self.service()
         history = self.repository.history(name=self.name)
 
@@ -530,7 +560,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
                 creation.sha256,
                 creation.size_bytes,
             )
-            repository.prepare(draft, creation.text)
+            repository.prepare(
+                draft, creation.text, policy_receipt=personal_receipt(draft, repository)
+            )
 
         with self.assertRaises(SkillMutationError) as caught:
             self.service().adopt(self.name, actor=Actor.USER_FOREGROUND, confirmed=True)
@@ -546,7 +578,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         from kairos_skills.adoption_recovery import reconcile_adoption_operation
 
         with SkillRemovalFiles(self.home) as files:
-            recovered = reconcile_adoption_operation(repository, files, record)
+            recovered = reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertIs(recovered.state, SkillMutationState.COMMITTED)
         self.assertEqual(
@@ -562,7 +596,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         from kairos_skills.adoption_recovery import reconcile_adoption_operation
 
         with SkillRemovalFiles(self.home) as files:
-            recovered = reconcile_adoption_operation(repository, files, record)
+            recovered = reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertIs(recovered.state, SkillMutationState.ABORTED)
         self.assertFalse(self.target.exists())
@@ -577,7 +613,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         from kairos_skills.adoption_recovery import reconcile_adoption_operation
 
         with SkillRemovalFiles(self.home) as files, self.assertRaises(SkillMutationError):
-            reconcile_adoption_operation(repository, files, record)
+            reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertIs(repository.get(draft.operation_id).state, SkillMutationState.CONFLICT)
         self.assertEqual((self.target / "SKILL.md").read_bytes(), b"changed after prepare\n")
@@ -593,7 +631,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
         from kairos_skills.adoption_recovery import reconcile_adoption_operation
 
         with SkillRemovalFiles(self.home) as files, self.assertRaises(SkillMutationError) as caught:
-            reconcile_adoption_operation(repository, files, record)
+            reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertEqual(caught.exception.kind, "conflict")
         self.assertIs(repository.get(draft.operation_id).state, SkillMutationState.CONFLICT)
@@ -617,7 +657,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
             SkillRemovalFiles(self.home) as files,
             patch("kairos_skills.removal_origin.trusted_bundle_root", return_value=bundle),
         ):
-            recovered = reconcile_adoption_operation(repository, files, record)
+            recovered = reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertIs(recovered.state, SkillMutationState.ABORTED)
         self.assertEqual(self.inventory(), before)
@@ -636,7 +678,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
             patch("kairos_filesystem.tree.os.listxattr", side_effect=OSError("unavailable")),
             self.assertRaises(SkillMutationError) as caught,
         ):
-            reconcile_adoption_operation(repository, files, record)
+            reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertEqual(caught.exception.kind, "unavailable")
         self.assertIs(repository.get(draft.operation_id).state, SkillMutationState.PREPARED)
@@ -650,7 +694,9 @@ class SkillAdoptionServiceTests(unittest.TestCase):
             ),
             self.assertRaises(SkillMutationError) as caught,
         ):
-            reconcile_adoption_operation(repository, files, record)
+            reconcile_adoption_operation(
+                repository, files, record, policy=personal_policy(self, files.home)
+            )
 
         self.assertEqual(caught.exception.kind, "io")
         self.assertIs(repository.get(draft.operation_id).state, SkillMutationState.PREPARED)

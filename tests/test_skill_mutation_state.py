@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_receipt
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_skills.catalog import catalog_home_id
@@ -57,7 +58,9 @@ class MutationStateTests(unittest.TestCase):
         self.db.close()
 
     def committed(self):
-        self.repo.prepare(self.draft, self.creation.text)
+        self.repo.prepare(
+            self.draft, self.creation.text, policy_receipt=personal_receipt(self.draft, self.repo)
+        )
         return self.repo.finish(self.draft.operation_id, SkillMutationState.COMMITTED)
 
     def events(self, operation_id):
@@ -70,17 +73,27 @@ class MutationStateTests(unittest.TestCase):
         ]
 
     def test_prepare_e_finish_atomicos(self):
-        prepared = self.repo.prepare(self.draft, self.creation.text)
+        prepared = self.repo.prepare(
+            self.draft, self.creation.text, policy_receipt=personal_receipt(self.draft, self.repo)
+        )
         self.assertEqual(prepared.state, SkillMutationState.PREPARED)
         self.assertEqual(self.repo.content(prepared.operation_id), self.creation)
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(creation_draft(self.home), self.creation.text)
+            self.repo.prepare(
+                (fixture_draft := creation_draft(self.home)),
+                self.creation.text,
+                policy_receipt=personal_receipt(fixture_draft, self.repo),
+            )
         finished = self.repo.finish(prepared.operation_id, SkillMutationState.COMMITTED)
         self.assertEqual(self.events(finished.operation_id), ["prepared", "committed"])
         self.assertIs(self.repo.provenance(finished.name), Provenance.USER)
         invalid = validate_skill_creation(creation_text(name="second"))
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(creation_draft(self.home, invalid), self.creation.text)
+            self.repo.prepare(
+                (fixture_draft := creation_draft(self.home, invalid)),
+                self.creation.text,
+                policy_receipt=personal_receipt(fixture_draft, self.repo),
+            )
         self.assertEqual(len(self.repo.history()), 1)
 
     def test_rollback_vinculado_e_idempotente(self):
@@ -91,7 +104,9 @@ class MutationStateTests(unittest.TestCase):
             action=SkillMutationAction.ROLLBACK,
             reverts=created.operation_id,
         )
-        self.repo.prepare(rollback, self.creation.text)
+        self.repo.prepare(
+            rollback, self.creation.text, policy_receipt=personal_receipt(rollback, self.repo)
+        )
         finished = self.repo.finish(rollback.operation_id, SkillMutationState.COMMITTED)
         self.assertEqual(
             self.repo.finish(rollback.operation_id, SkillMutationState.COMMITTED), finished
@@ -111,18 +126,26 @@ class MutationStateTests(unittest.TestCase):
             reverts=uuid.uuid4().hex,
         )
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(rollback, self.creation.text)
-        prepared = self.repo.prepare(self.draft, self.creation.text)
+            self.repo.prepare(
+                rollback, self.creation.text, policy_receipt=personal_receipt(rollback, self.repo)
+            )
+        prepared = self.repo.prepare(
+            self.draft, self.creation.text, policy_receipt=personal_receipt(self.draft, self.repo)
+        )
         rollback = dataclasses.replace(rollback, reverts=prepared.operation_id)
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(rollback, self.creation.text)
+            self.repo.prepare(
+                rollback, self.creation.text, policy_receipt=personal_receipt(rollback, self.repo)
+            )
         self.repo.finish(prepared.operation_id, SkillMutationState.COMMITTED)
         other = validate_skill_creation(creation_text(name="other"))
         rollback = dataclasses.replace(
             rollback, name=other.name, sha256=other.sha256, size_bytes=other.size_bytes
         )
         with self.assertRaises(SkillMutationError):
-            self.repo.prepare(rollback, other.text)
+            self.repo.prepare(
+                rollback, other.text, policy_receipt=personal_receipt(rollback, self.repo)
+            )
         self.assertEqual(len(self.repo.history()), 1)
 
     def test_foreign_keys_prevent_orphan_evidence(self):
@@ -141,14 +164,20 @@ class MutationStateTests(unittest.TestCase):
             action=SkillMutationAction.ROLLBACK,
             reverts=created.operation_id,
         )
-        self.repo.prepare(rollback, self.creation.text)
+        self.repo.prepare(
+            rollback, self.creation.text, policy_receipt=personal_receipt(rollback, self.repo)
+        )
         self.repo.finish(rollback.operation_id, SkillMutationState.COMMITTED)
         newer = creation_draft(self.home)
-        self.repo.prepare(newer, self.creation.text)
+        self.repo.prepare(
+            newer, self.creation.text, policy_receipt=personal_receipt(newer, self.repo)
+        )
         self.repo.finish(newer.operation_id, SkillMutationState.COMMITTED)
         with self.assertRaises(SkillMutationError):
             self.repo.prepare(
-                dataclasses.replace(rollback, operation_id=uuid.uuid4().hex), self.creation.text
+                (fixture_draft := dataclasses.replace(rollback, operation_id=uuid.uuid4().hex)),
+                self.creation.text,
+                policy_receipt=personal_receipt(fixture_draft, self.repo),
             )
         self.assertIs(self.repo.provenance(created.name), Provenance.USER)
 
@@ -161,7 +190,9 @@ class MutationStateTests(unittest.TestCase):
             with self.subTest(first=first):
                 creation = validate_skill_creation(creation_text(name="case-" + first.value))
                 draft = creation_draft(self.home, creation)
-                self.repo.prepare(draft, creation.text)
+                self.repo.prepare(
+                    draft, creation.text, policy_receipt=personal_receipt(draft, self.repo)
+                )
                 record = self.repo.finish(draft.operation_id, first)
                 self.assertEqual(self.repo.finish(draft.operation_id, first), record)
                 with self.assertRaises(SkillMutationError):
@@ -231,7 +262,11 @@ class MutationStateTests(unittest.TestCase):
     def test_history_limits_and_pending_other_name(self):
         created = self.committed()
         second = validate_skill_creation(creation_text(name="second"))
-        prepared = self.repo.prepare(creation_draft(self.home, second), second.text)
+        prepared = self.repo.prepare(
+            (fixture_draft := creation_draft(self.home, second)),
+            second.text,
+            policy_receipt=personal_receipt(fixture_draft, self.repo),
+        )
         self.assertEqual(self.repo.history(limit=1), (prepared,))
         self.assertEqual(self.repo.history(name=created.name), (created,))
         self.assertEqual(self.repo.pending("second"), (prepared,))

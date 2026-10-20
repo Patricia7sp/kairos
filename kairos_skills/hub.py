@@ -14,6 +14,10 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairos_skills.org_policy_contract import OrgPolicyAction
+from kairos_skills.org_policy_guard import publication_guard
+from kairos_skills.publication_io import capture_publication, delete_publication, move_publication
+
 __all__ = [
     "QuarantineError",
     "SkillBundle",
@@ -78,7 +82,9 @@ def scan_quarantined(path: Path) -> list[str]:
     return achados
 
 
-def install_from_quarantine(quarantine_path: Path, quarantine_dir: Path, skills_dir: Path) -> Path:
+def install_from_quarantine(
+    quarantine_path: Path, quarantine_dir: Path, skills_dir: Path, *, policy
+) -> Path:
     """Promove da quarentena para o diretório de skills.
 
     Duas defesas, e as duas são necessárias:
@@ -88,6 +94,11 @@ def install_from_quarantine(quarantine_path: Path, quarantine_dir: Path, skills_
     2. **Rejeição de symlink** — reconferida na promoção, não só no scan:
        entre o escaneamento e a promoção o conteúdo pode ter mudado.
     """
+    with publication_guard(policy, skills_dir.parent) as guard:
+        return _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, guard=guard)
+
+
+def _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, *, guard):
     resolved = quarantine_path.resolve()
     root = quarantine_dir.resolve()
     if not _within(resolved, root):
@@ -101,10 +112,22 @@ def install_from_quarantine(quarantine_path: Path, quarantine_dir: Path, skills_
             raise UnsafeQuarantinePath(f"symlink em skill promovida: {entry.relative_to(resolved)}")
 
     dest = skills_dir / resolved.name
+    guard.check(resolved.name, OrgPolicyAction.PROMOTE)
+    if skills_dir.is_symlink():
+        raise UnsafeQuarantinePath("Diretório de skills não pode ser um link.")
+    source_proof = capture_publication(resolved)
     skills_dir.mkdir(parents=True, exist_ok=True)
     if dest.exists():
-        shutil.rmtree(dest)
-    shutil.move(str(resolved), str(dest))
+        expected = capture_publication(dest)
+        delete_publication(
+            dest, expected, guard=lambda: guard.check(resolved.name, OrgPolicyAction.PROMOTE)
+        )
+    move_publication(
+        resolved,
+        dest,
+        source_proof,
+        guard=lambda: guard.check(resolved.name, OrgPolicyAction.PROMOTE),
+    )
     return dest
 
 

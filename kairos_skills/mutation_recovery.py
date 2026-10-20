@@ -6,6 +6,7 @@ from kairos_skills.mutation_contract import (
     SkillMutationError,
     SkillMutationState,
 )
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 
 
 def expected_entry(repository, record):
@@ -21,22 +22,32 @@ def mark_conflict(repository, record):
     )
 
 
-def reconcile_create(repository, files, record):
+def reconcile_create(repository, files, record, *, policy):
+    attest_policy_home(policy, files.home)
+    guard = repository_guard(policy, repository)
+    guard.check_recovery(record)
     expected = expected_entry(repository, record)
     installed = files.inspect_installed(record.name)
     staged = files.inspect_private(record.operation_id)
     if installed is None and staged is None:
         return repository.finish(record.operation_id, SkillMutationState.ABORTED)
     if installed is None and staged == expected:
+        guard.check_recovery(record)
         files.discard_staging(record.operation_id, expected)
+        guard.check_recovery(record)
         return repository.finish(record.operation_id, SkillMutationState.ABORTED)
     if staged is None and installed == expected:
+        guard.check_recovery(record)
         files.sync_parents()
+        guard.check_recovery(record)
         return repository.finish(record.operation_id, SkillMutationState.COMMITTED)
     return mark_conflict(repository, record)
 
 
-def reconcile_rollback(repository, files, record):
+def reconcile_rollback(repository, files, record, *, policy):
+    attest_policy_home(policy, files.home)
+    guard = repository_guard(policy, repository)
+    guard.check_recovery(record)
     expected = expected_entry(repository, record)
     installed = files.inspect_installed(record.name)
     retired = files.inspect_private(record.operation_id, retired=True)
@@ -44,12 +55,15 @@ def reconcile_rollback(repository, files, record):
         # Retirada não aconteceu, ou a mesma versão editada já foi devolvida.
         return repository.finish(record.operation_id, SkillMutationState.ABORTED)
     if installed is None and retired == expected:
+        guard.check_recovery(record)
         files.sync_parents()
+        guard.check_recovery(record)
         return repository.finish(record.operation_id, SkillMutationState.COMMITTED)
     return mark_conflict(repository, record)
 
 
-def reconcile_pending(repository, files, *, name: str):
+def reconcile_pending(repository, files, *, name: str, policy):
+    attest_policy_home(policy, files.home)
     from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionRecord
     from kairos_skills.adoption_recovery import reconcile_adoption_operation
     from kairos_skills.mutation_io import SkillMutationFiles
@@ -74,10 +88,10 @@ def reconcile_pending(repository, files, *, name: str):
             else:
                 raise SkillMutationError("corrupt", "Ação de skills desconhecida.")
             if isinstance(files, adapter):
-                results.append(handler(repository, files, record))
+                results.append(handler(repository, files, record, policy=policy))
             else:
                 with adapter(files.home) as operation_files:
-                    results.append(handler(repository, operation_files, record))
+                    results.append(handler(repository, operation_files, record, policy=policy))
         except SkillMutationError as error:
             if error.kind in ("conflict", "input"):
                 repository.finish(record.operation_id, SkillMutationState.CONFLICT)

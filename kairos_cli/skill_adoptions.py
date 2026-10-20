@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from kairos_skills.mutation_contract import (
     validate_id,
     validate_name,
 )
+from kairos_skills.org_policy import observe_org_policy, org_policy_context
 from kairos_skills.removal_state import database_connection
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
@@ -58,12 +60,12 @@ def _identification_metadata(result) -> dict[str, object]:
     }
 
 
-def _write_adoption(home: Path, args: argparse.Namespace) -> dict[str, object]:
+def _write_adoption(home: Path, args: argparse.Namespace, *, policy) -> dict[str, object]:
     command = args.skills_command
     with database_connection(home, write=True) as connection:
         migrate(connection)
         repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
-        service = SkillAdoptionService(home, repository)
+        service = SkillAdoptionService(home, repository, policy=policy)
         if command == "adopt":
             return _identification_metadata(
                 service.adopt(args.name, actor=Actor.USER_FOREGROUND, confirmed=True)
@@ -116,7 +118,8 @@ def run_skill_adoption(home: Path, args: argparse.Namespace) -> int:
     """Executa A/U após validar os guards lexicais antes de qualquer I/O."""
     try:
         _validate_adoption_args(args)
-        metadata = _write_adoption(home, args)
+        with observe_org_policy(org_policy_context(os.environ), home) as policy:
+            metadata = _write_adoption(home, args, policy=policy)
         _emit_metadata(metadata, as_json=getattr(args, "json", False))
         return 0
     except SkillMutationError as error:

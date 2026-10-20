@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_skill_mutation_service as service_fixtures
+from skill_org_fixtures import personal_policy, personal_sync_operation
 from test_skill_mutation_io import hold_lock
 
 from kairos_domain.ownership import Actor
@@ -18,14 +19,15 @@ from kairos_skills.sync import (
 )
 
 
-def sync_process(bundle, home, pipe):
+@personal_sync_operation
+def sync_process(bundle, home, pipe, *, policy):
     from kairos_skills import sync
 
     original = sync._sync_discovered
 
-    def mutate(discovered, user_dir):
+    def mutate(discovered, user_dir, **kwargs):
         pipe.send("mutation_started")
-        result = original(discovered, user_dir)
+        result = original(discovered, user_dir, **kwargs)
         return result
 
     original_snapshot = sync._snapshot_bundle
@@ -41,7 +43,7 @@ def sync_process(bundle, home, pipe):
         patch.object(sync, "_sync_discovered", mutate),
         patch.object(sync, "_snapshot_bundle", snapshot),
     ):
-        result = sync.sync_bundled_skills(bundle, home / "skills")
+        result = sync.sync_bundled_skills(bundle, home / "skills", policy=policy)
     pipe.send((result.copied, result.user_modified))
 
 
@@ -106,12 +108,16 @@ class MutationSyncTests(unittest.TestCase):
             self.assertEqual(parent.recv(), "locked")
             with (
                 patch(
-                    "kairos_skills.sync.skill_mutation_lock",
+                    "kairos_skills.mutation_lock.skill_mutation_lock",
                     lambda home: skill_mutation_lock(home, timeout=0.05),
                 ),
                 self.assertRaises(SkillMutationError) as raised,
             ):
-                sync_bundled_skills(self.bundle, self.home / "skills")
+                sync_bundled_skills(
+                    self.bundle,
+                    self.home / "skills",
+                    policy=personal_policy(self, ((self.home / "skills").parent)),
+                )
             self.assertEqual(raised.exception.kind, "conflict")
             self.assertNotIn(str(self.home), str(raised.exception))
             self.assertFalse((self.home / "skills" / "new-bundled").exists())
@@ -127,8 +133,16 @@ class MutationSyncTests(unittest.TestCase):
         lock.unlink()
         lock.symlink_to(self.root / "outside")
         with self.assertRaises(SkillMutationError):
-            sync_bundled_skills(self.bundle, self.home / "skills")
+            sync_bundled_skills(
+                self.bundle,
+                self.home / "skills",
+                policy=personal_policy(self, ((self.home / "skills").parent)),
+            )
         (self.home / "skills" / NO_BUNDLED_SKILLS_MARKER).touch()
-        result = sync_bundled_skills(self.bundle, self.home / "skills")
+        result = sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, ((self.home / "skills").parent)),
+        )
         self.assertTrue(result.skipped_opt_out)
         self.assertFalse((self.root / "outside").exists())

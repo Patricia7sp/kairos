@@ -59,3 +59,23 @@ Os nove jobs de verificação remotos do commit `5b84049` passaram no [run 38485
 - Desempenho fica como acompanhamento: medir latência e número de validações em ledgers com prefixos/históricos crescentes antes de otimizar. Não pular varreduras de integridade nem introduzir cache sem atestar mudanças/backup parcial.
 
 Validação dos ajustes em 2026-10-14: teste de fonte registrada RED→GREEN; regressão focal com 78 testes e 113 subtestes; revisão independente focada sem achados; CI local integral com Codex 0.154.0, 3.832 testes e 6.309 subtestes (16 skipped e 31 deselected), Ruff check/format nos 645 arquivos, shellcheck, recall, lockfile e frontends (239 testes e TypeScript). A primeira imagem teve 7 skips por stub ausente; após reconstruí-lo, a classe inteira passou com 30 testes e 26 subtestes, sem skips. Complemento Docker passou com 26 testes e 1 skip esperado de AppArmor/seccomp. Os seis hashes revisados foram conferidos após as execuções; a atualização final acrescenta somente estas evidências documentais. Resultados remotos de cada commit ficam nos [checks do PR #104](https://github.com/Patricia7sp/kairos/pull/104/checks). Logs/pareceres: `pr104-source-red.log`, `pr104-review-green.log`, `pr104-followup-review.md`, `pr104-followup-ci.log`, `pr104-followup-image.log` e `pr104-followup-supplement.log` no workspace de evidências.
+
+## Fechamento operacional de 2026-10-14
+
+O usuário autorizou merge e deploy em 2026-10-14. O [PR #104](https://github.com/Patricia7sp/kairos/pull/104) foi integrado por squash às 05:24:14 UTC como `d730822242f287a2a0268e9c5d66d4779c7477e0`. O diff entre esse commit e `e2dce519451d81062471aa2dd1a0ac9a8e9142cd` ficou vazio; a inspeção de `main~1..main` confirmou os 44 arquivos da entrega, sem alterações adicionais do squash. As restrições de autorização nas seções anteriores descrevem o estado histórico anterior ao fechamento.
+
+O [pipeline da main, run 38516446100](https://github.com/Patricia7sp/kairos/actions/runs/38516446100), terminou com dez jobs verdes: nove gates e deploy. O Komodo confirmou `Complete`/`success=true` no update `6acf12d705c8332b30f6ec99`; o job terminou às 05:28:52 UTC. O log não expõe `commit_hash` (mostra `?`), portanto esse campo não foi usado como prova do conteúdo publicado.
+
+Verificação direta após o deploy: `KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health bash scripts/smoke-deploy.sh` saiu 0 (`smoke ok: ok`); `/api/health` retornou `status=ok`, `app=kairos` e `ui_present=true`. Os containers `kairos` e `kairos-runtime-broker` estavam saudáveis. A imagem de `kairos` foi `sha256:334d0e6173e6dc671a77a2090754ce2e9e453f507fbae8e7e0fe27acb1c48731`. SHA-256 dos arquivos de identificação, serviço de adoção, metadata CLI, schema de adoção e backup dentro do container coincidiu com o checkout integrado. Essa comparação cobre os cinco arquivos observados; não é atestação integral da imagem.
+
+A2 está integrada e implantada. O deploy não autoriza adoções em lote ou instala política organizacional. B1/B2 continuam com seus próprios gates de especificação, planejamento e implementação.
+
+## Acompanhamento de desempenho
+
+A medição pendente foi executada em fixtures locais em 2026-10-14, com cinco
+cenários e sete amostras por caminho. O [relatório](2026-10-14-skill-ledger-benchmark.md)
+preserva método, limitações, contagens de validação e dados brutos. Em 1.000
+operações de prefixo, `identify` teve mediana de 4,67 s e adoção idempotente de
+9,14 s. Nenhuma otimização ou redução de verificações entrou nesta entrega.
+A [spec B1 para revisão](../specs/2026-10-14-politica-organizacional-b1-design.md)
+detalha a etapa seguinte, ainda sem aprovação ou implementação.

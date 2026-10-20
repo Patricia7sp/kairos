@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_skills.catalog import catalog_home_id
@@ -31,7 +32,9 @@ class MutationServiceTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         migrate(self.db)
         self.repo = SkillMutationRepository(self.db, home_id=catalog_home_id(self.home))
-        self.service = SkillMutationService(self.home, self.repo)
+        self.service = SkillMutationService(
+            self.home, self.repo, policy=personal_policy(self, self.home)
+        )
 
     def test_add_publica_registra_e_preserva_source(self):
         record = self.service.add(self.source, actor=Actor.USER_FOREGROUND)
@@ -99,11 +102,11 @@ class MutationServiceTests(unittest.TestCase):
 
     def test_constructor_is_readonly_and_other_home_refused(self):
         before = set(self.home.iterdir())
-        SkillMutationService(self.home, self.repo)
+        SkillMutationService(self.home, self.repo, policy=personal_policy(self, self.home))
         self.assertEqual(set(self.home.iterdir()), before)
         other = SkillMutationRepository(self.db, home_id="0" * 64)
         with self.assertRaises(SkillMutationError):
-            SkillMutationService(self.home, other)
+            SkillMutationService(self.home, other, policy=personal_policy(self, self.home))
 
     def test_before_prepare_failure_cleans_only_known_staging(self):
         with (

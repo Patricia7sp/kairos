@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from skill_org_fixtures import personal_policy
+
 from kairos_domain.ownership import (
     Actor,
     CronReferenceIndex,
@@ -151,32 +153,46 @@ class SyncTests(unittest.TestCase):
 
     def test_skill_nova_e_copiada_e_o_hash_registrado(self):
         self.mk_bundled("a")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.copied, ["a"])
         self.assertEqual(self.user_text("a"), "v1")
         self.assertIn("a", read_manifest(self.user / MANIFEST_NAME))
 
     def test_caso1_bundled_inalterado_pula_sem_ler_a_copia_do_usuario(self):
         self.mk_bundled("a")
-        sync_bundled_skills(self.bundled, self.user)
-        r = sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.skipped, ["a"])
 
     def test_caso2_usuario_nunca_tocou_entao_e_seguro_atualizar(self):
         self.mk_bundled("a", "v1")
-        sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.mk_bundled("a", "v2")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.updated, ["a"])
         self.assertEqual(self.user_text("a"), "v2")
 
     def test_caso3_o_usuario_EDITOU_entao_a_edicao_local_VENCE(self):
         """ADR 013 — salvage preserva autoria."""
         self.mk_bundled("a", "v1")
-        sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         (self.user / "a" / "SKILL.md").write_text("minha versão", encoding="utf-8")
         self.mk_bundled("a", "v2")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.user_modified, ["a"])
         self.assertEqual(self.user_text("a"), "minha versão", "sem sobrescrita, sem merge")
 
@@ -184,31 +200,43 @@ class SyncTests(unittest.TestCase):
         """É isso que distingue 'nunca mexeu' de 'editou' — comparar contra o
         bundled atual não distinguiria nada."""
         self.mk_bundled("a", "v1")
-        sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         # O usuário edita para exatamente o conteúdo do PRÓXIMO bundled.
         (self.user / "a" / "SKILL.md").write_text("v2", encoding="utf-8")
         self.mk_bundled("a", "v2")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         # Contra o bundled atual pareceria "igual"; contra a origem, é edição.
         self.assertEqual(r.user_modified, ["a"])
 
     def test_exclusao_pelo_usuario_e_RESPEITADA_nao_re_adicionada(self):
         self.mk_bundled("a")
-        sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         import shutil
 
         shutil.rmtree(self.user / "a")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.user_deleted, ["a"])
         self.assertFalse((self.user / "a").exists())
 
     def test_skill_removida_do_bundled_e_limpa_do_manifesto(self):
         self.mk_bundled("a")
-        sync_bundled_skills(self.bundled, self.user)
+        sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         import shutil
 
         shutil.rmtree(self.bundled / "a")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.cleaned, ["a"])
         self.assertNotIn("a", read_manifest(self.user / MANIFEST_NAME))
 
@@ -222,14 +250,18 @@ class SyncTests(unittest.TestCase):
         (self.user / MANIFEST_NAME).write_text("a\n", encoding="utf-8")  # v1
         self.assertEqual(read_manifest(self.user / MANIFEST_NAME), {"a": ""})
         self.mk_bundled("a", "v2")
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertEqual(r.user_modified, ["a"])
 
     def test_opt_out_por_perfil_zera_o_seeding(self):
         self.mk_bundled("a")
         self.user.mkdir(parents=True)
         (self.user / NO_BUNDLED_SKILLS_MARKER).touch()
-        r = sync_bundled_skills(self.bundled, self.user)
+        r = sync_bundled_skills(
+            self.bundled, self.user, policy=personal_policy(self, (self.user.parent))
+        )
         self.assertTrue(r.skipped_opt_out)
         self.assertEqual(r.copied, [])
         self.assertFalse((self.user / "a").exists())
@@ -270,7 +302,9 @@ class QuarentenaTests(unittest.TestCase):
     def test_o_pipeline_e_download_quarentena_scan_instalacao(self):
         path = quarantine_bundle(self.bundle(), self.q)
         self.assertEqual(scan_quarantined(path), [])
-        destino = install_from_quarantine(path, self.q, self.skills)
+        destino = install_from_quarantine(
+            path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+        )
         self.assertTrue((destino / "SKILL.md").is_file())
         self.assertFalse(path.exists(), "sai da quarentena ao ser promovida")
 
@@ -289,7 +323,9 @@ class QuarentenaTests(unittest.TestCase):
         fora.mkdir()
         (fora / "SKILL.md").write_text("x", encoding="utf-8")
         with self.assertRaises(UnsafeQuarantinePath):
-            install_from_quarantine(fora, self.q, self.skills)
+            install_from_quarantine(
+                fora, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+            )
 
     def test_dot_dot_no_meio_do_caminho_nao_passa(self):
         """Sem `resolve()`, um `..` no meio passaria pela contenção."""
@@ -299,7 +335,9 @@ class QuarentenaTests(unittest.TestCase):
         # genérico, o teste passaria também por "falta SKILL.md" e deixaria
         # de significar "a contenção pegou".
         with self.assertRaises(UnsafeQuarantinePath):
-            install_from_quarantine(disfarcado, self.q, self.skills)
+            install_from_quarantine(
+                disfarcado, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+            )
 
     def test_symlink_e_rejeitado_no_scan_E_na_promocao(self):
         """Reconferido na promoção porque entre o scan e ela o conteúdo pode
@@ -309,13 +347,17 @@ class QuarentenaTests(unittest.TestCase):
         (path / "link").symlink_to("/etc/passwd")
         self.assertTrue(any("symlink" in f for f in scan_quarantined(path)))
         with self.assertRaises(UnsafeQuarantinePath):
-            install_from_quarantine(path, self.q, self.skills)
+            install_from_quarantine(
+                path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+            )
 
     def test_bundle_sem_SKILL_md_e_reprovado(self):
         path = quarantine_bundle(self.bundle(files={"leia.md": b"x"}), self.q)
         self.assertIn("falta SKILL.md", scan_quarantined(path))
         with self.assertRaises(QuarantineError):
-            install_from_quarantine(path, self.q, self.skills)
+            install_from_quarantine(
+                path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+            )
 
 
 # ===========================================================================

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import test_skill_mutation_service as service_fixtures
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_operation, personal_policy
 
 from kairos_domain.ownership import Actor
 from kairos_skills.catalog import catalog_home_id
@@ -19,16 +20,17 @@ from kairos_state import connect
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
-def stopped_creation(home, source, phase, pipe):
+@personal_operation
+def stopped_creation(home, source, phase, pipe, *, policy):
     db = connect(home / "state.db")
     repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
-    service = SkillMutationService(home, repo)
+    service = SkillMutationService(home, repo, policy=policy)
     original_prepare = repo.prepare
     original_publish = SkillMutationFiles.publish
     original_stage = SkillMutationFiles.stage
 
-    def prepare(draft, text):
-        result = original_prepare(draft, text)
+    def prepare(draft, text, **kwargs):
+        result = original_prepare(draft, text, **kwargs)
         if phase == "prepare":
             pipe.send(draft.operation_id)
             pipe.recv()
@@ -56,12 +58,15 @@ def stopped_creation(home, source, phase, pipe):
     db.close()
 
 
-def racing_creation(home, source, barrier, pipe):
+@personal_operation
+def racing_creation(home, source, barrier, pipe, *, policy):
     db = connect(home / "state.db")
     repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
     barrier.wait(timeout=10)
     try:
-        record = SkillMutationService(home, repo).add(source, actor=Actor.USER_FOREGROUND)
+        record = SkillMutationService(home, repo, policy=policy).add(
+            source, actor=Actor.USER_FOREGROUND
+        )
         pipe.send(("committed", record.operation_id))
     except SkillMutationError as error:
         pipe.send(("refused", error.kind))
@@ -109,7 +114,9 @@ class RecoveryTests(unittest.TestCase):
         try:
             repo = SkillMutationRepository(db, home_id=catalog_home_id(self.home))
             with skill_mutation_lock(self.home), SkillMutationFiles(self.home) as files:
-                return reconcile_pending(repo, files, name=name)
+                return reconcile_pending(
+                    repo, files, name=name, policy=personal_policy(self, files.home)
+                )
         finally:
             db.close()
 

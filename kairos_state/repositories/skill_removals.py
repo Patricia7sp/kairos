@@ -262,7 +262,9 @@ class SkillRemovalRepository:
                 "io", "Não foi possível confirmar a operação no ledger; consulte seu ID."
             ) from None
 
-    def _insert(self, draft: SkillTreeDraft) -> SkillTreeRecord:
+    def _insert(self, draft: SkillTreeDraft, *, policy_receipt=None) -> SkillTreeRecord:
+        from kairos_state.repositories.skill_org_protections import insert_policy_intent
+
         self._conn.execute(
             "INSERT INTO skill_tree_operations(operation_id,home_id,action,name,actor,created_at,provenance,proof_json,snapshot_id,reverts) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
@@ -295,6 +297,8 @@ class SkillRemovalRepository:
             )
         else:
             require(draft.adoption is None)
+        if draft.action is SkillTreeAction.RESTORE:
+            insert_policy_intent(self._conn, draft, policy_receipt)
         self._conn.execute(
             "INSERT INTO skill_tree_events(operation_id,state) VALUES (?,'prepared')",
             (draft.operation_id,),
@@ -331,7 +335,9 @@ class SkillRemovalRepository:
 
         return self._write(operation)
 
-    def prepare_restore(self, draft: SkillTreeDraft) -> SkillTreeRecord:
+    def prepare_restore(self, draft: SkillTreeDraft, *, policy_receipt=None) -> SkillTreeRecord:
+        from kairos_state.repositories.skill_org_protections import validate_policy_receipt
+
         require(
             type(draft) is SkillTreeDraft
             and draft.action is SkillTreeAction.RESTORE
@@ -339,6 +345,7 @@ class SkillRemovalRepository:
         )
 
         def operation():
+            validate_policy_receipt(self._conn, draft, policy_receipt)
             parent = self.get(draft.reverts)
             require(
                 parent is not None
@@ -347,7 +354,7 @@ class SkillRemovalRepository:
             )
             require((parent.name, parent.provenance) == (draft.name, draft.provenance))
             require(_inventory(draft.proof) == _inventory(self._snapshot(draft.snapshot_id)))
-            return self._insert(draft)
+            return self._insert(draft, policy_receipt=policy_receipt)
 
         return self._write(operation)
 

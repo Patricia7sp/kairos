@@ -6,6 +6,7 @@ import hashlib
 import os
 import sqlite3
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 
 from kairos_domain.ownership import Provenance
@@ -21,6 +22,8 @@ from kairos_skills.mutation_io import (
     open_directory,
     open_fd,
 )
+from kairos_skills.org_policy import OrgPolicySession
+from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
 from kairos_skills.removal_io import capture_skill
 from kairos_skills.removal_origin import resolve_removal_origin
 from kairos_skills.removal_state import database_connection, read_skill_repository
@@ -214,13 +217,34 @@ def _make_identification(name, evidence, origin, adoption, adoption_record):
     )
 
 
-def identify_skill(home: Path, name: str) -> SkillIdentification:
+def _organization_observation(home, name, policy, database):
+    current = bool(policy.receipt(name).bindings)
+    with database_connection(home, write=False) as connection:
+        if connection is None:
+            if database:
+                raise _changed()
+            return current, False
+        if _database_fingerprint(connection) != database:
+            raise _changed()
+        repository = read_skill_repository(connection, home)
+        if repository is None:
+            return current, False
+        guard = repository_guard(policy, repository)
+        recorded = guard.protections is not None and bool(
+            guard.protections.protected_organizations(name)
+        )
+        return current, recorded
+
+
+def identify_skill(home: Path, name: str, *, policy: OrgPolicySession) -> SkillIdentification:
     """Diagnóstico do instante observado; remove deve revalidar suas próprias provas."""
     validate_name(name)
     home = Path(home)
+    attest_policy_home(policy, home)
     captured = None
     try:
         evidence, database = _installation_evidence(home, name)
+        protection = _organization_observation(home, name, policy, database)
         captured = read_installation_capture(home, name)
         origin = resolve_removal_origin(home, name, evidence.current, captured)
         repeated, _ = _installation_evidence(home, name, expected_database=database)
@@ -247,4 +271,25 @@ def identify_skill(home: Path, name: str) -> SkillIdentification:
         database=database,
         captured=captured,
     )
-    return _make_identification(name, evidence, origin, adoption, adoption_record)
+    if _organization_observation(home, name, policy, database) != protection:
+        raise _changed()
+    policy.revalidate()
+    report = _make_identification(name, evidence, origin, adoption, adoption_record)
+    current, recorded = protection
+    known = (
+        report.known_protection
+        + (("organization_policy",) if current else ())
+        + (("organization_recorded",) if recorded else ())
+    )
+    reasons = report.reasons
+    if current and not recorded:
+        reasons += ("organization_observation_not_persisted",)
+    return replace(
+        report,
+        known_protection=known,
+        protection_coverage="policy_and_recorded"
+        if policy.context.mode == "file"
+        else "namespace_and_recorded_only",
+        removivel=report.removivel and not current and not recorded,
+        reasons=reasons,
+    )

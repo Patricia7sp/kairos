@@ -36,6 +36,7 @@ from kairos_skills.removal_contract import (
 )
 from kairos_state.contention import Budget
 from kairos_state.skill_adoptions_schema import ADOPTION_TABLES, validate_adoption_schema
+from kairos_state.skill_org_schema import ORG_OBJECTS, ORG_TABLES, validate_org_schema
 from kairos_state.skill_writer import register_skill_writer
 from kairos_state.writes import write_with_retry
 
@@ -202,7 +203,9 @@ def validate_skill_timeline(connection: sqlite3.Connection):
     with corrupt_errors():
         names = {
             row[0]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )
         }
         modern = {
             "skill_tree_operations",
@@ -214,17 +217,23 @@ def validate_skill_timeline(connection: sqlite3.Connection):
         version = None
         if "schema_version" in names:
             versions = connection.execute("SELECT version FROM schema_version").fetchall()
-            require(len(versions) == 1 and type(versions[0][0]) is int and 0 <= versions[0][0] <= 9)
+            require(
+                len(versions) == 1 and type(versions[0][0]) is int and 0 <= versions[0][0] <= 10
+            )
             version = versions[0][0]
+        require(version == 10 or not names & ORG_OBJECTS)
         if not names & modern:
             require((version is None or version < 8) and not names & ADOPTION_TABLES)
             return None
-        require(modern <= names and version in (8, 9))
-        adopted = version == 9
+        require(modern <= names and version in (8, 9, 10))
+        adopted = version >= 9
+        require((names >= ORG_TABLES) if version == 10 else not names & ORG_TABLES)
         require((names >= ADOPTION_TABLES) if adopted else not names & ADOPTION_TABLES)
         if adopted:
             try:
                 validate_adoption_schema(connection)
+                if version == 10:
+                    validate_org_schema(connection)
             except sqlite3.DatabaseError:
                 require(False)
         require(
@@ -683,8 +692,10 @@ class SkillMutationRepository:
     def prepare_remove(self, draft, snapshot):
         return self._prepare_tree(draft, lambda tree: tree.prepare_remove(draft, snapshot))
 
-    def prepare_restore(self, draft):
-        return self._prepare_tree(draft, lambda tree: tree.prepare_restore(draft))
+    def prepare_restore(self, draft, *, policy_receipt=None):
+        return self._prepare_tree(
+            draft, lambda tree: tree.prepare_restore(draft, policy_receipt=policy_receipt)
+        )
 
     def _write(self, operation):
         register_skill_writer(self._conn)
@@ -712,7 +723,12 @@ class SkillMutationRepository:
                 "io", "Não foi possível confirmar a operação no ledger; consulte seu ID."
             ) from None
 
-    def prepare(self, draft: SkillMutationDraft, text: str):
+    def prepare(self, draft: SkillMutationDraft, text: str, *, policy_receipt=None):
+        from kairos_state.repositories.skill_org_protections import (
+            insert_policy_intent,
+            validate_policy_receipt,
+        )
+
         require(type(draft) is SkillMutationDraft)
         creation = validate_skill_creation(text)
         require(
@@ -722,6 +738,10 @@ class SkillMutationRepository:
         )
 
         def operation():
+            if draft.action is SkillMutationAction.CREATE:
+                validate_policy_receipt(self._conn, draft, policy_receipt)
+            else:
+                require(policy_receipt is None)
             self._assert_no_pending(draft.name)
             current = self._current_create(draft.name)
             if draft.action is SkillMutationAction.CREATE:
@@ -761,6 +781,8 @@ class SkillMutationRepository:
                     draft.reverts,
                 ),
             )
+            if draft.action is SkillMutationAction.CREATE:
+                insert_policy_intent(self._conn, draft, policy_receipt)
             self._conn.execute(
                 "INSERT INTO skill_mutation_events(operation_id,state) VALUES (?,?)",
                 (draft.operation_id, "prepared"),

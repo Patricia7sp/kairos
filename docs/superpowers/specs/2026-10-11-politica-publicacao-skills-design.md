@@ -1,8 +1,10 @@
 # Política organizacional e coordenação de publicação — fatia B
 
-Status: proposta futura separada; não aprovada nem implementada. Depende dos
-contratos de resolução da [fatia A](2026-10-10-proveniencia-skills-design.md).
-Não entra no plano A1/A2. B1 e B2 terão planos e gates próprios.
+Status: o [recorte detalhado de B1](2026-10-14-politica-organizacional-b1-design.md)
+foi aprovado pelo usuário em 2026-10-14; seu plano aguarda revisão e a
+implementação está pendente. B2 continua proposta não aprovada nem implementada.
+Depende dos contratos de resolução da [fatia A](2026-10-10-proveniencia-skills-design.md).
+Não entra no plano A1/A2. B1 e B2 têm planos e gates próprios.
 
 ## Herdado e não herdado
 

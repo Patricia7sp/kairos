@@ -25,6 +25,12 @@ from kairos_state.skill_adoptions_schema import (
     validate_adoption_schema,
 )
 from kairos_state.skill_mutations_schema import SKILL_MUTATIONS_SCHEMA_SQL
+from kairos_state.skill_org_schema import (
+    ORG_TABLES,
+    migrate_org_protections,
+    repair_org_triggers,
+    validate_org_schema,
+)
 from kairos_state.skill_removals_schema import (
     SKILL_REMOVALS_SCHEMA_SQL,
     SKILL_REMOVALS_TRIGGERS_SQL,
@@ -122,6 +128,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(7, "journal reversível de autoria manual de skills", _v7_skill_mutations),
     Migration(8, "snapshots binários e timeline de remoção de skills", _v8_skill_removals),
     Migration(9, "adoção revogável e timeline canônica de autoridade", migrate_adoptions),
+    Migration(10, "proteção organizacional ligada à instalação", migrate_org_protections),
 )
 
 
@@ -133,6 +140,9 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
     anterior, íntegro — nunca num estado intermediário sem nome.
     """
     ceiling = target if target is not None else _schema.SCHEMA_VERSION
+    supported = max(migration.version for migration in MIGRATIONS)
+    if type(ceiling) is not int or not 0 <= ceiling <= supported:
+        raise sqlite3.OperationalError("alvo de schema não suportado")
     if conn.in_transaction:
         raise sqlite3.OperationalError("cannot migrate inside an existing transaction")
 
@@ -140,7 +150,7 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
     conn.execute("BEGIN IMMEDIATE")
     try:
         current = read_schema_version(conn)
-        if current is not None and current > _schema.SCHEMA_VERSION:
+        if current is not None and current > supported:
             raise sqlite3.OperationalError("schema futuro não suportado")
         if current is None:
             current = 0
@@ -153,10 +163,13 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
             migration.apply(conn)
             conn.execute("UPDATE schema_version SET version = ?", (migration.version,))
             current = migration.version
-        if current == 9:
+        if current >= 9:
             validate_adoption_schema(conn)
+        if current >= 10:
+            validate_org_schema(conn)
     except BaseException:
         conn.rollback()
+        register_skill_writer(conn)
         raise
     else:
         conn.commit()
@@ -192,30 +205,34 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 
 #: Tabelas cujas linhas são o dado do usuário. O reparo pode recriar índices,
 #: gatilhos, tabelas FTS e objetos derivados — nunca tocar nestas.
-CANONICAL_TABLES = ADOPTION_TABLES | frozenset(
-    {
-        "cron_notepad",
-        "executions",
-        "sessions",
-        "messages",
-        "system_prompts",
-        "runtime_sessions",
-        "runtime_turns",
-        "runtime_events",
-        "runtime_approvals",
-        "runtime_directory_leases",
-        "runtime_queue",
-        "skill_catalogs",
-        "skill_catalog_assets",
-        "skill_mutation_operations",
-        "skill_mutation_events",
-        "skill_mutation_contents",
-        "skill_tree_operations",
-        "skill_tree_events",
-        "skill_tree_snapshots",
-        "skill_tree_blobs",
-        "skill_mutation_timeline",
-    }
+CANONICAL_TABLES = (
+    ADOPTION_TABLES
+    | ORG_TABLES
+    | frozenset(
+        {
+            "cron_notepad",
+            "executions",
+            "sessions",
+            "messages",
+            "system_prompts",
+            "runtime_sessions",
+            "runtime_turns",
+            "runtime_events",
+            "runtime_approvals",
+            "runtime_directory_leases",
+            "runtime_queue",
+            "skill_catalogs",
+            "skill_catalog_assets",
+            "skill_mutation_operations",
+            "skill_mutation_events",
+            "skill_mutation_contents",
+            "skill_tree_operations",
+            "skill_tree_events",
+            "skill_tree_snapshots",
+            "skill_tree_blobs",
+            "skill_mutation_timeline",
+        }
+    )
 )
 
 #: Derivados: reconstrutíveis a partir das canônicas, e portanto descartáveis
@@ -282,9 +299,15 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
             "SELECT id,content,tool_name,tool_calls FROM messages_fts_trigram_src"
         )
 
-    if read_schema_version(conn) == _schema.SCHEMA_VERSION:
+    observed = read_schema_version(conn)
+    if observed is not None and observed >= 9:
         with conn:
-            repair_adoption_triggers(conn)
+            if observed == 10:
+                repair_org_triggers(conn)
+            elif observed == 9:
+                repair_adoption_triggers(conn)
+            else:
+                raise sqlite3.DatabaseError("schema futuro não suportado para reparo")
             validate_adoption_schema(conn)
 
     depois = canonical_fingerprint(conn)

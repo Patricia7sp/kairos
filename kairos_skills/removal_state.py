@@ -15,6 +15,7 @@ from kairos_skills.mutation_io import check_chain, open_directory, open_fd, same
 from kairos_state.connection import BUSY_TIMEOUT_MS, apply_wal_with_fallback
 from kairos_state.repositories.skill_mutations import SkillMutationRepository, corrupt_errors
 from kairos_state.skill_adoptions_schema import ADOPTION_TABLES
+from kairos_state.skill_org_schema import ORG_OBJECTS, ORG_TABLES
 from kairos_state.skill_writer import register_skill_writer
 
 
@@ -176,7 +177,9 @@ def read_skill_repository(connection: sqlite3.Connection, home: Path):
     with corrupt_errors():
         names = {
             row[0]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )
         }
         version = None
         if "schema_version" in names:
@@ -184,20 +187,28 @@ def read_skill_repository(connection: sqlite3.Connection, home: Path):
             if (
                 len(versions) != 1
                 or type(versions[0][0]) is not int
-                or not 0 <= versions[0][0] <= 9
+                or not 0 <= versions[0][0] <= 10
             ):
                 raise SkillMutationError(
                     "corrupt", "Versão do ledger incompatível; leitura recusada."
                 )
             version = versions[0][0]
-        families = names & (_LEGACY_TABLES | _TREE_TABLES | ADOPTION_TABLES)
+        families = names & (_LEGACY_TABLES | _TREE_TABLES | ADOPTION_TABLES | ORG_OBJECTS)
         if not families:
             if version is not None and version >= 7:
                 raise SkillMutationError(
                     "corrupt", "Ledger de skills ausente em banco migrado; leitura recusada."
                 )
             return None
-        if names & ADOPTION_TABLES or version == 9:
+        if names & ORG_OBJECTS or version == 10:
+            if (
+                not names >= ORG_TABLES | ADOPTION_TABLES | _TREE_TABLES | _LEGACY_TABLES
+                or version != 10
+            ):
+                raise SkillMutationError(
+                    "corrupt", "Ledger de proteção incompleto; leitura recusada."
+                )
+        elif names & ADOPTION_TABLES or version == 9:
             if not names >= ADOPTION_TABLES | _TREE_TABLES | _LEGACY_TABLES or version != 9:
                 raise SkillMutationError(
                     "corrupt", "Ledger de adoção incompleto; leitura recusada."

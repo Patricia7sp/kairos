@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_receipt
 from test_skill_mutation_state import creation_draft
 
 from kairos_domain.ownership import Actor, Provenance
@@ -163,7 +164,9 @@ class AdoptionStateTests(unittest.TestCase):
 
     def seed_v8(self):
         creation = creation_draft(self.home)
-        self.common.prepare(creation, creation_text())
+        self.common.prepare(
+            creation, creation_text(), policy_receipt=personal_receipt(creation, self.common)
+        )
         self.common.finish(creation.operation_id, SkillMutationState.COMMITTED)
         tree = SkillRemovalRepository(self.db, home_id=self.home_id)
         draft = self.tree_draft()
@@ -208,7 +211,7 @@ class AdoptionStateTests(unittest.TestCase):
 
         text = creation_text(name="second")
         creation = creation_draft(self.home, validate_skill_creation(text))
-        self.common.prepare(creation, text)
+        self.common.prepare(creation, text, policy_receipt=personal_receipt(creation, self.common))
         removed = self.tree_draft(name="other-bundle")
         self.common.prepare_remove(removed, capture())
         self.common.finish(draft.operation_id, SkillMutationState.COMMITTED)
@@ -329,7 +332,9 @@ migrate(db)
             proof=capture(22),
             adoption=dataclasses.replace(removed.adoption, installation_id=restore_id),
         )
-        self.common.prepare_restore(restored)
+        self.common.prepare_restore(
+            restored, policy_receipt=personal_receipt(restored, self.common)
+        )
         self.common.finish(restored.operation_id, SkillMutationState.COMMITTED)
         self.assertEqual(
             self.common.installation_evidence(adoption.name).adoption.adoption_id,
@@ -371,7 +376,11 @@ migrate(db)
 
         text = creation_text(name=draft.name)
         with self.assertRaises(SkillMutationError):
-            self.common.prepare(creation_draft(self.home, validate_skill_creation(text)), text)
+            self.common.prepare(
+                (fixture_draft := creation_draft(self.home, validate_skill_creation(text))),
+                text,
+                policy_receipt=personal_receipt(fixture_draft, self.common),
+            )
         self.assertEqual(canonical_rows(self.db), before)
 
     def test_partial_schema_refused_without_reimport(self):
@@ -590,7 +599,9 @@ migrate(db)
         repository = self.modern()
         adoption = self.adopt(repository)
         legacy = creation_draft(self.home)
-        self.common.prepare(legacy, creation_text())
+        self.common.prepare(
+            legacy, creation_text(), policy_receipt=personal_receipt(legacy, self.common)
+        )
         removed = self.tree_draft()
         self.common.prepare_remove(removed, capture())
         statements = (
@@ -669,7 +680,9 @@ migrate(db)
     def test_preexisting_independent_grant_cannot_be_adopted_or_revoked(self):
         repository = self.modern()
         creation = creation_draft(self.home)
-        self.common.prepare(creation, creation_text())
+        self.common.prepare(
+            creation, creation_text(), policy_receipt=personal_receipt(creation, self.common)
+        )
         self.common.finish(creation.operation_id, SkillMutationState.COMMITTED)
         before = canonical_rows(self.db)
         with self.assertRaises(SkillMutationError):
@@ -692,7 +705,11 @@ migrate(db)
             if kind == "tree":
                 self.common.prepare_remove(self.tree_draft(name=name), capture())
             else:
-                self.common.prepare(creation_draft(self.home), creation_text())
+                self.common.prepare(
+                    (fixture_draft := creation_draft(self.home)),
+                    creation_text(),
+                    policy_receipt=personal_receipt(fixture_draft, self.common),
+                )
             before = canonical_rows(self.db)
             with self.subTest(kind=kind), self.assertRaises(SkillMutationError):
                 repository.prepare_adopt(self.adopt_draft(name=name), capture())

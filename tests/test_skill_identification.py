@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy, personal_receipt
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture
@@ -49,7 +50,9 @@ class SkillIdentificationTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         migrate(self.db)
         self.repo = SkillMutationRepository(self.db, home_id=catalog_home_id(self.home))
-        self.service = SkillMutationService(self.home, self.repo)
+        self.service = SkillMutationService(
+            self.home, self.repo, policy=personal_policy(self, self.home)
+        )
 
     def create(self):
         self.ledger()
@@ -91,7 +94,7 @@ class SkillIdentificationTests(unittest.TestCase):
 
     def observe(self):
         before = self.home_inventory()
-        report = identify_skill(self.home, self.name)
+        report = identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(self.home_inventory(), before)
         self.assertEqual(report.name, self.name)
         self.assertEqual(report.known_protection, ())
@@ -366,7 +369,9 @@ class SkillIdentificationTests(unittest.TestCase):
                 creation.sha256,
                 creation.size_bytes,
             )
-            self.repo.prepare(draft, creation.text)
+            self.repo.prepare(
+                draft, creation.text, policy_receipt=personal_receipt(draft, self.repo)
+            )
         target = self.home / "skills" / self.name
         shutil.copytree(self.home / ".skill-mutations" / "staging" / operation_id, target)
         report = self.observe()
@@ -440,8 +445,13 @@ class SkillIdentificationTests(unittest.TestCase):
                     elif missing == "target":
                         (self.home / "skills").mkdir(exist_ok=True)
                     before = self.home_inventory()
+                    kwargs = (
+                        {"policy": personal_policy(self, self.home)}
+                        if method is identify_skill
+                        else {}
+                    )
                     with self.assertRaises(SkillMutationError) as raised:
-                        method(self.home, self.name)
+                        method(self.home, self.name, **kwargs)
                     self.assertEqual(raised.exception.kind, "conflict")
                     self.assertEqual(self.home_inventory(), before)
 
@@ -453,8 +463,13 @@ class SkillIdentificationTests(unittest.TestCase):
         for method in (identify_skill, read_installation_capture):
             for name in ("_org", "../escape", "not valid", "Legacy_Name"):
                 with self.subTest(method=method.__name__, name=name):
+                    kwargs = (
+                        {"policy": personal_policy(self, self.home)}
+                        if method is identify_skill
+                        else {}
+                    )
                     with self.assertRaises(SkillMutationError) as raised:
-                        method(NoFilesystemAccess(), name)
+                        method(NoFilesystemAccess(), name, **kwargs)
                     self.assertEqual(raised.exception.kind, "input")
 
     def test_corrupt_and_incompatible_ledgers_are_errors_without_effects(self):
@@ -474,7 +489,7 @@ class SkillIdentificationTests(unittest.TestCase):
                 self.db.commit()
                 before = self.home_inventory()
                 with self.assertRaises(SkillMutationError) as raised:
-                    identify_skill(self.home, self.name)
+                    identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
                 self.assertEqual(raised.exception.kind, "corrupt")
                 self.assertNotIn(str(self.root), str(raised.exception))
                 self.assertEqual(self.home_inventory(), before)
@@ -509,7 +524,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_create_database):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertTrue((self.home / "state.db").exists())
 
     def test_pending_transition_with_same_ids_between_observations_is_conflict(self):
@@ -523,7 +542,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_mark_conflict):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertIs(self.repo.get(pending.operation_id).state, SkillMutationState.CONFLICT)
 
     def test_second_database_change_is_conflict_before_new_corruption_is_interpreted(self):
@@ -537,7 +560,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_drop_table):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
 
     def test_second_database_with_unreadable_sqlite_bytes_is_concurrent_conflict(self):
         self.create()
@@ -550,7 +577,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_corrupt_database):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
 
     def test_real_wal_commit_during_copy_is_conflict_and_preserves_committed_change(self):
         self.create()
@@ -566,7 +597,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch("kairos_skills.removal_state.os.read", read_then_commit):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertTrue(committed)
         self.assertEqual(self.repo.pending(self.name), tuple(committed))
 
@@ -582,7 +617,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_prepare):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertEqual(self.repo.pending(self.name), tuple(pending))
 
     def test_tree_change_between_observations_is_conflict(self):
@@ -596,7 +635,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "resolve_removal_origin", resolve_then_edit):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertEqual(target.read_bytes(), b"Edicao concorrente\n")
 
     def test_target_renamed_after_first_capture_is_concurrent_conflict(self):
@@ -613,7 +656,11 @@ class SkillIdentificationTests(unittest.TestCase):
             return result
 
         with patch.object(identification, "read_installation_capture", capture_then_rename):
-            self.assert_concurrent(lambda: identify_skill(self.home, self.name))
+            self.assert_concurrent(
+                lambda: identify_skill(
+                    self.home, self.name, policy=personal_policy(self, self.home)
+                )
+            )
         self.assertEqual(self.home_inventory(), after_rename[0])
         self.assertFalse(target.exists())
         self.assertEqual(
@@ -630,7 +677,7 @@ class SkillIdentificationTests(unittest.TestCase):
             ),
             self.assertRaises(SkillMutationError) as raised,
         ):
-            identify_skill(self.home, self.name)
+            identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(raised.exception.kind, "io")
         self.assertEqual(self.home_inventory(), before)
 
@@ -665,6 +712,6 @@ class SkillIdentificationTests(unittest.TestCase):
             patch("kairos_filesystem.tree.os.listxattr", side_effect=OSError),
             self.assertRaises(SkillMutationError) as raised,
         ):
-            identify_skill(self.home, self.name)
+            identify_skill(self.home, self.name, policy=personal_policy(self, self.home))
         self.assertEqual(raised.exception.kind, "unavailable")
         self.assertEqual(self.home_inventory(), before)

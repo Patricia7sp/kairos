@@ -2516,40 +2516,58 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status: proposta; não implementada nem aprovada.** Referência de design:
-`docs/superpowers/specs/2026-10-11-politica-publicacao-skills-design.md`,
-com recusa conservadora de namespace na fatia A
-(`2026-10-10-proveniencia-skills-design.md`).
+**Status: B1 implementada na branch, em validação para entrega; B2 permanece
+proposta não aprovada.** Spec aprovada em 2026-10-14 e plano revisado pelo
+usuário: `docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`
+e `docs/superpowers/plans/2026-10-14-politica-organizacional-b1.md`.
+Evidências e limites: [relatório B1](superpowers/reports/2026-10-14-politica-organizacional-b1.md).
 Referências herdadas: `_reversa_sdd/skills/requirements.md:54`,
 `skills/design.md:93` e §Fluxos alternativos (`:115`);
-`permissions.md` §3.4; ADR 009, Consequências;
-D-CLI.SKILL.REMOVE.
+`permissions.md` §3.4; ADR 009, Consequências; D-CLI.SKILL.REMOVE.
 
-O contrato herdado exige veto a `delete` e `remove_file` de espelhos
-organizacionais. Não define enrollment, emissor, administradores, formato de
-política ou override. A política local por home e nome proposta para Kairos
-é decisão nova e ficará em fatia futura, junto à continuidade dos vetos
-registrados. Ela coordenaria os escritores participantes para que uma nova
-publicação ou ausência posterior de uma entrada não apagasse uma proteção
-comprovada. Não autentica uma organização remota.
+A política local é decisão nova do Kairos. `KAIROS_SKILL_ORG_POLICY` seleciona
+um JSON UTF-8 regular, absoluto, sem symlinks ou hardlinks e limitado a 1 MiB.
+Ausência seleciona `none`; configuração inválida ou fonte inacessível recusa
+antes do banco mutante. A sessão mantém descritores e revalida cadeia, montagem,
+identidade e conteúdo antes dos efeitos. Componentes de home que surgem durante
+a sessão passam a integrar a observação até seu encerramento.
 
-O limite real é continuidade da política entre operações cooperativas.
-Este recorte não estabelece isolamento da configuração e das provas contra
-o usuário de execução, o runtime ou ferramentas com acesso de escrita ao
-host. Não declarar resistência a adulteração nem endurecimento de runtime;
-essa garantia exigiria composição administrativa e isolamento próprios,
-fora da proposta. Nenhum argumento de adoção ou declaração no conteúdo
-poderia afastar um veto conhecido pelos serviços participantes.
+O veto combina namespace reservado `skills/_org/`, binding corrente por
+home/nome e proteção durável. Binding inativo também veta; adoção USER,
+`--yes`, origem declarada e ausência posterior da fonte não afastam proteção
+registrada. Não há `force` nem `unprotect`. CREATE e RESTORE autorizados por
+seus próprios contratos preparam recibo no journal e concluem instalação e
+eventos de proteção na mesma transação. Consulta, recusa e `identify` não gravam
+observações. Proteção por nome sobrevive à substituição do inode e à revogação
+USER, sem conceder autoria ou proveniência.
 
-A reserva conservadora de `skills/_org/` é convenção nova proposta, não
-namespace definido pelas fontes. A fatia A propõe somente recusar alvos nesse
-namespace; consumo, mirrors e política externa ficam para a fatia B.
-Bloquear substituição destrutiva por sync ou promoção é uma
-ampliação futura do guard herdado: não equivale a afirmar que todas as ações
-`edit`, `patch` e `write_file` são proibidas. O design deve separar esse
-guard de substituição da matriz original. A fatia A mantém recusa de origem
-organizacional conhecida e exige adoção comprovada para autorizar instalação
-antes desconhecida, sem declarar concluído o guard organizacional geral.
+O schema v10 é aditivo e conserva as linhas canônicas A1/A2. Todos os escritores
+participantes precisam ser compatíveis: clientes v8/v9 são recusados nas famílias
+antigas e novas de banco v10, inclusive após reparo dos objetos derivados.
+Leitores reconhecem homes antigos sem migrá-los; backup valida e conserva a
+família de proteção. Restauração para outro home não transfere seus vínculos.
+
+Serviços e recuperações recebem sessão explícita, sem default `none`.
+Recuperação não incorpora binding novo a publicação antiga sem recibo equivalente;
+recibo preparado continua obrigatório mesmo se a política corrente retirar o
+binding. Falha ou veto preserva pendência e versões. `identify` informa
+`organization_policy`/`organization_recorded`, cobertura `policy_and_recorded`
+ou `namespace_and_recorded_only` e a limitação de observação não persistida.
+Diagnósticos não incluem fonte privada, conteúdo ou rótulos de organização.
+
+Sync e promoção exigem guard nas APIs públicas e recusam alvo protegido,
+inclusive ausente, até B2. Promoção também recusa operação pendente do nome sob
+o lock comum, preservando destino e quarentena. Sync relata progresso parcial
+com `blocked` e `failed`, sem listar o alvo vetado como copiado/atualizado; a CLI
+retorna 77. Compensação e limpeza revalidam política e identidades; veto conserva
+resíduos privados, inclusive após saída de contexto ou coleta de lixo.
+
+A garantia é continuidade entre operações cooperativas. Não autentica uma
+organização nem isola configuração, banco e código contra o mesmo UID.
+`remove_file` tem contrato no guard, sem nova operação pública. `edit`, `patch`
+e `write_file` in-place permanecem fora deste veto. B2 continua responsável
+pela publicação coordenada de alvos protegidos e recuperação transacional geral;
+B1 não torna um lote de sync atômico nem instala política em produção.
 
 ## D-09.GATES — matriz de ações prevalece sobre contagem textual
 

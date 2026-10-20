@@ -4,6 +4,7 @@ import unittest
 
 import test_skill_adoption_service as adoption_fixtures
 from skill_mutation_fixtures import creation_text
+from skill_org_fixtures import personal_policy
 
 from kairos_domain.ownership import Actor
 from kairos_skills.adoption_contract import AdoptionAuthority
@@ -19,8 +20,12 @@ class SkillAdoptionLineageTests(unittest.TestCase):
         adoption_fixtures.SkillAdoptionServiceTests.setUp(self)
         adoption_fixtures.SkillAdoptionServiceTests.legacy(self)
         self.repository = self.ledger()
-        self.adoptions = adoption_fixtures.adoption_service_type()(self.home, self.repository)
-        self.mutations = SkillMutationService(self.home, self.repository)
+        self.adoptions = adoption_fixtures.adoption_service_type()(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
+        self.mutations = SkillMutationService(
+            self.home, self.repository, policy=personal_policy(self, self.home)
+        )
 
     def ledger(self):
         return adoption_fixtures.SkillAdoptionServiceTests.ledger(self)
@@ -55,7 +60,12 @@ class SkillAdoptionLineageTests(unittest.TestCase):
             AdoptionAuthority(adoption.operation_id, restored.operation_id, True),
         )
         self.assertEqual(restored.draft.installation_source, adoption.draft.installation_source)
-        self.assertEqual(identify_skill(self.home, self.name).adoption_id, adoption.operation_id)
+        self.assertEqual(
+            identify_skill(
+                self.home, self.name, policy=personal_policy(self, self.home)
+            ).adoption_id,
+            adoption.operation_id,
+        )
 
         revoked = self.adoptions.unadopt(
             self.name,

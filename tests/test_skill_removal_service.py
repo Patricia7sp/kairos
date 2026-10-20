@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import test_skill_mutation_service as service_fixtures
 import test_skill_removal_io as io_fixtures
+from skill_org_fixtures import personal_policy
 
 import kairos_filesystem.tree as tree_io
 from kairos_domain.ownership import Actor, Provenance
@@ -405,7 +406,9 @@ class RemovalBundledServiceTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         migrate(self.db)
         self.repo = SkillMutationRepository(self.db, home_id=catalog_home_id(self.home))
-        self.service = SkillMutationService(self.home, self.repo)
+        self.service = SkillMutationService(
+            self.home, self.repo, policy=personal_policy(self, self.home)
+        )
         resolver = patch(
             "kairos_skills.removal_origin.trusted_bundle_root", return_value=self.bundle
         )
@@ -446,8 +449,8 @@ class RemovalBundledServiceTests(unittest.TestCase):
         self.assertIn("example", self.repo.bundled_tombstones())
         original = self.repo.prepare_restore
 
-        def prepare_then_error(draft):
-            original(draft)
+        def prepare_then_error(draft, **kwargs):
+            original(draft, **kwargs)
             self.assertIn("example", self.repo.bundled_tombstones())
             raise SkillMutationError("io", "fixture")
 

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import test_skill_removal_service as fixtures
+from skill_org_fixtures import personal_operation, personal_policy
 
 from kairos_domain.ownership import Actor
 from kairos_skills.catalog import catalog_home_id
@@ -18,10 +19,11 @@ from kairos_state import connect
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
-def stopped_tree_operation(home, name, remove_id, phase, pipe):
+@personal_operation
+def stopped_tree_operation(home, name, remove_id, phase, pipe, *, policy):
     db = connect(home / "state.db")
     repo = SkillMutationRepository(db, home_id=catalog_home_id(home))
-    service = SkillMutationService(home, repo)
+    service = SkillMutationService(home, repo, policy=policy)
     original_prepare = repo.prepare_restore if remove_id else repo.prepare_remove
     original_move = SkillRemovalFiles.publish if remove_id else SkillRemovalFiles.retire
     original_finish = repo.finish
@@ -31,10 +33,10 @@ def stopped_tree_operation(home, name, remove_id, phase, pipe):
         pipe.send(operation_id)
         pipe.recv()
 
-    def prepare(draft, *args):
+    def prepare(draft, *args, **kwargs):
         if phase == "before-prepare":
             stop(draft.operation_id)
-        result = original_prepare(draft, *args)
+        result = original_prepare(draft, *args, **kwargs)
         if phase == "prepared":
             stop(draft.operation_id)
         return result
@@ -104,7 +106,9 @@ class RemovalRecoveryTests(unittest.TestCase):
         try:
             repo = SkillMutationRepository(db, home_id=catalog_home_id(self.home))
             with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
-                return reconcile_pending(repo, files, name=self.name)
+                return reconcile_pending(
+                    repo, files, name=self.name, policy=personal_policy(self, files.home)
+                )
         finally:
             db.close()
 

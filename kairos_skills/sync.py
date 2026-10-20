@@ -14,15 +14,20 @@ Esse detalhe é o que faz o mecanismo funcionar.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import stat
+import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 
-from kairos_skills.mutation_lock import skill_mutation_lock
+from kairos_skills.mutation_contract import SkillMutationError
+from kairos_skills.org_policy_contract import OrgPolicyAction
+from kairos_skills.org_policy_guard import publication_guard
+from kairos_skills.publication_io import capture_publication, delete_publication, move_publication
 from kairos_skills.removal_state import read_skill_tombstones
 from kairos_skills.runtime import validate_skill_name
 
@@ -38,6 +43,7 @@ __all__ = [
 ]
 
 MANIFEST_NAME = ".bundled_manifest"
+_LOGGER = logging.getLogger(__name__)
 
 #: Marcador de opt-out por perfil. Presente ⇒ zero seeding.
 NO_BUNDLED_SKILLS_MARKER = ".no-bundled-skills"
@@ -63,6 +69,8 @@ class SyncResult:
     total_bundled: int = 0
     #: Distingue "optou por sair" de "sincronizou 0 / falhou".
     skipped_opt_out: bool = False
+    blocked: list[str] = field(default_factory=list)
+    failed: bool = False
 
 
 def origin_hash(skill_dir: Path) -> str:
@@ -125,7 +133,7 @@ def write_manifest(path: Path, manifest: dict[str, str]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
+def sync_bundled_skills(bundled_dir: Path, user_dir: Path, *, policy) -> SyncResult:
     """Semeia e atualiza, preservando o trabalho do usuário.
 
     **Os três casos, e o do meio é o inteligente:**
@@ -149,15 +157,18 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path) -> SyncResult:
         return result
 
     if not bundled_dir.is_dir():
-        with skill_mutation_lock(user_dir.parent):
+        with publication_guard(policy, user_dir.parent):
             read_skill_tombstones(user_dir.parent)
         return result
 
-    with _snapshot_bundle(bundled_dir) as bundled, skill_mutation_lock(user_dir.parent):
-        return _sync_discovered(bundled, user_dir)
+    with (
+        _snapshot_bundle(bundled_dir) as bundled,
+        publication_guard(policy, user_dir.parent) as guard,
+    ):
+        return _sync_discovered(bundled, user_dir, guard=guard)
 
 
-def _sync_discovered(bundled: dict[str, Path], user_dir: Path) -> SyncResult:
+def _sync_discovered(bundled: dict[str, Path], user_dir: Path, *, guard) -> SyncResult:
     tombstones = read_skill_tombstones(user_dir.parent)
     if user_dir.is_symlink():
         raise ValueError("Diretório de skills não pode ser um link.")
@@ -166,22 +177,54 @@ def _sync_discovered(bundled: dict[str, Path], user_dir: Path) -> SyncResult:
     if manifest_path.is_symlink():
         raise ValueError("Manifesto de skills não pode ser um link.")
     manifest = read_manifest(manifest_path)
-    with (
-        TemporaryDirectory(prefix=".skill-sync-", dir=user_dir) as temporary,
-        ExitStack() as rollback,
-    ):
+    original_manifest = manifest.copy()
+    staging = Path(mkdtemp(prefix=".skill-sync-", dir=user_dir))
+    rollback = ExitStack()
+    operation_id = uuid.uuid4().hex
+    try:
         result = _sync_items(
-            bundled, user_dir, manifest, Path(temporary), rollback, tombstones=tombstones
+            bundled, user_dir, manifest, staging, rollback, tombstones=tombstones, guard=guard
         )
-        write_manifest(manifest_path, manifest)
+        expected_staging = capture_publication(staging)
+        guard.policy.revalidate()
+        if manifest != original_manifest:
+            write_manifest(manifest_path, manifest)
         rollback.pop_all()
+
+        def cleanup_check():
+            guard.policy.revalidate()
+            for name in result.copied + result.updated:
+                guard.check(name, OrgPolicyAction.SYNC)
+
+        delete_publication(staging, expected_staging, guard=cleanup_check)
         return result
+    except BaseException:
+        _LOGGER.warning(
+            "skill_sync_residue_preserved",
+            extra={"action": "sync", "operation_id": operation_id, "reason": "publication_failed"},
+        )
+        rollback.close()
+        raise
 
 
-def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones) -> SyncResult:
+def _blocked(guard, name, result):
+    try:
+        guard.check(name, OrgPolicyAction.SYNC)
+    except SkillMutationError as error:
+        if error.kind != "denied":
+            raise
+        result.blocked.append(name)
+        result.failed = True
+        return True
+    return False
+
+
+def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones, guard) -> SyncResult:
     result = SyncResult(total_bundled=len(bundled))
 
     for name, src in bundled.items():
+        if _blocked(guard, name, result):
+            continue
         if name in tombstones:
             result.user_deleted.append(name)
             continue
@@ -193,7 +236,7 @@ def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones) -
             if dest.exists() or dest.is_symlink():
                 result.user_modified.append(name)
                 continue
-            _copy_tree(src, dest, staging, rollback)
+            _copy_tree(src, dest, staging, rollback, guard=guard)
             manifest[name] = current
             result.copied.append(name)
             continue
@@ -210,7 +253,7 @@ def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones) -
 
         if recorded and origin_hash(dest) == recorded:
             # Caso 2: o usuário nunca tocou — seguro atualizar.
-            _copy_tree(src, dest, staging, rollback)
+            _copy_tree(src, dest, staging, rollback, guard=guard)
             manifest[name] = current
             result.updated.append(name)
             continue
@@ -220,13 +263,15 @@ def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones) -
 
     for name in list(manifest):
         if name not in bundled:
+            if _blocked(guard, name, result):
+                continue
             del manifest[name]
             result.cleaned.append(name)
 
     return result
 
 
-def _copy_tree(src: Path, dest: Path, staging: Path, rollback: ExitStack) -> None:
+def _copy_tree(src: Path, dest: Path, staging: Path, rollback: ExitStack, *, guard) -> None:
     import shutil
 
     directory = staging / dest.name
@@ -234,17 +279,30 @@ def _copy_tree(src: Path, dest: Path, staging: Path, rollback: ExitStack) -> Non
     new = directory / "new"
     old = directory / "old"
     shutil.copytree(src, new)
+    new_proof = capture_publication(new)
+    old_proof = None
     if dest.exists():
-        os.replace(dest, old)
-    rollback.callback(_restore_copy, dest, old, directory / "discard")
-    os.replace(new, dest)
+        old_proof = capture_publication(dest)
+        move_publication(
+            dest, old, old_proof, guard=lambda: guard.check(dest.name, OrgPolicyAction.SYNC)
+        )
+    rollback.callback(
+        _restore_copy, dest, old, directory / "discard", new_proof, old_proof, guard=guard
+    )
+    move_publication(
+        new, dest, new_proof, guard=lambda: guard.check(dest.name, OrgPolicyAction.SYNC)
+    )
 
 
-def _restore_copy(dest: Path, old: Path, discard: Path) -> None:
+def _restore_copy(dest: Path, old: Path, discard: Path, new_proof, old_proof, *, guard) -> None:
+    def check():
+        guard.check(dest.name, OrgPolicyAction.SYNC)
+
+    check()
     if dest.exists() or dest.is_symlink():
-        os.replace(dest, discard)
+        move_publication(dest, discard, new_proof, guard=check)
     if old.exists():
-        os.replace(old, dest)
+        move_publication(old, dest, old_proof, guard=check)
 
 
 @contextmanager
