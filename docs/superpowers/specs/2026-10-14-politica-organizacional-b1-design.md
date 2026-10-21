@@ -1,8 +1,9 @@
 # B1 — política organizacional nos serviços de skills
 
-Status: spec aprovada pelo usuário em 2026-10-14; plano revisado e implementação
-integrada na branch. O [relatório B1](../reports/2026-10-14-politica-organizacional-b1.md)
-registra os gates e o estado de entrega. B2 permanece separado.
+Status atualizado em 21/10/2026: spec aprovada em 14/10, plano revisado e
+implementação integrada em `f9f9a6d` (PR #108, 20/10). O CI da main e o job de
+deploy passaram. O [relatório B1](../reports/2026-10-14-politica-organizacional-b1.md)
+preserva as evidências datadas; B2 permanece separado e não implementado.
 
 Complementa a [proposta B1/B2](2026-10-11-politica-publicacao-skills-design.md)
 e separa B1 da coordenação de publicação de B2. A2 foi integrada por
@@ -135,7 +136,7 @@ legíveis com cobertura declarada; escritores migram pelo fluxo existente.
 | Criação manual em destino ausente | Aplicar reserva de namespace; binding não concede autoria, mas gera proteção da instalação concluída |
 | `identify` | Informar veto corrente/registrado e cobertura; sem escrita e sem fonte privada |
 | Adoção e revogação USER | Não conceder autoridade destrutiva sobre alvo vetado; revogação USER continua sem remover veto |
-| Sync e promoção | Guard obrigatório nas APIs públicas, inclusive chamada direta; recusar publicação em alvo com binding ou proteção registrada até B2 |
+| Sync e promoção | Guard obrigatório nas APIs públicas, inclusive chamada direta; recusar publicação em alvo com binding ou proteção registrada |
 
 A última recusa inclui destino ausente: B1 não publica uma instalação
 organizacional por um escritor que ainda não sabe registrar proteção no journal
@@ -148,10 +149,12 @@ deve ter contrato testável para essa ação, mas B1 não cria uma nova ferramen
 para satisfazer a matriz herdada. Não declarar cobertura de um caminho público
 ausente. `edit`, `patch` e `write_file` in-place permanecem fora do veto novo.
 
-B2 continuará responsável por permitir publicações protegidas de forma
-coordenada, registrar publicações e provas de origem, substituir sem apagar
-diretamente destino ocupado e recuperar as fronteiras de staging/rename/fsync.
-B1 não declara corrigida a coordenação geral de publicação de alvos pessoais.
+A previsão original de B1 remetia publicações protegidas a B2. O desenho
+proposto em 21/10 conserva o veto, sem distribuição administrativa: B2 passa
+a coordenar publicações permitidas, provas de origem, substituição sem apagar
+diretamente o destino e recuperação nas fronteiras de staging/rename/fsync.
+Essa revisão documental não cria permissão nova. B1 não declara corrigida
+a coordenação geral de publicação de alvos pessoais.
 
 ## Recuperação
 
@@ -188,7 +191,10 @@ Casos obrigatórios:
 - Backup completo e restauração; família parcial/corrupta; leitura de home
   antigo sem migração; regressões de autoridade e linhagem A2 preservadas.
 - Sync/promoção vetados preservam destino e quarentena; alvos pessoais mantêm
-  contratos existentes. Nenhum teste simula guard apenas no adaptador CLI.
+  contratos existentes na entrega B1. A correção posterior de promoção
+  [D-CLI.SKILL.PROMOTE](../../decisoes.md#d-cliskillpromote--promoção-sem-substituição-destrutiva)
+  passa a recusar também destinos pessoais ocupados. Nenhum teste simula
+  guard apenas no adaptador CLI.
 
 Antes de merge: revisão independente obrigatória, `scripts/ci.sh` integral,
 imagem e integrações aplicáveis, jobs remotos verdes. Para esta etapa documental

@@ -2516,8 +2516,8 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status: B1 implementada na branch, em validação para entrega; B2 permanece
-proposta não aprovada.** Spec aprovada em 2026-10-14 e plano revisado pelo
+**Status em 21/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
+e job de deploy aprovados; B2 permanece proposta não aprovada.** Spec aprovada em 2026-10-14 e plano revisado pelo
 usuário: `docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`
 e `docs/superpowers/plans/2026-10-14-politica-organizacional-b1.md`.
 Evidências e limites: [relatório B1](superpowers/reports/2026-10-14-politica-organizacional-b1.md).
@@ -2547,6 +2547,42 @@ antigas e novas de banco v10, inclusive após reparo dos objetos derivados.
 Leitores reconhecem homes antigos sem migrá-los; backup valida e conserva a
 família de proteção. Restauração para outro home não transfere seus vínculos.
 
+No uso direto da API com código B1, o chamador deve migrar explicitamente a
+conexão para v10 antes de compor os serviços mutantes (#110). Mesmo em modo
+`none`, `add` prepara recibo; código novo sobre banco v9 recusa com
+“Schema antigo não registra recibo de proteção”. Essa recusa não é um fallback
+para escritor legado. A CLI já executa a migração nessa ordem. Exemplo de
+composição para um home existente, sem migração implícita no serviço:
+
+```python
+import os
+from pathlib import Path
+
+from kairos_domain.ownership import Actor
+from kairos_skills.catalog import catalog_home_id
+from kairos_skills.mutations import SkillMutationService
+from kairos_skills.org_policy import observe_org_policy, org_policy_context
+from kairos_state import connect
+from kairos_state.migrations import migrate
+from kairos_state.repositories.skill_mutations import SkillMutationRepository
+
+
+def adicionar_skill(home: Path, arquivo: Path):
+    with observe_org_policy(org_policy_context(os.environ), home) as policy:
+        connection = connect(home / "state.db")
+        try:
+            migrate(connection)
+            repository = SkillMutationRepository(connection, home_id=catalog_home_id(home))
+            service = SkillMutationService(home, repository, policy=policy)
+            return service.add(arquivo, actor=Actor.USER_FOREGROUND)
+        finally:
+            connection.close()
+```
+
+Selecionar e observar a política antes do banco mutante; mantê-la aberta na
+migração e no serviço. Leitores de homes antigos continuam sem escrita nem
+migração; clientes antigos seguem impedidos de escrever em v10.
+
 Serviços e recuperações recebem sessão explícita, sem default `none`.
 Recuperação não incorpora binding novo a publicação antiga sem recibo equivalente;
 recibo preparado continua obrigatório mesmo se a política corrente retirar o
@@ -2556,7 +2592,7 @@ ou `namespace_and_recorded_only` e a limitação de observação não persistida
 Diagnósticos não incluem fonte privada, conteúdo ou rótulos de organização.
 
 Sync e promoção exigem guard nas APIs públicas e recusam alvo protegido,
-inclusive ausente, até B2. Promoção também recusa operação pendente do nome sob
+inclusive ausente. B2 conserva esse veto; não prevê distribuição administrativa. Promoção também recusa operação pendente do nome sob
 o lock comum, preservando destino e quarentena. Sync relata progresso parcial
 com `blocked` e `failed`, sem listar o alvo vetado como copiado/atualizado; a CLI
 retorna 77. Compensação e limpeza revalidam política e identidades; veto conserva
@@ -2565,9 +2601,28 @@ resíduos privados, inclusive após saída de contexto ou coleta de lixo.
 A garantia é continuidade entre operações cooperativas. Não autentica uma
 organização nem isola configuração, banco e código contra o mesmo UID.
 `remove_file` tem contrato no guard, sem nova operação pública. `edit`, `patch`
-e `write_file` in-place permanecem fora deste veto. B2 continua responsável
-pela publicação coordenada de alvos protegidos e recuperação transacional geral;
-B1 não torna um lote de sync atômico nem instala política em produção.
+e `write_file` in-place permanecem fora deste veto. B2 propõe coordenar
+publicações permitidas e sua recuperação transacional, revalidando a proteção
+nas fronteiras. B1 não torna um lote de sync atômico nem instala política em produção.
+
+## D-CLI.SKILL.PROMOTE — promoção sem substituição destrutiva
+
+**Status: correção local de 21/10/2026, ainda não integrada.** A revisão
+pós-merge do PR #108 apontou exclusão do destino antes da tentativa de movimento.
+A recusa de política ou indisponibilidade do rename podia deixar a instalação
+anterior apagada. O recorte remove essa exclusão: toda promoção usa o movimento
+sem substituição existente. Destino ocupado, inclusive em corrida, é conflito;
+instalação e quarentena permanecem com suas identidades e conteúdo. Não existe
+`force`. Publicação inicial continua real e mantém os guards de B1.
+
+Esta é uma restrição deliberada do fluxo legado de promoção pessoal até B2:
+substituir uma instalação não é suportado por esta API nesta entrega. Não
+sugerir remover a instalação como etapa de uma atualização. Na publicação inicial, recusa ou falha após rename pode retornar erro com a
+árvore já no destino; não há recuperação automática nem garantia de quarentena
+ainda presente nessa fronteira. Sync mantém seu
+contrato próprio; este recorte não oferece journal/recuperação de publicação,
+nem atomicidade de lote. Evidências no
+[relatório da correção](superpowers/reports/2026-10-21-promocao-segura.md).
 
 ## D-09.GATES — matriz de ações prevalece sobre contagem textual
 

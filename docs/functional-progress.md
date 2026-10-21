@@ -1,9 +1,48 @@
 # Progresso funcional do Kairos
 
-Atualizado em 03/10/2026. Código integrado na `main`: PR #88, `69e4616`.
-Este documento reúne checkpoints de continuidade e entregas já integradas. O
-lote de hooks de stream iniciado em 03/10 permanece em desenvolvimento local,
-ainda não integrado à `main`. A conclusão integral não está declarada.
+Atualizado em 21/10/2026. Base integrada conferida: `main` em `f9f9a6d`
+(PR #108, de 20/10). Os checkpoints abaixo preservam suas datas e evidências;
+pendências históricas não substituem o estado consolidado desta seção.
+
+## Continuidade em 21/10/2026
+
+| Entrega | Integração confirmada |
+|---|---|
+| Hooks de stream de plugins | PR #89, `6f99912` |
+| CLI com ferramentas/MCP e autenticação compartilhada | PR #90, `841f1a5` |
+| Workspace restrito e autorização explícita de scripts | PRs #92/#93, `51ef540`/`52e0de0` |
+| Consumo explícito, categorias e catálogo de skills | PRs #94–#96, até `0463a5c` |
+| Autoria manual, histórico e rollback | PR #97, `0cefc78` |
+| Administração MCP e remoção segura | PRs #98/#99, `7de35ca`/`c77c92c` |
+| A1: identificação sem escrita | PR #102, `33b6e77`; registro no #103 |
+| A2: adoção/revogação com linhagem | PR #104, `d730822` |
+| Backup SQLite e diagnóstico | PRs #105/#107, `7ba1e6c`/`185440e` |
+| Sonar consultivo com cobertura de subprocessos | PR #106, `96fb3c9` |
+| B1: continuidade de proteção organizacional | PR #108, `f9f9a6d` |
+
+O [CI da main de B1](https://github.com/Patricia7sp/kairos/actions/runs/39378947460)
+concluiu os 11 jobs, incluindo deploy no Komodo e envio da análise Sonar.
+Isso não constitui um novo smoke de produção nem atesta o Quality Gate da main.
+O PR #108 registra Quality Gate aprovado para o head `703189d`.
+
+Prioridades de continuidade:
+
+1. Corrigir promoção que excluía instalação antes de confirmar o movimento.
+   O recorte local de 21/10 passa a recusar destino ocupado, preservando ambas
+   as árvores; ver [relatório](superpowers/reports/2026-10-21-promocao-segura.md).
+   Não está integrado à main por este registro.
+2. Explicitar migração v10 no uso direto dos serviços B1 (#110), documentada
+   nesta revisão em D-CLI.SKILL.ORG; a CLI já migrava antes de compor escritores.
+3. Revisar o [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
+   antes de produzir seu plano e implementar a coordenação transacional.
+4. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
+   a medição e definir uma observação estável. Não retirar revalidações de
+   política nas fronteiras de efeitos.
+
+Índice automático por padrão, `/learn`, curadoria integrada e workflows
+duráveis continuam pendentes; sua ordem posterior depende de recortes próprios.
+Ollama operacional permanece adiado. Instalar política em produção e isolamento
+contra adulteração pelo mesmo UID não foram entregues por B1.
 
 ## Mandato e critérios
 

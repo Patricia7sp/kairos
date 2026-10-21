@@ -12,7 +12,8 @@ from test_skill_org_services import OrgServiceFixture
 
 from kairos_cli import handlers
 from kairos_domain.ownership import Actor
-from kairos_skills import sync
+from kairos_filesystem.contract import FilesystemError
+from kairos_skills import hub, publication_io, sync
 from kairos_skills.hub import SkillBundle, install_from_quarantine, quarantine_bundle
 from kairos_skills.mutation_contract import SkillMutationError
 
@@ -61,6 +62,70 @@ class OrgPublicationTests(OrgServiceFixture):
                 removed.operation_id, actor=Actor.USER_FOREGROUND
             )
         )
+
+    def assert_occupied_promotion_preserved(self, source, target, before):
+        self.assertEqual(
+            (target.stat().st_ino, (target / "SKILL.md").read_bytes(), source.stat().st_ino),
+            before,
+        )
+        self.assertEqual((source / "SKILL.md").read_bytes(), b"replacement")
+
+    def occupied_promotion(self):
+        quarantine = self.root / "quarantine"
+        source = quarantine_bundle(
+            SkillBundle("personal-skill", {"SKILL.md": b"replacement"}), quarantine
+        )
+        target = self.home / "skills/personal-skill"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_bytes(b"installed")
+        before = (target.stat().st_ino, (target / "SKILL.md").read_bytes(), source.stat().st_ino)
+        return quarantine, source, target, before
+
+    def test_personal_promotion_refuses_occupied_destination_without_deleting_it(self):
+        quarantine, source, target, before = self.occupied_promotion()
+        with self.assertRaises(SkillMutationError) as caught:
+            install_from_quarantine(source, quarantine, target.parent, policy=self.none)
+        self.assertEqual(caught.exception.kind, "conflict")
+        self.assert_occupied_promotion_preserved(source, target, before)
+
+    def test_failed_move_preserves_installed_and_quarantined_versions(self):
+        quarantine, source, target, before = self.occupied_promotion()
+        with (
+            patch.object(
+                publication_io,
+                "rename_no_replace",
+                side_effect=FilesystemError("unavailable", "Movimento indisponível."),
+            ) as move,
+            self.assertRaises(SkillMutationError) as caught,
+        ):
+            install_from_quarantine(source, quarantine, target.parent, policy=self.none)
+        move.assert_called_once()
+        self.assertEqual(caught.exception.kind, "unavailable")
+        self.assert_occupied_promotion_preserved(source, target, before)
+
+    def test_policy_change_before_move_preserves_both_versions(self):
+        from kairos_skills.org_policy import observe_org_policy
+        from kairos_skills.org_policy_contract import OrgPolicyContext
+
+        quarantine, source, target, before = self.occupied_promotion()
+        policy_source = self.root / "promotion-policy.json"
+        policy_source.write_text('{"version":1,"bindings":[]}')
+        policy = self.enterContext(
+            observe_org_policy(OrgPolicyContext("file", policy_source), self.home)
+        )
+        original = hub.move_publication
+
+        def changed(*args, **kwargs):
+            policy_source.write_text('{"version":1, "bindings": []}')
+            return original(*args, **kwargs)
+
+        with (
+            patch.object(hub, "move_publication", side_effect=changed),
+            self.assertRaises(SkillMutationError) as caught,
+        ):
+            install_from_quarantine(source, quarantine, target.parent, policy=policy)
+        self.assertEqual(caught.exception.kind, "conflict")
+        self.assert_occupied_promotion_preserved(source, target, before)
 
     def bundle(self, name="org-skill", text="bundle"):
         bundled = self.root / "bundle"
