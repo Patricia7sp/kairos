@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from kairos_domain.ownership import Actor
+from kairos_filesystem.tree import observed_mount_id
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.org_policy_contract import OrgPolicyReceipt
 from kairos_skills.removal_io import capture_skill
@@ -118,6 +119,11 @@ class PublicationStateFixture(unittest.TestCase):
             scan,
             Actor.USER_FOREGROUND,
             source,
+            (
+                (self.home / "quarantine").stat().st_dev,
+                (self.home / "quarantine").stat().st_ino,
+                self._mount_id(self.home / "quarantine"),
+            ),
         )
         policy = OrgPolicyReceipt(self.home_id, name, uuid.uuid4().hex, None, ())
         draft = PublicationDraft(
@@ -137,3 +143,10 @@ class PublicationStateFixture(unittest.TestCase):
             1.0,
         )
         return receipt, draft
+
+    def _mount_id(self, path):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            return observed_mount_id(fd)
+        finally:
+            os.close(fd)

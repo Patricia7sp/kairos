@@ -2,8 +2,9 @@
 
 Status em 22/10/2026: desenho escrito aprovado explicitamente pela usuária,
 com referência ao conteúdo de `7fd4a12` no PR #111. O
-[plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) está para
-revisão; não há implementação B2 nem plano de execução aprovado.
+[plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) teve sua
+execução nativa autorizada em 22/10, sobre `02fb85e`. T1 está em `ff23200` e
+T2 foi validada localmente. T3–T7 e o aceite integrado permanecem pendentes.
 Base de execução atualizada: `44d890c` (main), com a correção do PR #111
 integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 
@@ -276,6 +277,7 @@ condicionar segurança a um número de benchmark.
 - Revisão independente e integração pelo Root; suíte integral local, Docker e
   jobs remotos verdes antes de merge. Runtime live só com credenciais/opt-in.
 
-O aceite escrito desta spec foi registrado em 22/10/2026. O próximo gate é a
-revisão do plano de execução, com arquivos, interfaces, migração e casos
-RED/GREEN. Não há código B2 nem autorização de merge/deploy neste registro.
+O aceite escrito desta spec foi registrado em 22/10/2026. O plano foi revisto
+e a execução nativa autorizada posteriormente nessa data. Os próximos gates
+são a conclusão das tarefas, revisão independente e aceite integrado; não há
+autorização de merge/deploy neste registro.

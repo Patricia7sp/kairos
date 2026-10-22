@@ -68,6 +68,7 @@ class AcquisitionReceipt:
     scan_sha256: str
     caller_actor: Actor
     source_proof: TreeCapture
+    quarantine_identity: tuple[int, int, int]
 
     def __post_init__(self):
         require(type(self.format_version) is int and self.format_version == 1)
@@ -77,6 +78,13 @@ class AcquisitionReceipt:
         validate_id(self.source_key)
         require(self.issuer == "kairos_quarantine_v1" and self.source_category == "unverified")
         require(self.caller_actor is Actor.USER_FOREGROUND)
+        require(
+            type(self.quarantine_identity) is tuple
+            and len(self.quarantine_identity) == 3
+            and all(type(value) is int and 0 <= value < 2**64 for value in self.quarantine_identity)
+            and self.quarantine_identity[1] > 0
+            and self.quarantine_identity[2] > 0
+        )
         _proof(self.source_proof)
         require(publication_inventory_hash(self.source_proof) == self.inventory_sha256)
         require(acquisition_scan_hash(self.inventory_sha256, []) == self.scan_sha256)
@@ -257,6 +265,7 @@ def receipt_from_json(value):
     value = dict(value)
     value["source_proof"] = capture_from_json(value["source_proof"])
     value["caller_actor"] = Actor(value["caller_actor"])
+    value["quarantine_identity"] = tuple(value["quarantine_identity"])
     return AcquisitionReceipt(**value)
 
 

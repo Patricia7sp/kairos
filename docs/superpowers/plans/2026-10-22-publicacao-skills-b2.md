@@ -10,7 +10,7 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** plano atualizado para revisão, sem implementação B2. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Ambos foram implantados com CI e smoke aprovados. Não reaplicar essas entregas. Este plano continua sujeito à revisão e aprovação antes de implementar; não autoriza merge/deploy de B2.
+**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 foi validada localmente na branch `feat/publicacao-skills-b2`. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
 
 **Execução proposta:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
@@ -60,7 +60,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 **Interfaces — produz:**
 
 - `PublicationWriter`: `bundled_sync` e `quarantine_promote`; `SkillPublicationAction.PUBLISH = "publish"`.
-- `AcquisitionReceipt`: `format_version: int` (formato inicial 1), `acquisition_id/home_id/name/issuer/source_key/source_category/inventory_sha256/scan_sha256: str`, `caller_actor: Actor`, `source_proof: TreeCapture`. IDs de operação/aquisição e source_key de quarentena são UUID v4; home_id e hashes são SHA-256. Inventário inclui caminhos/modos/tamanhos/hashes; identidade device/inode/mount permanece prova separada, sem conteúdo no JSON. Emissor local fixo `kairos_quarantine_v1`, categoria `unverified`; não aceitar esses valores do bundle. Scan é vinculado ao inventário por hash do JSON canônico `{inventory_sha256, findings}` e só pode autorizar recibo sem findings. `publication_inventory_hash(capture: TreeCapture) -> str` calcula o digest de conteúdo/modos sem device/inode/mount, para permitir comparação após cópia sem confundi-la com identidade.
+- `AcquisitionReceipt`: `format_version: int` (formato inicial 1), `acquisition_id/home_id/name/issuer/source_key/source_category/inventory_sha256/scan_sha256: str`, `caller_actor: Actor`, `source_proof: TreeCapture`, `quarantine_identity: tuple[int, int, int]` (device/inode/mount da raiz de quarentena). IDs de operação/aquisição e source_key de quarentena são UUID v4; home_id e hashes são SHA-256. Inventário inclui caminhos/modos/tamanhos/hashes; identidade device/inode/mount permanece prova separada, sem conteúdo no JSON. A identidade adicional da quarentena foi explicitada durante T2: a prova da árvore filha, sozinha, não recusa seu movimento para outra raiz com o mesmo source_key. Emissor local fixo `kairos_quarantine_v1`, categoria `unverified`; não aceitar esses valores do bundle. Scan é vinculado ao inventário por hash do JSON canônico `{inventory_sha256, findings}` e só pode autorizar recibo sem findings. `publication_inventory_hash(capture: TreeCapture) -> str` calcula o digest de conteúdo/modos sem device/inode/mount, para permitir comparação após cópia sem confundi-la com identidade.
 - `ManifestDelta(name: str, before: str | None, after: str | None)`; `None` significa entrada ausente. Hash MD5 legado do manifesto é apenas compatibilidade/eligibilidade; nunca prova de autoridade. SHA-256 do inventário é independente.
 - `PublicationDraft`: `operation_id/home_id/name/source_ref/source_key: str`, `writer: PublicationWriter`, `actor: Actor | None` (None para bundled, USER_FOREGROUND para promoção), `source_proof/staged_tree: TreeCapture`, `previous_installation: InstallationProof | None`, `previous_tree: TreeCapture | None`, `policy_receipt: OrgPolicyReceipt`, `manifest_delta: ManifestDelta | None`, `created_at: float`. Provas sem `contents`; refs privadas derivadas exclusivamente do ID. `source_ref` é lógico: nome para bundled ou `<acquisition_id>/<name>` para quarentena, nunca caminho absoluto ou URL; a sessão resolve a localização privada. Árvore legada pode ter previous_tree sem previous_installation; isso não lhe inventa autoria. Actor é derivado do contexto e não concede proveniência USER à instalação nova.
 - `SkillPublicationRecord`: `draft: PublicationDraft`, `state: SkillMutationState`, `manifest_complete/cleanup_complete: bool`, `projection_delta: ManifestDelta | None` (delta original ou última manutenção preparada); propriedades comuns `operation_id`, `name`, `action`, `home_id`, `actor` e `provenance: Provenance | None` (BUNDLED somente quando provado). `pending` inclui PREPARED/CONFLICT e COMMITTED com confirmação aplicável ausente.
@@ -102,7 +102,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - `SkillAcquisitionService(session: PublicationSession).acquire(bundle: SkillBundle) -> AcquisitionReceipt`: cria entrada exclusiva `<quarantine_root>/<acquisition_id>/<name>`, escaneia bytes atestados, sincroniza árvore/pais, depois emite recibo T1. Não executa download nem certifica pasta já existente. Aquisição não usa `context.resolve(name)` antes de criar a entrada: a raiz atestada é a de quarentena; a prova do filho nasce da criação e é revalidada na promoção.
 - `PublicationFiles(home: Path)` como context manager: `stage(operation_id: str, source: Path, expected: TreeCapture, *, guard: Callable[[], None]) -> TreeCapture`; `capture_installed(name: str)`, `capture_staged(operation_id: str)` e `capture_previous(operation_id: str)` retornam `TreeCapture | None`. Efeitos `retire(name: str, operation_id: str, expected: TreeCapture, *, guard: Callable[[], None]) -> None`, `publish(operation_id: str, name: str, expected: TreeCapture, *, guard: Callable[[], None]) -> None`, `return_previous(operation_id: str, name: str, expected: TreeCapture, *, guard: Callable[[], None]) -> None` e `sync_parents(*, guard: Callable[[], None]) -> None` exigem guard por keyword. `check() -> None` revalida o lifetime; capturas não concedem autoridade.
 
-- [ ] **RED:** testes `test_receipt_requires_real_acquisition`, `test_identical_bytes_replaced_root_refuses`, `test_stale_scan_refuses`, `test_arbitrary_bundle_root_has_no_package_authority`, `test_stage_from_other_filesystem_preserves_source`. Verificar recibo consultado no banco, raiz/inventário e scan vinculados; recusa conserva inode/bytes e histórico; staging entre filesystems copia e mantém a fonte. Não testar EXDEV apenas lançando uma exceção simulada.
+- [x] **RED:** testes `test_receipt_requires_real_acquisition`, `test_identical_bytes_replaced_root_refuses`, `test_stale_scan_refuses`, `test_arbitrary_bundle_root_has_no_package_authority`, `test_stage_from_other_filesystem_preserves_source`. Verificar recibo consultado no banco, raiz/inventário e scan vinculados; recusa conserva inode/bytes e histórico; staging entre filesystems copia e mantém a fonte. Não testar EXDEV apenas lançando uma exceção simulada.
 
   ```python
   self.assertNotEqual(staged.entries[0].device, source.entries[0].device)
@@ -110,13 +110,13 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
   self.assertEqual(capture_source().entries, source.entries)
   self.assertEqual(publications.receipt(receipt.acquisition_id), receipt)
   ```
-- [ ] **RED — colisão na quarentena:** forçar colisão no ID de aquisição com árvore e recibo já existentes. Conferir identidade, bytes e recibo anteriores preservados, sem exclusão nem emissão de autoridade sobre a entrada ocupada; uma nova aquisição só pode usar outra entrada exclusiva. Este caso cobre a exclusão sem atestação apontada na revisão do PR #111.
-- [ ] **RED — API legada de aquisição:** `test_legacy_quarantine_collision_preserves_existing_acquisition` chama `quarantine_bundle` sobre entrada ocupada, inclusive um diretório de aquisição com recibo. Exigir recusa explícita, mesmas identidades/bytes e recibo inalterado. Uma gravação legada nova não emite recibo nem passa a ser promovível por B2.
-- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_sources.py tests/test_skill_publication_files.py`; falhas pelos contratos ausentes, depois por comportamento não implementado.
-- [ ] **Implementar:** staging e versão anterior em `.skill-publications/<operation_id>/{staged,previous}`, diretórios 0700 no filesystem de `skills/`; ID validado antes da composição de referências. Reusar abertura NOFOLLOW, cadeia/device/inode/mount, escrita exclusiva, fsync e rename sem substituição. Recusar symlinks, hardlinks, especiais, atributos não preserváveis e excesso de limites. Fonte externa é copiada por descritores; nunca usar `shutil.move` entre filesystems.
-- [ ] **Implementar emissão/verificação:** origem não autenticada continua desconhecida, mesmo com recibo válido. Recusar recibo de outra raiz/home, emissor não permitido, bytes alterados ou ID fornecido sem registro. Na falha antes do journal, preservar resíduos desconhecidos; limpar apenas entrada criada e ainda comprovada com política corrente. Retirar a exclusão prévia de `quarantine_bundle`: destino ocupado recusa sem efeitos; aquisição B2 cria entrada exclusiva e nunca usa a API legada para substituir conteúdo.
-- [ ] **GREEN:** repetir os dois arquivos, com capturas reais antes/depois; executar caso cross-filesystem em tmpfs Docker no aceite T7 quando não houver dois devices locais, registrando o skip local explicitamente.
-- [ ] **Commit:** `feat(skills): atesta aquisição e prepara árvores de publicação`.
+- [x] **RED — colisão na quarentena:** forçar colisão no ID de aquisição com árvore e recibo já existentes. Conferir identidade, bytes e recibo anteriores preservados, sem exclusão nem emissão de autoridade sobre a entrada ocupada; uma nova aquisição só pode usar outra entrada exclusiva. Este caso cobre a exclusão sem atestação apontada na revisão do PR #111.
+- [x] **RED — API legada de aquisição:** `test_legacy_quarantine_collision_preserves_existing_acquisition` chama `quarantine_bundle` sobre entrada ocupada, inclusive um diretório de aquisição com recibo. Exigir recusa explícita, mesmas identidades/bytes e recibo inalterado. Uma gravação legada nova não emite recibo nem passa a ser promovível por B2.
+- [x] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_sources.py tests/test_skill_publication_files.py`; falhas pelos contratos ausentes, depois por comportamento não implementado.
+- [x] **Implementar:** staging e versão anterior em `.skill-publications/<operation_id>/{staged,previous}`, diretórios 0700 no filesystem de `skills/`; ID validado antes da composição de referências. Reusar abertura NOFOLLOW, cadeia/device/inode/mount, escrita exclusiva, fsync e rename sem substituição. Recusar symlinks, hardlinks, especiais, atributos não preserváveis e excesso de limites. Fonte externa é copiada por descritores; nunca usar `shutil.move` entre filesystems.
+- [x] **Implementar emissão/verificação:** origem não autenticada continua desconhecida, mesmo com recibo válido. Recusar recibo de outra raiz/home, emissor não permitido, bytes alterados ou ID fornecido sem registro. Na falha antes do journal, preservar resíduos desconhecidos; limpar apenas entrada criada e ainda comprovada com política corrente. Retirar a exclusão prévia de `quarantine_bundle`: destino ocupado recusa sem efeitos; aquisição B2 cria entrada exclusiva e nunca usa a API legada para substituir conteúdo.
+- [x] **GREEN:** repetir os dois arquivos, com capturas reais antes/depois; executar caso cross-filesystem em tmpfs Docker no aceite T7 quando não houver dois devices locais, registrando o skip local explicitamente.
+- [x] **Commit:** `feat(skills): atesta aquisição e prepara árvores de publicação`.
 
 ### Task 3: projeção de instalação e bloqueio comum de pendências
 
@@ -251,3 +251,33 @@ Auto-revisão do Root realizada em 22/10: objetivo/limites e autoridade cobertos
 Revisão de alinhamento à main em `44d890c`, em 22/10: os conflitos documentais foram resolvidos preservando os checkpoints e as evidências integradas pelo PR #113. O relatório da promoção permanece idêntico ao da main. O diff de B2 contém somente planejamento e status de aprovação; código, testes, dependências, configuração e workflow permanecem iguais à base. A revisão explicitou a recusa de colisões também em `quarantine_bundle`, os erros categorizados nas APIs públicas sem contexto/recibo, as referências lógicas sanitizadas, as assinaturas de I/O com guard obrigatório e a fixture v10 da base implantada. Os limites da spec aprovada e os cinco focos de revisão foram reconferidos, sem implementação ou aprovação presumida do plano.
 
 Validação documental desta revisão: `git diff --check`, 31 links locais e sintaxe Python 3.11 dos sete exemplos aprovados. Os exemplos não foram executados como testes e nenhuma suíte de produto foi atribuída à redação do plano.
+
+
+## Execução local — T1 e T2, 22/10/2026
+
+Execução nativa retomada na branch `feat/publicacao-skills-b2`, preservando T1
+em `ff23200`. T2 implementa fontes vivas da composição, sessão única de lock
+e banco, aquisição exclusiva com scan e recibo canônico e árvores privadas
+com staging, snapshot anterior e movimentos sem sobrescrita. A API legada de
+quarentena passou a recusar colisões preservando árvore e recibo existentes.
+
+A decisão adicional de T2 foi vincular o recibo também à identidade da raiz
+de quarentena. A árvore filha poderia ser movida intacta para outra raiz;
+`source_proof` e `source_key` sozinhos não detectariam esse caso. O campo
+`quarantine_identity` integra o formato v11 ainda não publicado; nenhum
+registro v10 é reescrito. Custo de revisão dessa decisão: ajustar DTO/fixtures
+v11 antes da publicação, caso a composição passe a fornecer prova equivalente.
+
+Validação: suíte integral com Codex 0.154.0, **3964 testes e 6424 subtestes
+aprovados**, 50 skips e 1 deselect. Após os últimos reforços de guard e logging,
+a rodada dos arquivos afetados passou com **106 testes e 39 subtestes, sem
+skips**; inclui aquisição/recibo/staging reais entre `/dev/shm` e o home
+temporário em outro device. Ruff check, format e diff-check passaram. Os
+registros integrais ficam no workspace ignorado `.superpowers/sdd/` deste
+plano. A validação entre devices no host não substitui o aceite na imagem
+real de T7.
+
+Próxima tarefa: T3, projeção de instalação, identificação e bloqueios comuns.
+T3–T7, revisão independente da branch, aceite integrado, CI remoto, merge e
+deploy permanecem pendentes. O schema padrão continua v10 e nenhuma instalação
+de produção foi migrada. Não liberar os commits intermediários como B2 pronta.

@@ -10,7 +10,6 @@ uma quarentena condicional só protege contra o que a condição prevê.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,16 +45,16 @@ class SkillBundle:
 
 def quarantine_bundle(bundle: SkillBundle, quarantine_dir: Path) -> Path:
     """Grava o bundle na quarentena. Primeiro passo, sempre."""
-    if not bundle.name or "/" in bundle.name or bundle.name.startswith("."):
-        raise QuarantineError(f"nome de skill inválido: {bundle.name!r}")
-
+    files = validated_bundle_files(bundle)
     dest = quarantine_dir / bundle.name
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.mkdir(mode=0o700)
+    except FileExistsError:
+        raise QuarantineError("Entrada de quarentena ocupada; aquisição preservada.") from None
 
     root = dest.resolve()
-    for rel, data in bundle.files.items():
+    for rel, data in files.items():
         target = (dest / rel).resolve()
         # Um nome de arquivo dentro do bundle é entrada NÃO CONFIÁVEL: um
         # `../../.bashrc` escaparia da quarentena antes de qualquer scan.
@@ -64,6 +63,44 @@ def quarantine_bundle(bundle: SkillBundle, quarantine_dir: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     return dest
+
+
+def validated_bundle_files(bundle: SkillBundle) -> dict[str, bytes]:
+    """Valida todos os componentes antes de criar uma entrada de quarentena."""
+    from kairos_skills.mutation_contract import SkillMutationError, require, validate_name
+    from kairos_skills.removal_contract import (
+        MAX_COMPONENT_BYTES,
+        MAX_FILE_BYTES,
+        MAX_TREE_BYTES,
+        MAX_TREE_DEPTH,
+        MAX_TREE_ENTRIES,
+    )
+
+    try:
+        require(type(bundle) is SkillBundle)
+        validate_name(bundle.name)
+        require(type(bundle.files) is dict and 0 < len(bundle.files) < MAX_TREE_ENTRIES)
+        files = dict(bundle.files)
+        directories = {""}
+        total = 0
+        for path, data in files.items():
+            require(type(path) is str and "\x00" not in path)
+            parts = path.split("/")
+            if not parts or any(part in ("", ".", "..") for part in parts):
+                raise UnsafeQuarantinePath("Caminho de bundle inseguro.")
+            require(len(parts) <= MAX_TREE_DEPTH)
+            require(all(len(part.encode("utf-8")) <= MAX_COMPONENT_BYTES for part in parts))
+            require(
+                type(data) is bytes
+                and len(data) <= (65536 if path == "SKILL.md" else MAX_FILE_BYTES)
+            )
+            total += len(data)
+            require(total <= MAX_TREE_BYTES)
+            directories.update("/".join(parts[:index]) for index in range(1, len(parts)))
+        require(not set(files) & directories and len(files) + len(directories) <= MAX_TREE_ENTRIES)
+        return files
+    except (SkillMutationError, UnicodeError):
+        raise QuarantineError("Bundle inválido ou fora dos limites de skills.") from None
 
 
 def scan_quarantined(path: Path) -> list[str]:

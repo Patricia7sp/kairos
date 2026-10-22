@@ -120,8 +120,10 @@ integrados pelos PRs #97/#98; remoção segura pelo #99, identificação A1 pelo
 de execução seguintes são históricos. O [checkpoint funcional](functional-progress.md)
 consolida a continuidade atual. Em 22/10, o
 [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
-aprovado; seu [plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md)
-está para revisão, sem implementação.
+aprovado; a execução nativa de seu
+[plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) foi autorizada
+posteriormente em 22/10 sobre `02fb85e`. T1 está em `ff23200`, com v11 explícito,
+e T2 foi validada localmente. A próxima tarefa é T3; o aceite integrado de B2 permanece pendente.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em
