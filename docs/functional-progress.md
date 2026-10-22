@@ -33,8 +33,10 @@ Prioridades de continuidade:
    Não está integrado à main por este registro.
 2. Explicitar migração v10 no uso direto dos serviços B1 (#110), documentada
    nesta revisão em D-CLI.SKILL.ORG; a CLI já migrava antes de compor escritores.
-3. Revisar o [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
-   antes de produzir seu plano e implementar a coordenação transacional.
+3. O [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
+   foi aprovado explicitamente em 22/10. Revisar o
+   [plano B2](superpowers/plans/2026-10-22-publicacao-skills-b2.md), proposto em
+   sete tarefas com execução nativa; a implementação não foi iniciada.
 4. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de
    política nas fronteiras de efeitos.

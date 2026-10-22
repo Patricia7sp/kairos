@@ -1,9 +1,10 @@
 # B2 — publicação coordenada de skills
 
-Status em 21/10/2026: proposta detalhada para revisão, sem implementação nem
-plano de execução aprovado. A usuária autorizou preparar este desenho após a
-correção da promoção e a atualização do planejamento. Esse aceite não declara
-aprovação desta spec escrita. Base integrada: `f9f9a6d` (PR #108).
+Status em 22/10/2026: desenho escrito aprovado explicitamente pela usuária,
+com referência ao conteúdo de `7fd4a12` no PR #111. O
+[plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) está para
+revisão; não há implementação B2 nem plano de execução aprovado.
+Base integrada: `f9f9a6d` (PR #108); a correção do PR #111 permanece dependência.
 
 ## Objetivo e continuidade
 
@@ -274,6 +275,6 @@ condicionar segurança a um número de benchmark.
 - Revisão independente e integração pelo Root; suíte integral local, Docker e
   jobs remotos verdes antes de merge. Runtime live só com credenciais/opt-in.
 
-Revisar esta spec escrita. Depois da aprovação, produzir o plano de execução
-com arquivos, interfaces, migração, casos RED/GREEN e propriedade das tarefas.
-Não há código B2 nem autorização de merge/deploy nesta proposta.
+O aceite escrito desta spec foi registrado em 22/10/2026. O próximo gate é a
+revisão do plano de execução, com arquivos, interfaces, migração e casos
+RED/GREEN. Não há código B2 nem autorização de merge/deploy neste registro.

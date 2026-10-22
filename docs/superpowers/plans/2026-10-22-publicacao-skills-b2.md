@@ -1,0 +1,245 @@
+# B2 — plano de implementação da publicação coordenada de skills
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans para a execução nativa proposta, tarefa por tarefa. superpowers:subagent-driven-development exige escolha posterior compatível com o gate de orquestração. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Atualizar skills por sync e promoção sem perder versões, com prova da publicação, resultado parcial explícito e recuperação observacional após interrupções.
+
+**Architecture:** Um coordenador por item compartilha o lock do home, prepara staging privado e journal antes dos movimentos, conserva a versão anterior e conclui a instalação numa transação SQLite. Manifesto e limpeza têm confirmações posteriores; pendências bloqueiam todos os escritores do nome. Aquisição, publicação e adoção continuam sendo provas distintas.
+
+**Tech Stack:** Python 3.11, SQLite, unittest/pytest existentes, descritores POSIX e `renameat2(RENAME_NOREPLACE)`, Docker; nenhuma dependência nova.
+
+**Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
+
+**Estado:** plano para revisão, sem implementação B2. Base de execução: correção de promoção do PR #111 (`7fd4a12`), ainda não integrada quando este plano foi escrito. Este documento não autoriza merge/deploy desse PR. Antes de executar, conferir sua integração ou manter a dependência explícita, sem reaplicar a correção.
+
+**Execução proposta:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
+
+## Global Constraints
+
+- “Não prometer atomicidade entre filesystem e SQLite”; não há atomicidade de lote.
+- “Publicação nova tem identidade instalada nova”; não herda adoção USER pelo nome, conteúdo ou inode reaproveitado.
+- “B2 não cria exceção ao veto organizacional, `force` ou permissão administrativa nova.”
+- “Quarentenas legadas sem recibo são recusadas sem efeitos.” Não certificar pastas arbitrárias.
+- “Leitores reconhecem homes anteriores sem migrar nem gravar.” Migração pertence à composição dos escritores, após observar a política.
+- “Não há transação SQLite aberta durante cópia, scan ou movimento de árvore.”
+- “Os registros canônicos A1/A2/B1 são imutáveis.” Não renumerar nem reescrever eventos antigos.
+- “COMMITTED com projeção ou limpeza pendente continua bloqueando escritores do nome.”
+- “Um restore somente do banco nunca é recuperação integral de publicação.”
+- Sem download, busca/update de hub, OAuth, `/learn`, curadoria, configuração de política em produção ou proteção contra adulteração pelo mesmo UID. #109 permanece recorte próprio.
+- Reutilizar os limites de árvores de skills de `removal_contract.py`: 64 MiB/árvore, 16 MiB/arquivo, 64 KiB para SKILL.md, 4096 entradas, profundidade 32, componente de 255 bytes. Não usar os limites genéricos mais largos de `publication_io.py` para contornar esse contrato.
+- Testar comportamento por APIs, arquivos, SQLite e subprocessos reais; nenhum teste lê `.py` nem congela catálogos/contagens. Falhas esperadas têm categoria e ID, com logging estruturado sanitizado; falha inesperada propaga.
+
+## Review Focus
+
+1. Capability antiga ainda escreve numa família esquecida após migração/reparo — T1/T7 verificam clientes e todas as famílias participantes.
+2. Recibo com bytes iguais mas raiz trocada, scan obsoleto ou emissor arbitrário concede autoridade — T2/T3 exercitam equivalência e identidades separadamente.
+3. Confirmação de manifesto/limpeza reaplica a instalação ou ressuscita adoção — T1/T3/T5 exercitam a ordem dos eventos e idempotência.
+4. Morte depois do rename/fsync, inclusive antes de gravar a confirmação, aparenta sucesso ou apaga uma versão — T4/T7 cobrem cada fronteira real.
+5. Backup restaura bytes corretos em novos inodes e transfere autoridade, ou ignora staging ausente — T6/T7 exigem diagnóstico e bloqueio conservadores.
+
+## Mapa de arquivos e dependências
+
+| Tarefa | Responsabilidade principal | Dependências |
+|---|---|---|
+| T1 | Contratos, schema v11, recibos e journal | base #111 |
+| T2 | Fontes observadas, emissão do recibo e I/O privado | T1 |
+| T3 | Timeline comum, origem e bloqueio de escritores | T1 |
+| T4 | Coordenador e recuperação por ID | T1–T3 |
+| T5 | Sync, promoção, manifesto e saídas reais | T4 |
+| T6 | Backup, reparo e diagnóstico de restauração | T3–T5 |
+| T7 | SIGKILL, clientes antigos, imagem e entrega | T1–T6 |
+
+Arquivos novos de produto: `kairos_skills/publication_contract.py` (DTOs e validação), `publication_sources.py` (observações confiáveis), `publication_session.py` (composição e lifetime do lock/banco), `acquisitions.py` (quarentena com recibo), `publication_files.py` (I/O), `publications.py` (coordenação), `publication_recovery.py` (retomada), `publication_backup.py` (inventário de backup/restore), `kairos_state/skill_publications_schema.py` (DDL/validação) e `kairos_state/repositories/skill_publications.py` (journal).
+
+Modificar arquivos existentes somente nas tarefas indicadas abaixo. Não refatorar genericamente os serviços A1/A2/B1. `tests/skill_publication_fixtures.py` mantém fixtures de arquivos/banco reais e construtores de DTOs; não substitui serviço, guard ou operação de daemon.
+
+### T1: contratos e persistência aditiva v11
+
+**Files:** criar `publication_contract.py`, `skill_publications_schema.py`, `repositories/skill_publications.py`, `tests/skill_publication_fixtures.py`, `tests/test_skill_publication_state.py`; modificar `kairos_state/migrations.py`, `skill_writer.py`, `skill_adoptions_schema.py`, `skill_org_schema.py`. Arquivos sem prefixo seguem o mapa acima.
+
+**Interfaces — produz:**
+
+- `PublicationWriter`: `bundled_sync` e `quarantine_promote`; `SkillPublicationAction.PUBLISH = "publish"`.
+- `AcquisitionReceipt`: `format_version: int` (formato inicial 1), `acquisition_id/home_id/name/issuer/source_key/source_category/inventory_sha256/scan_sha256: str`, `caller_actor: Actor`, `source_proof: TreeCapture`. IDs de operação/aquisição e source_key de quarentena são UUID v4; home_id e hashes são SHA-256. Inventário inclui caminhos/modos/tamanhos/hashes; identidade device/inode/mount permanece prova separada, sem conteúdo no JSON. Emissor local fixo `kairos_quarantine_v1`, categoria `unverified`; não aceitar esses valores do bundle. Scan é vinculado ao inventário por hash do JSON canônico `{inventory_sha256, findings}` e só pode autorizar recibo sem findings. `publication_inventory_hash(capture: TreeCapture) -> str` calcula o digest de conteúdo/modos sem device/inode/mount, para permitir comparação após cópia sem confundi-la com identidade.
+- `ManifestDelta(name: str, before: str | None, after: str | None)`; `None` significa entrada ausente. Hash MD5 legado do manifesto é apenas compatibilidade/eligibilidade; nunca prova de autoridade. SHA-256 do inventário é independente.
+- `PublicationDraft`: `operation_id/home_id/name/source_ref/source_key: str`, `writer: PublicationWriter`, `actor: Actor | None` (None para bundled, USER_FOREGROUND para promoção), `source_proof/staged_tree: TreeCapture`, `previous_installation: InstallationProof | None`, `previous_tree: TreeCapture | None`, `policy_receipt: OrgPolicyReceipt`, `manifest_delta: ManifestDelta | None`, `created_at: float`. Provas sem `contents`; refs privadas derivadas exclusivamente do ID. Árvore legada pode ter previous_tree sem previous_installation; isso não lhe inventa autoria. Actor é derivado do contexto e não concede proveniência USER à instalação nova.
+- `SkillPublicationRecord`: `draft: PublicationDraft`, `state: SkillMutationState`, `manifest_complete/cleanup_complete: bool`, `projection_delta: ManifestDelta | None` (delta original ou última manutenção preparada); propriedades comuns `operation_id`, `name`, `action`, `home_id`, `actor` e `provenance: Provenance | None` (BUNDLED somente quando provado). `pending` inclui PREPARED/CONFLICT e COMMITTED com confirmação aplicável ausente.
+- `PublicationResult`: `operation_id`, `name`, `state`, `complete: bool`, `error_kind: str | None`, `manifest_complete`, `cleanup_complete`. `complete` exige COMMITTED e as duas confirmações concluídas/não aplicáveis.
+- `SkillPublicationRepository(connection, *, home_id: str)`: `issue(receipt, *, guard) -> AcquisitionReceipt`, `receipt(acquisition_id) -> AcquisitionReceipt | None`, `prepare(draft, *, guard) -> SkillPublicationRecord`, `get(operation_id) -> SkillPublicationRecord | None`, `pending(name) -> tuple[SkillPublicationRecord, ...]`, `finish(operation_id, state: SkillMutationState, *, guard) -> SkillPublicationRecord`, `prepare_manifest(operation_id, delta: ManifestDelta, *, guard)`, `confirm_manifest(operation_id, *, guard)` e `confirm_cleanup(operation_id, *, guard)` retornando o record atualizado. Todo guard é `Callable[[], None]` obrigatório, chamado dentro da transação imediatamente antes do commit; falha desfaz a escrita e conserva sua categoria, sem convertê-la em corrupção. Nenhum método de repositório adquire lock de filesystem.
+
+- [ ] **RED:** criar testes `test_upgrade_preserves_canonical_prefix`, `test_phase_confirmation_does_not_create_installation`, `test_old_writer_cannot_mutate_any_family_after_repair` e `test_partial_schema_refuses_read_write_and_repair`. Asserções centrais:
+
+  ```python
+  before = canonical_rows(connection, old_tables)
+  migrate(connection, target=11)
+  self.assertEqual(canonical_rows(connection, old_tables), before)
+  self.assertEqual(publications.get(op).operation_id, op)
+  self.assertEqual(len(installation_commits(connection, op)), 1)
+  ```
+
+  `canonical_rows` consulta tabelas capturadas antes da migração; `installation_commits` consulta eventos reais. Construir operações pelas APIs, sem ler fonte SQL em testes.
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_state.py`; falha na capacidade nova ausente. Não aceitar erro de fixture/import alheio ao contrato como evidência suficiente; durante implementação, separar testes de contrato e migração conforme os símbolos surgirem.
+- [ ] **Implementar:** `migrate_publications(connection) -> None`, `validate_publication_schema(connection) -> None`, `repair_publication_objects(connection) -> None`. Novas tabelas append-only: `skill_acquisition_receipts`, `skill_publication_operations`, `skill_publication_events`, `skill_publication_migration` e `skill_publication_timeline`. Esta última copia o prefixo de `skill_authority_timeline` preservando sequências e acrescenta `publication_event`; congela a timeline anterior. Todos os eventos posteriores das quatro famílias entram na nova timeline, com exatamente uma referência por linha.
+- [ ] **Implementar eventos:** `prepared/committed/aborted/conflict/manifest_prepared/manifest_applied/source_cleaned`. Confirmações têm registros próprios, são idempotentes, só seguem COMMITTED e não representam nova instalação. `manifest_prepared` prepara uma manutenção posterior do delta de uma publicação já concluída, conservando sua instalação e tornando apenas a projeção pendente. Ações N/A são fixadas no draft, não inventadas durante retomada. Recibo de aquisição não gera evento de instalação.
+- [ ] **Implementar compatibilidade:** registrar capability 11 apenas após banco compatível; triggers exigem 11 em todas as tabelas mutantes v11, inclusive antigas e organizacionais. Atualizar validadores/reparo por versão, preservando comportamento v8/v9/v10 e prefixos grandfathered. Recibo de política acompanha PREPARED e o commit de publicação; triggers de B1 reconhecem o novo pai sem permitir publicação protegida. Acrescentar as tabelas à proteção de canônicas no reparo, sem reparar/remover suas linhas.
+- [ ] **Testar fronteira transacional:** `test_policy_change_before_commit_rolls_back_confirmation` troca a fonte de política antes do callback real e exige erro de política, evento ausente e estado ainda pendente. O callback valida política, identidade/cadeia dos descritores e observação do banco; cópia, captura integral de conteúdo e scan ficam antes de BEGIN. A política não ganha cache global nem deixa de ser revalidada nas fronteiras.
+- [ ] **Manter ativação controlada:** T1 acrescenta migração explicitamente alcançável por `migrate(connection, target=11)`, mas mantém o schema padrão v10 até T7. Fixtures B2 migram explicitamente; fixtures legadas preservam seu contrato. Só ativar o padrão v11 quando todos os leitores, escritores, backup e recuperação estiverem integrados. Não liberar/mesclar tarefas intermediárias como B2 pronta.
+- [ ] **GREEN:** repetir o comando e rodar `uv run pytest -q tests/test_skill_org_state.py tests/test_skill_adoption_state.py tests/test_state.py`; todos os testes selecionados passam. A migração explícita v10→v11 é o contrato; não criar teste congelando o valor global de `SCHEMA_VERSION`.
+- [ ] **Commit:** `feat(skills): registra aquisições e publicações no journal v11`.
+
+### T2: contexto confiável, aquisição e árvores privadas
+
+**Files:** criar `publication_sources.py`, `publication_session.py`, `acquisitions.py`, `publication_files.py`, `tests/test_skill_publication_sources.py`, `tests/test_skill_publication_files.py`; modificar `hub.py` apenas para reusar a validação de bundle sem promover; consumir helpers de `kairos_filesystem` sem afrouxar limites.
+
+**Interfaces — consome:** DTOs/repositório T1, `OrgPolicySession`, `TreeCapture`, `SkillBundle` e descritores existentes.
+
+**Interfaces — produz:**
+
+- `PublicationContext` é uma observação viva: `home_id: str`, `writer: PublicationWriter`, `source_key: str`, `root: Path` privado, `root_identity: tuple[int, int, int]` (device/inode/mount), `actor: Actor | None`, `replacement: TreeCapture | None`; `revalidate() -> None`, `resolve(name: str, *, acquisition_id: str | None = None) -> tuple[Path, TreeCapture]` e `contains(name: str) -> bool`. Bundled recusa acquisition_id; quarentena o exige e deriva `<id>/<name>`, reconferindo o recibo no serviço. Somente os context managers abaixo produzem instâncias válidas; nenhuma factory aceita metadados de autoridade desserializados.
+- `observe_bundled_source(home: Path, *, policy) -> ContextManager[PublicationContext]`: a raiz vem de `trusted_bundle_root()`, nunca do argumento de uma ferramenta. Source_key estável `package_bundle`; a prova de raiz/inventário continua obrigatória em cada sessão, inclusive retomada após reinício.
+- `observe_quarantine_source(home: Path, quarantine_root: Path, *, source_key: str, actor: Actor, policy, replacement: TreeCapture | None = None) -> ContextManager[PublicationContext]`: exige USER_FOREGROUND para intenção de promoção; `replacement` fixa a árvore autorizada a substituir, sem `force`. Recibo, categoria ou nome não substituem essa intenção. O contexto vivo mantém descritores, home, escritor e prova da fonte; não é um DTO desserializável do modelo.
+- `publication_session(home: Path, *, policy, context: PublicationContext) -> ContextManager[PublicationSession]`: valida fonte/política, adquire o lock uma vez, abre banco por descritor e migra explicitamente para v11 na composição. A sessão expõe `home`, `connection`, `publications: SkillPublicationRepository`, `files: PublicationFiles`, `policy`, `context`, `revalidate() -> None` e lifetime atestado. Não aceitar booleano `already_locked` ou token fornecido pelo modelo. Após saída, qualquer efeito recusa.
+- `SkillAcquisitionService(session: PublicationSession).acquire(bundle: SkillBundle) -> AcquisitionReceipt`: cria entrada exclusiva `<quarantine_root>/<acquisition_id>/<name>`, escaneia bytes atestados, sincroniza árvore/pais, depois emite recibo T1. Não executa download nem certifica pasta já existente. Aquisição não usa `context.resolve(name)` antes de criar a entrada: a raiz atestada é a de quarentena; a prova do filho nasce da criação e é revalidada na promoção.
+- `PublicationFiles(home)` como context manager: `stage(operation_id, source: Path, expected: TreeCapture) -> TreeCapture`, `capture_installed(name) -> TreeCapture | None`, `capture_staged(operation_id)`, `capture_previous(operation_id)`, `retire(name, operation_id, expected)`, `publish(operation_id, name, expected)`, `return_previous(operation_id, name, expected)`, `sync_parents()`, `check()`. Métodos de efeito recebem `guard: Callable[[], None]` obrigatório por keyword; capturas não concedem autoridade.
+
+- [ ] **RED:** testes `test_receipt_requires_real_acquisition`, `test_identical_bytes_replaced_root_refuses`, `test_stale_scan_refuses`, `test_arbitrary_bundle_root_has_no_package_authority`, `test_stage_from_other_filesystem_preserves_source`. Verificar recibo consultado no banco, raiz/inventário e scan vinculados; recusa conserva inode/bytes e histórico; staging entre filesystems copia e mantém a fonte. Não testar EXDEV apenas lançando uma exceção simulada.
+
+  ```python
+  self.assertNotEqual(staged.entries[0].device, source.entries[0].device)
+  self.assertEqual(publication_inventory_hash(staged), receipt.inventory_sha256)
+  self.assertEqual(capture_source().entries, source.entries)
+  self.assertEqual(publications.receipt(receipt.acquisition_id), receipt)
+  ```
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_sources.py tests/test_skill_publication_files.py`; falhas pelos contratos ausentes, depois por comportamento não implementado.
+- [ ] **Implementar:** staging e versão anterior em `.skill-publications/<operation_id>/{staged,previous}`, diretórios 0700 no filesystem de `skills/`; ID validado antes da composição de referências. Reusar abertura NOFOLLOW, cadeia/device/inode/mount, escrita exclusiva, fsync e rename sem substituição. Recusar symlinks, hardlinks, especiais, atributos não preserváveis e excesso de limites. Fonte externa é copiada por descritores; nunca usar `shutil.move` entre filesystems.
+- [ ] **Implementar emissão/verificação:** origem não autenticada continua desconhecida, mesmo com recibo válido. Recusar recibo de outra raiz/home, emissor não permitido, bytes alterados ou ID fornecido sem registro. Na falha antes do journal, preservar resíduos desconhecidos; limpar apenas entrada criada e ainda comprovada com política corrente. Não reusar a exclusão prévia de `quarantine_bundle` sobre um nome ocupado.
+- [ ] **GREEN:** repetir os dois arquivos, com capturas reais antes/depois; executar caso cross-filesystem em tmpfs Docker no aceite T7 quando não houver dois devices locais, registrando o skip local explicitamente.
+- [ ] **Commit:** `feat(skills): atesta aquisição e prepara árvores de publicação`.
+
+### T3: projeção de instalação e bloqueio comum de pendências
+
+**Files:** modificar `repositories/skill_mutations.py`, `removal_contract.py`, `identification_contract.py`, `identification.py`, `removal_origin.py`, `removal_state.py`, `org_policy_guard.py`, `mutations.py`, `adoptions.py`, `mutation_recovery.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_authority.py` e `tests/test_skill_publication_pending.py`.
+
+**Interfaces — consome:** T1. **Produz:** `CommonRecord` inclui `SkillPublicationRecord`; `get/history/pending/installation_evidence/current_installation` reconhecem a quarta família. `pending(name)` inclui confirmações incompletas. `repository_guard` consulta o mesmo estado antes dos efeitos de todas as famílias.
+
+- [ ] **RED:** `test_publication_clears_old_adoption`, `test_unproven_acquisition_never_becomes_user`, `test_confirmation_does_not_reapply_publication`, `test_every_writer_refuses_committed_cleanup_pending`, `test_legacy_reader_has_no_home_effects`. Exemplos de invariantes:
+
+  ```python
+  self.assertNotEqual(after.current.operation_id, before.current.operation_id)
+  self.assertIsNone(after.adoption)
+  self.assertIn(op, after.pending_operation_ids)
+  self.assertEqual(bytes_and_identities(home), observed_before_refusal)
+  ```
+
+  Parametrizar add/remove/rollback-restore/adopt/unadopt/sync/promote e recuperação antiga; verificar o ID bloqueador e zero efeitos na recusa.
+- [ ] **Testar sessões existentes:** `test_session_catalog_remains_immutable_after_publication` cria catálogo/assets reais, publica outra versão e exige os mesmos bytes/hashes no snapshot da sessão anterior; somente uma nova sessão pode observar o catálogo atualizado. Não alterar tabelas de catálogo para fazer a nova instalação parecer antiga.
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_authority.py tests/test_skill_publication_pending.py`.
+- [ ] **Implementar:** ampliar `InstallationProof.provenance` para `Provenance | None`, aceitando ausência somente na projeção de publicação comprovada; adoção exige USER como antes. Bundled confiável produz BUNDLED para a árvore nova. Aquisição produz prova de instalação com origem de aquisição verificável e proveniência/autorização destrutiva ausentes; não criar enum USER/SEDIMENT por conveniência. Nome, byte-idêntico e adoção anterior não autorizam a árvore nova.
+- [ ] **Implementar leitores:** `installation_source="verified_acquisition"` somente com recibo válido; sem provar o fornecedor remoto. Para publicação com proveniência ausente, `ownership="unknown"`, `authorization_basis="none"`, `removivel=False`. Preservar a convenção legada de exibição fora desse caso. Em `SkillMutationService.ownership`, recusar publicação sem autoridade em vez de usar `or Provenance.USER`; `resolve_removal_origin` não cai no manifesto para contornar uma publicação desconhecida.
+- [ ] **Implementar timeline:** aplicar cada commit de instalação uma única vez, na ordem canônica; confirmações não reinstalam nem recuperam adoção. Bloqueio de pendência precisa atingir também early returns/idempotência de operações antigas; recuperação A1/A2/B1 não despacha um record B2 a um adaptador legado. History/JSON mostram tipo, estado e pendência; rollback de ID de publicação recusa explicitamente, sem tentar restaurar como CREATE/RESTORE.
+- [ ] **Implementar metadados:** em `mutation_metadata`, tratar `SkillPublicationRecord` antes do ramo que usa `record.provenance.value` e `record.sha256`. Emitir origin nulo para origem não provada, writer, ID, estado, confirmação de manifesto/limpeza e pending; não inventar `reverts`, criação manual ou actor para bundled. `test_history_serializes_unknown_publication_without_user_fallback` percorre a CLI real.
+- [ ] **GREEN:** repetir os dois arquivos e `uv run pytest -q tests/test_skill_identification.py tests/test_skill_adoption_sync.py tests/test_skill_org_services.py`; preservar resultados A1/A2/B1 e leitura v8–v10 sem migração/sidecars no home original.
+- [ ] **Commit:** `feat(skills): integra publicações à autoridade e aos bloqueios comuns`.
+
+### T4: coordenador e recuperação observacional
+
+**Files:** criar `publications.py`, `publication_recovery.py`, `tests/test_skill_publication_service.py`, `tests/test_skill_publication_recovery.py`; integrar guard T3 e I/O T2 sem duplicar seu lock.
+
+**Interfaces — consome:** T1–T3. **Produz:** `SkillPublicationService(session: PublicationSession)` com `publish(name: str, *, acquisition_id: str | None = None, manifest_delta: ManifestDelta | None = None) -> PublicationResult` e `recover(operation_id: str) -> PublicationResult`. Usa a conexão/arquivos/contexto da sessão viva T2, compondo `SkillMutationRepository` na mesma conexão; não abre outro banco nem adquire outro lock.
+
+- [ ] **RED:** `test_prepared_precedes_any_installed_move`, `test_failed_publish_preserves_previous`, `test_post_rename_policy_refusal_remains_pending`, `test_unknown_private_tree_is_never_cleaned`, `test_recovery_table_and_repeat`. Conferir que sucesso implica árvore nova atestada, registro COMMITTED único e confirmações completas; todo erro após PREPARED conserva ID/pendência e versões, sem mensagem de sucesso.
+
+  ```python
+  self.assertFalse(result.complete)
+  self.assertIn(result.operation_id, {r.operation_id for r in publications.pending(name)})
+  self.assertEqual(capture_previous().entries, original.entries)
+  self.assertEqual(capture_installed().entries, prepared.staged_tree.entries)
+  ```
+
+  As duas últimas asserções pertencem ao caso de recusa pós-rename em substituição; a tabela da spec determina os demais layouts, sem impor esse layout ao caso de falha anterior ao movimento.
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_service.py tests/test_skill_publication_recovery.py`.
+- [ ] **Implementar protocolo:** exigir sessão T2 viva antes de efeitos; não migrar dentro do serviço nem admitir composição sobre repositório arbitrário sem a sessão. Verificar pendências; preparar staging/fsync; transação PREPARED; mover original para previous e staged para destino; fsync; revalidar; transação COMMITTED com identidade, recibo e proteção aplicável juntos. A intenção de substituição de promoção deve continuar correspondendo à árvore observada; sync usa sua elegibilidade T5. Nenhuma compensação apaga uma árvore recém-protegida.
+- [ ] **Implementar erros:** antes de PREPARED, lançar `SkillMutationError`; depois, falhas operacionais esperadas retornam `PublicationResult(complete=False, error_kind=...)` ou propagam erro explícito com operation_id quando a gravação de estado falhar. Registrar `action/writer/phase/kind/operation_id/reason` sanitizados. BaseException inesperada propaga, conservando o journal. Não converter falha de persistência em resultado concluído.
+- [ ] **Implementar** `reconcile_publication(session: PublicationSession, record: SkillPublicationRecord) -> PublicationResult`, sob o lock já detido. Aplicar cada linha da tabela da spec: original ainda instalado → abortar; original retirado e staged conhecido → repor/abortar se autorizado; novo instalado → concluir apenas com provas/política; duplicação, veto ou fonte indisponível → preservar e bloquear. Guard após rename continua obrigatório. COMMITTED nunca repete movimentos de instalação; retoma só confirmações. Repetição de ID terminal completo devolve o mesmo resultado comprovado.
+- [ ] **GREEN:** repetir os arquivos; incluir falha após cada rename/fsync/commit real via seams estreitos e verificar bytes, identidades, eventos e tentativas de escritores concorrentes. T7 acrescenta morte não capturável do processo.
+- [ ] **Commit:** `feat(skills): coordena publicação e recuperação sem perder versões`.
+
+### T5: sync, promoção, manifesto e CLI
+
+**Files:** modificar `sync.py`, `hub.py`, `kairos_cli/handlers.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_writers.py`, `tests/test_skill_publication_manifest.py`, `tests/test_cli_skill_publications.py`; ajustar testes existentes de sync/promoção para compor o contexto real T2.
+
+**Interfaces — consome:** T4 e `ManifestDelta`. **Produz:**
+
+- `sync_bundled_skills(bundled_dir: Path, user_dir: Path, *, policy, context: PublicationContext) -> SyncResult`; `bundled_dir` deve coincidir com a raiz atestada da composição. Não promover raiz arbitrária a BUNDLED.
+- `install_from_quarantine(quarantine_path: Path, quarantine_dir: Path, skills_dir: Path, *, policy, context: PublicationContext, acquisition_id: str) -> Path`: delega ao coordenador; retorna caminho só em conclusão integral, senão erro explícito com ID. Chamadas antigas sem contexto/recibo recusam antes de efeitos.
+- `SyncResult` conserva campos atuais e acrescenta `publications: list[PublicationResult]` e `pending: list[str]`. `reconcile_manifest(home: Path, record: SkillPublicationRecord, *, guard) -> None` faz compare-and-apply por entrada, preservando demais chaves e confirmando o journal depois do fsync do arquivo e pai.
+
+- [ ] **RED:** `test_direct_legacy_promote_cannot_bypass_journal`, `test_sync_preserves_edits_deletions_optout_and_tombstones`, `test_committed_manifest_gap_does_not_republish`, `test_manifest_conflict_preserves_other_items`, `test_cli_partial_is_nonzero_and_has_publication_id`. A interrupção depois do manifesto e antes de sua confirmação deve reconhecer o valor já esperado, sem criar outro ID/inode.
+
+  ```python
+  self.assertNotEqual(process.returncode, 0)
+  self.assertTrue(payload["failed"])
+  self.assertIn(op, payload["pendentes"])
+  self.assertEqual(recovered.operation_id, op)
+  self.assertEqual(capture_installed().entries, installed_before_resume.entries)
+  ```
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_writers.py tests/test_skill_publication_manifest.py tests/test_cli_skill_publications.py`.
+- [ ] **Implementar escritores:** remover caminhos diretos de substituição/compensação que contornem T4; compor `publication_session` em cada operação real e chamar o serviço com ela, sem aninhar `publication_guard`/outro lock. Sync permanece por item: mantém regras de edição local, exclusão, opt-out e tombstone; entradas legadas são critérios conservadores de elegibilidade, não autoria retroativa. Toda troca efetiva de árvore cria versão/ID novos a partir da fonte confiável. Para publicação já canônica, verificar a identidade/inventário além do MD5 legado antes de substituir; adoção anterior nunca atravessa a troca. Reabrir/recompor conexões de fixtures após upgrade, sem atualizar artificialmente a capability de um cliente antigo.
+- [ ] **Testar intenção concorrente:** `test_optout_after_staging_refuses_publication` e `test_changed_tombstone_before_effect_refuses_publication` exercitam mudanças antes do próximo efeito. O guard do sync reconfere opt-out/tombstones e elegibilidade além da política; conserva a preparação pendente se não puder abortar com segurança. Não mover/copiar itens adicionais só porque o lote começou antes da mudança.
+- [ ] **Implementar manifesto:** guardar delta do item em PREPARED; COMMITTED passa a ser a fonte das entradas novas. Reabrir e atestar manifesto corrente sob lock, aplicar apenas o item se seu valor ainda é `before` ou já é `after`; divergência no item é conflito. Preservar mudanças de outros itens. Arquivo malformado, link ou troca entre leitura/escrita recusa. Não usar o leitor permissivo legado para decidir uma escrita B2. Confirmar projeção e limpeza por eventos independentes, sem novo commit de instalação.
+- [ ] **Preservar limpeza de catálogo:** `retire_manifest_entry(name: str, *, session: PublicationSession) -> SkillPublicationRecord | None` verifica ausência no inventário do pacote e guard corrente. Para entrada B2, acrescenta `manifest_prepared` com delta para ausência ao ID existente e confirma a projeção; não move árvore nem renova instalação. Recuperação dessa manutenção usa a prova de ausência no pacote atual, sem declarar a fonte antiga disponível. Para entrada apenas legada, mantém a limpeza atômica existente sob lock/guard, sem fabricar publicação. Acrescentar `test_package_removal_cleans_manifest_without_installation_event`; ID/inode/adoção não mudam, e interrupção após preparação bloqueia o nome.
+- [ ] **Implementar saídas:** listas copied/updated só recebem itens completos. JSON de sync conserva chaves existentes e inclui `publicacoes` e `pendentes`; `failed=True` em falha parcial. Exit 77 para veto, 69 para indisponibilidade da plataforma, 2 para entrada inválida, 1 para demais falhas/pendências, 0 só para resultado integral. Opt-out continua uma decisão explícita de não semear. `history/identify` expõem estado verdadeiro sem caminhos privados. Nenhum comando novo de hub/download/restore genérico.
+- [ ] **GREEN:** repetir os três arquivos e `uv run pytest -q tests/test_skills.py tests/test_skill_sync_categories.py tests/test_skill_removal_sync.py tests/test_skill_adoption_sync.py tests/test_skill_org_publication.py`; testes novos de CLI usam executável real com home descartável, sem provider.
+- [ ] **Commit:** `feat(skills): publica sync e quarentena pelo coordenador comum`.
+
+### T6: backup integral, reparo e restauração diagnóstica
+
+**Files:** criar `publication_backup.py`, `tests/test_skill_publication_backup.py`; modificar `kairos_cli/backup.py`, `kairos_state/migrations.py` e `kairos_state/skill_publications_schema.py` para integrar validação/reparo à rotina de backup.
+
+**Interfaces — consome:** T1/T3/T4. **Produz:** `publication_backup_inventory(home: Path, repository: SkillPublicationRepository) -> tuple[PublicationBackupEntry, ...]`, com `PublicationBackupEntry(relative_path: str, proof: TreeCapture)` validado contra refs derivadas dos IDs; `validate_restored_publication(home: Path, record: SkillPublicationRecord, *, policy) -> RestorationObservation`. Definir `RestorationObservation` com `operation_id/observed_home_id: str`, `present_artifacts: tuple[str, ...]`, `inventory_valid/identity_valid: bool` e `reasons: tuple[str, ...]`. Uma observação não altera o journal nem concede autoridade.
+
+- [ ] **RED:** `test_backup_covers_all_referenced_artifacts`, `test_missing_artifact_preserves_previous_archive`, `test_restore_new_inodes_has_no_new_authority`, `test_database_only_restore_blocks_recovery`, `test_repair_does_not_complete_pending_publication`. Comparar canônicas antes/depois; restaurar arquivo real em home isolado e verificar bytes/modos de staged/previous/instalado, ausência de binding transferido e recusa mutante.
+
+  ```python
+  self.assertTrue(observation.inventory_valid)
+  self.assertFalse(observation.identity_valid)
+  self.assertEqual(canonical_rows(restored, tables), canonical_before_backup)
+  self.assertFalse(identify_restored().removivel)
+  ```
+- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_backup.py`.
+- [ ] **Implementar backup:** para home B2, adquirir o lock comum antes da observação do journal, snapshot SQLite e leitura das árvores; atestar inventários antes/depois. Incluir `.skill-publications`, recibos, journal, manifesto e árvore instalada, com todos os snapshots preservados e pendências. Exigir os artefatos esperados pelo estado/layout observado na tabela de recuperação: staged ausente depois de rename para o destino não é, por si só, corrupção. Quarentena externa não entra implicitamente no arquivo. Artefato obrigatório ausente, links, escape ou alteração recusam o novo backup e preservam saída anterior. Homes legados mantêm o contrato existente, sem migração implícita.
+- [ ] **Implementar restore/reparo:** inventários íntegros comprovam os bytes restaurados, não os inodes anteriores. Diagnóstico não renova recibo, instalação, adoção ou binding. Reparo recria somente derivados/triggers v11 e não exclui pendências. Retomada mutante ainda exige o contexto e as identidades compatíveis de T4; observação de restore por hash não satisfaz esse requisito. Em outro home, histórico continua histórico e vínculos não se transferem; no mesmo home, o veto durável de B1 permanece. Fonte externa ausente impede concluir limpeza, sem escolher outra pasta pelo nome. Não criar comando de importação/reatribuição de autoridade para remover esse bloqueio.
+- [ ] **GREEN:** repetir o arquivo e `uv run pytest -q tests/test_cli_backup_boundary.py tests/test_skill_adoption_backup.py tests/test_skill_org_backup.py`; conferir `PRAGMA integrity_check`, fingerprints canônicos e falhas sanitizadas na API pública de backup.
+- [ ] **Commit:** `feat(backup): preserva artefatos e pendências de publicações`.
+
+### T7: interrupções reais, clientes antigos e aceite na imagem
+
+**Files:** criar `tests/test_skill_publication_processes.py`, `tests/fixtures/skill_publication_process.py`, `tests/skill_publication_image_acceptance.py`, `scripts/prepare-skill-v10-client.sh`; modificar `kairos_state/schema.py`, `tests/test_container.py`, `scripts/ci.sh`, `.github/workflows/ci.yml`, `docs/functional-progress.md`, `docs/cli-auth-progress.md`, `docs/decisoes.md`; criar `docs/superpowers/reports/2026-10-22-publicacao-skills-b2.md`.
+
+**Interfaces — consome:** T1–T6. A fixture de subprocesso usa APIs de produto e Pipe para sinalizar fronteiras reais; seams chamam a operação real antes/depois da pausa. Não acrescentar flags de teste ao runtime de produção.
+
+- [ ] **Ativar release integrada:** somente após T1–T6, atualizar `SCHEMA_VERSION` padrão para 11 e verificar homes novos, upgrade de v10 e leitura legada. O teste exige presença/comportamento da capacidade solicitada, não congela a última versão do catálogo de migrações.
+- [ ] **RED:** `test_sigkill_boundaries_preserve_recoverable_versions`, `test_v10_client_refuses_v11_after_repair`, `test_cross_device_quarantine_in_real_image`, `RealImageTests.test_skill_publication_recovery_and_backup`. A execução deve falhar com a implementação sem retomada/proteção correspondente; registrar a mutação específica quando a capacidade já estiver implementada. Um teste que apenas encontra um programa já encerrado não prova SIGKILL.
+- [ ] **Implementar fixture antiga:** extrair/buildar o cliente real de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc` em venv isolado, com dependências verificadas e wheel/digest/proveniência registrados, seguindo `prepare-skill-v8-client.sh`. Preparar cliente v10 tanto no CI local quanto remoto. Exercitar as famílias antigas com os clientes anteriores disponíveis, e capabilities 8/9/10 em testes comportamentais de transações reais. Nenhum teste muda a função do cliente para fazê-lo declarar capability 11.
+- [ ] **Implementar matriz de morte:** processo filho pausa antes/depois de PREPARED, de cada rename/fsync, de COMMITTED, da gravação do manifesto e das confirmações de projeção/limpeza. Pai exige sinal da fronteira, envia SIGKILL, confirma exitcode -9 e reabre serviço/SQLite reais. Cobrir publicação inicial e substituição, política que muda entre processos, fonte indisponível, árvore trocada byte-idêntica e órfão desconhecido. Comparar IDs, inodes, inventários e histórico; repetir retomada e tentar outro escritor do mesmo nome.
+
+  ```python
+  self.assertTrue(parent.poll(deadline_seconds))
+  reached = parent.recv()
+  self.assertEqual(reached["phase"], expected_phase)
+  process.kill()
+  process.join(deadline_seconds)
+  self.assertEqual(process.exitcode, -9)
+  self.assertEqual(recover_again.operation_id, recovered.operation_id)
+  ```
+- [ ] **Implementar aceite na imagem:** o teste invoca o script de aceite montado somente leitura, importando os módulos instalados da imagem, sem montar fontes de produto. Usar UID sem privilégios, rede desativada e volumes descartáveis. Quarentena em tmpfs e destino em outro volume devem ter `st_dev` diferentes comprovados; se o requisito não foi exercitado, o aceite não passa silenciosamente. O script reutiliza a matriz de processos, inclui manifesto/limpeza pendentes e backup/restauração integral/banco isolado, sem provider ou credencial real.
+- [ ] **Verificar GREEN:** `uv run pytest -q tests/test_skill_publication_processes.py`; depois construir imagem real/stub/broker/worker e executar `uv run pytest -q tests/test_container.py::RealImageTests`, exigindo o teste novo sem skips. Regressões de família velha e corrupta permanecem ativas. O caminho live segue desabilitado.
+- [ ] **Revisar e validar integração:** revisão independente do diff inteiro, correção dos bloqueadores com RED→GREEN, conferência integrada pelo Root; `scripts/ci.sh` completo com Codex fixado no PATH; integrações Docker offline e lint pinado do Dockerfile.stub conforme CI. Reutilizar evidência só se comando, revisão, arquivos, lockfile, configuração e ambiente ainda corresponderem. Não prometer análise Sonar quando o scanner não rodou; conferir jobs remotos e Quality Gate do commit efetivamente proposto.
+- [ ] **Registrar entrega:** comandos, códigos de saída, revisão, imagem/digests, skips/deselects e causas, resultados de recuperação, backup e restauração no relatório. Atualizar decisões como implementadas somente após aceite correspondente; sem marcar este plano concluído por ter sido escrito. Merge exige suíte local e jobs de verificação remotos verdes; deploy é pós-merge e depende da autorização aplicável, com backup/restore privado, smoke e rollback conforme o runbook.
+- [ ] **Commit:** `test(skills): valida publicação interrompida na imagem real`.
+
+## Revisão do plano e passagem para execução
+
+Este plano define schema, contratos e testes propostos; nenhum símbolo novo foi implementado nem check de produto executado por sua redação. Antes de implementar, a usuária revisa este documento. A execução nativa proposta respeita a preferência de agente único; a revisão independente permanece obrigatória no fechamento.
+
+Auto-revisão do Root realizada em 22/10: objetivo/limites e autoridade cobertos em T2–T5; recibos em T1/T2; protocolo/estados/tabela de recuperação em T1/T4/T7; manifesto em T5; migração/clientes/leitores em T1/T3/T7; backup/reparo/restore em T6/T7; erros e aceite em T4/T5/T7. Os cinco focos acima têm casos próprios. Foram corrigidos durante a revisão: lifetime único do lock/conexão, source_key estável para retomada, staging entre devices sem exigir identidade igual, manutenção de manifesto sem instalar e ativação do schema somente no fechamento. Não foi delegada essa auto-revisão. Se a base avançar, resolver divergências antes do primeiro RED e registrar as decisões no ledger da execução.

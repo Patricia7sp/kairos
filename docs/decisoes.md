@@ -2516,8 +2516,9 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status em 21/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
-e job de deploy aprovados; B2 permanece proposta não aprovada.** Spec aprovada em 2026-10-14 e plano revisado pelo
+**Status em 22/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
+e job de deploy aprovados; desenho B2 aprovado, plano para revisão e sem
+implementação B2.** Spec B1 aprovada em 2026-10-14 e plano revisado pelo
 usuário: `docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`
 e `docs/superpowers/plans/2026-10-14-politica-organizacional-b1.md`.
 Evidências e limites: [relatório B1](superpowers/reports/2026-10-14-politica-organizacional-b1.md).
