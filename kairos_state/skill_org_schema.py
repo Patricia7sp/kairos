@@ -202,8 +202,19 @@ def read_org_receipt(connection, operation_id):
         raise sqlite3.DatabaseError("recibo organizacional incoerente") from None
 
 
-def validate_org_schema(connection: sqlite3.Connection) -> None:
-    expected = _reference_objects()
+def validate_org_schema(connection: sqlite3.Connection, *, _publication=False) -> None:
+    version = connection.execute("SELECT version FROM schema_version").fetchone()[0]
+    if version == 11 and not _publication:
+        from kairos_state.skill_publications_schema import validate_publication_schema
+
+        validate_publication_schema(connection)
+        return
+    if _publication:
+        from kairos_state.skill_publications_schema import expected_publication_objects
+
+        expected = expected_publication_objects()
+    else:
+        expected = _reference_objects()
     objects = {
         name: (kind, table, sql)
         for kind, name, table, sql in expected
@@ -224,8 +235,14 @@ def validate_org_schema(connection: sqlite3.Connection) -> None:
         )
         if row[1] in protected_tables
     )
-    if actual_triggers != expected_org_triggers():
+    if actual_triggers != tuple(
+        (name, table, sql) for kind, name, table, sql in expected if kind == "trigger"
+    ):
         raise sqlite3.DatabaseError("guards de proteção incompatíveis")
+    _validate_org_rows(connection, _publication=_publication)
+
+
+def _validate_org_rows(connection, *, _publication):
     boundary = connection.execute(
         "SELECT singleton,prefix_last_authority_sequence FROM skill_org_migration"
     ).fetchall()
@@ -236,12 +253,11 @@ def validate_org_schema(connection: sqlite3.Connection) -> None:
         or boundary[0][1] < 0
     ):
         raise sqlite3.DatabaseError("fronteira de proteção incompatível")
-    latest = connection.execute(
-        "SELECT COALESCE(MAX(sequence),0) FROM skill_authority_timeline"
-    ).fetchone()[0]
+    timeline = "skill_publication_timeline" if _publication else "skill_authority_timeline"
+    latest = connection.execute("SELECT COALESCE(MAX(sequence),0) FROM " + timeline).fetchone()[0]  # noqa: S608 — tabela escolhida entre duas constantes locais
     if boundary[0][1] > latest:
         raise sqlite3.DatabaseError("fronteira de proteção futura")
-    installations = connection.execute("""
+    installation_query = """
 SELECT o.operation_id,o.home_id,o.name,MIN(t.sequence),MAX(e.state='committed')
 FROM skill_mutation_operations o JOIN skill_mutation_events e USING(operation_id)
 JOIN skill_authority_timeline t ON t.legacy_event=e.sequence WHERE o.action='create' GROUP BY o.operation_id
@@ -249,7 +265,17 @@ UNION ALL
 SELECT o.operation_id,o.home_id,o.name,MIN(t.sequence),MAX(e.state='committed')
 FROM skill_tree_operations o JOIN skill_tree_events e USING(operation_id)
 JOIN skill_authority_timeline t ON t.tree_event=e.sequence WHERE o.action='restore' GROUP BY o.operation_id
-""").fetchall()
+"""
+    if _publication:
+        installation_query += """
+UNION ALL
+SELECT o.operation_id,o.home_id,o.name,MIN(t.sequence),MAX(e.state='committed')
+FROM skill_publication_operations o JOIN skill_publication_events e USING(operation_id)
+JOIN skill_publication_timeline t ON t.publication_event=e.sequence GROUP BY o.operation_id
+"""
+    installations = connection.execute(
+        installation_query.replace("skill_authority_timeline", timeline)
+    ).fetchall()
     by_id = {row[0]: row for row in installations}
     intents = {row[0] for row in connection.execute("SELECT operation_id FROM skill_org_intents")}
     required = {row[0] for row in installations if row[3] > boundary[0][1]}

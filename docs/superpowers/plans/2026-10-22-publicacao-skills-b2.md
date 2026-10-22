@@ -53,7 +53,7 @@ Arquivos novos de produto: `kairos_skills/publication_contract.py` (DTOs e valid
 
 Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes curtos de módulos de skills pertencem a `kairos_skills/`; `skill_writer.py`, `skill_adoptions_schema.py` e `skill_org_schema.py` pertencem a `kairos_state/`; os caminhos `repositories/` pertencem a `kairos_state/repositories/`. Não refatorar genericamente os serviços A1/A2/B1. `tests/skill_publication_fixtures.py` mantém fixtures de arquivos/banco reais e construtores de DTOs; não substitui serviço, guard ou operação de daemon.
 
-### T1: contratos e persistência aditiva v11
+### Task 1: contratos e persistência aditiva v11
 
 **Files:** criar `publication_contract.py`, `skill_publications_schema.py`, `repositories/skill_publications.py`, `tests/skill_publication_fixtures.py`, `tests/test_skill_publication_state.py`; modificar `kairos_state/migrations.py`, `skill_writer.py`, `skill_adoptions_schema.py`, `skill_org_schema.py`. Arquivos sem prefixo seguem o mapa acima.
 
@@ -87,7 +87,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir o comando e rodar `uv run pytest -q tests/test_skill_org_state.py tests/test_skill_adoption_state.py tests/test_state.py`; todos os testes selecionados passam. A migração explícita v10→v11 é o contrato; não criar teste congelando o valor global de `SCHEMA_VERSION`.
 - [ ] **Commit:** `feat(skills): registra aquisições e publicações no journal v11`.
 
-### T2: contexto confiável, aquisição e árvores privadas
+### Task 2: contexto confiável, aquisição e árvores privadas
 
 **Files:** criar `publication_sources.py`, `publication_session.py`, `acquisitions.py`, `publication_files.py`, `tests/test_skill_publication_sources.py`, `tests/test_skill_publication_files.py`; modificar `hub.py` para reusar a validação de bundle e recusar colisões da API legada, sem promover; consumir helpers de `kairos_filesystem` sem afrouxar limites.
 
@@ -118,7 +118,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir os dois arquivos, com capturas reais antes/depois; executar caso cross-filesystem em tmpfs Docker no aceite T7 quando não houver dois devices locais, registrando o skip local explicitamente.
 - [ ] **Commit:** `feat(skills): atesta aquisição e prepara árvores de publicação`.
 
-### T3: projeção de instalação e bloqueio comum de pendências
+### Task 3: projeção de instalação e bloqueio comum de pendências
 
 **Files:** modificar `repositories/skill_mutations.py`, `removal_contract.py`, `identification_contract.py`, `identification.py`, `removal_origin.py`, `removal_state.py`, `org_policy_guard.py`, `mutations.py`, `adoptions.py`, `mutation_recovery.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_authority.py` e `tests/test_skill_publication_pending.py`.
 
@@ -143,7 +143,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir os dois arquivos e `uv run pytest -q tests/test_skill_identification.py tests/test_skill_adoption_sync.py tests/test_skill_org_services.py`; preservar resultados A1/A2/B1 e leitura v8–v10 sem migração/sidecars no home original.
 - [ ] **Commit:** `feat(skills): integra publicações à autoridade e aos bloqueios comuns`.
 
-### T4: coordenador e recuperação observacional
+### Task 4: coordenador e recuperação observacional
 
 **Files:** criar `publications.py`, `publication_recovery.py`, `tests/test_skill_publication_service.py`, `tests/test_skill_publication_recovery.py`; integrar guard T3 e I/O T2 sem duplicar seu lock.
 
@@ -166,7 +166,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir os arquivos; incluir falha após cada rename/fsync/commit real via seams estreitos e verificar bytes, identidades, eventos e tentativas de escritores concorrentes. T7 acrescenta morte não capturável do processo.
 - [ ] **Commit:** `feat(skills): coordena publicação e recuperação sem perder versões`.
 
-### T5: sync, promoção, manifesto e CLI
+### Task 5: sync, promoção, manifesto e CLI
 
 **Files:** modificar `sync.py`, `hub.py`, `kairos_cli/handlers.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_writers.py`, `tests/test_skill_publication_manifest.py`, `tests/test_cli_skill_publications.py`; ajustar testes existentes de sync/promoção para compor o contexto real T2.
 
@@ -196,7 +196,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir os três arquivos e `uv run pytest -q tests/test_skills.py tests/test_skill_sync_categories.py tests/test_skill_removal_sync.py tests/test_skill_adoption_sync.py tests/test_skill_org_publication.py`; testes novos de CLI usam executável real com home descartável, sem provider.
 - [ ] **Commit:** `feat(skills): publica sync e quarentena pelo coordenador comum`.
 
-### T6: backup integral, reparo e restauração diagnóstica
+### Task 6: backup integral, reparo e restauração diagnóstica
 
 **Files:** criar `publication_backup.py`, `tests/test_skill_publication_backup.py`; modificar `kairos_cli/backup.py`, `kairos_state/migrations.py` e `kairos_state/skill_publications_schema.py` para integrar validação/reparo à rotina de backup.
 
@@ -216,7 +216,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 - [ ] **GREEN:** repetir o arquivo e `uv run pytest -q tests/test_cli_backup_boundary.py tests/test_skill_adoption_backup.py tests/test_skill_org_backup.py`; conferir `PRAGMA integrity_check`, fingerprints canônicos e falhas sanitizadas na API pública de backup.
 - [ ] **Commit:** `feat(backup): preserva artefatos e pendências de publicações`.
 
-### T7: interrupções reais, clientes antigos e aceite na imagem
+### Task 7: interrupções reais, clientes antigos e aceite na imagem
 
 **Files:** criar `tests/test_skill_publication_processes.py`, `tests/fixtures/skill_publication_process.py`, `tests/skill_publication_image_acceptance.py`, `scripts/prepare-skill-v10-client.sh`; modificar `kairos_state/schema.py`, `tests/test_container.py`, `scripts/ci.sh`, `.github/workflows/ci.yml`, `docs/functional-progress.md`, `docs/cli-auth-progress.md`, `docs/decisoes.md`; criar `docs/superpowers/reports/2026-10-22-publicacao-skills-b2.md`.
 
