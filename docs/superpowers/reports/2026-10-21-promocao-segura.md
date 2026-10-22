@@ -127,3 +127,36 @@ coordenação por item, manifesto, identidade nova, recuperação, migração,
 backup e aceite na imagem real. Sua revisão escrita precede o plano de
 implementação. CI remoto e revisão do desenho não são presumidos por este
 relatório local.
+
+## Resposta à revisão do PR #111 — 22/10/2026
+
+A revisão fornecida pela usuária identificou que
+`test_policy_change_before_move_preserves_both_versions` aceitava conflito por
+destino ocupado como prova de recusa por política. O falso positivo foi
+reproduzido em dois processos isolados: desativando os guards de
+`move_publication` e desativando `OrgPolicySession.revalidate`. Antes do ajuste,
+o teste passava nos dois casos. Não houve alteração do código de produto para
+essas mutações; os métodos foram substituídos somente em memória no runner.
+
+O teste agora exige também `"atestada"` na mensagem da exceção, distinguindo a
+recusa de política do conflito por nome ocupado. Com essa asserção, as duas
+mutações falham exatamente por receberem a mensagem de destino ocupado. Com o
+código real, os arquivos `test_skills.py` e `test_skill_org_publication.py`
+aprovam **54 testes e 11 subtestes**; Ruff check/format e `git diff --check`
+também aprovam. As verificações integrais acima pertencem ao estado anterior
+a esta asserção; o código de produto, dependências e configuração permanecem
+idênticos. A validação remota deve ser conferida no novo head, sem atribuir a
+ele o CI de `7fd4a12`.
+
+A spec B2 revisada foi aprovada pela usuária. O plano foi elaborado no
+[PR #112](https://github.com/Patricia7sp/kairos/pull/112), ainda para revisão e
+sem implementação. A substituição destrutiva em `quarantine_bundle` permanece
+fora do PR #111: T2 do plano exige aquisição exclusiva, preservação da entrada
+ocupada e teste de colisão com árvore/recibo anteriores.
+
+Pendência condicionada ao merge real de #111: atualizar o status em
+[D-CLI.SKILL.PROMOTE](../../decisoes.md),
+no item inicial de [functional-progress.md](../../functional-progress.md) e no
+topo deste relatório, com commit de integração e evidências do CI/deploy
+observado. Até esse evento, a correção continua em PR; aprovação da revisão
+não atesta merge nem implantação.
