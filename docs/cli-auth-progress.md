@@ -118,8 +118,10 @@ Atualização em 21/10/2026: os recortes de autoria/MCP descritos abaixo foram
 integrados pelos PRs #97/#98; remoção segura pelo #99, identificação A1 pelo
 #102, adoção A2 pelo #104 e proteção organizacional B1 pelo #108. Os registros
 de execução seguintes são históricos. O [checkpoint funcional](functional-progress.md)
-consolida a continuidade atual e o [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
-permanece para revisão, sem implementação.
+consolida a continuidade atual. Em 22/10, o
+[desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
+aprovado; seu [plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md)
+está para revisão, sem implementação.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em

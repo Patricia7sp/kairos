@@ -40,11 +40,14 @@ inicial após rename ainda depende da recuperação prevista em B2.
 
 Prioridades de continuidade:
 
-1. Revisar o plano B2 no [PR #112](https://github.com/Patricia7sp/kairos/pull/112).
-   O [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
-   aprovado pela usuária; o plano ainda depende de revisão e aprovação antes
-   da implementação. T2 inclui aquisição exclusiva e teste de colisão na
-   quarentena, preservando a árvore e o recibo anteriores.
+1. Revisar o [plano B2](superpowers/plans/2026-10-22-publicacao-skills-b2.md)
+   no [PR #112](https://github.com/Patricia7sp/kairos/pull/112), alinhado à base
+   integrada `44d890c`. O
+   [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
+   aprovado pela usuária; o plano propõe sete tarefas com execução nativa,
+   sequencial, e revisão independente ao final. Ainda depende de revisão e
+   aprovação antes da implementação. T2 inclui aquisição exclusiva e teste
+   de colisão na quarentena, preservando a árvore e o recibo anteriores.
 2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de
    política nas fronteiras de efeitos.
