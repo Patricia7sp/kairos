@@ -1,10 +1,11 @@
 # Progresso funcional do Kairos
 
-Atualizado em 21/10/2026. Base integrada conferida: `main` em `f9f9a6d`
-(PR #108, de 20/10). Os checkpoints abaixo preservam suas datas e evidências;
-pendências históricas não substituem o estado consolidado desta seção.
+Atualizado em 22/10/2026. Base integrada conferida: `main` em `74fba82`
+([PR #111](https://github.com/Patricia7sp/kairos/pull/111), de 22/10). Os
+checkpoints abaixo preservam suas datas e evidências; pendências históricas não
+substituem o estado consolidado desta seção.
 
-## Continuidade em 21/10/2026
+## Continuidade em 22/10/2026
 
 | Entrega | Integração confirmada |
 |---|---|
@@ -19,23 +20,32 @@ pendências históricas não substituem o estado consolidado desta seção.
 | Backup SQLite e diagnóstico | PRs #105/#107, `7ba1e6c`/`185440e` |
 | Sonar consultivo com cobertura de subprocessos | PR #106, `96fb3c9` |
 | B1: continuidade de proteção organizacional | PR #108, `f9f9a6d` |
+| Promoção preserva instalação e quarentena; migração explícita v10 documentada | PR #111, `74fba82`; fecha #110 |
 
 O [CI da main de B1](https://github.com/Patricia7sp/kairos/actions/runs/39378947460)
 concluiu os 11 jobs, incluindo deploy no Komodo e envio da análise Sonar.
 Isso não constitui um novo smoke de produção nem atesta o Quality Gate da main.
 O PR #108 registra Quality Gate aprovado para o head `703189d`.
 
+O [CI da correção](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
+concluiu onze jobs verdes, incluindo o deploy no Komodo; com o check externo do
+SonarCloud são doze checks verdes. O checkout da stack aponta para `74fba82`,
+o container está healthy e o smoke direto pós-deploy respondeu `ok`.
+
+A correção de promoção e a documentação da migração v10 estão integradas pelo
+[PR #111](https://github.com/Patricia7sp/kairos/pull/111). Destino ocupado recusa
+preservando ambas as árvores; ver
+[relatório](superpowers/reports/2026-10-21-promocao-segura.md). A publicação
+inicial após rename ainda depende da recuperação prevista em B2.
+
 Prioridades de continuidade:
 
-1. Corrigir promoção que excluía instalação antes de confirmar o movimento.
-   O recorte local de 21/10 passa a recusar destino ocupado, preservando ambas
-   as árvores; ver [relatório](superpowers/reports/2026-10-21-promocao-segura.md).
-   Não está integrado à main por este registro.
-2. Explicitar migração v10 no uso direto dos serviços B1 (#110), documentada
-   nesta revisão em D-CLI.SKILL.ORG; a CLI já migrava antes de compor escritores.
-3. Revisar o [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
-   antes de produzir seu plano e implementar a coordenação transacional.
-4. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
+1. Revisar o plano B2 no [PR #112](https://github.com/Patricia7sp/kairos/pull/112).
+   O [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
+   aprovado pela usuária; o plano ainda depende de revisão e aprovação antes
+   da implementação. T2 inclui aquisição exclusiva e teste de colisão na
+   quarentena, preservando a árvore e o recibo anteriores.
+2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de
    política nas fronteiras de efeitos.
 
