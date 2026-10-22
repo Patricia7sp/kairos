@@ -2,11 +2,12 @@
 
 Estado em 22/10/2026: correção integrada à main em `74fba82`, por squash do
 [PR #111](https://github.com/Patricia7sp/kairos/pull/111), após validação de
-`5f89262`. A árvore integrada é idêntica à árvore validada; o diff do único pai
-foi conferido sem remoções adicionais. O
-[CI da main](https://github.com/Patricia7sp/kairos/actions/runs/39775355139) e o
-deploy no Komodo foram concluídos com sucesso. O checkout da stack aponta para
-`74fba82`, o container está healthy e o smoke direto pós-deploy respondeu `ok`.
+`5f89262`. A árvore integrada é idêntica à árvore validada; o diff contra o pai
+único foi conferido sem remoções adicionais. O
+[CI da main](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
+concluiu doze checks verdes, com o deploy no Komodo incluído. O checkout da
+stack aponta para `74fba82`, o container está healthy e o smoke direto
+pós-deploy respondeu `ok`.
 
 O desenho B2 foi aprovado pela usuária. O plano está no
 [PR #112](https://github.com/Patricia7sp/kairos/pull/112), ainda para revisão e
@@ -192,9 +193,21 @@ passam a refletir a integração observada.
 - DeployStack `6ad9fd6015bb7baf7a08c176` terminou com sucesso. O log do script
   não informou o commit (`?`); a identidade foi conferida diretamente no
   checkout usado pela stack: HEAD `74fba822cfc6fb48701bfdfe7ed7ff58170c4ce4`.
-- O container foi iniciado por esse deploy e está healthy. A imagem em uso é
-  `sha256:dc280539991bef96d6198de2ce4676816e95f9814cf7c186c34d003b731ea14d`.
-  Os hashes de `hub.py`, `publication_io.py`, `org_policy.py` e `pyproject.toml`
-  no container conferem com os arquivos validados. A leitura usou UID 10000.
+- O container foi iniciado por esse deploy (12:12:11Z) e está healthy. A imagem
+  em uso é `sha256:dc280539991bef96d6198de2ce4676816e95f9814cf7c186c34d003b731ea14d`.
+  Os hashes do código em uso conferem com os arquivos validados: `hub.py`
+  `a6259cefc2e26c44e4be2e3b9e049bfc6070ac43062d4ddd08d7110ef5be0066`,
+  `publication_io.py`
+  `44daa7ed19f178323a89917b475e598c386ab96f85cfe669a554f4a0004b8e1b`,
+  `org_policy.py`
+  `f51b750e1658e62e339a485a24b25a470281c06ce693d94ae24816b85c10dbe8` e
+  `pyproject.toml`
+  `55d68d1d4f61a104b35761031c828d026e0ee5dfe1214bace8ab83eaf6ea994b`.
+  A leitura usou UID 10000.
 - O smoke direto, repetido após o deploy por `scripts/smoke-deploy.sh`,
   respondeu `smoke ok: ok` e exit 0. Nenhum runtime live foi invocado.
+- Reconferência no mesmo dia, sem novo deploy: o checkout da stack continua em
+  `74fba82`, o container segue healthy com a mesma imagem, os quatro hashes
+  acima seguem iguais e o smoke direto voltou `smoke ok: ok` (exit 0).
+- Evidência mecânica da rodada: `/tmp/kairos-promocao-validacao-20261022/`
+  (`evidence.json` e `merge-deploy.json`), em diretório temporário da máquina.

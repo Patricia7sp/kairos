@@ -1,9 +1,9 @@
 # Progresso funcional do Kairos
 
 Atualizado em 22/10/2026. Base integrada conferida: `main` em `74fba82`
-([PR #111](https://github.com/Patricia7sp/kairos/pull/111), de 22/10). Os checkpoints
-abaixo preservam suas datas e evidências; pendências históricas não substituem
-o estado consolidado desta seção.
+([PR #111](https://github.com/Patricia7sp/kairos/pull/111), de 22/10). Os
+checkpoints abaixo preservam suas datas e evidências; pendências históricas não
+substituem o estado consolidado desta seção.
 
 ## Continuidade em 22/10/2026
 
@@ -28,14 +28,15 @@ Isso não constitui um novo smoke de produção nem atesta o Quality Gate da mai
 O PR #108 registra Quality Gate aprovado para o head `703189d`.
 
 O [CI da correção](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
-concluiu onze jobs verdes, incluindo deploy no Komodo; o check externo
-SonarCloud também aprovou o Quality Gate. O checkout da stack aponta para
-`74fba82`, o container está healthy e o smoke direto pós-deploy respondeu `ok`.
+concluiu onze jobs verdes, incluindo o deploy no Komodo; com o check externo do
+SonarCloud são doze checks verdes. O checkout da stack aponta para `74fba82`,
+o container está healthy e o smoke direto pós-deploy respondeu `ok`.
 
 A correção de promoção e a documentação da migração v10 estão integradas pelo
-PR #111. Destino ocupado recusa preservando ambas as árvores; ver
-[relatório](superpowers/reports/2026-10-21-promocao-segura.md). A publicação inicial
-após rename ainda depende da recuperação prevista em B2.
+[PR #111](https://github.com/Patricia7sp/kairos/pull/111). Destino ocupado recusa
+preservando ambas as árvores; ver
+[relatório](superpowers/reports/2026-10-21-promocao-segura.md). A publicação
+inicial após rename ainda depende da recuperação prevista em B2.
 
 Prioridades de continuidade:
 
