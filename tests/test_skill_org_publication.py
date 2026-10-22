@@ -125,6 +125,7 @@ class OrgPublicationTests(OrgServiceFixture):
         ):
             install_from_quarantine(source, quarantine, target.parent, policy=policy)
         self.assertEqual(caught.exception.kind, "conflict")
+        self.assertIn("atestada", str(caught.exception))
         self.assert_occupied_promotion_preserved(source, target, before)
 
     def bundle(self, name="org-skill", text="bundle"):
