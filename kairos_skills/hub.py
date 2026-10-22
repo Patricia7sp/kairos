@@ -16,7 +16,7 @@ from pathlib import Path
 
 from kairos_skills.org_policy_contract import OrgPolicyAction
 from kairos_skills.org_policy_guard import publication_guard
-from kairos_skills.publication_io import capture_publication, delete_publication, move_publication
+from kairos_skills.publication_io import capture_publication, move_publication
 
 __all__ = [
     "QuarantineError",
@@ -93,6 +93,9 @@ def install_from_quarantine(
        quarentena resolvida. Sem `resolve()`, um `..` no meio passaria.
     2. **Rejeição de symlink** — reconferida na promoção, não só no scan:
        entre o escaneamento e a promoção o conteúdo pode ter mudado.
+
+    Destino ocupado recusa com conflito, preservando instalação e quarentena.
+    Substituições dependem da coordenação transacional de publicação.
     """
     with publication_guard(policy, skills_dir.parent) as guard:
         return _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, guard=guard)
@@ -117,11 +120,6 @@ def _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, *, guard):
         raise UnsafeQuarantinePath("Diretório de skills não pode ser um link.")
     source_proof = capture_publication(resolved)
     skills_dir.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        expected = capture_publication(dest)
-        delete_publication(
-            dest, expected, guard=lambda: guard.check(resolved.name, OrgPolicyAction.PROMOTE)
-        )
     move_publication(
         resolved,
         dest,

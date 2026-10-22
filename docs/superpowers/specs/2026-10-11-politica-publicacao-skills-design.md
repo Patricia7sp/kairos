@@ -1,8 +1,9 @@
 # Política organizacional e coordenação de publicação — fatia B
 
-Status: o [recorte detalhado de B1](2026-10-14-politica-organizacional-b1-design.md)
-foi aprovado pelo usuário em 2026-10-14; seu plano aguarda revisão e a
-implementação está pendente. B2 continua proposta não aprovada nem implementada.
+Status atualizado em 21/10/2026: o [recorte B1](2026-10-14-politica-organizacional-b1-design.md)
+foi integrado à main em `f9f9a6d` (PR #108) e o job de deploy passou.
+B2 continua proposta não aprovada nem implementada; seu
+[desenho detalhado](2026-10-21-publicacao-skills-b2-design.md) está para revisão.
 Depende dos contratos de resolução da [fatia A](2026-10-10-proveniencia-skills-design.md).
 Não entra no plano A1/A2. B1 e B2 têm planos e gates próprios.
 
@@ -71,9 +72,10 @@ Explicitar nos resultados que a garantia não resiste a adulteração pelo UID.
 
 ## B2: escritores e publicação
 
-Sync legítimo hoje pode trocar inode sem renovar prova; promoção pública
-pode substituir destino sem journal comum. B2 coordena esses escritores
-existentes, sem entregar download/busca/update do hub.
+Na base B1, sync legítimo pode trocar inode sem renovar prova e a promoção
+pode substituir destino sem journal comum. A correção local de 21/10 passa
+a recusar destino ocupado na promoção. B2 propõe retomar substituições seguras
+e coordenar os escritores, sem entregar download/busca/update do hub.
 
 Cada publicação recebe ID, identidade observada, inventário e snapshot;
 publicação não é automaticamente autoria USER nem concessão independente.

@@ -4,6 +4,22 @@ Estado em 2026-10-19: implementação integrada na worktree `removal_design`;
 checks locais obrigatórios e regressões complementares concluídos; aceite
 remoto pendente na revisão commitada. Não há autorização de merge/deploy B1.
 
+## Atualização de continuidade em 21/10/2026
+
+O estado de 19/10 acima e os próximos gates ao final são históricos.
+O [PR #108](https://github.com/Patricia7sp/kairos/pull/108) foi integrado em
+`f9f9a6d` em 20/10, após autorização registrada no commit de merge. O
+[CI da main](https://github.com/Patricia7sp/kairos/actions/runs/39378947460)
+concluiu os 11 jobs com sucesso, incluindo deploy e análise Sonar consultiva.
+O corpo do PR registra os checks e o Quality Gate do head `703189d` aprovados;
+não extrapolar esse resultado para um Quality Gate novo da main.
+
+A revisão automática concluída depois do merge apontou a exclusão antecipada
+na promoção de quarentena. O [recorte de correção de 21/10](2026-10-21-promocao-segura.md)
+é separado de B1 e da proposta B2; não declarar sua integração por este registro.
+Os acompanhamentos #109 (custo do ledger) e #110 (migração explícita na API)
+permanecem rastreados no checkpoint funcional.
+
 ## Escopo e rastreabilidade
 
 Spec aprovada: [design B1](../specs/2026-10-14-politica-organizacional-b1-design.md).

@@ -1,8 +1,10 @@
 # Resolução de evidências e adoção de skills — fatia A
 
-Status: proposta revisada, aguardando aprovação; nenhuma regra nova está
-implementada. Base: main `c77c92c6272fd3858e5d43df6faa12839d79154a` (PR #99).
-Esta revisão incorpora os seis apontamentos da revisão do PR #100.
+Status atualizado em 21/10/2026: A1 integrada pelo PR #102 (`33b6e77`),
+A2 pelo PR #104 (`d730822`) e B1 pelo PR #108 (`f9f9a6d`). B2 permanece proposta,
+com [desenho detalhado para revisão](2026-10-21-publicacao-skills-b2-design.md).
+A base original desta spec foi `c77c92c` (PR #99); os contratos abaixo preservam
+a divisão aprovada e os seis apontamentos incorporados do PR #100.
 
 ## Objetivo e divisão
 
