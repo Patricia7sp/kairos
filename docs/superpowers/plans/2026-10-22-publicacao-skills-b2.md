@@ -10,7 +10,7 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** plano para revisão, sem implementação B2. Base de execução: correção de promoção do PR #111 (`7fd4a12`), ainda não integrada quando este plano foi escrito. Este documento não autoriza merge/deploy desse PR. Antes de executar, conferir sua integração ou manter a dependência explícita, sem reaplicar a correção.
+**Estado:** plano para revisão, sem implementação B2. Base de execução: correção de promoção do PR #111 (`5f89262`), ainda não integrada quando este plano foi escrito. Este documento não autoriza merge/deploy desse PR. Antes de executar, conferir sua integração ou manter a dependência explícita, sem reaplicar a correção.
 
 **Execução proposta:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
@@ -110,6 +110,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Não refator
   self.assertEqual(capture_source().entries, source.entries)
   self.assertEqual(publications.receipt(receipt.acquisition_id), receipt)
   ```
+- [ ] **RED — colisão na quarentena:** forçar colisão no ID de aquisição com árvore e recibo já existentes. Conferir identidade, bytes e recibo anteriores preservados, sem exclusão nem emissão de autoridade sobre a entrada ocupada; uma nova aquisição só pode usar outra entrada exclusiva. Este caso cobre a exclusão sem atestação apontada na revisão do PR #111.
 - [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_sources.py tests/test_skill_publication_files.py`; falhas pelos contratos ausentes, depois por comportamento não implementado.
 - [ ] **Implementar:** staging e versão anterior em `.skill-publications/<operation_id>/{staged,previous}`, diretórios 0700 no filesystem de `skills/`; ID validado antes da composição de referências. Reusar abertura NOFOLLOW, cadeia/device/inode/mount, escrita exclusiva, fsync e rename sem substituição. Recusar symlinks, hardlinks, especiais, atributos não preserváveis e excesso de limites. Fonte externa é copiada por descritores; nunca usar `shutil.move` entre filesystems.
 - [ ] **Implementar emissão/verificação:** origem não autenticada continua desconhecida, mesmo com recibo válido. Recusar recibo de outra raiz/home, emissor não permitido, bytes alterados ou ID fornecido sem registro. Na falha antes do journal, preservar resíduos desconhecidos; limpar apenas entrada criada e ainda comprovada com política corrente. Não reusar a exclusão prévia de `quarantine_bundle` sobre um nome ocupado.
