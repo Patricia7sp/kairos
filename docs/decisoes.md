@@ -2608,8 +2608,11 @@ nas fronteiras. B1 não torna um lote de sync atômico nem instala política em 
 
 ## D-CLI.SKILL.PROMOTE — promoção sem substituição destrutiva
 
-**Status: correção local de 21/10/2026, ainda não integrada.** A revisão
-pós-merge do PR #108 apontou exclusão do destino antes da tentativa de movimento.
+**Status: integrada à main em 22/10/2026 pelo
+[PR #111](https://github.com/Patricia7sp/kairos/pull/111), `74fba82`, com
+[CI e deploy verdes](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
+e a stack healthy.** A revisão pós-merge do PR #108 apontou exclusão do destino
+antes da tentativa de movimento.
 A recusa de política ou indisponibilidade do rename podia deixar a instalação
 anterior apagada. O recorte remove essa exclusão: toda promoção usa o movimento
 sem substituição existente. Destino ocupado, inclusive em corrida, é conflito;

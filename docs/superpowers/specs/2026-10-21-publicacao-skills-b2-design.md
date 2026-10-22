@@ -4,7 +4,8 @@ Status em 22/10/2026: desenho escrito aprovado explicitamente pela usuária,
 com referência ao conteúdo de `7fd4a12` no PR #111. O
 [plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) está para
 revisão; não há implementação B2 nem plano de execução aprovado.
-Base integrada: `f9f9a6d` (PR #108); a correção do PR #111 permanece dependência.
+Base de execução atualizada: `44d890c` (main), com a correção do PR #111
+integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 
 ## Objetivo e continuidade
 

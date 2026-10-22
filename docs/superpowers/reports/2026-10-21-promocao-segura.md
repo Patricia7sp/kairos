@@ -1,8 +1,18 @@
 # Promoção de skills sem perda do destino
 
-Estado em 21/10/2026: correção local sobre `f9f9a6d`, main integrada de B1.
-Não há merge ou deploy desta correção. B2 está documentada para revisão,
-sem implementação nem plano aprovado.
+Estado em 22/10/2026: correção integrada à main em `74fba82`, por squash do
+[PR #111](https://github.com/Patricia7sp/kairos/pull/111), após validação de
+`5f89262`. A árvore integrada é idêntica à árvore validada; o diff contra o pai
+único foi conferido sem remoções adicionais. O
+[CI da main](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
+concluiu doze checks verdes, com o deploy no Komodo incluído. O checkout da
+stack aponta para `74fba82`, o container está healthy e o smoke direto
+pós-deploy respondeu `ok`.
+
+O desenho B2 foi aprovado pela usuária. O plano está no
+[PR #112](https://github.com/Patricia7sp/kairos/pull/112), ainda para revisão e
+aprovação, sem implementação iniciada. As seções de 21/10 preservam as
+evidências e os limites observados antes da integração.
 
 ## Defeito e contrato da correção
 
@@ -154,9 +164,50 @@ sem implementação. A substituição destrutiva em `quarantine_bundle` permanec
 fora do PR #111: T2 do plano exige aquisição exclusiva, preservação da entrada
 ocupada e teste de colisão com árvore/recibo anteriores.
 
-Pendência condicionada ao merge real de #111: atualizar o status em
-[D-CLI.SKILL.PROMOTE](../../decisoes.md),
-no item inicial de [functional-progress.md](../../functional-progress.md) e no
-topo deste relatório, com commit de integração e evidências do CI/deploy
-observado. Até esse evento, a correção continua em PR; aprovação da revisão
-não atesta merge nem implantação.
+## Integração confirmada — 22/10/2026
+
+O PR #111 foi integrado por squash em `74fba82`, com a árvore Git idêntica à
+de `5f89262`. O diff `HEAD~1..HEAD` foi conferido; no código de produto foram
+retirados o bloco de exclusão destrutiva e seu import sem uso. Os status em
+[D-CLI.SKILL.PROMOTE](../../decisoes.md), no checkpoint de
+[functional-progress.md](../../functional-progress.md) e no topo deste relatório
+passam a refletir a integração observada.
+
+- Repetição local completa no head validado: **3931 testes e 6409 subtestes
+  aprovados**, 19 skips e 31 deselects, exit 0, com Codex 0.154.0 e cliente v8
+  real. Ruff check/format do teste alterado e `git diff --check` aprovados.
+- Prova por mutação repetida: o teste sem a nova asserção passa nas duas
+  mutações; com a asserção, falha em ambas pela origem errada da recusa.
+  O código real passa. As mutações foram aplicadas somente em memória.
+- [CI do PR em `5f89262`](https://github.com/Patricia7sp/kairos/actions/runs/39706554853):
+  onze checks verdes, incluindo Quality Gate SonarCloud. Logs confirmam
+  3928 testes e 6409 subtestes unitários, 22 skips e 31 deselects;
+  30 testes e 26 subtestes na imagem, sem skips; sessões Docker offline com
+  26 testes aprovados e um skip de perfil AppArmor/seccomp do host.
+- O [CI pós-merge](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
+  concluiu onze jobs verdes, incluindo deploy no Komodo; o check externo
+  SonarCloud aprovou o Quality Gate, totalizando doze checks verdes. Logs da
+  main confirmam 3928 testes e 6409 subtestes unitários aprovados, 22 skips e
+  31 deselects; imagem com 30 testes e 26 subtestes, sem skips; Docker offline
+  com 26 testes aprovados e um skip do perfil do host.
+- DeployStack `6ad9fd6015bb7baf7a08c176` terminou com sucesso. O log do script
+  não informou o commit (`?`); a identidade foi conferida diretamente no
+  checkout usado pela stack: HEAD `74fba822cfc6fb48701bfdfe7ed7ff58170c4ce4`.
+- O container foi iniciado por esse deploy (12:12:11Z) e está healthy. A imagem
+  em uso é `sha256:dc280539991bef96d6198de2ce4676816e95f9814cf7c186c34d003b731ea14d`.
+  Os hashes do código em uso conferem com os arquivos validados: `hub.py`
+  `a6259cefc2e26c44e4be2e3b9e049bfc6070ac43062d4ddd08d7110ef5be0066`,
+  `publication_io.py`
+  `44daa7ed19f178323a89917b475e598c386ab96f85cfe669a554f4a0004b8e1b`,
+  `org_policy.py`
+  `f51b750e1658e62e339a485a24b25a470281c06ce693d94ae24816b85c10dbe8` e
+  `pyproject.toml`
+  `55d68d1d4f61a104b35761031c828d026e0ee5dfe1214bace8ab83eaf6ea994b`.
+  A leitura usou UID 10000.
+- O smoke direto, repetido após o deploy por `scripts/smoke-deploy.sh`,
+  respondeu `smoke ok: ok` e exit 0. Nenhum runtime live foi invocado.
+- Reconferência no mesmo dia, sem novo deploy: o checkout da stack continua em
+  `74fba82`, o container segue healthy com a mesma imagem, os quatro hashes
+  acima seguem iguais e o smoke direto voltou `smoke ok: ok` (exit 0).
+- Evidência mecânica da rodada: `/tmp/kairos-promocao-validacao-20261022/`
+  (`evidence.json` e `merge-deploy.json`), em diretório temporário da máquina.
