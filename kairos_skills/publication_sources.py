@@ -60,7 +60,10 @@ class PublicationContext:
         self._bundled = {}
         self._inventory = {}
         self._observations = {}
-        if writer is PublicationWriter.BUNDLED_SYNC:
+        self._observation_stacks = {}
+        if writer is PublicationWriter.BUNDLED_SYNC and not os.path.lexists(
+            self._home / "skills" / ".no-bundled-skills"
+        ):
             self._discover(self._fd, self.root, category=True)
 
     @property
@@ -121,12 +124,13 @@ class PublicationContext:
         if self._closed:
             raise SkillMutationError("conflict", "Fonte de publicação encerrada.")
         self._policy.revalidate()
-        with publication_errors(), ExitStack() as stack:
+        with publication_errors():
             check_chain(self._chain)
             for parent, name, fd in self._chain:
-                current = open_fd(stack, name, os.O_PATH, parent=parent)
-                if observed_mount_id(current) != self._mounts[fd]:
-                    raise SkillMutationError("conflict", "Montagem da fonte alterada.")
+                with ExitStack() as current_stack:
+                    current = open_fd(current_stack, name, os.O_PATH, parent=parent)
+                    if observed_mount_id(current) != self._mounts[fd]:
+                        raise SkillMutationError("conflict", "Montagem da fonte alterada.")
             value = _metadata(self._fd, self.root_identity[2])
             if (value.st_dev, value.st_ino, observed_mount_id(self._fd)) != self.root_identity:
                 raise SkillMutationError("conflict", "Raiz da fonte alterada.")
@@ -140,23 +144,29 @@ class PublicationContext:
             for chain, handles in self._observations.values():
                 check_chain(chain)
                 for parent, name, fd in chain:
-                    current = open_fd(stack, name, os.O_PATH, parent=parent)
-                    if observed_mount_id(current) != observed_mount_id(fd):
-                        raise SkillMutationError(
-                            "conflict", "Montagem da cadeia da fonte alterada."
-                        )
+                    with ExitStack() as current_stack:
+                        current = open_fd(current_stack, name, os.O_PATH, parent=parent)
+                        if observed_mount_id(current) != observed_mount_id(fd):
+                            raise SkillMutationError(
+                                "conflict", "Montagem da cadeia da fonte alterada."
+                            )
                 for parent, name, fd, stamp, mount in handles:
                     same_entry(parent, name, fd)
-                    current = open_fd(stack, name, os.O_PATH, parent=parent)
-                    if observed_mount_id(current) != mount or _stamp(_metadata(fd, mount)) != stamp:
-                        raise SkillMutationError("conflict", "Árvore da fonte alterada.")
+                    with ExitStack() as current_stack:
+                        current = open_fd(current_stack, name, os.O_PATH, parent=parent)
+                        if (
+                            observed_mount_id(current) != mount
+                            or _stamp(_metadata(fd, mount)) != stamp
+                        ):
+                            raise SkillMutationError("conflict", "Árvore da fonte alterada.")
 
     def _track_source(self, path, proof):
         """Guarda identidades e stamps; revalidação de commit nunca copia conteúdo."""
         self.revalidate()
         if path in self._observations:
             return
-        parent, chain = open_directory(self._stack, path.parent)
+        observation_stack = self._stack.enter_context(ExitStack())
+        parent, chain = open_directory(observation_stack, path.parent)
         handles = []
         directories = {}
         for entry in proof.entries:
@@ -165,7 +175,7 @@ class PublicationContext:
             flags = os.O_RDONLY | os.O_NONBLOCK
             if entry.kind == "directory":
                 flags |= os.O_DIRECTORY
-            fd = open_fd(self._stack, component, flags, parent=directory)
+            fd = open_fd(observation_stack, component, flags, parent=directory)
             value = _metadata(fd, entry.mount_id)
             if (value.st_dev, value.st_ino, stat.S_IMODE(value.st_mode)) != (
                 entry.device,
@@ -179,6 +189,7 @@ class PublicationContext:
         if capture_source(path).entries != proof.entries:
             raise SkillMutationError("conflict", "Árvore alterada durante observação.")
         self._observations[path] = chain, handles
+        self._observation_stacks[path] = observation_stack
         self.revalidate()
 
     def contains(self, name):
@@ -195,6 +206,14 @@ class PublicationContext:
             raise SkillMutationError("conflict", "Fonte alterada antes da limpeza.")
         # O deletor verifica cada entrada; a observação imutável termina antes dos unlinks.
         del self._observations[path]
+        self._observation_stacks.pop(path).close()
+
+    def _release_completed_bundle(self, name):
+        require(self.writer is PublicationWriter.BUNDLED_SYNC)
+        path = self._bundled.get(name)
+        if path in self._observations:
+            del self._observations[path]
+            self._observation_stacks.pop(path).close()
 
     def resolve(self, name, *, acquisition_id=None, repository=None):
         validate_name(name)

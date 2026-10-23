@@ -11,13 +11,14 @@ from unittest.mock import patch
 import test_skill_removal_projection as projection_fixtures
 from skill_mutation_fixtures import creation_text
 from skill_org_fixtures import personal_policy, personal_receipt, personal_sync_operation
+from skill_publication_writer_fixtures import sync_bundled_skills
 from test_skill_mutation_io import hold_lock
 from test_skill_mutation_state import creation_draft
 
 from kairos_domain.ownership import Actor
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import SkillMutationError, SkillMutationState
-from kairos_skills.sync import MANIFEST_NAME, read_manifest, sync_bundled_skills
+from kairos_skills.sync import MANIFEST_NAME, read_manifest
 from kairos_state import connect
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
@@ -25,29 +26,27 @@ from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 @personal_sync_operation
 def guarded_sync(bundle, home, pipe, *, policy):
-    from contextlib import contextmanager
-
     from kairos_skills import sync
+    from kairos_skills.publication_sources import observe_bundled_source
 
-    original_snapshot = sync._snapshot_bundle
-    original_read = sync.read_skill_tombstones
+    original = sync._recover_pending
 
-    @contextmanager
-    def snapshot(source):
-        with original_snapshot(source) as bundled:
-            pipe.send("snapshot_ready")
-            yield bundled
-
-    def read(home):
-        result = original_read(home)
+    def read(session, result):
+        recovered = original(session, result)
         pipe.send("ledger_read")
-        return result
+        return recovered
 
     with (
-        patch.object(sync, "_snapshot_bundle", snapshot),
-        patch.object(sync, "read_skill_tombstones", read),
+        patch("kairos_skills.publication_sources.trusted_bundle_root", return_value=bundle),
+        observe_bundled_source(home, policy=policy) as context,
     ):
-        result = sync.sync_bundled_skills(bundle, home / "skills", policy=policy)
+        for name in context._bundled:
+            context.resolve(name)
+        pipe.send("snapshot_ready")
+        with patch.object(sync, "_recover_pending", side_effect=read):
+            result = sync.sync_bundled_skills(
+                bundle, home / "skills", policy=policy, context=context
+            )
     pipe.send(result.copied)
 
 
@@ -154,17 +153,20 @@ class RemovalSyncTests(unittest.TestCase):
                         policy=personal_policy(self, ((self.home / "skills").parent)),
                     )
                 self.assertEqual(raised.exception.operation_id, draft.operation_id)
-                self.assertFalse((self.home / "skills").exists())
+                self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_corrupt_or_incompatible_ledger_refuses_seeding(self):
-        from kairos_state.schema import SCHEMA_VERSION
+        from kairos_state.migrations import MIGRATIONS
 
         self.repository()
         pristine = sqlite3.connect(":memory:")
         self.addCleanup(pristine.close)
         self.db.backup(pristine)
         for statement, parameters in (
-            ("UPDATE schema_version SET version=?", (SCHEMA_VERSION + 1,)),
+            (
+                "UPDATE schema_version SET version=?",
+                (max(item.version for item in MIGRATIONS) + 1,),
+            ),
             ("DROP TABLE skill_tree_snapshots", ()),
         ):
             pristine.backup(self.db)
@@ -177,7 +179,7 @@ class RemovalSyncTests(unittest.TestCase):
                         self.home / "skills",
                         policy=personal_policy(self, ((self.home / "skills").parent)),
                     )
-                self.assertFalse((self.home / "skills").exists())
+                self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_old_home_read_does_not_create_or_migrate_database(self):
         from kairos_skills.removal_state import read_skill_tombstones
@@ -216,7 +218,7 @@ class RemovalSyncTests(unittest.TestCase):
                 policy=personal_policy(self, ((self.home / "skills").parent)),
             )
         self.assertEqual(outside.read_bytes(), b"private marker")
-        self.assertFalse((self.home / "skills").exists())
+        self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_missing_bundle_cannot_hide_pending_operations(self):
         repo = self.repository()
@@ -230,8 +232,9 @@ class RemovalSyncTests(unittest.TestCase):
                 self.home / "skills",
                 policy=personal_policy(self, ((self.home / "skills").parent)),
             )
-        self.assertEqual(raised.exception.operation_id, draft.operation_id)
-        self.assertFalse((self.home / "skills").exists())
+        self.assertEqual(raised.exception.kind, "io")
+        self.assertEqual(repo.pending(self.name)[0].operation_id, draft.operation_id)
+        self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_restore_committed_allows_sync_without_overwriting_edits(self):
         sync_bundled_skills(
@@ -282,7 +285,7 @@ class RemovalSyncTests(unittest.TestCase):
                 self.home / "skills",
                 policy=personal_policy(self, ((self.home / "skills").parent)),
             )
-        self.assertFalse((self.home / "skills").exists())
+        self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_sync_and_remove_share_lock(self):
         context = multiprocessing.get_context("spawn")
@@ -298,7 +301,7 @@ class RemovalSyncTests(unittest.TestCase):
             self.assertTrue(sync_parent.poll(10))
             self.assertEqual(sync_parent.recv(), "snapshot_ready")
             self.assertFalse(sync_parent.poll(0.15))
-            self.assertFalse((self.home / "skills").exists())
+            self.assertFalse((self.home / "skills" / self.name).exists())
             lock_parent.send("release")
             self.assertTrue(sync_parent.poll(10))
             self.assertEqual(sync_parent.recv(), "ledger_read")

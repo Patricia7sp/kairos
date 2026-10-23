@@ -16,6 +16,9 @@ def reconcile_publication(session, record: SkillPublicationRecord):
     record = current
     draft = record.draft
     try:
+        from kairos_skills.publication_manifest import observe_manifest
+
+        _manifest, session._manifest_observation = observe_manifest(session.home)
         coordinator = PublicationCoordinator(session)
         coordinator.guard(draft)
         if record.state is SkillMutationState.ABORTED:

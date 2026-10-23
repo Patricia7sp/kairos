@@ -435,7 +435,7 @@ COMMANDS: tuple[Command, ...] = (
         "Sincronização de skills",
         _sub("disable", "Desativa a sincronização de uma skill"),
         _sub("enable", "Ativa a sincronização"),
-        _sub("now", "Sincroniza agora"),
+        _c("now", "Sincroniza agora", status=Status.IMPLEMENTED),
         _sub("push", "Envia alterações locais"),
         _sub("status", "Estado da sincronização"),
         status=Status.IMPLEMENTED,

@@ -6,7 +6,6 @@ import logging
 import time
 import uuid
 
-from kairos_domain.ownership import Provenance
 from kairos_skills.mutation_contract import (
     SkillMutationError,
     SkillMutationState,
@@ -80,11 +79,19 @@ class PublicationCoordinator:
         self.common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
         self.policy = repository_guard(session.policy, self.common)
 
-    def guard(self, draft):
+    def projection_guard(self, draft):
+        from kairos_skills.sync import check_sync_policy
+
         self.session.revalidate()
         self.compatible_context(draft)
         self.session.files.check_operation(draft.operation_id)
         self.policy.check_publication(draft)
+        current = self.session.publications.get(draft.operation_id)
+        if current is not None and current.projection_delta != draft.manifest_delta:
+            require(current.projection_delta is not None and current.projection_delta.after is None)
+            require(not self.session.context.contains(draft.name), "Skill voltou ao pacote.")
+        else:
+            check_sync_policy(self.session, draft)
         others = [
             r for r in self.common.pending(draft.name) if r.operation_id != draft.operation_id
         ]
@@ -94,6 +101,12 @@ class PublicationCoordinator:
                 "Outra operação pendente bloqueia o nome.",
                 operation_id=others[0].operation_id,
             )
+
+    def guard(self, draft):
+        from kairos_skills.sync import check_sync_intent
+
+        self.projection_guard(draft)
+        check_sync_intent(self.session, draft)
 
     def trees(self, draft, *, installed, staged, previous):
         root = self.session.home
@@ -148,8 +161,20 @@ class PublicationCoordinator:
         return path
 
     def finish_phases(self, record):
+        from kairos_skills.sync import observe_manifest, reconcile_manifest
+
         draft = record.draft
         self.guard(draft)
+        if record.projection_delta != draft.manifest_delta:
+            if not record.manifest_complete:
+                reconcile_manifest(
+                    self.session.home, record, guard=lambda: self.projection_guard(draft)
+                )
+                _manifest, self.session._manifest_observation = observe_manifest(self.session.home)
+                record = self.session.publications.confirm_manifest(
+                    draft.operation_id, guard=lambda: self.guard(draft)
+                )
+            return publication_result(record)
         installed = self.session.files.capture_installed(draft.name)
         previous = self.session.files.capture_previous(draft.operation_id)
         staged = self.session.files.capture_staged(draft.operation_id)
@@ -158,8 +183,28 @@ class PublicationCoordinator:
                 "conflict", "Instalação ou snapshot divergente; versões preservadas."
             )
         if not record.manifest_complete:
-            # A projeção efetiva é conectada em T5; nunca confirmar uma escrita inexistente.
-            return publication_result(record, error_kind="unavailable")
+            with observe_publication_trees(
+                self.trees(draft, installed=installed, staged=None, previous=previous)
+            ) as check:
+
+                def projection_guard():
+                    self.projection_guard(draft)
+                    check()
+                    if record.projection_delta != record.draft.manifest_delta:
+                        require(
+                            not self.session.context.contains(draft.name), "Skill voltou ao pacote."
+                        )
+
+                reconcile_manifest(self.session.home, record, guard=projection_guard)
+                _manifest, self.session._manifest_observation = observe_manifest(self.session.home)
+
+                def confirmation_guard():
+                    projection_guard()
+                    self.session._manifest_observation.check()
+
+                record = self.session.publications.confirm_manifest(
+                    draft.operation_id, guard=confirmation_guard
+                )
         if not record.cleanup_complete:
             source = self.source(draft)
             self.guard(draft)
@@ -174,7 +219,10 @@ class PublicationCoordinator:
                 self.session.context._release_source_for_cleanup(source, draft.source_proof)
                 delete_publication(source, draft.source_proof, guard=guard)
                 record = self.session.publications.confirm_cleanup(draft.operation_id, guard=guard)
-        return publication_result(record)
+        result = publication_result(record)
+        if result.complete and draft.writer is PublicationWriter.BUNDLED_SYNC:
+            self.session.context._release_completed_bundle(draft.name)
+        return result
 
 
 class SkillPublicationService:
@@ -211,14 +259,20 @@ class SkillPublicationService:
             previous = session.files.capture_installed(name)
             current = coordinator.common.current_installation(name)
             if session.context.writer is PublicationWriter.QUARANTINE_PROMOTE:
-                require(
-                    session.context.replacement == previous,
-                    "Substituição exige intenção sobre a árvore exata.",
-                )
-            elif previous is not None:
-                require(
-                    current is not None and current.provenance is Provenance.BUNDLED,
-                    "Substituição bundled exige instalação elegível.",
+                if session.context.replacement != previous:
+                    raise SkillMutationError(
+                        "conflict", "Substituição exige intenção sobre a árvore exata."
+                    )
+            else:
+                from kairos_skills.sync import prepare_sync_publication
+
+                prepare_sync_publication(
+                    session,
+                    name,
+                    previous=previous,
+                    current=current,
+                    delta=manifest_delta,
+                    source_proof=proof,
                 )
             phase = "staging"
             staged = session.files.stage(operation_id, source, proof, guard=session.revalidate)

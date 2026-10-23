@@ -32,6 +32,25 @@ from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
+def publication_result_metadata(result):
+    return {
+        "operation_id": result.operation_id,
+        "name": result.name,
+        "state": result.state.value,
+        "complete": result.complete,
+        "error_kind": result.error_kind,
+        "manifest_complete": result.manifest_complete,
+        "cleanup_complete": result.cleanup_complete,
+    }
+
+
+def publication_exit_code(result):
+    for kind, code in (("denied", 77), ("unavailable", 69), ("input", 2)):
+        if kind in result.error_kinds or (kind == "denied" and result.blocked):
+            return code
+    return 1 if result.failed else 0
+
+
 def mutation_metadata(record: CommonRecord) -> dict[str, object]:
     if isinstance(record, SkillPublicationRecord):
         return {

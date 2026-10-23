@@ -1,14 +1,14 @@
 """Publicações incompletas bloqueiam todos os escritores, inclusive repetições."""
 
+from skill_publication_writer_fixtures import acquired_source, sync_bundled_skills
 from test_skill_publication_authority import PublicationAuthorityFixture, home_contents
 
 from kairos_domain.ownership import Actor
 from kairos_skills.adoptions import SkillAdoptionService
-from kairos_skills.hub import SkillBundle, install_from_quarantine, quarantine_bundle
+from kairos_skills.hub import SkillBundle, install_from_quarantine
 from kairos_skills.mutation_contract import SkillMutationError, SkillMutationState
 from kairos_skills.mutation_recovery import reconcile_pending
 from kairos_skills.removal_io import SkillRemovalFiles
-from kairos_skills.sync import sync_bundled_skills
 
 
 class PublicationPendingTests(PublicationAuthorityFixture):
@@ -17,7 +17,13 @@ class PublicationPendingTests(PublicationAuthorityFixture):
         _publications, draft = self.publish(complete=False)
         adoption = SkillAdoptionService(self.home, self.common, policy=self.policy)
         quarantine = self.home / "legacy-quarantine"
-        source = quarantine_bundle(SkillBundle(self.name, {"SKILL.md": b"replacement"}), quarantine)
+        source, context, acquisition_id = acquired_source(
+            self,
+            self.home,
+            quarantine,
+            SkillBundle(self.name, {"SKILL.md": b"replacement"}),
+            policy=self.policy,
+        )
         bundle = self.home / "empty-package"
         bundle.mkdir()
         calls = {
@@ -34,7 +40,12 @@ class PublicationPendingTests(PublicationAuthorityFixture):
             ),
             "sync": lambda: sync_bundled_skills(bundle, self.home / "skills", policy=self.policy),
             "promote": lambda: install_from_quarantine(
-                source, quarantine, self.home / "skills", policy=self.policy
+                source,
+                quarantine,
+                self.home / "skills",
+                policy=self.policy,
+                context=context,
+                acquisition_id=acquisition_id,
             ),
         }
         with SkillRemovalFiles(self.home) as files:
@@ -44,12 +55,18 @@ class PublicationPendingTests(PublicationAuthorityFixture):
             before = home_contents(self.home)
             history = self.common.history()
             for action, call in calls.items():
-                with self.subTest(action=action), self.assertRaises(SkillMutationError) as caught:
-                    call()
-                self.assertEqual(caught.exception.kind, "conflict")
-                self.assertEqual(caught.exception.operation_id, draft.operation_id)
-                self.assertEqual(home_contents(self.home), before)
-                self.assertEqual(self.common.history(), history)
+                with self.subTest(action=action):
+                    if action == "sync":
+                        result = call()
+                        self.assertTrue(result.failed)
+                        self.assertIn(draft.operation_id, result.pending)
+                    else:
+                        with self.assertRaises(SkillMutationError) as caught:
+                            call()
+                        self.assertEqual(caught.exception.kind, "conflict")
+                        self.assertEqual(caught.exception.operation_id, draft.operation_id)
+                    self.assertEqual(home_contents(self.home), before)
+                    self.assertEqual(self.common.history(), history)
 
     def test_prepared_publication_blocks_before_legacy_recovery(self):
         self.manual()
@@ -76,7 +93,8 @@ class PublicationPendingTests(PublicationAuthorityFixture):
         before = home_contents(self.home)
         with self.assertRaises(SkillMutationError) as caught:
             sync_bundled_skills(missing, self.home / "skills", policy=self.policy)
-        self.assertEqual(caught.exception.operation_id, draft.operation_id)
+        self.assertEqual(caught.exception.kind, "io")
+        self.assertEqual(_publications.pending(self.name)[0].operation_id, draft.operation_id)
         self.assertEqual(home_contents(self.home), before)
 
     def test_rollback_repetition_checks_publication_before_returning_old_success(self):

@@ -98,7 +98,10 @@ class PublicationStateFixture(unittest.TestCase):
         acquisition_id, operation_id = uuid.uuid4().hex, uuid.uuid4().hex
         name = "personal-skill"
         source = self.capture(self.home / "quarantine" / acquisition_id / name)
-        staged = self.capture(self.home / ".skill-publications" / operation_id / "staged")
+        area = self.home / ".skill-publications"
+        area.mkdir(mode=0o700, exist_ok=True)
+        (area / operation_id).mkdir(mode=0o700)
+        staged = self.capture(area / operation_id / "staged")
         inventory = publication_inventory_hash(source)
         scan = hashlib.sha256(
             json.dumps(

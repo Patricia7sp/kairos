@@ -355,3 +355,56 @@ as regressões T1–T4 e fonte em dispositivo realmente distinto. A projeção
 efetiva do manifesto e a elegibilidade completa de sync são T5; delta de
 manifesto ainda não confirmado impede sucesso integral em T4. T5–T7, revisão
 independente e aceite integrado permanecem pendentes; schema padrão v10.
+
+
+## Execução local — T5, 23/10/2026
+
+Sync e promoção usam contexto T2 e coordenador T4; ausência de contexto ou
+recibo é recusa `input` antes de efeitos. Promoção exige intenção sobre a
+árvore exata para substituir. Sync conserva edição/exclusão local, opt-out
+(inclusive marcador com alvo ausente), tombstones e elegibilidade legada.
+Uma instalação B2 também precisa da identidade e do inventário canônicos: a
+cópia byte-idêntica em outra raiz não herda elegibilidade. O MD5 legado é
+calculado a partir de captura por descritores para decisões de escrita, sem
+seguir links; sua ordenação histórica é preservada.
+
+O manifesto usa leitura estrita e compare-and-apply de uma entrada; demais
+entradas são preservadas, inclusive chaves surgidas durante a publicação.
+Após fsync do arquivo/pai, a confirmação verifica a observação corrente no
+commit. Lacuna depois da gravação retoma o mesmo ID/inode; limpeza de catálogo
+usa `manifest_prepared` no ID existente, sem evento de instalação ou herança
+de adoção. Ausência no pacote atual autoriza somente essa manutenção;
+tombstones permanecem. Snapshot anterior continua preservado.
+
+A CLI pública existente `kairos sync now` foi ativada em `commands.py`; o
+handler `skills sync` não estava exposto pelo parser. JSON mantém campos
+anteriores e acrescenta `publicacoes`/`pendentes`; itens incompletos não entram
+em copiadas/atualizadas, e os códigos distinguem veto, indisponibilidade,
+entrada inválida e pendência. Não há novo comando de hub/download/restore.
+
+Decisões de integração: `publication_manifest.py` isola o compare-and-apply e
+evita ciclo com o coordenador; fontes/revalidações fecham descritores
+temporários por entrada e liberam observações só ao terminar a operação ou
+decisão sem efeito, mantendo os guards. O preflight captura sem prender todas
+as fontes; pendências conhecidas são reconciliadas antes de validar outros
+itens do pacote. Um SKILL.md do pacote real excede 64 KiB: o sync sem pendência
+recusa o preflight, em vez de aumentar o limite ou alterar conteúdo de
+terceiros. Isso não oculta o ID de publicação já pendente. Rever essas
+decisões custa adaptar helpers/roteamento ou tratar o conteúdo em recorte
+próprio; não autoriza retirar vetos nem transformar manifesto em autoria.
+
+Validação integral estável: **4027 testes e 6441 subtestes**, 51 skips e
+1 deselect, Codex 0.154.0; fingerprint da árvore conferido antes/depois
+(`4aac463f2ac671b8dac407219b50d6e1d507833f48d12e9defebf04a9ac0afcc`).
+Ruff check/format globais e diff-check passaram. Rodada afetada anterior:
+109 testes/38 subtestes; teste sob limite de 160 descritores passou também ao
+repetir o lote. Mutação sem liberação recusou o lote, como esperado.
+
+Uma tentativa integral anterior terminou em segfault após dump adicional
+do faulthandler de 60s; outra rodada foi invalidada por edição de fixture
+durante subprocessos. Nenhuma foi contada como verde. Os casos isolados de
+catálogo/identificação passaram no host; a integral acima usou o comando
+normal do CI e árvore estável, sem remover testes. A causa nativa do primeiro
+segfault não foi atribuída ao produto sem evidência. T6–T7, revisão
+independente e aceite integrado seguem pendentes; padrão v10, sem migração
+de produção, merge ou deploy.

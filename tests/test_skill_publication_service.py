@@ -335,7 +335,10 @@ class PublicationServiceTests(PublicationServiceFixture):
         from kairos_skills.publication_contract import ManifestDelta
 
         session = self.start()
-        result = self.publish(manifest_delta=ManifestDelta(self.name, None, ""))
+        with patch(
+            "kairos_skills.sync.reconcile_manifest", side_effect=OSError("manifest unavailable")
+        ):
+            result = self.publish(manifest_delta=ManifestDelta(self.name, None, ""))
         self.assertIs(result.state, SkillMutationState.COMMITTED)
         self.assertFalse(result.complete)
         self.assertFalse(result.manifest_complete)

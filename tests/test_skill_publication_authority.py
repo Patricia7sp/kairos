@@ -27,7 +27,10 @@ def home_contents(home):
         str(path.relative_to(home)): (
             path.lstat().st_dev,
             path.lstat().st_ino,
-            hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None,
+            # SHM muda com locks de leitores; conteúdo canônico continua no DB/WAL.
+            hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.is_file() and path.name != "state.db-shm"
+            else None,
         )
         for path in (home, *sorted(home.rglob("*")))
     }
