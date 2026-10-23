@@ -36,7 +36,9 @@ contrato do executável. Consome a implementação de backup B2 sem mudar I/O.
 
 Chamador real CLI sem asyncio.run residual; nenhum backup real omitido por
 fixture; subprocesso/harness importando API nova; retorno0 somente após
-arquivo publicado e retorno1 preservando saída anterior e descartando parcial.
+arquivo publicado; recusa antes da publicação preservando saída anterior e
+descartando parcial. Erro de fsync do pai após replace recusa o atestado de
+durabilidade e não garante rollback; esse limite preexistente não é alterado.
 
 Auto-revisão: uma tarefa, interface única e consumidores enumerados. Escopo
 exato escolhido no diálogo; execução nativa autorizada, sem nova decisão de

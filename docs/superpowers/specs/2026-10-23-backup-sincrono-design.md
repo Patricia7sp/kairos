@@ -15,6 +15,14 @@ chamar diretamente. CLI, JSON, códigos de saída, arquivo produzido, lock,
 fsync, descarte de parcial e recusa com saída anterior preservada mantêm
 seus contratos. A ordem e o corpo das operações de backup não mudam.
 
+A preservação da saída anterior cobre recusas antes da publicação. Já existe
+um limite após `os.replace`: se o fsync do diretório falhar, a função retorna1
+sem atestar durabilidade, mas o novo arquivo pode estar visível no destino.
+Retorno de erro não promete rollback depois desse ponto. Essa semântica foi
+reproduzida na revisão e permanece igual; recuperação pós-publicação é outro
+recorte. O CLI atual cria um destino novo; output é um argumento do helper,
+sem opção correspondente exposta pelo parser.
+
 Manter async exigiria offload integral e um contrato adicional de cancelamento
 e cleanup; não corresponde ao consumidor atual. Suprimir S7493 não alinha a
 assinatura ao trabalho efetivamente síncrono. A usuária escolheu o fluxo
