@@ -53,9 +53,11 @@ Prioridades de continuidade:
    bloqueios comuns sem herdar autoria/adoção. T4 acrescenta coordenador e
    recuperação observacional por ID, com versões preservadas e confirmação
    de limpeza independente. T5 foi validada localmente com escritores e
-   manifesto pelo coordenador e saída real de `kairos sync now`. T6 foi validada localmente com backup integral, reparo de derivados
-   e diagnóstico de restauração sem transferir autoridade. A próxima tarefa
-   é T7, interrupções reais, clientes antigos e aceite na imagem. Não há aceite integral de B2, migração
+   manifesto pelo coordenador e saída real de `kairos sync now`. T6 foi validada localmente com backup integral e restauração sem renovar
+   autoridade. T7 ativou v11 na branch e passou no CI local completo, incluindo
+   102 SIGKILLs na imagem real, clientes antigos e backup/restauração. Falta
+   a revisão independente de toda a branch; CI remoto permanece pendente.
+   O Quality Gate consultivo do Sonar está em erro. Não há aceite integral de B2, migração
    de produção, merge ou deploy deste recorte.
 2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de

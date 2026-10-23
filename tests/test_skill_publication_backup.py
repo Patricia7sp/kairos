@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import fcntl
 import io
 import multiprocessing
+import os
 import shutil
 import sqlite3
 import tarfile
@@ -73,6 +75,98 @@ def rows(connection):
 
 
 class PublicationBackupTests(PublicationServiceFixture):
+    def test_v11_database_created_after_absence_decision_restarts_locked_capture(self):
+        from kairos_state import initialize_schema
+
+        late = self.home / "z-after-state.txt"
+        late.write_bytes(b"preserved")
+        original = tarfile.TarFile.add
+        created = False
+
+        def add(tar, path, *args, **kwargs):
+            nonlocal created
+            result = original(tar, path, *args, **kwargs)
+            if Path(path) == late and not created:
+                with (
+                    skill_mutation_lock(self.home),
+                    closing(connect(self.home / "state.db")) as connection,
+                ):
+                    initialize_schema(connection)
+                created = True
+            return result
+
+        archive = self.root / "backup.tar.gz"
+        with patch.object(tarfile.TarFile, "add", new=add):
+            self.assertEqual(self.backup(archive)[0], 0)
+        self.assertTrue(created)
+        restored = self.restored(archive)
+        self.assertEqual((restored / late.name).read_bytes(), b"preserved")
+        with closing(sqlite3.connect(restored / "state.db")) as connection:
+            self.assertEqual(
+                connection.execute("SELECT version FROM schema_version").fetchone()[0], 11
+            )
+
+    def test_initialized_v11_without_skills_can_be_backed_up_without_creating_them(self):
+        from kairos_state import initialize_schema
+
+        with closing(connect(self.home / "state.db")) as connection:
+            initialize_schema(connection)
+            before = rows(connection)
+        self.assertFalse((self.home / "skills").exists())
+        archive = self.root / "backup.tar.gz"
+        self.assertEqual(self.backup(archive)[0], 0)
+        self.assertFalse((self.home / "skills").exists())
+        with tarfile.open(archive) as tar:
+            self.assertIn("state.db", tar.getnames())
+        restored = self.restored(archive)
+        with closing(sqlite3.connect(restored / "state.db")) as connection:
+            self.assertEqual(rows(connection), before)
+
+    def test_backup_restarts_under_lock_when_v11_appears_during_snapshot(self):
+        from kairos_cli.backup import _snapshot_database
+        from kairos_state.migrations import migrate
+        from kairos_state.repositories.skill_mutations import validate_skill_timeline
+
+        with closing(connect(self.home / "state.db")) as connection:
+            migrate(connection, target=10)
+        migrated = False
+
+        def snapshot(*args, **kwargs):
+            nonlocal migrated
+            if not migrated:
+                with (
+                    skill_mutation_lock(self.home),
+                    closing(connect(self.home / "state.db")) as connection,
+                ):
+                    migrate(connection, target=11)
+                migrated = True
+            return _snapshot_database(*args, **kwargs)
+
+        def timeline(connection):
+            if connection.execute("SELECT version FROM schema_version").fetchone()[0] == 11:
+                fd = os.open(self.home / ".skills-write.lock", os.O_RDONLY)
+                try:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(fd)
+            return validate_skill_timeline(connection)
+
+        archive = self.root / "backup.tar.gz"
+        with (
+            patch("kairos_cli.backup._snapshot_database", side_effect=snapshot),
+            patch(
+                "kairos_state.repositories.skill_mutations.validate_skill_timeline",
+                side_effect=timeline,
+            ),
+        ):
+            self.assertEqual(self.backup(archive)[0], 0)
+        self.assertTrue(migrated)
+        with closing(sqlite3.connect(self.restored(archive) / "state.db")) as connection:
+            self.assertEqual(
+                connection.execute("SELECT version FROM schema_version").fetchone()[0], 11
+            )
+
     def test_published_tree_in_pending_removal_is_backed_up_at_known_retired_id(self):
         from kairos_skills.adoptions import SkillAdoptionService
         from kairos_skills.mutations import SkillMutationService

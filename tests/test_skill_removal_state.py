@@ -87,7 +87,7 @@ class RemovalStateTests(unittest.TestCase):
     def modern(self):
         from kairos_state.repositories.skill_removals import SkillRemovalRepository
 
-        migrate(self.db)
+        migrate(self.db, target=10)
         return SkillRemovalRepository(self.db, home_id=self.home_id)
 
     def capture(self):

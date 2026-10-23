@@ -10,7 +10,7 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3–T6 foram validadas localmente em 23/10 na branch `feat/publicacao-skills-b2`. A próxima tarefa é T7. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
+**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3–T6 foram validadas localmente em 23/10 na branch `feat/publicacao-skills-b2`. T7 foi validada pelo CI local completo; a revisão independente da branch permanece pendente. O schema padrão agora é v11 somente na branch; execução não autoriza merge/deploy de B2.
 
 **Execução:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
@@ -222,10 +222,10 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 
 **Interfaces — consome:** T1–T6. A fixture de subprocesso usa APIs de produto e Pipe para sinalizar fronteiras reais; seams chamam a operação real antes/depois da pausa. Não acrescentar flags de teste ao runtime de produção.
 
-- [ ] **Ativar release integrada:** somente após T1–T6, atualizar `SCHEMA_VERSION` padrão para 11 e verificar homes novos, upgrade de v10 e leitura legada. O teste exige presença/comportamento da capacidade solicitada, não congela a última versão do catálogo de migrações.
-- [ ] **RED:** `test_sigkill_boundaries_preserve_recoverable_versions`, `test_v10_client_refuses_v11_after_repair`, `test_cross_device_quarantine_in_real_image`, `RealImageTests.test_skill_publication_recovery_and_backup`. A execução deve falhar com a implementação sem retomada/proteção correspondente; registrar a mutação específica quando a capacidade já estiver implementada. Um teste que apenas encontra um programa já encerrado não prova SIGKILL.
-- [ ] **Implementar fixture antiga:** extrair/buildar o cliente v10 real da base implantada `44d890ca632b40b78a21b62c5e05622200a5b23c` em venv isolado, com dependências verificadas e wheel/digest/proveniência registrados, seguindo `prepare-skill-v8-client.sh`. Preparar cliente v10 tanto no CI local quanto remoto. Exercitar as famílias antigas com os clientes anteriores disponíveis, e capabilities 8/9/10 em testes comportamentais de transações reais. Nenhum teste muda a função do cliente para fazê-lo declarar capability 11.
-- [ ] **Implementar matriz de morte:** processo filho pausa antes/depois de PREPARED, de cada rename/fsync, de COMMITTED, da gravação do manifesto e das confirmações de projeção/limpeza. Pai exige sinal da fronteira, envia SIGKILL, confirma exitcode -9 e reabre serviço/SQLite reais. Cobrir publicação inicial e substituição, política que muda entre processos, fonte indisponível, árvore trocada byte-idêntica e órfão desconhecido. Comparar IDs, inodes, inventários e histórico; repetir retomada e tentar outro escritor do mesmo nome.
+- [x] **Ativar release integrada:** somente após T1–T6, atualizar `SCHEMA_VERSION` padrão para 11 e verificar homes novos, upgrade de v10 e leitura legada. O teste exige presença/comportamento da capacidade solicitada, não congela a última versão do catálogo de migrações.
+- [x] **RED:** `test_sigkill_boundaries_preserve_recoverable_versions`, `test_v10_client_refuses_v11_after_repair`, `test_cross_device_quarantine_in_real_image`, `RealImageTests.test_skill_publication_recovery_and_backup`. A execução deve falhar com a implementação sem retomada/proteção correspondente; registrar a mutação específica quando a capacidade já estiver implementada. Um teste que apenas encontra um programa já encerrado não prova SIGKILL.
+- [x] **Implementar fixture antiga:** extrair/buildar o cliente v10 real da base implantada `44d890ca632b40b78a21b62c5e05622200a5b23c` em venv isolado, com dependências verificadas e wheel/digest/proveniência registrados, seguindo `prepare-skill-v8-client.sh`. Preparar cliente v10 tanto no CI local quanto remoto. Exercitar as famílias antigas com os clientes anteriores disponíveis, e capabilities 8/9/10 em testes comportamentais de transações reais. Nenhum teste muda a função do cliente para fazê-lo declarar capability 11.
+- [x] **Implementar matriz de morte:** processo filho pausa antes/depois de PREPARED, de cada rename/fsync, de COMMITTED, da gravação do manifesto e das confirmações de projeção/limpeza. Pai exige sinal da fronteira, envia SIGKILL, confirma exitcode -9 e reabre serviço/SQLite reais. Cobrir publicação inicial e substituição, política que muda entre processos, fonte indisponível, árvore trocada byte-idêntica e órfão desconhecido. Comparar IDs, inodes, inventários e histórico; repetir retomada e tentar outro escritor do mesmo nome.
 
   ```python
   self.assertTrue(parent.poll(deadline_seconds))
@@ -236,11 +236,11 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
   self.assertEqual(process.exitcode, -9)
   self.assertEqual(recover_again.operation_id, recovered.operation_id)
   ```
-- [ ] **Implementar aceite na imagem:** o teste invoca o script de aceite montado somente leitura, importando os módulos instalados da imagem, sem montar fontes de produto. Usar UID sem privilégios, rede desativada e volumes descartáveis. Quarentena em tmpfs e destino em outro volume devem ter `st_dev` diferentes comprovados; se o requisito não foi exercitado, o aceite não passa silenciosamente. O script reutiliza a matriz de processos, inclui manifesto/limpeza pendentes e backup/restauração integral/banco isolado, sem provider ou credencial real.
-- [ ] **Verificar GREEN:** `uv run pytest -q tests/test_skill_publication_processes.py`; depois construir imagem real/stub/broker/worker e executar `uv run pytest -q tests/test_container.py::RealImageTests`, exigindo o teste novo sem skips. Regressões de família velha e corrupta permanecem ativas. O caminho live segue desabilitado.
+- [x] **Implementar aceite na imagem:** o teste invoca o script de aceite montado somente leitura, importando os módulos instalados da imagem, sem montar fontes de produto. Usar UID sem privilégios, rede desativada e volumes descartáveis. Quarentena em tmpfs e destino em outro volume devem ter `st_dev` diferentes comprovados; se o requisito não foi exercitado, o aceite não passa silenciosamente. O script reutiliza a matriz de processos, inclui manifesto/limpeza pendentes e backup/restauração integral/banco isolado, sem provider ou credencial real.
+- [x] **Verificar GREEN:** `uv run pytest -q tests/test_skill_publication_processes.py`; depois construir imagem real/stub/broker/worker e executar `uv run pytest -q tests/test_container.py::RealImageTests`, exigindo o teste novo sem skips. Regressões de família velha e corrupta permanecem ativas. O caminho live segue desabilitado.
 - [ ] **Revisar e validar integração:** revisão independente do diff inteiro, correção dos bloqueadores com RED→GREEN, conferência integrada pelo Root; `scripts/ci.sh` completo com Codex fixado no PATH; integrações Docker offline e lint pinado do Dockerfile.stub conforme CI. Reutilizar evidência só se comando, revisão, arquivos, lockfile, configuração e ambiente ainda corresponderem. Não prometer análise Sonar quando o scanner não rodou; conferir jobs remotos e Quality Gate do commit efetivamente proposto.
-- [ ] **Registrar entrega:** comandos, códigos de saída, revisão, imagem/digests, skips/deselects e causas, resultados de recuperação, backup e restauração no relatório. Atualizar decisões como implementadas somente após aceite correspondente; sem marcar este plano concluído por ter sido escrito. Merge exige suíte local e jobs de verificação remotos verdes; deploy é pós-merge e depende da autorização aplicável, com backup/restore privado, smoke e rollback conforme o runbook.
-- [ ] **Commit:** `test(skills): valida publicação interrompida na imagem real`.
+- [x] **Registrar entrega:** comandos, códigos de saída, revisão, imagem/digests, skips/deselects e causas, resultados de recuperação, backup e restauração no relatório. Atualizar decisões como implementadas somente após aceite correspondente; sem marcar este plano concluído por ter sido escrito. Merge exige suíte local e jobs de verificação remotos verdes; deploy é pós-merge e depende da autorização aplicável, com backup/restore privado, smoke e rollback conforme o runbook.
+- [x] **Commit:** `test(skills): valida publicação interrompida na imagem real`.
 
 ## Revisão do plano e passagem para execução
 
@@ -432,3 +432,42 @@ Fingerprint de fontes antes/depois idêntico:
 `4b2be91d78ac7234acae582eea267e96a7b36cfab0041a6e93926ffc583597ad`.
 Ruff check/format globais e diff-check aprovados antes dessa suíte.
 Schema padrão permanece v10 até T7; imagem e revisão independente pendentes.
+
+
+## Execução local — T7, 23/10/2026
+
+T1–T6 concluídas antes da ativação padrão de v11. Homes novos, upgrade v10 e
+leitura legada foram exercitados sem congelar o catálogo de migrações.
+Cliente v10 real da base `44d890c`, wheel reproduzido e dependências por hash,
+é preparado tanto pelo CI local quanto pelo remoto. Clientes v8/v10 e
+capabilities 8/9/10 são recusados em v11, inclusive após reparo.
+
+A matriz usa Pipe e SIGKILL comprovado (-9) em 102 fronteiras: 50 iniciais e
+52 substituições, com cada fsync descoberto pelo caminho de controle real,
+renames, transações sem commit, COMMITTED e confirmações. Repetição preserva
+ID, inodes e história; outro escritor é bloqueado enquanto há pendência.
+A imagem executa os módulos instalados, com scripts de teste RO, UID10000,
+rede none, caps removidas, rootfs RO e filesystems distintos comprovados.
+Backup/restauração integral e banco isolado não transferem autoridade.
+
+O primeiro CI encontrou quatro falhas unitárias e uma na imagem e não foi
+contado como aprovação. Correções RED→GREEN cobrem backup v11 sem skills e
+inicialização/upgrade concorrente: a parcial inicialmente legada é descartada
+e recapturada sob lock. Fixtures de corrupção agora alteram a timeline ativa
+e recompõem guards; os serviços são testados separadamente do bootstrap que
+recusa schema corrompido. O teste sob160FDs manteve lote e inventários, com
+deadline300s após probe com coverage concluir corretamente em139,21s.
+
+Rodada definitiva de `scripts/ci.sh`: **exit0**, árvore congelada
+`40d43040b1f9a1c6c1928e61cb152ed924bcc6c67699d076902ac432578f18d9`.
+Python com coverage: **4050 passed,21 skipped,33 deselected,6495 subtests**
+(1145,58s). Imagem: **32 passed,26 subtests,sem skips** (190,83s). Docker
+offline: **26 passed,1 skipped** (59,90s), skip exige AppArmor/seccomp do host.
+Frontends17/204/18 e tsc verdes; lint, lock, recall e quatro builds verdes.
+Sonar scanner exit0 e processamento SUCCESS, mas Quality Gate ERROR por
+confiabilidade; análise local não comprova o commit final remoto.
+
+Revisão independente final da branch ainda pendente. CI remoto é gate antes
+de merge; nenhum merge, deploy ou migração de produção foi executado.
+Detalhes, digests, decisões e limites no
+[relatório](../reports/2026-10-22-publicacao-skills-b2.md).

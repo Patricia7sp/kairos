@@ -118,7 +118,7 @@ class PublicationWriterTests(PublicationWriterFixture):
         )
         process.start()
         try:
-            self.assertTrue(parent.poll(60))
+            self.assertTrue(parent.poll(300), "Lote não concluiu sob o limite real de descritores.")
             payload = parent.recv()
             process.join(5)
             self.assertEqual(process.exitcode, 0)

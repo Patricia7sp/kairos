@@ -3,6 +3,29 @@
 import sqlite3
 
 
+def register_mutation_writer(connection):
+    """Fronteira pública dos escritores; registro SQL puro continua no bootstrap."""
+    import logging
+
+    from kairos_skills.mutation_contract import SkillMutationError
+
+    try:
+        register_skill_writer(connection)
+    except sqlite3.DatabaseError:
+        logging.getLogger(__name__).warning(
+            "skill_mutation_write_refused",
+            extra={
+                "action": "mutate",
+                "phase": "capability",
+                "kind": "corrupt",
+                "reason": "schema_attestation_failed",
+            },
+        )
+        raise SkillMutationError(
+            "corrupt", "Ledger de skills incoerente; arquivos preservados."
+        ) from None
+
+
 def register_skill_writer(connection: sqlite3.Connection) -> None:
     exists = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE name='schema_version'"

@@ -39,7 +39,7 @@ from kairos_state.contention import Budget
 from kairos_state.skill_adoptions_schema import ADOPTION_TABLES, validate_adoption_schema
 from kairos_state.skill_org_schema import ORG_OBJECTS, ORG_TABLES, validate_org_schema
 from kairos_state.skill_publications_schema import PUBLICATION_TABLES, validate_publication_schema
-from kairos_state.skill_writer import register_skill_writer
+from kairos_state.skill_writer import register_mutation_writer
 from kairos_state.writes import write_with_retry
 
 
@@ -797,7 +797,7 @@ class SkillMutationRepository:
         )
 
     def _write(self, operation):
-        register_skill_writer(self._conn)
+        register_mutation_writer(self._conn)
 
         def transaction():
             if self._conn.in_transaction:

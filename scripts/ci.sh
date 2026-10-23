@@ -31,6 +31,7 @@ UV="${UV:-uv}"
 command -v "$UV" >/dev/null 2>&1 || UV="$HOME/.local/bin/uv"
 
 run "Cliente v8 para regressão de downgrade" env UV="$UV" bash scripts/prepare-skill-v8-client.sh
+run "Cliente v10 para regressão de downgrade" env UV="$UV" bash scripts/prepare-skill-v10-client.sh
 
 # Cobertura para o Sonar (advisory), espelhando o job `tests` do CI. O
 # `COVERAGE_PROCESS_START` ativa o `.pth` permanente do coverage em cada
@@ -88,12 +89,23 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   # shellcheck disable=SC2317,SC2329
   hadolint_local() {
     docker run --rm -v "$PWD/.hadolint.yaml:/cfg.yaml:ro" -i \
-      hadolint/hadolint:latest-alpine hadolint --config /cfg.yaml - < Dockerfile
+      hadolint/hadolint:v2.12.0 hadolint --config /cfg.yaml - < "$1"
   }
-  run "Dockerfile (hadolint)" hadolint_local
+  run "Dockerfile (hadolint)" hadolint_local Dockerfile
+  run "Dockerfile.stub (hadolint)" hadolint_local Dockerfile.stub
   run "docker build --check" docker build --check .
   run "Construir a imagem"   docker build -q -t kairos:test .
+  run "Construir o broker" docker build --target runtime-broker -t kairos:runtime-broker-test .
+  run "Verificar o broker" docker run --rm --entrypoint docker kairos:runtime-broker-test --version
+  run "Validar stub" docker build --check -f Dockerfile.stub .
+  run "Construir stub" docker build -f Dockerfile.stub -t kairos:stub .
   run "Testes de integração" "$UV" run pytest -q tests/test_container.py::RealImageTests
+  run "Validar worker" docker build --check -f docker/external-sandbox/Dockerfile .
+  run "Construir worker" docker build -f docker/external-sandbox/Dockerfile -t kairos:external-sandbox .
+  run "Sessões Docker isoladas (offline)" env KAIROS_EXTERNAL_SANDBOX_TEST=1 \
+    timeout -k 10s 240s "$UV" run pytest -q \
+    tests/test_external_sandbox_integration.py tests/test_docker_session_worker.py \
+    tests/test_docker_sessions_integration.py
 else
   skip "Imagem + integração" "docker indisponível"
 fi

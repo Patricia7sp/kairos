@@ -26,7 +26,7 @@ from kairos_skills.removal_contract import (
 )
 from kairos_state.contention import Budget
 from kairos_state.repositories.skill_mutations import authority_query, corrupt_errors
-from kairos_state.skill_writer import register_skill_writer
+from kairos_state.skill_writer import register_mutation_writer
 from kairos_state.writes import write_with_retry
 
 
@@ -237,7 +237,7 @@ class SkillRemovalRepository:
             return self._snapshot(record.draft.snapshot_id)
 
     def _write(self, operation):
-        register_skill_writer(self._conn)
+        register_mutation_writer(self._conn)
 
         def transaction():
             if self._conn.in_transaction:

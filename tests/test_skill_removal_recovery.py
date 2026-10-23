@@ -104,13 +104,16 @@ class RemovalRecoveryTests(unittest.TestCase):
     def reconcile(self):
         db = connect(self.home / "state.db")
         try:
-            repo = SkillMutationRepository(db, home_id=catalog_home_id(self.home))
-            with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
-                return reconcile_pending(
-                    repo, files, name=self.name, policy=personal_policy(self, files.home)
-                )
+            return self.reconcile_on(db)
         finally:
             db.close()
+
+    def reconcile_on(self, db):
+        repo = SkillMutationRepository(db, home_id=catalog_home_id(self.home))
+        with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
+            return reconcile_pending(
+                repo, files, name=self.name, policy=personal_policy(self, files.home)
+            )
 
     def test_remove_death_all_boundaries(self):
         for phase in ("prepared", "rename", "before-commit", "after-commit"):
@@ -252,13 +255,18 @@ class RemovalRecoveryTests(unittest.TestCase):
         self.assertEqual((self.target / "scripts/run.bin").read_bytes(), b"\x00\xff")
 
     def test_corrupted_snapshot_refused_before_touching_files(self):
+        from test_skill_adoption_state import mutate_rows_without_guard
+
         operation_id = self.interrupted("rename")
-        self.db.execute("DROP TRIGGER skill_tree_blobs_no_update")
-        with self.db:
-            self.db.execute("UPDATE skill_tree_blobs SET content=? WHERE size_bytes=2", (b"xx",))
+        mutate_rows_without_guard(
+            self.db,
+            "skill_tree_blobs_no_update",
+            "UPDATE skill_tree_blobs SET content=? WHERE size_bytes=2",
+            (b"xx",),
+        )
         retired = self.home / ".skill-mutations/retired" / operation_id
         with self.assertRaises(SkillMutationError) as raised:
-            self.reconcile()
+            self.reconcile_on(self.db)
         self.assertEqual(raised.exception.kind, "corrupt")
         self.assertEqual((retired / "scripts/run.bin").read_bytes(), b"\x00\xff")
         self.assertFalse(self.target.exists())

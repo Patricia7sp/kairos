@@ -128,10 +128,12 @@ com identificação e bloqueios comuns de publicações. T4 acrescenta coordena�
 e recuperação observacional por ID, sem instalação ou limpeza fictícias.
 T5 também foi validada localmente: `kairos sync now` usa o coordenador,
 expõe IDs/confirmações/pendências e retorna falha em resultado parcial.
-T6 foi validada localmente: backup sob lock comum, inventário atestado,
-reparo de derivados e restauração sem renovar autoridade. A próxima tarefa
-é T7, interrupções reais, clientes antigos e imagem; o aceite integrado
-de B2 permanece pendente.
+T6 foi validada localmente com backup sob lock e restauração sem renovar
+autoridade. T7 ativou v11 na branch e passou no CI local completo, com
+102 SIGKILLs na imagem, clientes antigos reais e backup/restauração. A
+revisão independente da branch e o CI remoto permanecem pendentes; o
+Quality Gate consultivo do Sonar está em erro. Evidências e limites no
+[relatório B2](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em

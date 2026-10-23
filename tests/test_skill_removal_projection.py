@@ -380,12 +380,19 @@ class RemovalProjectionTests(unittest.TestCase):
             _history(self.home, argparse.Namespace(name=None, limit=20))
 
     def test_missing_timeline_reference_blocks_projection_and_history(self):
+        from test_skill_adoption_state import mutate_rows_without_guard
+
+        from kairos_state.repositories.skill_mutations import authority_query
+
         created = self.create()
-        self.db.execute("DROP TRIGGER skill_authority_timeline_no_delete")
-        with self.db:
-            self.db.execute(
-                "DELETE FROM skill_authority_timeline WHERE legacy_event=(SELECT MAX(sequence) FROM skill_mutation_events)"
-            )
+        mutate_rows_without_guard(
+            self.db,
+            authority_query(self.db, "skill_authority_timeline_no_delete"),
+            authority_query(
+                self.db,
+                "DELETE FROM skill_authority_timeline WHERE legacy_event=(SELECT MAX(sequence) FROM skill_mutation_events)",
+            ),
+        )
         for read in (
             lambda: self.repo.current_installation(self.name),
             self.repo.history,
@@ -395,12 +402,19 @@ class RemovalProjectionTests(unittest.TestCase):
                 read()
 
     def test_orphan_operation_blocks_history_and_projection(self):
+        from test_skill_adoption_state import mutate_rows_without_guard
+
+        from kairos_state.repositories.skill_mutations import authority_query
+
         created = self.create()
-        self.db.execute("DROP TRIGGER skill_authority_timeline_no_delete")
-        self.db.execute("DROP TRIGGER skill_mutation_events_no_delete")
-        with self.db:
-            self.db.execute("DELETE FROM skill_authority_timeline")
-            self.db.execute("DELETE FROM skill_mutation_events")
+        mutate_rows_without_guard(
+            self.db,
+            authority_query(self.db, "skill_authority_timeline_no_delete"),
+            authority_query(self.db, "DELETE FROM skill_authority_timeline"),
+        )
+        mutate_rows_without_guard(
+            self.db, "skill_mutation_events_no_delete", "DELETE FROM skill_mutation_events"
+        )
         for read in (self.repo.history, lambda: self.repo.current_installation(self.name)):
             with self.subTest(read=read), self.assertRaises(SkillMutationError):
                 read()

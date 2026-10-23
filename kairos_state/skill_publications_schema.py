@@ -313,9 +313,15 @@ def _install(connection):
 
 
 def migrate_publications(connection):
+    from kairos_skills.mutation_contract import SkillMutationError
     from kairos_state.repositories.skill_mutations import validate_skill_timeline
 
-    validate_skill_timeline(connection)
+    try:
+        validate_skill_timeline(connection)
+    except SkillMutationError:
+        raise sqlite3.DatabaseError(
+            "Estado de skills incompatível com a migração de publicação."
+        ) from None
     present = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     if present & PUBLICATION_TABLES:
         raise sqlite3.DatabaseError("Família de publicação parcial antes da migração.")

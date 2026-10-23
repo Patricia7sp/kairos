@@ -7,7 +7,10 @@ execução nativa autorizada em 22/10, sobre `02fb85e`. T1 está em `ff23200` e
 T2 está em `1103f0c`; T3 está em `fb5e71b` e T4 em `abc67f8`. T5 foi
 validada localmente em 23/10 com escritores, manifesto e CLI pelo coordenador.
 T6 foi validada localmente com backup integral e diagnóstico de restauração
-sem transferir autoridade. T7 e o aceite integrado permanecem pendentes.
+sem transferir autoridade. T7 passou no CI local completo e ativou v11 somente na branch de trabalho.
+Revisão independente, CI remoto e aceite de integração permanecem pendentes;
+o Quality Gate consultivo do Sonar está em erro. Evidências no
+[relatório](../reports/2026-10-22-publicacao-skills-b2.md).
 Base de execução atualizada: `44d890c` (main), com a correção do PR #111
 integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 

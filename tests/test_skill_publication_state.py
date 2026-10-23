@@ -1,6 +1,7 @@
 """Migração e confirmações não podem apagar história nem fabricar instalação."""
 
 import sqlite3
+import uuid
 from dataclasses import replace
 
 from skill_publication_fixtures import PublicationStateFixture, canonical_rows
@@ -10,6 +11,58 @@ from kairos_state.migrations import migrate, repair_derived_objects
 
 
 class PublicationStateTests(PublicationStateFixture):
+    def test_tree_writer_corruption_in_v11_returns_sanitized_error(self):
+        from kairos_domain.ownership import Actor, Provenance
+        from kairos_skills.removal_contract import SkillTreeAction, SkillTreeDraft
+        from kairos_state.repositories.skill_removals import SkillRemovalRepository
+
+        self.upgrade()
+        proof = replace(
+            self.capture(self.home / "skills/personal-skill"), contents={"SKILL.md": b"publication"}
+        )
+        operation_id = uuid.uuid4().hex
+        draft = SkillTreeDraft(
+            operation_id,
+            self.home_id,
+            SkillTreeAction.REMOVE,
+            "personal-skill",
+            Actor.USER_FOREGROUND,
+            1.0,
+            Provenance.BUNDLED,
+            proof,
+            operation_id,
+        )
+        self.connection.execute("DROP TRIGGER skill_acquisition_receipts_writer")
+        with self.assertRaises(SkillMutationError) as caught:
+            SkillRemovalRepository(self.connection, home_id=self.home_id).prepare_remove(
+                draft, proof
+            )
+        self.assertEqual(caught.exception.kind, "corrupt")
+
+    def test_corrupt_v10_upgrade_reports_database_error_without_partial_v11(self):
+        self.connection.execute("DROP TRIGGER skill_adoption_operations_no_update")
+        with self.assertRaises(sqlite3.DatabaseError):
+            migrate(self.connection, target=11)
+        self.assertEqual(
+            self.connection.execute("SELECT version FROM schema_version").fetchone()[0], 10
+        )
+        self.assertIsNone(
+            self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='skill_publication_operations'"
+            ).fetchone()
+        )
+
+    def test_legacy_writer_corruption_in_v11_returns_sanitized_error(self):
+        self.upgrade()
+        self.connection.execute("DROP TRIGGER skill_acquisition_receipts_writer")
+        with self.assertRaises(SkillMutationError) as caught:
+            self.legacy_creation()
+        self.assertEqual(caught.exception.kind, "corrupt")
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM skill_mutation_operations").fetchone()[0],
+            0,
+        )
+
     def test_confirmation_refuses_before_commit(self):
         repository, draft = self.prepared(manifest=True)
         before = tuple(self.connection.execute("SELECT * FROM skill_publication_events"))
