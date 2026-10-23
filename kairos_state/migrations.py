@@ -313,7 +313,7 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
     if observed is not None and observed >= 9:
         with conn:
             if observed == 11:
-                repair_publication_objects(conn)
+                recriados.extend(repair_publication_objects(conn))
             elif observed == 10:
                 repair_org_triggers(conn)
             elif observed == 9:

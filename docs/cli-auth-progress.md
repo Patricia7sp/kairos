@@ -128,8 +128,10 @@ com identificação e bloqueios comuns de publicações. T4 acrescenta coordena�
 e recuperação observacional por ID, sem instalação ou limpeza fictícias.
 T5 também foi validada localmente: `kairos sync now` usa o coordenador,
 expõe IDs/confirmações/pendências e retorna falha em resultado parcial.
-A próxima tarefa é T6, backup/reparo/diagnóstico de restauração; o aceite
-integrado de B2 permanece pendente.
+T6 foi validada localmente: backup sob lock comum, inventário atestado,
+reparo de derivados e restauração sem renovar autoridade. A próxima tarefa
+é T7, interrupções reais, clientes antigos e imagem; o aceite integrado
+de B2 permanece pendente.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em

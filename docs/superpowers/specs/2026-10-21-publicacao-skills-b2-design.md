@@ -6,7 +6,8 @@ com referência ao conteúdo de `7fd4a12` no PR #111. O
 execução nativa autorizada em 22/10, sobre `02fb85e`. T1 está em `ff23200` e
 T2 está em `1103f0c`; T3 está em `fb5e71b` e T4 em `abc67f8`. T5 foi
 validada localmente em 23/10 com escritores, manifesto e CLI pelo coordenador.
-T6–T7 e o aceite integrado permanecem pendentes.
+T6 foi validada localmente com backup integral e diagnóstico de restauração
+sem transferir autoridade. T7 e o aceite integrado permanecem pendentes.
 Base de execução atualizada: `44d890c` (main), com a correção do PR #111
 integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 

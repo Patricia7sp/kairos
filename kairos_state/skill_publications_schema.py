@@ -355,3 +355,4 @@ def repair_publication_objects(connection):
         raise
     else:
         connection.execute("RELEASE kairos_publication_repair") if nested else connection.commit()
+    return (*(name for name, _, _ in expected_publication_triggers()), "skill_org_protections")

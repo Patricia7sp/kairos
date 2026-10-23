@@ -10,7 +10,7 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3 foi validada localmente em 23/10 na branch `feat/publicacao-skills-b2`. A próxima tarefa é T4. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
+**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3–T6 foram validadas localmente em 23/10 na branch `feat/publicacao-skills-b2`. A próxima tarefa é T7. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
 
 **Execução:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
@@ -202,7 +202,7 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 
 **Interfaces — consome:** T1/T3/T4. **Produz:** `publication_backup_inventory(home: Path, repository: SkillPublicationRepository) -> tuple[PublicationBackupEntry, ...]`, com `PublicationBackupEntry(relative_path: str, proof: TreeCapture)` validado contra refs derivadas dos IDs; `validate_restored_publication(home: Path, record: SkillPublicationRecord, *, policy) -> RestorationObservation`. Definir `RestorationObservation` com `operation_id/observed_home_id: str`, `present_artifacts: tuple[str, ...]`, `inventory_valid/identity_valid: bool` e `reasons: tuple[str, ...]`. Uma observação não altera o journal nem concede autoridade.
 
-- [ ] **RED:** `test_backup_covers_all_referenced_artifacts`, `test_missing_artifact_preserves_previous_archive`, `test_restore_new_inodes_has_no_new_authority`, `test_database_only_restore_blocks_recovery`, `test_repair_does_not_complete_pending_publication`. Comparar canônicas antes/depois; restaurar arquivo real em home isolado e verificar bytes/modos de staged/previous/instalado, ausência de binding transferido e recusa mutante.
+- [x] **RED:** `test_backup_covers_all_referenced_artifacts`, `test_missing_artifact_preserves_previous_archive`, `test_restore_new_inodes_has_no_new_authority`, `test_database_only_restore_blocks_recovery`, `test_repair_does_not_complete_pending_publication`. Comparar canônicas antes/depois; restaurar arquivo real em home isolado e verificar bytes/modos de staged/previous/instalado, ausência de binding transferido e recusa mutante.
 
   ```python
   self.assertTrue(observation.inventory_valid)
@@ -210,11 +210,11 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
   self.assertEqual(canonical_rows(restored, tables), canonical_before_backup)
   self.assertFalse(identify_restored().removivel)
   ```
-- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_backup.py`.
-- [ ] **Implementar backup:** para home B2, adquirir o lock comum antes da observação do journal, snapshot SQLite e leitura das árvores; atestar inventários antes/depois. Incluir `.skill-publications`, recibos, journal, manifesto e árvore instalada, com todos os snapshots preservados e pendências. Exigir os artefatos esperados pelo estado/layout observado na tabela de recuperação: staged ausente depois de rename para o destino não é, por si só, corrupção. Quarentena externa não entra implicitamente no arquivo. Artefato obrigatório ausente, links, escape ou alteração recusam o novo backup e preservam saída anterior. Homes legados mantêm o contrato existente, sem migração implícita.
-- [ ] **Implementar restore/reparo:** inventários íntegros comprovam os bytes restaurados, não os inodes anteriores. Diagnóstico não renova recibo, instalação, adoção ou binding. Reparo recria somente derivados/triggers v11 e não exclui pendências. Retomada mutante ainda exige o contexto e as identidades compatíveis de T4; observação de restore por hash não satisfaz esse requisito. Em outro home, histórico continua histórico e vínculos não se transferem; no mesmo home, o veto durável de B1 permanece. Fonte externa ausente impede concluir limpeza, sem escolher outra pasta pelo nome. Não criar comando de importação/reatribuição de autoridade para remover esse bloqueio.
-- [ ] **GREEN:** repetir o arquivo e `uv run pytest -q tests/test_cli_backup_boundary.py tests/test_skill_adoption_backup.py tests/test_skill_org_backup.py`; conferir `PRAGMA integrity_check`, fingerprints canônicos e falhas sanitizadas na API pública de backup.
-- [ ] **Commit:** `feat(backup): preserva artefatos e pendências de publicações`.
+- [x] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_backup.py`.
+- [x] **Implementar backup:** para home B2, adquirir o lock comum antes da observação do journal, snapshot SQLite e leitura das árvores; atestar inventários antes/depois. Incluir `.skill-publications`, recibos, journal, manifesto e árvore instalada, com todos os snapshots preservados e pendências. Exigir os artefatos esperados pelo estado/layout observado na tabela de recuperação: staged ausente depois de rename para o destino não é, por si só, corrupção. Quarentena externa não entra implicitamente no arquivo. Artefato obrigatório ausente, links, escape ou alteração recusam o novo backup e preservam saída anterior. Homes legados mantêm o contrato existente, sem migração implícita.
+- [x] **Implementar restore/reparo:** inventários íntegros comprovam os bytes restaurados, não os inodes anteriores. Diagnóstico não renova recibo, instalação, adoção ou binding. Reparo recria somente derivados/triggers v11 e não exclui pendências. Retomada mutante ainda exige o contexto e as identidades compatíveis de T4; observação de restore por hash não satisfaz esse requisito. Em outro home, histórico continua histórico e vínculos não se transferem; no mesmo home, o veto durável de B1 permanece. Fonte externa ausente impede concluir limpeza, sem escolher outra pasta pelo nome. Não criar comando de importação/reatribuição de autoridade para remover esse bloqueio.
+- [x] **GREEN:** repetir o arquivo e `uv run pytest -q tests/test_cli_backup_boundary.py tests/test_skill_adoption_backup.py tests/test_skill_org_backup.py`; conferir `PRAGMA integrity_check`, fingerprints canônicos e falhas sanitizadas na API pública de backup.
+- [x] **Commit:** `feat(backup): preserva artefatos e pendências de publicações`.
 
 ### Task 7: interrupções reais, clientes antigos e aceite na imagem
 
@@ -408,3 +408,27 @@ normal do CI e árvore estável, sem remover testes. A causa nativa do primeiro
 segfault não foi atribuída ao produto sem evidência. T6–T7, revisão
 independente e aceite integrado seguem pendentes; padrão v10, sem migração
 de produção, merge ou deploy.
+
+
+## Execução local — T6, 23/10/2026
+
+Backup v11 agora segura o lock comum durante journal, snapshot SQLite e
+inventários antes/depois. Preserva modos, versões e saída anterior diante
+de ausência, alteração, links ou erro de fsync. A saída é publicada por
+replace atômico após fsync do arquivo, seguido de fsync do diretório.
+Homes legados mantêm o caminho sem migração implícita.
+
+O diagnóstico separa inventário de identidade: restauração em novos inodes
+não renova recibos, adoções, binding ou autoridade. Reparo relata os objetos
+v11 recriados e não conclui pendências. Referências estrangeiras não podem
+sumir pelo filtro do home; backup integral recusa esse transplante. Árvores
+retiradas por REMOVE pendente são reconhecidas somente pelo ID canônico e
+pela prova completa da remoção.
+
+Validação: 12 testes novos passaram, incluindo disputa real do lock com
+escritor de outra família; suíte integral congelada com Codex 0.154.0:
+**4039 passed, 51 skipped, 1 deselected, 6441 subtests passed** (478,38 s).
+Fingerprint de fontes antes/depois idêntico:
+`4b2be91d78ac7234acae582eea267e96a7b36cfab0041a6e93926ffc583597ad`.
+Ruff check/format globais e diff-check aprovados antes dessa suíte.
+Schema padrão permanece v10 até T7; imagem e revisão independente pendentes.
