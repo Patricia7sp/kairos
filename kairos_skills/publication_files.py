@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import os
 import stat
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 
-from kairos_filesystem.descriptors import check_chain, open_directory, open_fd, rename_no_replace
+from kairos_filesystem.descriptors import (
+    check_chain,
+    open_directory,
+    open_fd,
+    rename_no_replace,
+    same_entry,
+)
 from kairos_filesystem.tree import (
     _create_directory,
     _metadata,
+    _stamp,
     assert_creation_supported,
+    delete_verified_tree,
     observed_mount_id,
     restore_tree,
 )
@@ -32,6 +40,61 @@ def capture_source(path):
         result = capture_skill(parent, path.name)
         check_chain(chain)
         return result
+
+
+@contextmanager
+def observe_publication_trees(trees):
+    """Captura fora da transação; guard de commit verifica só metadados presos a fds."""
+    with publication_errors(), ExitStack() as stack:
+        checks = []
+        for path, proof in trees:
+            parent, chain = open_directory(stack, path.parent)
+            if proof is None:
+                checks.append((parent, path.name, None, None, None, chain))
+                continue
+            directories = {}
+            for entry in proof.entries:
+                directory = parent if not entry.path else directories[entry.path.rpartition("/")[0]]
+                component = path.name if not entry.path else entry.path.rpartition("/")[2]
+                fd = open_fd(
+                    stack,
+                    component,
+                    os.O_RDONLY
+                    | os.O_NONBLOCK
+                    | (os.O_DIRECTORY if entry.kind == "directory" else 0),
+                    parent=directory,
+                )
+                value = _metadata(fd, entry.mount_id)
+                _expect(
+                    (value.st_dev, value.st_ino, stat.S_IMODE(value.st_mode))
+                    == (entry.device, entry.inode, entry.mode),
+                    kind="conflict",
+                )
+                checks.append((directory, component, fd, _stamp(value), entry.mount_id, chain))
+                if entry.kind == "directory":
+                    directories[entry.path] = fd
+            _expect(capture_source(path).entries == proof.entries, kind="conflict")
+
+        def check():
+            with publication_errors(), ExitStack() as current:
+                for parent, name, fd, stamp, mount, chain in checks:
+                    check_chain(chain)
+                    if fd is None:
+                        try:
+                            os.stat(name, dir_fd=parent, follow_symlinks=False)
+                        except FileNotFoundError:
+                            continue
+                        raise SkillMutationError("conflict", "Destino antes ausente foi ocupado.")
+                    same_entry(parent, name, fd)
+                    opened = open_fd(current, name, os.O_PATH, parent=parent)
+                    _expect(
+                        observed_mount_id(opened) == mount
+                        and _stamp(_metadata(fd, mount)) == stamp,
+                        kind="conflict",
+                    )
+
+        check()
+        yield check
 
 
 class PublicationFiles:
@@ -146,6 +209,17 @@ class PublicationFiles:
         with publication_errors():
             return self._capture(self._operation(operation_id), "previous")
 
+    def check_operation(self, operation_id):
+        with publication_errors():
+            parent = self._operation(operation_id)
+            _expect(parent is not None, "Área da operação ausente.", kind="conflict")
+            with os.scandir(parent) as entries:
+                _expect(
+                    all(entry.name in {"staged", "previous"} for entry in entries),
+                    "Artefato privado desconhecido; entrada preservada.",
+                    kind="conflict",
+                )
+
     def stage(self, operation_id, source, expected, *, guard):
         validate_id(operation_id)
         validate_capture(expected)
@@ -231,6 +305,17 @@ class PublicationFiles:
                 expected,
                 guard=guard,
             )
+
+    def discard_staged(self, operation_id, expected, *, guard):
+        with publication_errors():
+            parent = self._operation(operation_id)
+            _expect(parent is not None, kind="conflict")
+
+            def check():
+                self.check()
+                guard()
+
+            delete_verified_tree(parent, "staged", expected, guard=check)
 
     def sync_parents(self, *, guard):
         _expect(callable(guard), "Guard obrigatório.")

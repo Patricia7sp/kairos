@@ -187,7 +187,16 @@ class PublicationContext:
         require(self.writer is PublicationWriter.BUNDLED_SYNC, "Quarentena exige ID de aquisição.")
         return name in self._bundled
 
-    def resolve(self, name, *, acquisition_id=None):
+    def _release_source_for_cleanup(self, path, proof):
+        require(self.writer is PublicationWriter.QUARANTINE_PROMOTE)
+        self.revalidate()
+        require(path in self._observations)
+        if capture_source(path).entries != proof.entries:
+            raise SkillMutationError("conflict", "Fonte alterada antes da limpeza.")
+        # O deletor verifica cada entrada; a observação imutável termina antes dos unlinks.
+        del self._observations[path]
+
+    def resolve(self, name, *, acquisition_id=None, repository=None):
         validate_name(name)
         self.revalidate()
         if self.writer is PublicationWriter.BUNDLED_SYNC:
@@ -200,11 +209,21 @@ class PublicationContext:
             from kairos_skills.removal_state import database_connection
             from kairos_state.repositories.skill_publications import SkillPublicationRepository
 
-            with publication_errors(), database_connection(self._home, write=False) as connection:
-                require(connection is not None, "Recibo de aquisição ausente.")
-                receipt = SkillPublicationRepository(connection, home_id=self.home_id).receipt(
-                    acquisition_id
+            if repository is None:
+                with (
+                    publication_errors(),
+                    database_connection(self._home, write=False) as connection,
+                ):
+                    require(connection is not None, "Recibo de aquisição ausente.")
+                    receipt = SkillPublicationRepository(connection, home_id=self.home_id).receipt(
+                        acquisition_id
+                    )
+            else:
+                require(
+                    type(repository) is SkillPublicationRepository
+                    and repository.home_id == self.home_id
                 )
+                receipt = repository.receipt(acquisition_id)
             require(receipt is not None, "Recibo de aquisição ausente.")
             require(
                 (receipt.name, receipt.source_key, receipt.home_id)

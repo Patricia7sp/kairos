@@ -320,3 +320,38 @@ sem atribuir a T3 o coordenador de T4 ou o aceite na imagem de T7.
 Próxima tarefa: T4, coordenação da publicação e recuperação observacional por
 ID. T4–T7, revisão independente da branch e aceite integrado permanecem
 pendentes. Schema padrão v10, sem migração de produção, merge ou deploy.
+
+
+## Execução local — T4, 23/10/2026
+
+O coordenador usa a sessão viva T2, sua conexão e seu lock. PREPARED é
+durável antes do primeiro movimento instalado; COMMITTED só ocorre após
+revalidar identidades, fonte, política e proteção organizacional. Capturas
+e movimentos ficam fora da transação SQLite; o guard de commit verifica
+descritores e metadados observados. Substituição exige a intenção foreground
+sobre a árvore exata, e a versão anterior permanece no snapshot privado.
+
+A recuperação observa os cinco layouts da tabela, sem adotar órfãos ou
+apagar duplicatas desconhecidas. Um novo veto mantém as versões pendentes.
+COMMITTED retoma somente confirmações; repetir ID completo comprova a árvore
+instalada, o snapshot e a compatibilidade do contexto, sem renovar instalação.
+Falhas operacionais carregam ID e resultado incompleto; interrupções inesperadas
+propagam. Recusas geram logging estruturado sanitizado.
+
+A integração ampliou três helpers previstos em T2/T3: guard permite somente
+o próprio draft canônico pendente; resolução usa o repositório da sessão; I/O
+observa árvores para commit e descarta apenas staging conhecido e permitido.
+A observação imutável da fonte termina imediatamente antes de sua exclusão
+verificada, mantendo raiz/contexto/política e instalação/snapshot atestados.
+Se a fonte desapareceu sem confirmação durável de limpeza, a retomada conserva
+a pendência: ausência não comprova a autoria da exclusão. Custo de rever essas
+decisões: endurecer helpers ou especificar tratamento explícito dessa pendência,
+sem inferir sucesso nem mudar linhas canônicas antigas.
+
+Suíte integral: **4009 testes e 6441 subtestes**, com 51 skips e 1 deselect,
+Codex 0.154.0. Ruff check, format e diff-check passaram. Validação dirigida
+final: **134 testes e 57 subtestes**, sem skips, incluindo
+as regressões T1–T4 e fonte em dispositivo realmente distinto. A projeção
+efetiva do manifesto e a elegibilidade completa de sync são T5; delta de
+manifesto ainda não confirmado impede sucesso integral em T4. T5–T7, revisão
+independente e aceite integrado permanecem pendentes; schema padrão v10.

@@ -124,8 +124,10 @@ aprovado; a execução nativa de seu
 [plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) foi autorizada
 posteriormente em 22/10 sobre `02fb85e`. T1 está em `ff23200`, com v11 explícito,
 e T2 foi validada localmente. Em 23/10, T3 também foi validada localmente,
-com identificação e bloqueios comuns de publicações. A próxima tarefa é T4;
-o aceite integrado de B2 permanece pendente.
+com identificação e bloqueios comuns de publicações. T4 acrescenta coordenação
+e recuperação observacional por ID, sem instalação ou limpeza fictícias.
+A próxima tarefa é T5, escritores/manifesto/CLI; o aceite integrado de B2
+permanece pendente.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em
