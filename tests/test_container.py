@@ -10,6 +10,7 @@ LÓGICA DE DECISÃO — que é onde os bugs desta unit moram — sem exigir Dock
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
@@ -552,7 +553,9 @@ class RealImageTests(unittest.TestCase):
                 f"imagem {cls.IMAGE} não construída — rode: docker build -t {cls.IMAGE} ."
             )
 
-    def run_in(self, *cmd, image=None, entrypoint="/bin/bash", extra=(), input_text=None):
+    def run_in(
+        self, *cmd, image=None, entrypoint="/bin/bash", extra=(), input_text=None, timeout=120
+    ):
         args = ["docker", "run", "--rm", *extra]
         if input_text is not None:
             args.append("--interactive")
@@ -560,10 +563,55 @@ class RealImageTests(unittest.TestCase):
             args += ["--entrypoint", entrypoint]
         args += [image or self.IMAGE, *cmd]
         return subprocess.run(
-            args, input=input_text, capture_output=True, text=True, timeout=120, check=False
+            args, input=input_text, capture_output=True, text=True, timeout=timeout, check=False
         )
 
     # -- estrutura ---------------------------------------------------------
+
+    def _publication_acceptance(self, mode):
+        from pathlib import Path
+
+        tests = Path(__file__).resolve().parent
+        result = self.run_in(
+            "/acceptance/skill_publication_image_acceptance.py",
+            mode,
+            entrypoint="/opt/kairos/.venv/bin/python",
+            timeout=300,
+            extra=(
+                "--user",
+                "10000:10000",
+                "--network",
+                "none",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--read-only",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,mode=1777",
+                "--tmpfs",
+                "/acceptance-home:rw,nosuid,nodev,uid=10000,gid=10000,mode=700,size=128m",
+                "--tmpfs",
+                "/acceptance-quarantine:rw,nosuid,nodev,uid=10000,gid=10000,mode=700,size=64m",
+                "--mount",
+                f"type=bind,src={tests / 'skill_publication_image_acceptance.py'},dst=/acceptance/skill_publication_image_acceptance.py,readonly",
+                "--mount",
+                f"type=bind,src={tests / 'fixtures/skill_publication_process.py'},dst=/acceptance/fixtures/skill_publication_process.py,readonly",
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_cross_device_quarantine_in_real_image(self):
+        report = self._publication_acceptance("cross-device")
+        self.assertNotEqual(report["home_device"], report["quarantine_device"])
+        self.assertEqual(report["sigkills"], 4)
+
+    def test_skill_publication_recovery_and_backup(self):
+        report = self._publication_acceptance("full")
+        self.assertGreater(report["sigkills"], 40)
+        self.assertEqual(report["backup"], "complete")
+        self.assertFalse(report["authority_transferred"])
 
     def test_o_shim_resolve_antes_da_venv_no_PATH_real(self):
         r = self.run_in("-c", "command -v kairos")

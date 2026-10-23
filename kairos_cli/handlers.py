@@ -306,17 +306,32 @@ def cmd_skills(args) -> int:
         return ExitCode.OK
 
     if sub == "sync":
+        from kairos_cli.skill_mutations import publication_exit_code, publication_result_metadata
         from kairos_skills.mutation_contract import SkillMutationError
         from kairos_skills.org_policy import observe_org_policy, org_policy_context
-        from kairos_skills.sync import sync_bundled_skills
+        from kairos_skills.publication_sources import observe_bundled_source
+        from kairos_skills.sync import SyncResult, sync_bundled_skills
 
-        bundled = Path(__file__).resolve().parent.parent / "skills"
         try:
-            with observe_org_policy(org_policy_context(os.environ), user_dir.parent) as policy:
-                r = sync_bundled_skills(bundled, user_dir, policy=policy)
+            with (
+                observe_org_policy(org_policy_context(os.environ), user_dir.parent) as policy,
+                observe_bundled_source(user_dir.parent, policy=policy) as context,
+            ):
+                r = sync_bundled_skills(context.root, user_dir, policy=policy, context=context)
         except SkillMutationError as error:
-            print("kairos: " + str(error), file=sys.stderr)
-            return {"input": 2, "unavailable": 69, "denied": 77}.get(error.kind, 1)
+            r = SyncResult(
+                failed=True,
+                error_kinds=[error.kind],
+                errors=[
+                    {
+                        "name": None,
+                        "kind": error.kind,
+                        "operation_id": error.operation_id,
+                    }
+                ],
+            )
+            if not args.json:
+                print("kairos: " + str(error), file=sys.stderr)
         except (OSError, ValueError):
             print(
                 "kairos: sincronização não pôde ser concluída; versões preservadas.",
@@ -331,10 +346,13 @@ def cmd_skills(args) -> int:
                 "respeitadas (apagadas pelo usuário)": r.user_deleted,
                 "blocked": r.blocked,
                 "failed": r.failed,
+                "publicacoes": [publication_result_metadata(p) for p in r.publications],
+                "pendentes": r.pending,
+                "erros": r.errors,
             },
             as_json=args.json,
         )
-        return 77 if r.blocked else ExitCode.OK
+        return publication_exit_code(r)
 
     return ExitCode.NOT_IMPLEMENTED
 
@@ -549,6 +567,10 @@ def cmd_tick(args) -> int:
 
 
 def cmd_sync(args) -> int:
+    if args.sync_command == "now":
+        from argparse import Namespace
+
+        return cmd_skills(Namespace(skills_command="sync", json=args.json))
     if args.sync_command == "status":
         manifesto = _home() / "skills" / ".bundled_manifest"
         from kairos_skills.sync import read_manifest

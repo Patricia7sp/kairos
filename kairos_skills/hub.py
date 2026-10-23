@@ -10,13 +10,14 @@ uma quarentena condicional só protege contra o que a condição prevê.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from kairos_skills.org_policy_contract import OrgPolicyAction
-from kairos_skills.org_policy_guard import publication_guard
-from kairos_skills.publication_io import capture_publication, move_publication
+from kairos_skills.mutation_contract import SkillMutationError, require, validate_id
+from kairos_skills.publication_contract import PublicationWriter
+from kairos_skills.publication_session import publication_session
+from kairos_skills.publication_sources import PublicationContext
+from kairos_skills.publications import SkillPublicationService
 
 __all__ = [
     "QuarantineError",
@@ -46,16 +47,16 @@ class SkillBundle:
 
 def quarantine_bundle(bundle: SkillBundle, quarantine_dir: Path) -> Path:
     """Grava o bundle na quarentena. Primeiro passo, sempre."""
-    if not bundle.name or "/" in bundle.name or bundle.name.startswith("."):
-        raise QuarantineError(f"nome de skill inválido: {bundle.name!r}")
-
+    files = validated_bundle_files(bundle)
     dest = quarantine_dir / bundle.name
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.mkdir(mode=0o700)
+    except FileExistsError:
+        raise QuarantineError("Entrada de quarentena ocupada; aquisição preservada.") from None
 
     root = dest.resolve()
-    for rel, data in bundle.files.items():
+    for rel, data in files.items():
         target = (dest / rel).resolve()
         # Um nome de arquivo dentro do bundle é entrada NÃO CONFIÁVEL: um
         # `../../.bashrc` escaparia da quarentena antes de qualquer scan.
@@ -64,6 +65,44 @@ def quarantine_bundle(bundle: SkillBundle, quarantine_dir: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     return dest
+
+
+def validated_bundle_files(bundle: SkillBundle) -> dict[str, bytes]:
+    """Valida todos os componentes antes de criar uma entrada de quarentena."""
+    from kairos_skills.mutation_contract import SkillMutationError, require, validate_name
+    from kairos_skills.removal_contract import (
+        MAX_COMPONENT_BYTES,
+        MAX_FILE_BYTES,
+        MAX_TREE_BYTES,
+        MAX_TREE_DEPTH,
+        MAX_TREE_ENTRIES,
+    )
+
+    try:
+        require(type(bundle) is SkillBundle)
+        validate_name(bundle.name)
+        require(type(bundle.files) is dict and 0 < len(bundle.files) < MAX_TREE_ENTRIES)
+        files = dict(bundle.files)
+        directories = {""}
+        total = 0
+        for path, data in files.items():
+            require(type(path) is str and "\x00" not in path)
+            parts = path.split("/")
+            if not parts or any(part in ("", ".", "..") for part in parts):
+                raise UnsafeQuarantinePath("Caminho de bundle inseguro.")
+            require(len(parts) <= MAX_TREE_DEPTH)
+            require(all(len(part.encode("utf-8")) <= MAX_COMPONENT_BYTES for part in parts))
+            require(
+                type(data) is bytes
+                and len(data) <= (65536 if path == "SKILL.md" else MAX_FILE_BYTES)
+            )
+            total += len(data)
+            require(total <= MAX_TREE_BYTES)
+            directories.update("/".join(parts[:index]) for index in range(1, len(parts)))
+        require(not set(files) & directories and len(files) + len(directories) <= MAX_TREE_ENTRIES)
+        return files
+    except (SkillMutationError, UnicodeError):
+        raise QuarantineError("Bundle inválido ou fora dos limites de skills.") from None
 
 
 def scan_quarantined(path: Path) -> list[str]:
@@ -83,7 +122,13 @@ def scan_quarantined(path: Path) -> list[str]:
 
 
 def install_from_quarantine(
-    quarantine_path: Path, quarantine_dir: Path, skills_dir: Path, *, policy
+    quarantine_path: Path,
+    quarantine_dir: Path,
+    skills_dir: Path,
+    *,
+    policy,
+    context=None,
+    acquisition_id=None,
 ) -> Path:
     """Promove da quarentena para o diretório de skills.
 
@@ -97,36 +142,32 @@ def install_from_quarantine(
     Destino ocupado recusa com conflito, preservando instalação e quarentena.
     Substituições dependem da coordenação transacional de publicação.
     """
-    with publication_guard(policy, skills_dir.parent) as guard:
-        return _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, guard=guard)
-
-
-def _promote_quarantine(quarantine_path, quarantine_dir, skills_dir, *, guard):
-    resolved = quarantine_path.resolve()
-    root = quarantine_dir.resolve()
-    if not _within(resolved, root):
-        raise UnsafeQuarantinePath(f"Unsafe quarantine path: {quarantine_path}")
-
-    if not (resolved / "SKILL.md").is_file():
-        raise QuarantineError(f"{resolved.name}: falta SKILL.md")
-
-    for entry in resolved.rglob("*"):
-        if entry.is_symlink():
-            raise UnsafeQuarantinePath(f"symlink em skill promovida: {entry.relative_to(resolved)}")
-
-    dest = skills_dir / resolved.name
-    guard.check(resolved.name, OrgPolicyAction.PROMOTE)
-    if skills_dir.is_symlink():
-        raise UnsafeQuarantinePath("Diretório de skills não pode ser um link.")
-    source_proof = capture_publication(resolved)
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    move_publication(
-        resolved,
-        dest,
-        source_proof,
-        guard=lambda: guard.check(resolved.name, OrgPolicyAction.PROMOTE),
+    require(type(context) is PublicationContext, "Contexto de publicação obrigatório.")
+    require(Path(skills_dir).name == "skills", "Promoção exige o diretório skills do home.")
+    require(
+        context.writer is PublicationWriter.QUARANTINE_PROMOTE,
+        "Promoção exige contexto de quarentena.",
     )
-    return dest
+    validate_id(acquisition_id)
+    require(Path(quarantine_dir).absolute() == context.root, "Quarentena diverge da composição.")
+    source = Path(quarantine_path).absolute()
+    require(
+        source == context.root / acquisition_id / source.name,
+        "Caminho não corresponde à aquisição.",
+    )
+    with publication_session(
+        Path(skills_dir).absolute().parent, policy=policy, context=context
+    ) as session:
+        result = SkillPublicationService(session).publish(
+            source.name, acquisition_id=acquisition_id
+        )
+        if not result.complete:
+            raise SkillMutationError(
+                result.error_kind or "conflict",
+                "Publicação pendente; retome o ID indicado.",
+                operation_id=result.operation_id,
+            )
+    return Path(skills_dir) / source.name
 
 
 def _within(path: Path, root: Path) -> bool:

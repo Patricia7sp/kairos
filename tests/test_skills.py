@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from skill_org_fixtures import personal_policy
+from skill_publication_writer_fixtures import sync_bundled_skills
 
 from kairos_domain.ownership import (
     Actor,
@@ -46,7 +47,6 @@ from kairos_skills.sync import (
     NO_BUNDLED_SKILLS_MARKER,
     origin_hash,
     read_manifest,
-    sync_bundled_skills,
     write_manifest,
 )
 
@@ -136,7 +136,7 @@ class SyncTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.bundled = self.root / "bundled"
-        self.user = self.root / "user"
+        self.user = self.root / "home" / "skills"
         self.bundled.mkdir()
 
     def tearDown(self):
@@ -299,17 +299,25 @@ class QuarentenaTests(unittest.TestCase):
     def bundle(self, name="nova", files=None):
         return SkillBundle(name=name, files=files or {"SKILL.md": b"# Nova\n"})
 
+    def acquired(self):
+        from skill_publication_writer_fixtures import acquired_source
+
+        policy = personal_policy(self, self.root)
+        path, context, acquisition_id = acquired_source(
+            self, self.root, self.q, self.bundle(), policy=policy
+        )
+        return path, context, acquisition_id, policy
+
     def test_o_pipeline_e_download_quarentena_scan_instalacao(self):
-        path = quarantine_bundle(self.bundle(), self.q)
+        path, context, acquisition_id, policy = self.acquired()
         self.assertEqual(scan_quarantined(path), [])
         destino = install_from_quarantine(
-            path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+            path, self.q, self.skills, policy=policy, context=context, acquisition_id=acquisition_id
         )
         self.assertTrue((destino / "SKILL.md").is_file())
-        self.assertFalse(path.exists(), "sai da quarentena ao ser promovida")
+        self.assertFalse(path.exists())
 
     def test_nome_de_arquivo_no_bundle_e_entrada_NAO_CONFIAVEL(self):
-        """Um `../../.bashrc` escaparia da quarentena antes de qualquer scan."""
         with self.assertRaises(UnsafeQuarantinePath):
             quarantine_bundle(self.bundle(files={"../../escapou.txt": b"x"}), self.q)
 
@@ -319,45 +327,73 @@ class QuarentenaTests(unittest.TestCase):
                 quarantine_bundle(self.bundle(name=ruim), self.q)
 
     def test_promocao_de_caminho_FORA_da_quarentena_e_recusada(self):
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        path, context, acquisition_id, policy = self.acquired()
         fora = self.root / "fora"
         fora.mkdir()
         (fora / "SKILL.md").write_text("x", encoding="utf-8")
-        with self.assertRaises(UnsafeQuarantinePath):
+        with self.assertRaises(SkillMutationError) as caught:
             install_from_quarantine(
-                fora, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+                fora,
+                self.q,
+                self.skills,
+                policy=policy,
+                context=context,
+                acquisition_id=acquisition_id,
             )
+        self.assertEqual(caught.exception.kind, "input")
+        self.assertTrue(path.exists())
+        self.assertEqual((fora / "SKILL.md").read_text(), "x")
 
     def test_dot_dot_no_meio_do_caminho_nao_passa(self):
-        """Sem `resolve()`, um `..` no meio passaria pela contenção."""
-        quarantine_bundle(self.bundle(), self.q)
-        disfarcado = self.q / "nova" / ".." / ".." / "fora"
-        # Especificamente UnsafeQuarantinePath: se fosse QuarantineError
-        # genérico, o teste passaria também por "falta SKILL.md" e deixaria
-        # de significar "a contenção pegou".
-        with self.assertRaises(UnsafeQuarantinePath):
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        path, context, acquisition_id, policy = self.acquired()
+        disfarcado = path / ".." / ".." / "fora"
+        with self.assertRaises(SkillMutationError) as caught:
             install_from_quarantine(
-                disfarcado, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+                disfarcado,
+                self.q,
+                self.skills,
+                policy=policy,
+                context=context,
+                acquisition_id=acquisition_id,
             )
+        self.assertEqual(caught.exception.kind, "input")
+        self.assertTrue(path.exists())
 
     def test_symlink_e_rejeitado_no_scan_E_na_promocao(self):
-        """Reconferido na promoção porque entre o scan e ela o conteúdo pode
-        ter mudado. E um link para ~/.ssh/id_rsa transformaria `skill_view`
-        num leitor de arquivo arbitrário."""
-        path = quarantine_bundle(self.bundle(), self.q)
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        path, context, acquisition_id, policy = self.acquired()
         (path / "link").symlink_to("/etc/passwd")
         self.assertTrue(any("symlink" in f for f in scan_quarantined(path)))
-        with self.assertRaises(UnsafeQuarantinePath):
+        with self.assertRaises(SkillMutationError):
             install_from_quarantine(
-                path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+                path,
+                self.q,
+                self.skills,
+                policy=policy,
+                context=context,
+                acquisition_id=acquisition_id,
             )
+        self.assertTrue(path.exists())
+        self.assertFalse((self.skills / "nova").exists())
 
     def test_bundle_sem_SKILL_md_e_reprovado(self):
-        path = quarantine_bundle(self.bundle(files={"leia.md": b"x"}), self.q)
+        from skill_publication_writer_fixtures import acquired_source
+
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        bundle = self.bundle(files={"leia.md": b"x"})
+        path = quarantine_bundle(bundle, self.q)
         self.assertIn("falta SKILL.md", scan_quarantined(path))
-        with self.assertRaises(QuarantineError):
-            install_from_quarantine(
-                path, self.q, self.skills, policy=personal_policy(self, (self.skills.parent))
+        with self.assertRaises(SkillMutationError):
+            acquired_source(
+                self, self.root, self.q, bundle, policy=personal_policy(self, self.root)
             )
+        self.assertTrue(path.exists())
 
 
 # ===========================================================================

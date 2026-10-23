@@ -16,20 +16,26 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import stat
-import uuid
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
+from tempfile import NamedTemporaryFile
 
-from kairos_skills.mutation_contract import SkillMutationError
+from kairos_domain.ownership import Provenance
+from kairos_skills.mutation_contract import SkillMutationError, SkillMutationState, require
 from kairos_skills.org_policy_contract import OrgPolicyAction
-from kairos_skills.org_policy_guard import publication_guard
-from kairos_skills.publication_io import capture_publication, delete_publication, move_publication
-from kairos_skills.removal_state import read_skill_tombstones
-from kairos_skills.runtime import validate_skill_name
+from kairos_skills.org_policy_guard import repository_guard
+from kairos_skills.publication_contract import ManifestDelta, PublicationResult, PublicationWriter
+from kairos_skills.publication_files import capture_source
+from kairos_skills.publication_manifest import (
+    apply_manifest_delta,
+    observe_manifest,
+    reconcile_manifest,
+)
+from kairos_skills.publication_session import publication_session
+from kairos_skills.publication_sources import PublicationContext
+from kairos_skills.publications import SkillPublicationService
+from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 __all__ = [
     "MANIFEST_NAME",
@@ -71,6 +77,10 @@ class SyncResult:
     skipped_opt_out: bool = False
     blocked: list[str] = field(default_factory=list)
     failed: bool = False
+    publications: list[PublicationResult] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+    error_kinds: list[str] = field(default_factory=list)
+    errors: list[dict[str, str | None]] = field(default_factory=list)
 
 
 def origin_hash(skill_dir: Path) -> str:
@@ -85,6 +95,17 @@ def origin_hash(skill_dir: Path) -> str:
         h.update(str(path.relative_to(skill_dir)).encode("utf-8"))
         h.update(path.read_bytes())
     return h.hexdigest()
+
+
+def _attested_origin_hash(path, *, expected=None):
+    snapshot = capture_source(path)
+    if expected is not None:
+        require(snapshot.entries == expected.entries, "Árvore alterada durante cálculo do hash.")
+    digest = hashlib.md5(usedforsecurity=False)
+    for relative in sorted(snapshot.contents, key=Path):
+        digest.update(relative.encode("utf-8"))
+        digest.update(snapshot.contents[relative])
+    return digest.hexdigest()
 
 
 def read_manifest(path: Path) -> dict[str, str]:
@@ -133,270 +154,326 @@ def write_manifest(path: Path, manifest: dict[str, str]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def sync_bundled_skills(bundled_dir: Path, user_dir: Path, *, policy) -> SyncResult:
-    """Semeia e atualiza, preservando o trabalho do usuário.
-
-    **Os três casos, e o do meio é o inteligente:**
-
-    1. Bundled ainda casa com o `origin_hash` → pula **sem ler** a cópia do
-       usuário. É o caminho comum, e ler o diretório inteiro de 82 skills a
-       cada boot custaria caro por nada.
-    2. Bundled mudou **e** a cópia do usuário casa com o `origin_hash` →
-       atualiza. A comparação é contra o hash **de origem registrado**, não
-       contra o bundled atual: é isso que prova que o usuário nunca a tocou.
-    3. Bundled mudou **e** a cópia do usuário difere → o usuário customizou →
-       **preserva e avisa**.
-
-    Exclusão pelo usuário também é decisão que sobrevive: skill no manifesto
-    e ausente do diretório do usuário **não é re-adicionada**.
-    """
-    result = SyncResult()
-
-    if (user_dir / NO_BUNDLED_SKILLS_MARKER).exists():
-        result.skipped_opt_out = True
-        return result
-
-    if not bundled_dir.is_dir():
-        with publication_guard(policy, user_dir.parent):
-            read_skill_tombstones(user_dir.parent)
-        return result
-
-    with (
-        _snapshot_bundle(bundled_dir) as bundled,
-        publication_guard(policy, user_dir.parent) as guard,
-    ):
-        return _sync_discovered(bundled, user_dir, guard=guard)
+def check_sync_policy(session, draft):
+    if draft.writer is not PublicationWriter.BUNDLED_SYNC:
+        return
+    if os.path.lexists(session.home / "skills" / NO_BUNDLED_SKILLS_MARKER):
+        raise SkillMutationError("conflict", "Opt-out observado; publicação pendente preservada.")
+    common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
+    if draft.name in common.bundled_tombstones():
+        raise SkillMutationError("conflict", "Tombstone observado; publicação pendente preservada.")
 
 
-def _sync_discovered(bundled: dict[str, Path], user_dir: Path, *, guard) -> SyncResult:
-    tombstones = read_skill_tombstones(user_dir.parent)
-    if user_dir.is_symlink():
-        raise ValueError("Diretório de skills não pode ser um link.")
-    user_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = user_dir / MANIFEST_NAME
-    if manifest_path.is_symlink():
-        raise ValueError("Manifesto de skills não pode ser um link.")
-    manifest = read_manifest(manifest_path)
-    original_manifest = manifest.copy()
-    staging = Path(mkdtemp(prefix=".skill-sync-", dir=user_dir))
-    rollback = ExitStack()
-    operation_id = uuid.uuid4().hex
-    try:
-        result = _sync_items(
-            bundled, user_dir, manifest, staging, rollback, tombstones=tombstones, guard=guard
-        )
-        expected_staging = capture_publication(staging)
-        guard.policy.revalidate()
-        if manifest != original_manifest:
-            write_manifest(manifest_path, manifest)
-        rollback.pop_all()
-
-        def cleanup_check():
-            guard.policy.revalidate()
-            for name in result.copied + result.updated:
-                guard.check(name, OrgPolicyAction.SYNC)
-
-        delete_publication(staging, expected_staging, guard=cleanup_check)
-        return result
-    except BaseException:
-        _LOGGER.warning(
-            "skill_sync_residue_preserved",
-            extra={"action": "sync", "operation_id": operation_id, "reason": "publication_failed"},
-        )
-        rollback.close()
-        raise
+def check_sync_intent(session, draft):
+    observation = getattr(session, "_manifest_observation", None)
+    if observation is not None:
+        observation.check()
 
 
-def _blocked(guard, name, result):
-    try:
-        guard.check(name, OrgPolicyAction.SYNC)
-    except SkillMutationError as error:
-        if error.kind != "denied":
-            raise
-        result.blocked.append(name)
+def prepare_sync_publication(session, name, *, previous, current, delta, source_proof):
+    require(delta is not None and delta.name == name, "Sync exige delta canônico de manifesto.")
+    manifest, observation = observe_manifest(session.home)
+    require(manifest.get(name) == delta.before, "Manifesto não corresponde à preparação.")
+    session._manifest_observation = observation
+    require(
+        delta.after == _attested_origin_hash(session.context._bundled[name], expected=source_proof),
+        "Delta não corresponde à fonte bundled.",
+    )
+    if os.path.lexists(session.home / "skills" / NO_BUNDLED_SKILLS_MARKER):
+        raise SkillMutationError("conflict", "Opt-out observado antes da preparação.")
+    common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
+    require(name not in common.bundled_tombstones(), "Tombstone impede publicação.")
+    if previous is None:
+        require(name not in manifest, "Exclusão pelo usuário deve ser preservada.")
+        return
+    require(
+        bool(delta.before)
+        and _attested_origin_hash(session.home / "skills" / name, expected=previous)
+        == delta.before,
+        "Edição local impede atualização.",
+    )
+    if current is not None:
+        published = session.publications.get(current.operation_id)
+        if published is not None:
+            require(
+                published.draft.writer is PublicationWriter.BUNDLED_SYNC,
+                "Instalação não é bundled elegível.",
+            )
+            require(published.draft.staged_tree == previous, "Instalação canônica alterada.")
+        else:
+            require(
+                current.provenance is Provenance.BUNDLED
+                or current.installation_source == "package_bundle",
+                "Instalação não é bundled elegível.",
+            )
+
+
+def _accumulate(result, publication):
+    result.publications.append(publication)
+    if publication.error_kind is not None and publication.error_kind not in result.error_kinds:
+        result.error_kinds.append(publication.error_kind)
+    if not publication.complete:
         result.failed = True
-        return True
-    return False
+        if (
+            publication.state
+            in (
+                SkillMutationState.PREPARED,
+                SkillMutationState.CONFLICT,
+                SkillMutationState.COMMITTED,
+            )
+            and publication.operation_id not in result.pending
+        ):
+            result.pending.append(publication.operation_id)
 
 
-def _sync_items(bundled, user_dir, manifest, staging, rollback, *, tombstones, guard) -> SyncResult:
-    result = SyncResult(total_bundled=len(bundled))
-
-    for name, src in bundled.items():
-        if _blocked(guard, name, result):
+def _recover_pending(session, result):
+    common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
+    records = []
+    for operation_id in dict.fromkeys(row[3] for row in common._timeline()):
+        record = common.get(operation_id)
+        if record is None:
+            _LOGGER.warning(
+                "skill_sync_incomplete",
+                extra={
+                    "action": "sync",
+                    "phase": "history",
+                    "kind": "corrupt",
+                    "operation_id": operation_id,
+                    "reason": "foreign_history",
+                },
+            )
+            raise SkillMutationError(
+                "corrupt",
+                "Histórico não corresponde ao home observado.",
+                operation_id=operation_id,
+            )
+        records.append(record)
+    publication_ids = {p.operation_id for p in session.publications.history()}
+    blocked = set()
+    for record in records:
+        pending = getattr(record, "pending", None)
+        if pending is None:
+            pending = record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
+        if not pending:
             continue
-        if name in tombstones:
-            result.user_deleted.append(name)
+        if (
+            record.operation_id not in publication_ids
+            or record.draft.writer is not PublicationWriter.BUNDLED_SYNC
+        ):
+            if record.operation_id not in result.pending:
+                result.pending.append(record.operation_id)
+            blocked.add(record.name)
+            _sync_failure(
+                session,
+                record.name,
+                result,
+                SkillMutationError(
+                    "conflict",
+                    "Operação exige recuperação pelo escritor de origem.",
+                    operation_id=record.operation_id,
+                ),
+                phase="recovery",
+            )
             continue
-        dest = user_dir / name
-        recorded = manifest.get(name)
-        current = origin_hash(src)
+        _manifest, session._manifest_observation = observe_manifest(session.home)
+        publication = SkillPublicationService(session).recover(record.operation_id)
+        _accumulate(result, publication)
+        if not publication.complete:
+            blocked.add(record.name)
+            _sync_failure(
+                session,
+                record.name,
+                result,
+                SkillMutationError(
+                    publication.error_kind or "conflict",
+                    "Recuperação incompleta.",
+                    operation_id=record.operation_id,
+                ),
+                phase="recovery",
+            )
+    return blocked
 
-        if name not in manifest:
-            if dest.exists() or dest.is_symlink():
-                result.user_modified.append(name)
-                continue
-            _copy_tree(src, dest, staging, rollback, guard=guard)
-            manifest[name] = current
-            result.copied.append(name)
-            continue
 
-        if not dest.exists():
-            # O usuário apagou. Decisão dele, e ela sobrevive ao sync.
-            result.user_deleted.append(name)
-            continue
+def retire_manifest_entry(name, *, session):
+    require(
+        type(session.context) is PublicationContext
+        and session.context.writer is PublicationWriter.BUNDLED_SYNC
+    )
+    session.revalidate()
+    require(not session.context.contains(name), "Skill ainda pertence ao pacote.")
+    common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
+    guard = repository_guard(session.policy, common)
+    guard.check(name, OrgPolicyAction.SYNC)
+    manifest, session._manifest_observation = observe_manifest(session.home)
+    if name not in manifest:
+        return None
+    delta = ManifestDelta(name, manifest[name], None)
+    records = session.publications.history(name=name)
+    record = next(
+        (
+            item
+            for item in reversed(records)
+            if item.state is SkillMutationState.COMMITTED
+            and item.draft.writer is PublicationWriter.BUNDLED_SYNC
+            and item.projection_delta is not None
+            and item.projection_delta.after == delta.before
+        ),
+        None,
+    )
+    if record is None:
 
-        if recorded and recorded == current:
-            # Caso 1: nem lemos a cópia do usuário.
-            result.skipped.append(name)
-            continue
+        def legacy_guard():
+            session.revalidate()
+            guard.check(name, OrgPolicyAction.SYNC)
+            require(not session.context.contains(name), "Skill voltou ao pacote.")
 
-        if recorded and origin_hash(dest) == recorded:
-            # Caso 2: o usuário nunca tocou — seguro atualizar.
-            _copy_tree(src, dest, staging, rollback, guard=guard)
-            manifest[name] = current
-            result.updated.append(name)
-            continue
+        apply_manifest_delta(session.home, delta, guard=legacy_guard)
+        return None
+    require(
+        record.state is SkillMutationState.COMMITTED and not record.pending,
+        "Publicação pendente impede manutenção.",
+    )
 
-        # Caso 3 (inclui `recorded` vazio, de manifesto v1): preserva.
+    def check():
+        session.revalidate()
+        guard.check_publication(record.draft)
+        require(not session.context.contains(name), "Skill voltou ao pacote.")
+
+    record = session.publications.prepare_manifest(record.operation_id, delta, guard=check)
+    reconcile_manifest(session.home, record, guard=check)
+    _manifest, session._manifest_observation = observe_manifest(session.home)
+
+    def confirmation_guard():
+        check()
+        session._manifest_observation.check()
+
+    return session.publications.confirm_manifest(record.operation_id, guard=confirmation_guard)
+
+
+def _sync_item(session, name, result):
+    common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
+    repository_guard(session.policy, common).check(name, OrgPolicyAction.SYNC)
+    if name in common.bundled_tombstones():
+        result.user_deleted.append(name)
+        return
+    manifest, session._manifest_observation = observe_manifest(session.home)
+    source, proof = session.context.resolve(name, repository=session.publications)
+    require(proof == session._bundled_preflight_proofs[name], "Fonte alterada após preflight.")
+    digest = _attested_origin_hash(source, expected=proof)
+    dest = session.home / "skills" / name
+    before = manifest.get(name)
+    exists = dest.exists() or dest.is_symlink()
+    current = common.current_installation(name) if exists else None
+    published = None if current is None else session.publications.get(current.operation_id)
+    publication = None
+    if (published is not None and published.draft.writer is not PublicationWriter.BUNDLED_SYNC) or (
+        name not in manifest and exists
+    ):
         result.user_modified.append(name)
+    elif name in manifest and not exists:
+        result.user_deleted.append(name)
+    elif before and before == digest:
+        result.skipped.append(name)
+    elif exists and (not before or _attested_origin_hash(dest) != before):
+        result.user_modified.append(name)
+    else:
+        publication = SkillPublicationService(session).publish(
+            name, manifest_delta=ManifestDelta(name, before, digest)
+        )
+        _accumulate(result, publication)
+        if publication.complete:
+            (result.updated if exists else result.copied).append(name)
+    if publication is None:
+        session.context._release_completed_bundle(name)
 
-    for name in list(manifest):
-        if name not in bundled:
-            if _blocked(guard, name, result):
-                continue
-            del manifest[name]
+
+def _sync_failure(session, name, result, error, *, phase):
+    kind = getattr(error, "kind", "io")
+    if kind not in result.error_kinds:
+        result.error_kinds.append(kind)
+    result.failed = True
+    detail = {"name": name, "kind": kind, "operation_id": getattr(error, "operation_id", None)}
+    if detail not in result.errors:
+        result.errors.append(detail)
+    if kind == "denied":
+        result.blocked.append(name)
+    for record in session.publications.pending(name):
+        if record.operation_id not in result.pending:
+            result.pending.append(record.operation_id)
+    _LOGGER.warning(
+        "skill_sync_incomplete",
+        extra={
+            "action": "sync",
+            "writer": session.context.writer.value,
+            "phase": phase,
+            "kind": kind,
+            "operation_id": getattr(error, "operation_id", None),
+            "reason": "sync_item_refused",
+        },
+    )
+
+
+def _sync_discovered(session, result, blocked):
+    for name in sorted(session._bundled_preflight_proofs):
+        try:
+            _sync_item(session, name, result)
+        except (SkillMutationError, OSError) as error:
+            _sync_failure(session, name, result, error, phase="item")
+    manifest, session._manifest_observation = observe_manifest(session.home)
+    for name in sorted(
+        (set(manifest) & session._manifest_cleanup_candidates)
+        - set(session.context._bundled)
+        - blocked
+    ):
+        try:
+            record = retire_manifest_entry(name, session=session)
+            if record is not None:
+                _accumulate(
+                    result,
+                    PublicationResult(
+                        record.operation_id,
+                        name,
+                        record.state,
+                        True,
+                        None,
+                        record.manifest_complete,
+                        record.cleanup_complete,
+                    ),
+                )
             result.cleaned.append(name)
-
+        except (SkillMutationError, OSError) as error:
+            _sync_failure(session, name, result, error, phase="catalog_cleanup")
     return result
 
 
-def _copy_tree(src: Path, dest: Path, staging: Path, rollback: ExitStack, *, guard) -> None:
-    import shutil
-
-    directory = staging / dest.name
-    directory.mkdir()
-    new = directory / "new"
-    old = directory / "old"
-    shutil.copytree(src, new)
-    new_proof = capture_publication(new)
-    old_proof = None
-    if dest.exists():
-        old_proof = capture_publication(dest)
-        move_publication(
-            dest, old, old_proof, guard=lambda: guard.check(dest.name, OrgPolicyAction.SYNC)
-        )
-    rollback.callback(
-        _restore_copy, dest, old, directory / "discard", new_proof, old_proof, guard=guard
+def sync_bundled_skills(bundled_dir: Path, user_dir: Path, *, policy, context=None) -> SyncResult:
+    require(type(context) is PublicationContext, "Contexto de publicação obrigatório.")
+    require(Path(user_dir).name == "skills", "Sync exige o diretório skills do home.")
+    require(
+        context.writer is PublicationWriter.BUNDLED_SYNC
+        and Path(bundled_dir).absolute() == context.root,
+        "Raiz bundled não corresponde à composição.",
     )
-    move_publication(
-        new, dest, new_proof, guard=lambda: guard.check(dest.name, OrgPolicyAction.SYNC)
-    )
-
-
-def _restore_copy(dest: Path, old: Path, discard: Path, new_proof, old_proof, *, guard) -> None:
-    def check():
-        guard.check(dest.name, OrgPolicyAction.SYNC)
-
-    check()
-    if dest.exists() or dest.is_symlink():
-        move_publication(dest, discard, new_proof, guard=check)
-    if old.exists():
-        move_publication(old, dest, old_proof, guard=check)
-
-
-@contextmanager
-def _directory(name, *, parent=None):
-    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
-    try:
-        yield fd
-    finally:
-        os.close(fd)
-
-
-def _entries(fd):
-    with os.scandir(fd) as entries:
-        return sorted(entries, key=lambda entry: entry.name)
-
-
-def _is_skill(fd):
-    try:
-        info = os.stat("SKILL.md", dir_fd=fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-        raise ValueError("SKILL.md deve ser arquivo regular sem links.")
-    return True
-
-
-@contextmanager
-def _snapshot_bundle(bundled_dir: Path):
-    with TemporaryDirectory(prefix="kairos-bundle-sync-") as temporary:
-        snapshots = {}
-
-        def capture(name, fd):
-            validate_skill_name(name)
-            if name in snapshots:
-                raise ValueError("Nome de skill duplicado no bundle; sincronização recusada.")
-            destination = Path(temporary) / name
-            _copy_directory(fd, destination)
-            snapshots[name] = destination
-
-        try:
-            with _directory(bundled_dir) as root:
-                for entry in _entries(root):
-                    if entry.is_symlink():
-                        raise ValueError("Links não são aceitos no bundle de skills.")
-                    if entry.name.startswith(".") or not entry.is_dir(follow_symlinks=False):
-                        continue
-                    with _directory(entry.name, parent=root) as directory:
-                        if _is_skill(directory):
-                            capture(entry.name, directory)
-                            continue
-                        for child in _entries(directory):
-                            if child.is_symlink():
-                                raise ValueError("Links não são aceitos no bundle de skills.")
-                            if child.name.startswith(".") or not child.is_dir(
-                                follow_symlinks=False
-                            ):
-                                continue
-                            with _directory(child.name, parent=directory) as skill:
-                                if _is_skill(skill):
-                                    capture(child.name, skill)
-        except OSError:
-            raise ValueError("Não foi possível ler o bundle de skills com segurança.") from None
-        yield dict(sorted(snapshots.items()))
-
-
-def _copy_directory(fd: int, destination: Path) -> None:
-    destination.mkdir()
-    for entry in _entries(fd):
-        info = entry.stat(follow_symlinks=False)
-        if stat.S_ISDIR(info.st_mode):
-            with _directory(entry.name, parent=fd) as child:
-                _copy_directory(child, destination / entry.name)
-        elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
-            _copy_file(fd, entry.name, destination / entry.name)
-        else:
-            raise ValueError("Bundle de skills contém link ou arquivo especial.")
-    destination.chmod(stat.S_IMODE(os.fstat(fd).st_mode))
-
-
-def _copy_file(parent: int, name: str, destination: Path) -> None:
-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-            raise ValueError("Bundle de skills contém link ou arquivo especial.")
-        with destination.open("xb") as output:
-            while chunk := os.read(fd, 64 * 1024):
-                output.write(chunk)
-        after = os.fstat(fd)
-        if after.st_nlink != 1 or (before.st_size, before.st_mtime_ns) != (
-            after.st_size,
-            after.st_mtime_ns,
-        ):
-            raise ValueError("Bundle de skills alterado durante a leitura.")
-        destination.chmod(stat.S_IMODE(before.st_mode))
-    finally:
-        os.close(fd)
+    require(context.home_id == policy.home_id, "Contexto pertence a outro home.")
+    context.revalidate()
+    result = SyncResult()
+    if os.path.lexists(user_dir / NO_BUNDLED_SKILLS_MARKER):
+        result.skipped_opt_out = True
+        return result
+    with publication_session(user_dir.parent, policy=policy, context=context) as session:
+        manifest, session._manifest_observation = observe_manifest(session.home)
+        session._manifest_cleanup_candidates = set(manifest)
+        result.total_bundled = len(context._bundled)
+        blocked = _recover_pending(session, result)
+        session._bundled_preflight_proofs = {}
+        for name, path in sorted(context._bundled.items()):
+            if name in blocked:
+                continue
+            try:
+                session._bundled_preflight_proofs[name] = replace(
+                    capture_source(path, source_input=True), contents=None
+                )
+            except (SkillMutationError, OSError) as error:
+                _sync_failure(session, name, result, error, phase="preflight")
+        context.revalidate()
+        return _sync_discovered(session, result, blocked)

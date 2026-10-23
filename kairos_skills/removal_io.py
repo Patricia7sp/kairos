@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 
 from kairos_filesystem.contract import TreeCapture, TreeLimits
@@ -75,9 +75,10 @@ def read_skill_file(parent: int, name: str, limit: int, *, identity: tuple[int, 
         return bytes(data), after
 
 
-def capture_skill(parent: int, name: str) -> TreeCapture:
+def capture_skill(parent: int, name: str, *, observed: bool = True) -> TreeCapture:
     """Atesta limites antes de alocar bytes, inclusive o limite próprio de SKILL.md."""
-    with _observed_tree_errors(), io_errors(), _filesystem_errors(), ExitStack() as stack:
+    errors = _observed_tree_errors() if observed else nullcontext()
+    with errors, io_errors(), _filesystem_errors(), ExitStack() as stack:
         proof = capture_tree(parent, name, limits=LIMITS, include_contents=False)
         validate_capture(proof)
         root = open_fd(stack, name, os.O_RDONLY | os.O_DIRECTORY, parent=parent)

@@ -40,11 +40,28 @@ inicial após rename ainda depende da recuperação prevista em B2.
 
 Prioridades de continuidade:
 
-1. Revisar o plano B2 no [PR #112](https://github.com/Patricia7sp/kairos/pull/112).
-   O [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
-   aprovado pela usuária; o plano ainda depende de revisão e aprovação antes
-   da implementação. T2 inclui aquisição exclusiva e teste de colisão na
-   quarentena, preservando a árvore e o recibo anteriores.
+1. Executar o [plano B2](superpowers/plans/2026-10-22-publicacao-skills-b2.md)
+   no [PR #112](https://github.com/Patricia7sp/kairos/pull/112), alinhado à base
+   integrada `44d890c`. O
+   [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
+   aprovado pela usuária; a execução nativa e sequencial das sete tarefas foi
+   autorizada em 22/10, após revisão de `02fb85e`, com revisão independente ao
+   final. T1 foi commitada em `ff23200`, mantendo v11 explicitamente opt-in;
+   T2 foi validada localmente e inclui aquisição exclusiva e teste de colisão
+   na quarentena, preservando a árvore e o recibo anteriores. Em 23/10, T3
+   foi validada localmente: publicações entram na timeline, identificação e
+   bloqueios comuns sem herdar autoria/adoção. T4 acrescenta coordenador e
+   recuperação observacional por ID, com versões preservadas e confirmação
+   de limpeza independente. T5 foi validada localmente com escritores e
+   manifesto pelo coordenador e saída real de `kairos sync now`. T6 foi validada localmente com backup integral e restauração sem renovar
+   autoridade. T7 ativou v11 na branch e passou no CI local completo, incluindo
+   102 SIGKILLs na imagem real, clientes antigos e backup/restauração. A revisão
+   independente encontrou seis falhas, corrigidas com regressões RED→GREEN.
+   A validação local pós-revisão passou: 4064 testes e 6502 subtestes, imagem32
+   sem skips e Docker offline26/1 skip. Checks remotos e Quality Gate da revisão
+   proposta devem ser conferidos no PR da implementação. A análise local anterior
+   do Sonar teve erro. Não há aceite de integração de B2, migração
+   de produção, merge ou deploy deste recorte.
 2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de
    política nas fronteiras de efeitos.

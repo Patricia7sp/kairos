@@ -9,6 +9,11 @@ from kairos_skills.catalog import catalog_home_id
 from kairos_skills.mutation_contract import SkillMutationError, require, validate_name
 from kairos_skills.org_policy import OrgPolicySession
 from kairos_skills.org_policy_contract import OrgPolicyAction
+from kairos_skills.publication_contract import (
+    PublicationDraft,
+    PublicationWriter,
+    SkillPublicationRecord,
+)
 from kairos_state.repositories.skill_org_protections import (
     SkillOrgProtectionRepository,
     has_org_schema,
@@ -77,11 +82,26 @@ class SkillOrgGuard:
         )
         raise SkillMutationError(
             kind,
-            "Proteção organizacional impede a operação; versões preservadas.",
+            "Existe operação pendente para este nome; retome o ID indicado."
+            if reason == "pending_operation"
+            else "Proteção organizacional impede a operação; versões preservadas.",
             operation_id=operation_id,
         )
 
     def check(self, name: str, action: OrgPolicyAction):
+        return self._check(name, action)
+
+    def check_publication(self, draft: PublicationDraft):
+        require(type(draft) is PublicationDraft and draft.home_id == self.policy.home_id)
+        require(self.repository is not None)
+        action = (
+            OrgPolicyAction.SYNC
+            if draft.writer is PublicationWriter.BUNDLED_SYNC
+            else OrgPolicyAction.PROMOTE
+        )
+        return self._check(draft.name, action, publication=draft)
+
+    def _check(self, name, action, *, publication=None):
         require(type(action) is OrgPolicyAction)
         self.policy.revalidate()
         require(type(name) is str)
@@ -92,8 +112,17 @@ class SkillOrgGuard:
             require(all(part not in ("", ".", "..") for part in parts))
             name = parts[0]
         validate_name(name)
-        if action is OrgPolicyAction.PROMOTE and self.repository is not None:
-            pending = self.repository.pending(name)
+        if self.repository is not None:
+            pending = tuple(
+                record
+                for record in self.repository.pending(name)
+                if (action is OrgPolicyAction.PROMOTE or isinstance(record, SkillPublicationRecord))
+                and not (
+                    publication is not None
+                    and isinstance(record, SkillPublicationRecord)
+                    and record.draft == publication
+                )
+            )
             if pending:
                 self._refuse(
                     action, "conflict", "pending_operation", operation_id=pending[0].operation_id

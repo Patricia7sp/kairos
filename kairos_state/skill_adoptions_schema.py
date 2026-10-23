@@ -308,14 +308,23 @@ def repair_adoption_triggers(connection: sqlite3.Connection) -> None:
             connection.commit()
 
 
-def validate_adoption_schema(connection: sqlite3.Connection) -> None:
+def validate_adoption_schema(connection: sqlite3.Connection, *, _publication=False) -> None:
     tables = {
         row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     if not tables >= ADOPTION_TABLES:
         raise sqlite3.DatabaseError("schema de adoção incompleto")
     version = connection.execute("SELECT version FROM schema_version").fetchone()[0]
-    if version == 10:
+    if version == 11 and not _publication:
+        from kairos_state.skill_publications_schema import validate_publication_schema
+
+        validate_publication_schema(connection)
+        return
+    if _publication:
+        from kairos_state.skill_publications_schema import expected_publication_triggers
+
+        expected_triggers = expected_publication_triggers()
+    elif version == 10:
         from kairos_state.skill_org_schema import expected_org_triggers
 
         expected_triggers = expected_org_triggers()

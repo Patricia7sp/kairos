@@ -25,8 +25,8 @@ from kairos_skills.removal_contract import (
     validate_capture,
 )
 from kairos_state.contention import Budget
-from kairos_state.repositories.skill_mutations import corrupt_errors
-from kairos_state.skill_writer import register_skill_writer
+from kairos_state.repositories.skill_mutations import authority_query, corrupt_errors
+from kairos_state.skill_writer import register_mutation_writer
 from kairos_state.writes import write_with_retry
 
 
@@ -178,7 +178,7 @@ class SkillRemovalRepository:
             else "SELECT e.sequence,e.state,t.sequence FROM skill_tree_events e LEFT JOIN skill_mutation_timeline t ON t.tree_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4"
         )
         events = self._conn.execute(
-            query,
+            authority_query(self._conn, query),
             (operation_id,),
         ).fetchall()
         require(1 <= len(events) <= 3)
@@ -237,7 +237,7 @@ class SkillRemovalRepository:
             return self._snapshot(record.draft.snapshot_id)
 
     def _write(self, operation):
-        register_skill_writer(self._conn)
+        register_mutation_writer(self._conn)
 
         def transaction():
             if self._conn.in_transaction:

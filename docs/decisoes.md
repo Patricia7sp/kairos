@@ -2516,8 +2516,9 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status em 21/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
-e job de deploy aprovados; B2 permanece proposta não aprovada.** Spec aprovada em 2026-10-14 e plano revisado pelo
+**Status em 22/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
+e job de deploy aprovados; desenho B2 aprovado, plano para revisão e sem
+implementação B2.** Spec B1 aprovada em 2026-10-14 e plano revisado pelo
 usuário: `docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`
 e `docs/superpowers/plans/2026-10-14-politica-organizacional-b1.md`.
 Evidências e limites: [relatório B1](superpowers/reports/2026-10-14-politica-organizacional-b1.md).
@@ -2680,3 +2681,45 @@ Criação segura de diretórios privados exige filesystem local atestável
 (ext2/3/4, XFS, Btrfs ou tmpfs); overlay, FUSE e filesystems remotos são
 recusados. Entradas especiais, links, hardlinks e outros mounts também
 recusam a operação antes da exclusão.
+
+
+## D-CLI.SKILL.B2 — publicação coordenada e autoridade observada
+
+**Status: implementada e validada pelo CI local na branch
+`feat/publicacao-skills-b2`, em 23/10/2026; revisão independente concluída
+com seis achados corrigidos e validação integrada local pós-revisão aprovada.
+Checks remotos devem ser conferidos no PR da implementação.
+Não integrada à main nem implantada.**
+[Spec](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md),
+[plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) e
+[relatório](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
+
+Sync e promoção pessoal passam pelo mesmo coordenador, sessão de lock/banco e
+política viva. Staging é cópia, inclusive entre devices; a versão anterior fica
+no snapshot privado. PREPARED antecede movimentos; COMMITTED antecede as
+confirmações independentes de manifesto e limpeza. Eventos de confirmação não
+reinstalam a árvore nem ressuscitam adoção. O schema v11 é aditivo e só passou
+a ser padrão em T7; clientes antigos são recusados após migração/reparo.
+
+Aquisição verificada associa recibo à raiz e à árvore escaneada, sem conceder
+autoria USER ou autoridade de remoção. Promoção exige intenção foreground
+sobre a árvore exata para substituir. Bytes iguais em outro inode não renovam
+autoridade. Pendências bloqueiam o nome nas quatro famílias. Fonte excluída
+sem confirmação durável mantém limpeza pendente; não inferir autoria pela
+ausência. Órfãos desconhecidos permanecem preservados.
+
+Backup v11 segura o lock comum durante a captura autoritativa e atesta os
+artefatos antes/depois. Home novo sem skills não precisa criar a pasta. Se um
+bootstrap concorrente criar/migrar v11, a parcial é descartada e repetida sob
+lock, sem aceitar troca de um banco previamente observado. Restore preserva
+eventos e inventários, sem renovar identidades, adoções ou bindings; banco
+isolado não é recuperação integral. Reparo recria derivados e não conclui
+pendências. Fonte externa não entra implicitamente no arquivo.
+
+O pacote tem fonte acima de 64 KiB: o preflight recusa o nome afetado e
+permite publicar as demais, com resultado parcial explícito e status não zero.
+Não ampliar limites nem declarar sync completo desse pacote como validado.
+A validação local pós-revisão passou com 4064 testes e 6502 subtestes, além
+de imagem32 sem skips e Docker offline26/1 skip. Inclui102 SIGKILLs, backup
+e restore reais. O Quality Gate local anterior do Sonar teve erro; conferir
+os checks e a análise da revisão proposta no PR antes de integrar.

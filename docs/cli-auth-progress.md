@@ -118,8 +118,24 @@ Atualização em 21/10/2026: os recortes de autoria/MCP descritos abaixo foram
 integrados pelos PRs #97/#98; remoção segura pelo #99, identificação A1 pelo
 #102, adoção A2 pelo #104 e proteção organizacional B1 pelo #108. Os registros
 de execução seguintes são históricos. O [checkpoint funcional](functional-progress.md)
-consolida a continuidade atual e o [desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md)
-permanece para revisão, sem implementação.
+consolida a continuidade atual. Em 22/10, o
+[desenho B2](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
+aprovado; a execução nativa de seu
+[plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) foi autorizada
+posteriormente em 22/10 sobre `02fb85e`. T1 está em `ff23200`, com v11 explícito,
+e T2 foi validada localmente. Em 23/10, T3 também foi validada localmente,
+com identificação e bloqueios comuns de publicações. T4 acrescenta coordenação
+e recuperação observacional por ID, sem instalação ou limpeza fictícias.
+T5 também foi validada localmente: `kairos sync now` usa o coordenador,
+expõe IDs/confirmações/pendências e retorna falha em resultado parcial.
+T6 foi validada localmente com backup sob lock e restauração sem renovar
+autoridade. T7 ativou v11 na branch e passou no CI local completo, com
+102 SIGKILLs na imagem, clientes antigos reais e backup/restauração. A
+revisão independente encontrou seis falhas, corrigidas e revalidadas localmente:
+4064 testes e 6502 subtestes passaram; imagem32 e Docker offline26 passaram.
+Os checks remotos devem ser conferidos no PR da implementação; o Quality Gate
+local anterior do Sonar teve erro e não comprova a revisão final. Evidências e limites no
+[relatório B2](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em

@@ -1,8 +1,9 @@
 # Resolução de evidências e adoção de skills — fatia A
 
-Status atualizado em 21/10/2026: A1 integrada pelo PR #102 (`33b6e77`),
-A2 pelo PR #104 (`d730822`) e B1 pelo PR #108 (`f9f9a6d`). B2 permanece proposta,
-com [desenho detalhado para revisão](2026-10-21-publicacao-skills-b2-design.md).
+Status atualizado em 22/10/2026: A1 integrada pelo PR #102 (`33b6e77`),
+A2 pelo PR #104 (`d730822`) e B1 pelo PR #108 (`f9f9a6d`). O
+[desenho B2](2026-10-21-publicacao-skills-b2-design.md) foi aprovado; seu plano
+aguarda revisão, sem implementação B2.
 A base original desta spec foi `c77c92c` (PR #99); os contratos abaixo preservam
 a divisão aprovada e os seis apontamentos incorporados do PR #100.
 

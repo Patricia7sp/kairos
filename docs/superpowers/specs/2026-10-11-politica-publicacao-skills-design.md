@@ -1,9 +1,9 @@
 # Política organizacional e coordenação de publicação — fatia B
 
-Status atualizado em 21/10/2026: o [recorte B1](2026-10-14-politica-organizacional-b1-design.md)
+Status atualizado em 22/10/2026: o [recorte B1](2026-10-14-politica-organizacional-b1-design.md)
 foi integrado à main em `f9f9a6d` (PR #108) e o job de deploy passou.
-B2 continua proposta não aprovada nem implementada; seu
-[desenho detalhado](2026-10-21-publicacao-skills-b2-design.md) está para revisão.
+O [desenho B2](2026-10-21-publicacao-skills-b2-design.md) foi aprovado em 22/10;
+o plano aguarda revisão e a implementação ainda não começou.
 Depende dos contratos de resolução da [fatia A](2026-10-10-proveniencia-skills-design.md).
 Não entra no plano A1/A2. B1 e B2 têm planos e gates próprios.
 

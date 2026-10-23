@@ -25,13 +25,47 @@ from kairos_skills.mutation_io import (
 )
 from kairos_skills.mutations import SkillMutationService
 from kairos_skills.org_policy import observe_org_policy, org_policy_context
+from kairos_skills.publication_contract import SkillPublicationRecord
 from kairos_skills.removal_contract import CommonRecord, SkillTreeAction, SkillTreeRecord
 from kairos_skills.removal_state import database_connection, read_skill_repository
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
+def publication_result_metadata(result):
+    return {
+        "operation_id": result.operation_id,
+        "name": result.name,
+        "state": result.state.value,
+        "complete": result.complete,
+        "error_kind": result.error_kind,
+        "manifest_complete": result.manifest_complete,
+        "cleanup_complete": result.cleanup_complete,
+    }
+
+
+def publication_exit_code(result):
+    for kind, code in (("denied", 77), ("unavailable", 69), ("input", 2)):
+        if kind in result.error_kinds or (kind == "denied" and result.blocked):
+            return code
+    return 1 if result.failed else 0
+
+
 def mutation_metadata(record: CommonRecord) -> dict[str, object]:
+    if isinstance(record, SkillPublicationRecord):
+        return {
+            "id": record.operation_id,
+            "operation_id": record.operation_id,
+            "name": record.name,
+            "action": record.action.value,
+            "state": record.state.value,
+            "origin": None if record.provenance is None else record.provenance.value,
+            "writer": record.draft.writer.value,
+            "created_at": record.draft.created_at,
+            "manifest_complete": record.manifest_complete,
+            "cleanup_complete": record.cleanup_complete,
+            "pending": record.pending,
+        }
     if isinstance(record, SkillAdoptionRecord):
         draft = record.draft
         committed = record.state.value == "committed"

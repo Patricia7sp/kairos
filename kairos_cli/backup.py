@@ -15,12 +15,17 @@ from pathlib import Path
 
 from kairos_filesystem.contract import FilesystemError
 from kairos_filesystem.descriptors import check_chain, open_directory, open_fd, same_entry
+from kairos_skills.mutation_contract import SkillMutationError
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class BackupBoundaryError(Exception):
     """A entrada observada não pode ser arquivada como banco do home."""
+
+
+class PublicationSchemaAppeared(BackupBoundaryError):
+    """A captura inicial deve ser descartada e repetida sob o lock v11."""
 
 
 def _database_entry(directory: int):
@@ -62,7 +67,7 @@ def _check_database(directory: int, descriptor: int | None, chain) -> None:
         same_entry(directory, "state.db", descriptor)
 
 
-def _snapshot_database(directory, descriptor, chain, snapshot):
+def _snapshot_database(directory, descriptor, chain, snapshot, *, snapshot_guard):
     def check(*_progress):
         _check_database(directory, descriptor, chain)
 
@@ -73,6 +78,7 @@ def _snapshot_database(directory, descriptor, chain, snapshot):
         check()
         with closing(sqlite3.connect(snapshot)) as destination:
             source.backup(destination, pages=64, progress=check)
+            snapshot_guard(destination)
             objects = {
                 row[0]
                 for row in destination.execute(
@@ -102,7 +108,9 @@ def _snapshot_database(directory, descriptor, chain, snapshot):
     snapshot.chmod(os.fstat(descriptor).st_mode & 0o777)
 
 
-def _archive_home(home: Path, archive: Path, *, output: Path | None = None) -> int:
+def _archive_home_contents(
+    home: Path, archive: Path, *, output, snapshot_guard, required_roots=()
+) -> int:
     home, archive = home.absolute(), archive.absolute()
     outputs = {archive} if output is None else {archive, output.absolute()}
     excludes = {"__pycache__", ".cache", ".pytest_cache"}
@@ -132,7 +140,9 @@ def _archive_home(home: Path, archive: Path, *, output: Path | None = None) -> i
                 if path in outputs:
                     continue
                 relative = path.relative_to(home)
-                if any(part in excludes for part in relative.parts):
+                if any(part in excludes for part in relative.parts) and not any(
+                    relative == root or root in relative.parents for root in required_roots
+                ):
                     continue
                 if relative.as_posix() in {"state.db-wal", "state.db-shm", "state.db-journal"}:
                     continue
@@ -150,7 +160,9 @@ def _archive_home(home: Path, archive: Path, *, output: Path | None = None) -> i
                         )
                     _check_database(directory, descriptor, chain)
                     if descriptor is not None:
-                        _snapshot_database(directory, descriptor, chain, snapshot)
+                        _snapshot_database(
+                            directory, descriptor, chain, snapshot, snapshot_guard=snapshot_guard
+                        )
                         tar.add(snapshot, arcname="state.db", recursive=False)
                         files += 1
                         _check_database(directory, descriptor, chain)
@@ -166,6 +178,203 @@ def _archive_home(home: Path, archive: Path, *, output: Path | None = None) -> i
     return files
 
 
+def _observed_version(connection):
+    present = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='schema_version'"
+    ).fetchone()
+    if present is None:
+        return None
+    rows = connection.execute("SELECT version FROM schema_version").fetchall()
+    if len(rows) != 1 or type(rows[0][0]) is not int:
+        raise BackupBoundaryError
+    return rows[0][0]
+
+
+def _reject_publication_snapshot(connection):
+    if _observed_version(connection) == 11:
+        raise PublicationSchemaAppeared
+
+
+def _backup_manifest_guard(home, directory):
+    from kairos_skills.publication_manifest import observe_manifest
+
+    try:
+        os.stat("skills", dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+
+        def check_absence():
+            try:
+                os.stat("skills", dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            raise BackupBoundaryError
+
+        return check_absence
+    _manifest, observation = observe_manifest(home)
+    return observation.check
+
+
+def _publication_area_safe(home):
+    area = home / ".skill-publications"
+    for path in (area, *area.rglob("*")):
+        try:
+            value = path.lstat()
+        except FileNotFoundError:
+            if path == area:
+                return
+            raise BackupBoundaryError from None
+        if not (stat.S_ISDIR(value.st_mode) or stat.S_ISREG(value.st_mode)) or (
+            stat.S_ISREG(value.st_mode) and value.st_nlink != 1
+        ):
+            raise BackupBoundaryError
+
+
+def _archive_publications(home, archive, *, output, directory, descriptor, chain):
+    from kairos_skills.catalog import catalog_home_id
+    from kairos_skills.mutation_lock import skill_mutation_lock
+    from kairos_skills.publication_backup import (
+        publication_backup_inventory,
+        validate_publication_archive,
+    )
+    from kairos_skills.removal_state import database_connection
+    from kairos_state.migrations import canonical_fingerprint
+    from kairos_state.repositories.skill_publications import SkillPublicationRepository
+
+    with skill_mutation_lock(home), database_connection(home) as connection:
+        _check_database(directory, descriptor, chain)
+        if connection is None or _observed_version(connection) != 11:
+            raise BackupBoundaryError
+        repository = SkillPublicationRepository(connection, home_id=catalog_home_id(home))
+        before = publication_backup_inventory(home, repository)
+        check_manifest = _backup_manifest_guard(home, directory)
+        _publication_area_safe(home)
+        fingerprint = canonical_fingerprint(connection)
+
+        def snapshot_guard(snapshot):
+            if _observed_version(snapshot) != 11 or canonical_fingerprint(snapshot) != fingerprint:
+                raise BackupBoundaryError
+
+        files = _archive_home_contents(
+            home,
+            archive,
+            output=output,
+            snapshot_guard=snapshot_guard,
+            required_roots=tuple(Path(entry.relative_path) for entry in before),
+        )
+        validate_publication_archive(archive, before)
+        _check_database(directory, descriptor, chain)
+        if publication_backup_inventory(home, repository) != before:
+            raise BackupBoundaryError
+        check_manifest()
+        _publication_area_safe(home)
+        return files
+
+
+def _archive_home(home: Path, archive: Path, *, output: Path | None = None) -> int:
+    home = Path(home).absolute()
+    with ExitStack() as stack:
+        directory, chain = open_directory(stack, home)
+        initial = _database_entry(directory)
+        descriptor = None if initial is None else _database_descriptor(stack, directory, initial)
+        version = None
+        if descriptor is not None:
+            with closing(
+                sqlite3.connect(f"file:/proc/self/fd/{descriptor}?mode=ro", uri=True)
+            ) as peek:
+                version = _observed_version(peek)
+        _check_database(directory, descriptor, chain)
+        if version == 11:
+            return _archive_publications(
+                home,
+                archive,
+                output=output,
+                directory=directory,
+                descriptor=descriptor,
+                chain=chain,
+            )
+        try:
+            return _archive_home_contents(
+                home, archive, output=output, snapshot_guard=_reject_publication_snapshot
+            )
+        except BackupBoundaryError:
+            check_chain(chain)
+            if descriptor is None:
+                initial = _database_entry(directory)
+                if initial is None:
+                    raise BackupBoundaryError from None
+                descriptor = _database_descriptor(stack, directory, initial)
+            _check_database(directory, descriptor, chain)
+            with closing(
+                sqlite3.connect(f"file:/proc/self/fd/{descriptor}?mode=ro", uri=True)
+            ) as current:
+                if _observed_version(current) != 11:
+                    raise
+            return _archive_publications(
+                home,
+                archive,
+                output=output,
+                directory=directory,
+                descriptor=descriptor,
+                chain=chain,
+            )
+
+
+def _archive_and_publish(home, partial, archive, descriptor):
+    if partial.parent != archive.parent:
+        raise BackupBoundaryError
+    with ExitStack() as stack:
+        parent, chain = open_directory(stack, partial.parent)
+        same_entry(parent, partial.name, descriptor)
+        files = _archive_home(home, partial, output=archive)
+        check_chain(chain)
+        same_entry(parent, partial.name, descriptor)
+        observed = os.fstat(descriptor)
+        if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+            raise BackupBoundaryError
+        os.fsync(descriptor)
+        if partial != archive:
+            os.replace(partial.name, archive.name, src_dir_fd=parent, dst_dir_fd=parent)
+            same_entry(parent, archive.name, descriptor)
+        os.fsync(parent)
+        check_chain(chain)
+        return files, observed.st_size
+
+
+def _publication_backup_error(error):
+    _LOGGER.warning(
+        "backup_publication_refused",
+        extra={
+            "action": "backup",
+            "writer": "backup",
+            "phase": "publication_inventory",
+            "kind": error.kind,
+            "operation_id": error.operation_id,
+            "reason": "publication_artifacts_unverified",
+        },
+    )
+    message = (
+        "kairos: não foi possível atestar os artefatos de publicação; backup anterior preservado."
+    )
+    if error.operation_id is not None:
+        message += f" Operação: {error.operation_id}."
+    print(message, file=sys.stderr)
+
+
+def _backup_summary(home, archive, size, files, *, as_json):
+    if as_json:
+        print(
+            json.dumps(
+                {"archive": str(archive), "home": str(home), "size_bytes": size, "files": files},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(f"Backup de {home}")
+        print(f"  archive: {archive}")
+        print(f"  tamanho: {size} bytes em {files} arquivos")
+
+
 async def run_backup(home: Path, args) -> int:
     home = Path(home)
     if not home.exists():
@@ -177,6 +386,7 @@ async def run_backup(home: Path, args) -> int:
         output = getattr(args, "output", None)
         if output:
             archive = Path(output).absolute()
+            archive = archive.parent.resolve() / archive.name
             if archive.name in {
                 "state.db",
                 "state.db-wal",
@@ -190,13 +400,24 @@ async def run_backup(home: Path, args) -> int:
             fd, tmp_path = tempfile.mkstemp(prefix="kairos-backup-", suffix=f"-{ts}.tar.gz")
             archive = Path(tmp_path)
         partial = Path(tmp_path)
-        os.close(fd)
-        files = _archive_home(home, partial, output=archive)
-        size = partial.stat().st_size
-        if partial != archive:
-            os.replace(partial, archive)
+        with os.fdopen(fd, "r+b") as descriptor:
+            files, size = _archive_and_publish(home, partial, archive, descriptor.fileno())
         partial = None
+    except SkillMutationError as error:
+        _publication_backup_error(error)
+        return 1
     except (BackupBoundaryError, FilesystemError):
+        _LOGGER.warning(
+            "backup_boundary_refused",
+            extra={
+                "action": "backup",
+                "writer": "backup",
+                "phase": "archive",
+                "kind": "conflict",
+                "operation_id": None,
+                "reason": "state_or_output_boundary_changed",
+            },
+        )
         print(
             "kairos: fronteira de state.db inválida ou alterada; backup recusado. "
             "Confira state.db, os diretórios do home e o destino de saída. "
@@ -206,6 +427,17 @@ async def run_backup(home: Path, args) -> int:
         )
         return 1
     except (OSError, sqlite3.DatabaseError, tarfile.TarError):
+        _LOGGER.warning(
+            "backup_archive_refused",
+            extra={
+                "action": "backup",
+                "writer": "backup",
+                "phase": "archive",
+                "kind": "io",
+                "operation_id": None,
+                "reason": "archive_write_failed",
+            },
+        )
         print("kairos: não foi possível criar o backup com segurança.", file=sys.stderr)
         return 1
     finally:
@@ -218,17 +450,5 @@ async def run_backup(home: Path, args) -> int:
                     extra={"action": "backup", "reason": "partial_cleanup_failed"},
                 )
 
-    as_json = getattr(args, "json", False)
-    if as_json:
-        print(
-            json.dumps(
-                {"archive": str(archive), "home": str(home), "size_bytes": size, "files": files},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    else:
-        print(f"Backup de {home}")
-        print(f"  archive: {archive}")
-        print(f"  tamanho: {size} bytes em {files} arquivos")
+    _backup_summary(home, archive, size, files, as_json=getattr(args, "json", False))
     return 0

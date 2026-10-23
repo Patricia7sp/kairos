@@ -105,7 +105,7 @@ class AdoptionStateTests(unittest.TestCase):
     def modern(self):
         from kairos_state.repositories.skill_adoptions import SkillAdoptionRepository
 
-        migrate(self.db)
+        migrate(self.db, target=10)
         return SkillAdoptionRepository(self.db, home_id=self.home_id)
 
     def adopt_draft(self, *, name="legacy", installation_id=None, inode=2):

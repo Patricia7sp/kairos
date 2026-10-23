@@ -39,6 +39,8 @@ jobs:
         run: uv sync --python "$PYTHON_VERSION" --extra dev
       - name: Preparar cliente v8 para downgrade
         run: bash scripts/prepare-skill-v8-client.sh
+      - name: Preparar cliente v10 para downgrade
+        run: bash scripts/prepare-skill-v10-client.sh
       # Sem Docker aqui: os testes de integração ficam no job `image`, para
       # que uma falha de build não se confunda com falha de lógica.
       # Regressões cruzam o journal Python com o reducer JavaScript servido.

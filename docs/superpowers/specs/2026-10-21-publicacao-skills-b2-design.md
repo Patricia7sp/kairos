@@ -1,9 +1,20 @@
 # B2 — publicação coordenada de skills
 
-Status em 21/10/2026: proposta detalhada para revisão, sem implementação nem
-plano de execução aprovado. A usuária autorizou preparar este desenho após a
-correção da promoção e a atualização do planejamento. Esse aceite não declara
-aprovação desta spec escrita. Base integrada: `f9f9a6d` (PR #108).
+Status de execução em 23/10/2026: desenho escrito aprovado pela usuária em 22/10,
+com referência ao conteúdo de `7fd4a12` no PR #111. O
+[plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) teve sua
+execução nativa autorizada em 22/10, sobre `02fb85e`. T1 está em `ff23200` e
+T2 está em `1103f0c`; T3 está em `fb5e71b` e T4 em `abc67f8`. T5 foi
+validada localmente em 23/10 com escritores, manifesto e CLI pelo coordenador.
+T6 foi validada localmente com backup integral e diagnóstico de restauração
+sem transferir autoridade. T7 passou no CI local completo e ativou v11 somente na branch de trabalho.
+Revisão independente concluída, com seis achados corrigidos; validação local
+pós-revisão aprovada. CI remoto e aceite de integração devem ser conferidos
+no PR da implementação; o Quality Gate local anterior do Sonar teve erro
+e não comprova a revisão final. Evidências no
+[relatório](../reports/2026-10-22-publicacao-skills-b2.md).
+Base de execução atualizada: `44d890c` (main), com a correção do PR #111
+integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 
 ## Objetivo e continuidade
 
@@ -274,6 +285,7 @@ condicionar segurança a um número de benchmark.
 - Revisão independente e integração pelo Root; suíte integral local, Docker e
   jobs remotos verdes antes de merge. Runtime live só com credenciais/opt-in.
 
-Revisar esta spec escrita. Depois da aprovação, produzir o plano de execução
-com arquivos, interfaces, migração, casos RED/GREEN e propriedade das tarefas.
-Não há código B2 nem autorização de merge/deploy nesta proposta.
+O aceite escrito desta spec foi registrado em 22/10/2026. O plano foi revisto
+e a execução nativa autorizada posteriormente nessa data. Os próximos gates
+são a conclusão das tarefas, revisão independente e aceite integrado; não há
+autorização de merge/deploy neste registro.

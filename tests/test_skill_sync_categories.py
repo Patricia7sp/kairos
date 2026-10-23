@@ -6,12 +6,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from skill_org_fixtures import personal_policy
+from skill_publication_writer_fixtures import sync_bundled_skills
 
 from kairos_skills.sync import (
     MANIFEST_NAME,
     NO_BUNDLED_SKILLS_MARKER,
     read_manifest,
-    sync_bundled_skills,
     write_manifest,
 )
 
@@ -61,13 +61,15 @@ class CategorySyncTests(unittest.TestCase):
                     sync_bundled_skills(
                         bundle, self.home, policy=personal_policy(self, (self.home.parent))
                     )
-                self.assertFalse(self.home.exists())
+                self.assertFalse(list(self.home.glob("*/SKILL.md")))
+        self.assertFalse((self.home / MANIFEST_NAME).exists())
 
-    def test_links_recusados_antes_de_qualquer_copia(self):
+    def test_links_recusados_na_descoberta_ou_na_fonte_sem_copiar_dados_externos(self):
         for kind in ("categoria", "skill", "arquivo", "anexo", "hardlink"):
             with self.subTest(kind=kind), TemporaryDirectory() as temporary:
                 bundle = Path(temporary) / "bundle"
                 bundle.mkdir()
+                user = Path(temporary) / "home/skills"
                 normal = bundle / "a-normal"
                 normal.mkdir()
                 (normal / "SKILL.md").write_text("normal")
@@ -87,11 +89,24 @@ class CategorySyncTests(unittest.TestCase):
                             (bad / "ref.md").hardlink_to(outside / "SKILL.md")
                         else:
                             (bad / "references").symlink_to(outside, target_is_directory=True)
-                with self.assertRaises(ValueError):
-                    sync_bundled_skills(
-                        bundle, self.home, policy=personal_policy(self, (self.home.parent))
+                if kind in ("categoria", "skill", "arquivo"):
+                    with self.assertRaises(ValueError):
+                        sync_bundled_skills(bundle, user, policy=personal_policy(self, user.parent))
+                    self.assertFalse(list(user.glob("*/SKILL.md")))
+                    self.assertFalse((user / MANIFEST_NAME).exists())
+                else:
+                    result = sync_bundled_skills(
+                        bundle, user, policy=personal_policy(self, user.parent)
                     )
-                self.assertFalse(self.home.exists())
+                    self.assertTrue(result.failed)
+                    self.assertEqual(result.error_kinds, ["input"])
+                    self.assertEqual(
+                        result.errors, [{"name": "z-bad", "kind": "input", "operation_id": None}]
+                    )
+                    self.assertEqual(result.copied, ["a-normal"])
+                    self.assertEqual((user / "a-normal/SKILL.md").read_text(), "normal")
+                    self.assertFalse((user / "z-bad").exists())
+                    self.assertEqual(set(read_manifest(user / MANIFEST_NAME)), {"a-normal"})
                 self.assertEqual((outside / "SKILL.md").read_text(), "privado fictício")
 
     def test_skill_local_sem_manifesto_e_preservada(self):
@@ -149,34 +164,34 @@ class CategorySyncTests(unittest.TestCase):
         )
         manifest = (self.home / MANIFEST_NAME).read_bytes()
         (source / "SKILL.md").write_text("v2")
-        with (
-            patch("shutil.copytree", side_effect=OSError("falha fictícia")),
-            self.assertRaises(OSError),
+        with patch(
+            "kairos_skills.publication_files.PublicationFiles.stage",
+            side_effect=OSError("falha fictícia"),
         ):
-            sync_bundled_skills(
-                self.bundle, self.home, policy=personal_policy(self, (self.home.parent))
+            result = sync_bundled_skills(
+                self.bundle, self.home, policy=personal_policy(self, self.home.parent)
             )
+        self.assertTrue(result.failed)
         self.assertEqual((self.home / "plana" / "SKILL.md").read_text(), "v1")
         self.assertEqual((self.home / MANIFEST_NAME).read_bytes(), manifest)
 
-    def test_falha_no_manifesto_reverte_copias_e_atualizacoes(self):
+    def test_falha_no_manifesto_preserva_publicacoes_e_snapshots_pendentes(self):
         source = self.skill("plana", "v1")
-        sync_bundled_skills(
-            self.bundle, self.home, policy=personal_policy(self, (self.home.parent))
-        )
+        sync_bundled_skills(self.bundle, self.home, policy=personal_policy(self, self.home.parent))
         manifest = (self.home / MANIFEST_NAME).read_bytes()
         (source / "SKILL.md").write_text("v2")
         self.skill("categoria/nova")
-        with (
-            patch("kairos_skills.sync.write_manifest", side_effect=OSError("falha fictícia")),
-            self.assertRaises(OSError),
-        ):
-            sync_bundled_skills(
-                self.bundle, self.home, policy=personal_policy(self, (self.home.parent))
+        with patch("kairos_skills.sync.reconcile_manifest", side_effect=OSError("falha fictícia")):
+            result = sync_bundled_skills(
+                self.bundle, self.home, policy=personal_policy(self, self.home.parent)
             )
-        self.assertEqual((self.home / "plana" / "SKILL.md").read_text(), "v1")
-        self.assertFalse((self.home / "nova").exists())
+        self.assertTrue(result.failed)
+        self.assertEqual(len(result.pending), 2)
+        self.assertEqual((self.home / "plana" / "SKILL.md").read_text(), "v2")
+        self.assertTrue((self.home / "nova").exists())
         self.assertEqual((self.home / MANIFEST_NAME).read_bytes(), manifest)
+        previous = list((self.home.parent / ".skill-publications").glob("*/previous/SKILL.md"))
+        self.assertEqual([path.read_text() for path in previous], ["v1"])
 
     def test_script_executavel_e_copiado_sem_executar(self):
         source = self.skill("categoria/script")
@@ -232,11 +247,14 @@ class CategorySyncTests(unittest.TestCase):
 
         source = self.skill("categoria/fifo")
         os.mkfifo(source / "pipe")
-        with self.assertRaises(ValueError):
-            sync_bundled_skills(
-                self.bundle, self.home, policy=personal_policy(self, (self.home.parent))
-            )
-        self.assertFalse(self.home.exists())
+        result = sync_bundled_skills(
+            self.bundle, self.home, policy=personal_policy(self, self.home.parent)
+        )
+        self.assertTrue(result.failed)
+        self.assertEqual(result.errors, [{"name": "fifo", "kind": "input", "operation_id": None}])
+        self.assertEqual(result.copied, [])
+        self.assertFalse(list(self.home.glob("*/SKILL.md")))
+        self.assertFalse((self.home / MANIFEST_NAME).exists())
 
     def test_link_na_raiz_do_bundle_e_recusado(self):
         self.skill("categoria/segura")
@@ -244,7 +262,8 @@ class CategorySyncTests(unittest.TestCase):
         link.symlink_to(self.bundle, target_is_directory=True)
         with self.assertRaises(ValueError):
             sync_bundled_skills(link, self.home, policy=personal_policy(self, (self.home.parent)))
-        self.assertFalse(self.home.exists())
+        self.assertFalse(list(self.home.glob("*/SKILL.md")))
+        self.assertFalse((self.home / MANIFEST_NAME).exists())
 
     def test_link_no_destino_nao_recebe_copias(self):
         self.skill("categoria/segura")

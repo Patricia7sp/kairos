@@ -8,13 +8,15 @@ import shutil
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+from skill_publication_writer_fixtures import acquired_source, sync_bundled_skills
 from test_skill_org_services import OrgServiceFixture
+from test_skill_publication_files import capture
 
 from kairos_cli import handlers
 from kairos_domain.ownership import Actor
 from kairos_filesystem.contract import FilesystemError
-from kairos_skills import hub, publication_io, sync
-from kairos_skills.hub import SkillBundle, install_from_quarantine, quarantine_bundle
+from kairos_skills import publication_files, sync
+from kairos_skills.hub import SkillBundle, install_from_quarantine
 from kairos_skills.mutation_contract import SkillMutationError
 
 
@@ -35,12 +37,23 @@ class OrgPublicationTests(OrgServiceFixture):
         before = target.stat().st_ino, (target / "SKILL.md").read_bytes()
         history = self.repository.history()
         quarantine = self.root / "quarantine"
-        source = quarantine_bundle(
-            SkillBundle("org-skill", {"SKILL.md": b"replacement"}), quarantine
+        source, context, acquisition_id = acquired_source(
+            self,
+            self.home,
+            quarantine,
+            SkillBundle("org-skill", {"SKILL.md": b"replacement"}),
+            policy=self.none,
         )
         source_before = source.stat().st_ino
         with self.assertRaises(SkillMutationError) as caught:
-            install_from_quarantine(source, quarantine, self.home / "skills", policy=self.none)
+            install_from_quarantine(
+                source,
+                quarantine,
+                self.home / "skills",
+                policy=self.none,
+                context=context,
+                acquisition_id=acquisition_id,
+            )
         self.assertEqual(caught.exception.kind, "conflict")
         self.assertEqual(caught.exception.operation_id, pending[0].operation_id)
         self.assertEqual((target.stat().st_ino, (target / "SKILL.md").read_bytes()), before)
@@ -72,8 +85,12 @@ class OrgPublicationTests(OrgServiceFixture):
 
     def occupied_promotion(self):
         quarantine = self.root / "quarantine"
-        source = quarantine_bundle(
-            SkillBundle("personal-skill", {"SKILL.md": b"replacement"}), quarantine
+        source, self.context, self.acquisition_id = acquired_source(
+            self,
+            self.home,
+            quarantine,
+            SkillBundle("personal-skill", {"SKILL.md": b"replacement"}),
+            policy=self.none,
         )
         target = self.home / "skills/personal-skill"
         target.mkdir(parents=True)
@@ -84,28 +101,54 @@ class OrgPublicationTests(OrgServiceFixture):
     def test_personal_promotion_refuses_occupied_destination_without_deleting_it(self):
         quarantine, source, target, before = self.occupied_promotion()
         with self.assertRaises(SkillMutationError) as caught:
-            install_from_quarantine(source, quarantine, target.parent, policy=self.none)
+            install_from_quarantine(
+                source,
+                quarantine,
+                target.parent,
+                policy=self.none,
+                context=self.context,
+                acquisition_id=self.acquisition_id,
+            )
         self.assertEqual(caught.exception.kind, "conflict")
         self.assert_occupied_promotion_preserved(source, target, before)
 
     def test_failed_move_preserves_installed_and_quarantined_versions(self):
+        from kairos_skills.publication_sources import observe_quarantine_source
+
         quarantine, source, target, before = self.occupied_promotion()
         with (
+            observe_quarantine_source(
+                self.home,
+                quarantine,
+                source_key=self.context.source_key,
+                actor=Actor.USER_FOREGROUND,
+                policy=self.none,
+                replacement=capture(target),
+            ) as context,
             patch.object(
-                publication_io,
+                publication_files,
                 "rename_no_replace",
                 side_effect=FilesystemError("unavailable", "Movimento indisponível."),
             ) as move,
             self.assertRaises(SkillMutationError) as caught,
         ):
-            install_from_quarantine(source, quarantine, target.parent, policy=self.none)
+            install_from_quarantine(
+                source,
+                quarantine,
+                target.parent,
+                policy=self.none,
+                context=context,
+                acquisition_id=self.acquisition_id,
+            )
         move.assert_called_once()
         self.assertEqual(caught.exception.kind, "unavailable")
+        self.assertIsNotNone(caught.exception.operation_id)
         self.assert_occupied_promotion_preserved(source, target, before)
 
     def test_policy_change_before_move_preserves_both_versions(self):
         from kairos_skills.org_policy import observe_org_policy
         from kairos_skills.org_policy_contract import OrgPolicyContext
+        from kairos_skills.publication_sources import observe_quarantine_source
 
         quarantine, source, target, before = self.occupied_promotion()
         policy_source = self.root / "promotion-policy.json"
@@ -113,19 +156,34 @@ class OrgPublicationTests(OrgServiceFixture):
         policy = self.enterContext(
             observe_org_policy(OrgPolicyContext("file", policy_source), self.home)
         )
-        original = hub.move_publication
+        original = publication_files.PublicationFiles.retire
 
-        def changed(*args, **kwargs):
+        def changed(files, *args, **kwargs):
             policy_source.write_text('{"version":1, "bindings": []}')
-            return original(*args, **kwargs)
+            return original(files, *args, **kwargs)
 
         with (
-            patch.object(hub, "move_publication", side_effect=changed),
+            observe_quarantine_source(
+                self.home,
+                quarantine,
+                source_key=self.context.source_key,
+                actor=Actor.USER_FOREGROUND,
+                policy=policy,
+                replacement=capture(target),
+            ) as context,
+            patch.object(publication_files.PublicationFiles, "retire", new=changed),
             self.assertRaises(SkillMutationError) as caught,
         ):
-            install_from_quarantine(source, quarantine, target.parent, policy=policy)
+            install_from_quarantine(
+                source,
+                quarantine,
+                target.parent,
+                policy=policy,
+                context=context,
+                acquisition_id=self.acquisition_id,
+            )
         self.assertEqual(caught.exception.kind, "conflict")
-        self.assertIn("atestada", str(caught.exception))
+        self.assertIsNotNone(caught.exception.operation_id)
         self.assert_occupied_promotion_preserved(source, target, before)
 
     def bundle(self, name="org-skill", text="bundle"):
@@ -136,7 +194,7 @@ class OrgPublicationTests(OrgServiceFixture):
         return bundled
 
     def test_initial_sync_blocks_bound_destination_without_publication(self):
-        result = sync.sync_bundled_skills(self.bundle(), self.home / "skills", policy=self.policy)
+        result = sync_bundled_skills(self.bundle(), self.home / "skills", policy=self.policy)
         self.assertEqual(result.blocked, ["org-skill"])
         self.assertTrue(result.failed)
         self.assertEqual(result.copied, [])
@@ -146,7 +204,7 @@ class OrgPublicationTests(OrgServiceFixture):
 
     def test_update_block_preserves_installed_root_and_manifest(self):
         bundle = self.bundle()
-        sync.sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
+        sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
         target = self.home / "skills/org-skill"
         before = (
             target.stat(),
@@ -154,7 +212,7 @@ class OrgPublicationTests(OrgServiceFixture):
             (self.home / "skills" / sync.MANIFEST_NAME).read_bytes(),
         )
         self.bundle(text="new")
-        result = sync.sync_bundled_skills(bundle, self.home / "skills", policy=self.policy)
+        result = sync_bundled_skills(bundle, self.home / "skills", policy=self.policy)
         self.assertTrue(result.failed)
         self.assertEqual(result.updated, [])
         self.assertEqual(
@@ -169,7 +227,7 @@ class OrgPublicationTests(OrgServiceFixture):
     def test_partial_batch_reports_completed_personal_skill_and_block(self):
         bundle = self.bundle("aaa-personal")
         self.bundle()
-        result = sync.sync_bundled_skills(bundle, self.home / "skills", policy=self.policy)
+        result = sync_bundled_skills(bundle, self.home / "skills", policy=self.policy)
         self.assertEqual(result.copied, ["aaa-personal"])
         self.assertEqual(result.blocked, ["org-skill"])
         self.assertTrue(result.failed)
@@ -177,7 +235,13 @@ class OrgPublicationTests(OrgServiceFixture):
 
     def test_promotion_veto_preserves_quarantine_and_existing_destination(self):
         quarantine = self.root / "quarantine"
-        source = quarantine_bundle(SkillBundle("org-skill", {"SKILL.md": b"new"}), quarantine)
+        source, context, acquisition_id = acquired_source(
+            self,
+            self.home,
+            quarantine,
+            SkillBundle("org-skill", {"SKILL.md": b"new"}),
+            policy=self.policy,
+        )
         skills = self.home / "skills"
         target = skills / "org-skill"
         for occupied in (False, True):
@@ -186,7 +250,14 @@ class OrgPublicationTests(OrgServiceFixture):
                     target.mkdir(parents=True)
                     (target / "SKILL.md").write_bytes(b"old")
                 with self.assertRaises(SkillMutationError) as caught:
-                    install_from_quarantine(source, quarantine, skills, policy=self.policy)
+                    install_from_quarantine(
+                        source,
+                        quarantine,
+                        skills,
+                        policy=self.policy,
+                        context=context,
+                        acquisition_id=acquisition_id,
+                    )
                 self.assertEqual(caught.exception.kind, "denied")
                 self.assertEqual((source / "SKILL.md").read_bytes(), b"new")
                 self.assertEqual(target.exists(), occupied)
@@ -196,64 +267,58 @@ class OrgPublicationTests(OrgServiceFixture):
     def test_direct_publication_requires_same_home_session(self):
         bundle = self.bundle()
         with self.assertRaises(TypeError):
-            sync.sync_bundled_skills(bundle, self.home / "skills")
+            sync_bundled_skills(bundle, self.home / "skills")
         with self.assertRaises(SkillMutationError):
-            sync.sync_bundled_skills(bundle, self.root / "other/skills", policy=self.none)
+            sync_bundled_skills(bundle, self.root / "other/skills", policy=self.none)
         with self.assertRaises(TypeError):
             install_from_quarantine(self.root, self.root, self.home / "skills")
 
     def test_source_change_after_staging_never_replaces_destination(self):
-        bundle = self.bundle()
-        sync.sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
-        self.bundle(text="new")
-        original = shutil.copytree
-
-        # A file-mode policy with no binding permits this personal publication.
         from kairos_skills.org_policy import observe_org_policy
         from kairos_skills.org_policy_contract import OrgPolicyContext
 
+        bundle = self.bundle()
+        sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
+        self.bundle(text="new")
         source = self.root / "personal-policy.json"
         source.write_text('{"version":1,"bindings":[]}')
         policy = self.enterContext(observe_org_policy(OrgPolicyContext("file", source), self.home))
+        original = publication_files.PublicationFiles.stage
 
-        def changed(*args, **kwargs):
-            result = original(*args, **kwargs)
-            if args[1].name == "new":
-                source.write_text('{"version":1, "bindings": []}')
+        def changed(files, *args, **kwargs):
+            result = original(files, *args, **kwargs)
+            source.write_text('{"version":1, "bindings": []}')
             return result
 
-        with (
-            patch.object(shutil, "copytree", side_effect=changed),
-            self.assertRaises(SkillMutationError),
-        ):
-            sync.sync_bundled_skills(bundle, self.home / "skills", policy=policy)
+        with patch.object(publication_files.PublicationFiles, "stage", new=changed):
+            result = sync_bundled_skills(bundle, self.home / "skills", policy=policy)
+        self.assertTrue(result.failed)
         self.assertEqual((self.home / "skills/org-skill/SKILL.md").read_text(), "bundle")
         gc.collect()
-        self.assertTrue(list((self.home / "skills").glob(".skill-sync-*/*/new/SKILL.md")))
+        self.assertTrue(list((self.home / ".skill-publications").glob("*/staged/SKILL.md")))
 
     def test_vetoed_compensation_preserves_both_versions_after_gc(self):
         from kairos_skills.org_policy import observe_org_policy
         from kairos_skills.org_policy_contract import OrgPolicyContext
 
         bundle = self.bundle()
-        sync.sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
+        sync_bundled_skills(bundle, self.home / "skills", policy=self.none)
         self.bundle(text="new")
         source = self.root / "personal-policy.json"
         source.write_text('{"version":1,"bindings":[]}')
         policy = self.enterContext(observe_org_policy(OrgPolicyContext("file", source), self.home))
 
-        def fail(*args):
+        def fail(*args, **kwargs):
             source.write_text('{"version":1, "bindings": []}')
             raise OSError("private-backend-sentinel")
 
-        with (
-            patch.object(sync, "write_manifest", side_effect=fail),
-            self.assertRaises(SkillMutationError),
-        ):
-            sync.sync_bundled_skills(bundle, self.home / "skills", policy=policy)
+        with patch.object(sync, "reconcile_manifest", side_effect=fail):
+            result = sync_bundled_skills(bundle, self.home / "skills", policy=policy)
+        self.assertTrue(result.failed)
+        self.assertEqual(len(result.pending), 1)
         gc.collect()
         self.assertEqual((self.home / "skills/org-skill/SKILL.md").read_text(), "new")
-        old = list((self.home / "skills").glob(".skill-sync-*/*/old/SKILL.md"))
+        old = list((self.home / ".skill-publications").glob("*/previous/SKILL.md"))
         self.assertEqual([path.read_text() for path in old], ["bundle"])
 
     def test_cli_partial_batch_returns_77_with_json_fields(self):
@@ -266,6 +331,10 @@ class OrgPublicationTests(OrgServiceFixture):
         output = io.StringIO()
         with (
             patch.object(handlers, "__file__", str(bundle_project / "kairos_cli/handlers.py")),
+            patch(
+                "kairos_skills.publication_sources.trusted_bundle_root",
+                return_value=bundle_project / "skills",
+            ),
             patch.object(handlers, "_home", return_value=self.home),
             patch.dict(
                 handlers.os.environ,

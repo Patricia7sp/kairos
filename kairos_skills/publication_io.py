@@ -1,6 +1,7 @@
 """Provas de árvores e movimentos para escritores de publicação participantes."""
 
 import logging
+import sqlite3
 from contextlib import ExitStack, contextmanager
 
 from kairos_filesystem.contract import FilesystemError
@@ -32,6 +33,14 @@ def publication_errors():
         )
         raise SkillMutationError(
             "io", "Publicação não pôde ser concluída; versões preservadas."
+        ) from None
+    except sqlite3.DatabaseError:
+        _LOGGER.warning(
+            "skill_publication_refused",
+            extra={"action": "publish", "kind": "corrupt", "reason": "database_attestation_failed"},
+        )
+        raise SkillMutationError(
+            "corrupt", "Estado de publicação indisponível ou incoerente; versões preservadas."
         ) from None
 
 

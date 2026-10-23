@@ -16,6 +16,7 @@ from kairos_state.connection import BUSY_TIMEOUT_MS, apply_wal_with_fallback
 from kairos_state.repositories.skill_mutations import SkillMutationRepository, corrupt_errors
 from kairos_state.skill_adoptions_schema import ADOPTION_TABLES
 from kairos_state.skill_org_schema import ORG_OBJECTS, ORG_TABLES
+from kairos_state.skill_publications_schema import PUBLICATION_TABLES
 from kairos_state.skill_writer import register_skill_writer
 
 
@@ -172,6 +173,16 @@ _TREE_TABLES = frozenset(
 )
 
 
+def _read_ledger_version(connection, names):
+    version = None
+    if "schema_version" in names:
+        versions = connection.execute("SELECT version FROM schema_version").fetchall()
+        if len(versions) != 1 or type(versions[0][0]) is not int or not 0 <= versions[0][0] <= 11:
+            raise SkillMutationError("corrupt", "Versão do ledger incompatível; leitura recusada.")
+        version = versions[0][0]
+    return version
+
+
 def read_skill_repository(connection: sqlite3.Connection, home: Path):
     """Reconhece homes antigos e recusa famílias parciais ou schema incompatível."""
     with corrupt_errors():
@@ -181,26 +192,26 @@ def read_skill_repository(connection: sqlite3.Connection, home: Path):
                 "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
             )
         }
-        version = None
-        if "schema_version" in names:
-            versions = connection.execute("SELECT version FROM schema_version").fetchall()
-            if (
-                len(versions) != 1
-                or type(versions[0][0]) is not int
-                or not 0 <= versions[0][0] <= 10
-            ):
-                raise SkillMutationError(
-                    "corrupt", "Versão do ledger incompatível; leitura recusada."
-                )
-            version = versions[0][0]
-        families = names & (_LEGACY_TABLES | _TREE_TABLES | ADOPTION_TABLES | ORG_OBJECTS)
+        version = _read_ledger_version(connection, names)
+        families = names & (
+            _LEGACY_TABLES | _TREE_TABLES | ADOPTION_TABLES | ORG_OBJECTS | PUBLICATION_TABLES
+        )
         if not families:
             if version is not None and version >= 7:
                 raise SkillMutationError(
                     "corrupt", "Ledger de skills ausente em banco migrado; leitura recusada."
                 )
             return None
-        if names & ORG_OBJECTS or version == 10:
+        if names & PUBLICATION_TABLES or version == 11:
+            if (
+                version != 11
+                or not names
+                >= PUBLICATION_TABLES | ORG_TABLES | ADOPTION_TABLES | _TREE_TABLES | _LEGACY_TABLES
+            ):
+                raise SkillMutationError(
+                    "corrupt", "Ledger de publicação incompleto; leitura recusada."
+                )
+        elif names & ORG_OBJECTS or version == 10:
             if (
                 not names >= ORG_TABLES | ADOPTION_TABLES | _TREE_TABLES | _LEGACY_TABLES
                 or version != 10
@@ -257,6 +268,16 @@ def read_skill_tombstones(home: Path) -> frozenset[str]:
                     )
                 )
             tombstones = repository.bundled_tombstones()
+            published = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='skill_publication_operations'"
+            ).fetchone()
+            if published is not None:
+                names.update(
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT DISTINCT name FROM skill_publication_operations"
+                    )
+                )
         for name in sorted(names):
             pending = repository.pending(name)
             if pending:

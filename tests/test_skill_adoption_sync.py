@@ -5,11 +5,11 @@ import unittest
 import test_skill_adoption_service as adoption_fixtures
 from skill_mutation_fixtures import creation_text
 from skill_org_fixtures import personal_policy
+from skill_publication_writer_fixtures import sync_bundled_skills
 
 from kairos_domain.ownership import Actor
 from kairos_skills.mutation_contract import SkillMutationState
 from kairos_skills.mutations import SkillMutationService
-from kairos_skills.sync import sync_bundled_skills
 
 
 class SkillAdoptionSyncTests(unittest.TestCase):

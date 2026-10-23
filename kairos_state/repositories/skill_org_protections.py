@@ -15,7 +15,7 @@ from kairos_state.skill_org_schema import bindings_digest, read_org_receipt
 
 def has_org_schema(connection):
     row = connection.execute("SELECT version FROM schema_version").fetchone()
-    return row is not None and row[0] == 10
+    return row is not None and row[0] in (10, 11)
 
 
 def validate_policy_receipt(connection, draft, receipt):

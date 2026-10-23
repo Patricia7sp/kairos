@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from skill_org_fixtures import personal_policy
+from skill_publication_writer_fixtures import sync_bundled_skills
 from test_chat_search_loop import RoundGateway, answer_round, make_service
 from test_chat_tool_approval import mutator_round
 from test_interaction_skills import skill_payload
@@ -22,7 +23,6 @@ from kairos_providers import (
     ModelSelectionContext,
     ProviderModelRef,
 )
-from kairos_skills.sync import sync_bundled_skills
 from kairos_state import connect, initialize_schema
 
 

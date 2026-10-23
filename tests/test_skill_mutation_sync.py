@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import test_skill_mutation_service as service_fixtures
 from skill_org_fixtures import personal_policy, personal_sync_operation
+from skill_publication_writer_fixtures import sync_bundled_skills
 from test_skill_mutation_io import hold_lock
 
 from kairos_domain.ownership import Actor
@@ -15,35 +16,31 @@ from kairos_skills.sync import (
     MANIFEST_NAME,
     NO_BUNDLED_SKILLS_MARKER,
     read_manifest,
-    sync_bundled_skills,
 )
 
 
 @personal_sync_operation
 def sync_process(bundle, home, pipe, *, policy):
     from kairos_skills import sync
+    from kairos_skills.publication_sources import observe_bundled_source
 
     original = sync._sync_discovered
 
-    def mutate(discovered, user_dir, **kwargs):
+    def mutate(*args, **kwargs):
         pipe.send("mutation_started")
-        result = original(discovered, user_dir, **kwargs)
-        return result
-
-    original_snapshot = sync._snapshot_bundle
-    from contextlib import contextmanager
-
-    @contextmanager
-    def snapshot(source):
-        with original_snapshot(source) as bundled:
-            pipe.send("snapshot_ready")
-            yield bundled
+        return original(*args, **kwargs)
 
     with (
-        patch.object(sync, "_sync_discovered", mutate),
-        patch.object(sync, "_snapshot_bundle", snapshot),
+        patch("kairos_skills.publication_sources.trusted_bundle_root", return_value=bundle),
+        observe_bundled_source(home, policy=policy) as context,
     ):
-        result = sync.sync_bundled_skills(bundle, home / "skills", policy=policy)
+        for name in context._bundled:
+            context.resolve(name)
+        pipe.send("snapshot_ready")
+        with patch.object(sync, "_sync_discovered", side_effect=mutate):
+            result = sync.sync_bundled_skills(
+                bundle, home / "skills", policy=policy, context=context
+            )
     pipe.send((result.copied, result.user_modified))
 
 
@@ -108,7 +105,7 @@ class MutationSyncTests(unittest.TestCase):
             self.assertEqual(parent.recv(), "locked")
             with (
                 patch(
-                    "kairos_skills.mutation_lock.skill_mutation_lock",
+                    "kairos_skills.publication_session.skill_mutation_lock",
                     lambda home: skill_mutation_lock(home, timeout=0.05),
                 ),
                 self.assertRaises(SkillMutationError) as raised,

@@ -31,6 +31,12 @@ from kairos_state.skill_org_schema import (
     repair_org_triggers,
     validate_org_schema,
 )
+from kairos_state.skill_publications_schema import (
+    PUBLICATION_TABLES,
+    migrate_publications,
+    repair_publication_objects,
+    validate_publication_schema,
+)
 from kairos_state.skill_removals_schema import (
     SKILL_REMOVALS_SCHEMA_SQL,
     SKILL_REMOVALS_TRIGGERS_SQL,
@@ -129,6 +135,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(8, "snapshots binários e timeline de remoção de skills", _v8_skill_removals),
     Migration(9, "adoção revogável e timeline canônica de autoridade", migrate_adoptions),
     Migration(10, "proteção organizacional ligada à instalação", migrate_org_protections),
+    Migration(11, "aquisição e publicação coordenada de skills", migrate_publications),
 )
 
 
@@ -167,6 +174,8 @@ def migrate(conn: sqlite3.Connection, *, target: int | None = None) -> int:
             validate_adoption_schema(conn)
         if current >= 10:
             validate_org_schema(conn)
+        if current >= 11:
+            validate_publication_schema(conn)
     except BaseException:
         conn.rollback()
         register_skill_writer(conn)
@@ -208,6 +217,7 @@ def backup_corrupt_db(db_path: str | os.PathLike[str], *, now: float | None = No
 CANONICAL_TABLES = (
     ADOPTION_TABLES
     | ORG_TABLES
+    | PUBLICATION_TABLES
     | frozenset(
         {
             "cron_notepad",
@@ -302,7 +312,9 @@ def repair_derived_objects(conn: sqlite3.Connection) -> list[str]:
     observed = read_schema_version(conn)
     if observed is not None and observed >= 9:
         with conn:
-            if observed == 10:
+            if observed == 11:
+                recriados.extend(repair_publication_objects(conn))
+            elif observed == 10:
                 repair_org_triggers(conn)
             elif observed == 9:
                 repair_adoption_triggers(conn)

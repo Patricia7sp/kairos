@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from kairos_state import connect, initialize_schema, read_schema_version
-from kairos_state.migrations import MIGRATIONS
+from kairos_state.migrations import MIGRATIONS, migrate
 from kairos_state.schema import SCHEMA_VERSION
 
 # ERD §1: 10 tabelas + 3 índices FTS.
@@ -101,7 +101,10 @@ class SchemaTestCase(unittest.TestCase):
 
     def test_versao_do_schema_e_propria_do_kairos(self):
         self.assertEqual(read_schema_version(self.db), SCHEMA_VERSION)
-        self.assertEqual(SCHEMA_VERSION, MIGRATIONS[-1].version)
+        latest = max(migration.version for migration in MIGRATIONS)
+        self.assertEqual(migrate(self.db, target=latest), latest)
+        self.assertEqual(read_schema_version(self.db), latest)
+        self.assertEqual(migrate(self.db, target=latest), latest)
 
     def test_inicializacao_e_idempotente(self):
         before = self.tables()

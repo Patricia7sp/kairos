@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -34,6 +35,8 @@ from kairos_skills.removal_io import SkillRemovalFiles
 from kairos_skills.removal_origin import prove_removal_origin, resolve_removal_origin
 from kairos_skills.removal_recovery import tree_matches
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def operation_error(error, operation_id: str) -> SkillMutationError:
@@ -178,6 +181,23 @@ class SkillMutationService:
         return self.repository.history(name=name, limit=limit)
 
     def ownership(self, name: str) -> Provenance:
+        current = self.repository.current_installation(name)
+        if current is not None and current.provenance is None:
+            _LOGGER.warning(
+                "skill_publication_authority_refused",
+                extra={
+                    "action": "ownership",
+                    "kind": "denied",
+                    "phase": "authorization",
+                    "reason": "unproven_publication",
+                    "operation_id": current.operation_id,
+                },
+            )
+            raise SkillMutationError(
+                "denied",
+                "Publicação não comprova autoria local nem autorização para remover.",
+                operation_id=current.operation_id,
+            )
         return self.repository.provenance(name) or Provenance.USER
 
     def _abort_staged(self, files, operation_id, expected):
@@ -319,6 +339,9 @@ class SkillMutationService:
         if confirmed is not True:
             raise SkillMutationError("denied", "Remoção exige confirmação explícita --yes.")
         self._check(name, OrgPolicyAction.REMOVE)
+        current = self.repository.current_installation(name)
+        if current is not None and current.provenance is None:
+            self.ownership(name)
         operation_id = uuid.uuid4().hex
         try:
             with skill_mutation_lock(self.home), SkillRemovalFiles(self.home) as files:
