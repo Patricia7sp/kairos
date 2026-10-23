@@ -1,7 +1,6 @@
 """Aceite offline contra módulos instalados; somente este harness é montado."""
 
 import argparse
-import asyncio
 import io
 import json
 import os
@@ -67,9 +66,7 @@ def run_backup_acceptance(root, quarantine_root):
     before = canonical(case.home)
     archive = root / "backup.tar.gz"
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-        code = asyncio.run(
-            run_backup(case.home, argparse.Namespace(output=str(archive), json=True))
-        )
+        code = run_backup(case.home, argparse.Namespace(output=str(archive), json=True))
     assert code == 0, code
     for database_only in (False, True):
         destination = root / ("database-only" if database_only else "full-restore")

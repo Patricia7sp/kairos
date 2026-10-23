@@ -375,7 +375,7 @@ def _backup_summary(home, archive, size, files, *, as_json):
         print(f"  tamanho: {size} bytes em {files} arquivos")
 
 
-async def run_backup(home: Path, args) -> int:
+def run_backup(home: Path, args) -> int:
     home = Path(home)
     if not home.exists():
         print(f"kairos: home {home} não existe", file=sys.stderr)

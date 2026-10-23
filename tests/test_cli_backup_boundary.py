@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import io
 import json
 import os
@@ -34,7 +33,7 @@ class BackupBoundaryTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         args = argparse.Namespace(output=str(self.archive) if output is None else output, json=True)
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            code = asyncio.run(run_backup(self.home, args))
+            code = run_backup(self.home, args)
         return code, stdout.getvalue(), stderr.getvalue()
 
     def database(self, path=None):
@@ -81,10 +80,10 @@ class BackupBoundaryTests(unittest.TestCase):
     def test_fifo_database_refuses_without_blocking(self):
         os.mkfifo(self.home / "state.db")
         code = """
-import argparse,asyncio,sys
+import argparse,sys
 from pathlib import Path
 from kairos_cli.backup import run_backup
-raise SystemExit(asyncio.run(run_backup(Path(sys.argv[1]),argparse.Namespace(output=sys.argv[2],json=True))))
+raise SystemExit(run_backup(Path(sys.argv[1]),argparse.Namespace(output=sys.argv[2],json=True)))
 """
         try:
             result = subprocess.run(
