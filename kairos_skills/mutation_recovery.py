@@ -1,5 +1,7 @@
 """Reconciliação somente de IDs conhecidos, sob lock do chamador."""
 
+import logging
+
 from kairos_skills.mutation_contract import (
     SkillFilesystemEntry,
     SkillMutationAction,
@@ -7,6 +9,8 @@ from kairos_skills.mutation_contract import (
     SkillMutationState,
 )
 from kairos_skills.org_policy_guard import attest_policy_home, repository_guard
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def expected_entry(repository, record):
@@ -67,12 +71,29 @@ def reconcile_pending(repository, files, *, name: str, policy):
     from kairos_skills.adoption_contract import SkillAdoptionAction, SkillAdoptionRecord
     from kairos_skills.adoption_recovery import reconcile_adoption_operation
     from kairos_skills.mutation_io import SkillMutationFiles
+    from kairos_skills.publication_contract import SkillPublicationRecord
     from kairos_skills.removal_contract import SkillTreeAction
     from kairos_skills.removal_io import SkillRemovalFiles
     from kairos_skills.removal_recovery import reconcile_tree_operation
 
     results = []
     for record in repository.pending(name):
+        if isinstance(record, SkillPublicationRecord):
+            _LOGGER.warning(
+                "skill_publication_recovery_refused",
+                extra={
+                    "action": "recover",
+                    "phase": "legacy_recovery",
+                    "kind": "conflict",
+                    "reason": "publication_coordinator_required",
+                    "operation_id": record.operation_id,
+                },
+            )
+            raise SkillMutationError(
+                "conflict",
+                "Publicação pendente exige recuperação pelo coordenador.",
+                operation_id=record.operation_id,
+            )
         try:
             if record.action is SkillMutationAction.CREATE:
                 handler, adapter = reconcile_create, SkillMutationFiles

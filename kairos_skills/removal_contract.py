@@ -7,6 +7,7 @@ import math
 import os
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING, Union
 
 from kairos_domain.ownership import Actor, Provenance
 from kairos_filesystem.contract import TreeCapture, TreeEntry
@@ -24,6 +25,9 @@ from kairos_skills.mutation_contract import (
     validate_id,
     validate_name,
 )
+
+if TYPE_CHECKING:
+    from kairos_skills.publication_contract import SkillPublicationRecord
 
 MAX_TREE_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -171,17 +175,22 @@ class SkillTreeRecord:
 @dataclass(frozen=True)
 class InstallationProof:
     operation_id: str
-    provenance: Provenance
+    provenance: Provenance | None
     device: int
     inode: int
     adoption: AdoptionAuthority | None = None
+    installation_source: str | None = None
 
     def __post_init__(self):
         validate_id(self.operation_id)
         require(
-            type(self.provenance) is Provenance
-            and self.provenance in (Provenance.USER, Provenance.BUNDLED)
+            (
+                type(self.provenance) is Provenance
+                and self.provenance in (Provenance.USER, Provenance.BUNDLED)
+            )
+            or (self.provenance is None and self.installation_source == "verified_acquisition")
         )
+        require(self.installation_source in (None, "package_bundle", "verified_acquisition"))
         require(type(self.device) is int and 0 <= self.device < 2**64)
         require(type(self.inode) is int and 0 < self.inode < 2**64)
         if self.adoption is not None:
@@ -192,4 +201,6 @@ class InstallationProof:
             )
 
 
-CommonRecord = SkillMutationRecord | SkillTreeRecord | SkillAdoptionRecord
+CommonRecord = Union[
+    SkillMutationRecord, SkillTreeRecord, SkillAdoptionRecord, "SkillPublicationRecord"
+]

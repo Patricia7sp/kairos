@@ -179,6 +179,13 @@ def _make_identification(name, evidence, origin, adoption, adoption_record):
             Provenance.BUNDLED: "package_bundle",
         }.get(provenance, "unknown")
     )
+    publication_unknown = (
+        evidence.current is not None
+        and evidence.current.provenance is None
+        and evidence.current.installation_source == "verified_acquisition"
+    )
+    if publication_unknown and origin.identity_valid is True:
+        source = "verified_acquisition"
     adoption_active = (
         None if adoption is None else adoption.active and origin.identity_valid is True
     )
@@ -201,7 +208,7 @@ def _make_identification(name, evidence, origin, adoption, adoption_record):
         historical_creation_origin=historical,
         installation_source=source,
         authorization_basis=authorization_basis,
-        ownership=(provenance or Provenance.USER).value,
+        ownership="unknown" if publication_unknown else (provenance or Provenance.USER).value,
         current_installation_id=None if evidence.current is None else evidence.current.operation_id,
         historical_creation_id=evidence.historical_creation_id,
         current_removal_id=evidence.current_removal_id,

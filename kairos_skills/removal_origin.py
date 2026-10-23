@@ -205,7 +205,12 @@ def resolve_removal_origin(
             if (current.device, current.inode) != (root.device, root.inode):
                 result = OriginEvidence(None, False, "none", ("replaced_root",))
             else:
-                result = OriginEvidence(current.provenance, True, "proven_write", ())
+                result = OriginEvidence(
+                    current.provenance,
+                    True,
+                    "none" if current.provenance is None else "proven_write",
+                    (),
+                )
         else:
             manifest = _read_manifest(installed)
             result = _resolve_bundle_origin(name, captured, manifest)

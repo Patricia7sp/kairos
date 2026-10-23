@@ -23,6 +23,7 @@ from kairos_skills.removal_contract import validate_capture
 from kairos_state.repositories.skill_mutations import (
     SkillMutationRepository,
     _project_committed_records,
+    authority_query,
     corrupt_errors,
 )
 from kairos_state.repositories.skill_removals import SkillRemovalRepository
@@ -73,7 +74,10 @@ class SkillAdoptionRepository:
                 == (snapshot.entries[0].device, snapshot.entries[0].inode)
             )
         events = self._conn.execute(
-            "SELECT e.sequence,e.state,t.sequence FROM skill_adoption_events e LEFT JOIN skill_authority_timeline t ON t.adoption_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4",
+            authority_query(
+                self._conn,
+                "SELECT e.sequence,e.state,t.sequence FROM skill_adoption_events e LEFT JOIN skill_authority_timeline t ON t.adoption_event=e.sequence WHERE e.operation_id=? ORDER BY e.sequence LIMIT 4",
+            ),
             (operation_id,),
         ).fetchall()
         require(1 <= len(events) <= 3)
@@ -117,11 +121,17 @@ class SkillAdoptionRepository:
                     == (parent.name, parent.draft.installation_source)
                 )
                 committed = self._conn.execute(
-                    "SELECT t.sequence FROM skill_authority_timeline t JOIN skill_adoption_events e ON e.sequence=t.adoption_event WHERE e.operation_id=? AND e.state='committed'",
+                    authority_query(
+                        self._conn,
+                        "SELECT t.sequence FROM skill_authority_timeline t JOIN skill_adoption_events e ON e.sequence=t.adoption_event WHERE e.operation_id=? AND e.state='committed'",
+                    ),
                     (parent.operation_id,),
                 ).fetchone()
                 first = self._conn.execute(
-                    "SELECT t.sequence FROM skill_authority_timeline t JOIN skill_adoption_events e ON e.sequence=t.adoption_event WHERE e.operation_id=? ORDER BY t.sequence LIMIT 1",
+                    authority_query(
+                        self._conn,
+                        "SELECT t.sequence FROM skill_authority_timeline t JOIN skill_adoption_events e ON e.sequence=t.adoption_event WHERE e.operation_id=? ORDER BY t.sequence LIMIT 1",
+                    ),
                     (operation_id,),
                 ).fetchone()
                 require(committed[0] < first[0])

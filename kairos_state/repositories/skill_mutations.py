@@ -27,6 +27,7 @@ from kairos_skills.mutation_contract import (
     validate_name,
     validate_skill_creation,
 )
+from kairos_skills.publication_contract import SkillPublicationAction, SkillPublicationRecord
 from kairos_skills.removal_contract import (
     CommonRecord,
     InstallationProof,
@@ -37,6 +38,7 @@ from kairos_skills.removal_contract import (
 from kairos_state.contention import Budget
 from kairos_state.skill_adoptions_schema import ADOPTION_TABLES, validate_adoption_schema
 from kairos_state.skill_org_schema import ORG_OBJECTS, ORG_TABLES, validate_org_schema
+from kairos_state.skill_publications_schema import PUBLICATION_TABLES, validate_publication_schema
 from kairos_state.skill_writer import register_skill_writer
 from kairos_state.writes import write_with_retry
 
@@ -57,6 +59,16 @@ def identity_json(identity: SkillDirectoryIdentity) -> str:
     return json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
 
 
+def authority_query(connection, query):
+    """Seleciona a timeline canônica sem interpolar nomes ou entrada externa."""
+    version = connection.execute("SELECT version FROM schema_version").fetchone()
+    return (
+        query.replace("skill_authority_timeline", "skill_publication_timeline")
+        if version is not None and version[0] == 11
+        else query
+    )
+
+
 def _adopt_installation(current, record, founders):
     draft = record.draft
     same_root = current is not None and (current.device, current.inode) == (
@@ -64,7 +76,16 @@ def _adopt_installation(current, record, founders):
         draft.inode,
     )
     if same_root:
-        require(current.adoption is not None and not current.adoption.active)
+        require(
+            (current.adoption is not None and not current.adoption.active)
+            or (
+                current.adoption is None
+                and current.provenance is None
+                and current.installation_source
+                == draft.installation_source
+                == "verified_acquisition"
+            )
+        )
         require(draft.installation_id == current.operation_id)
     else:
         require(draft.installation_id == draft.operation_id)
@@ -72,7 +93,12 @@ def _adopt_installation(current, record, founders):
     require(draft.adoption_id not in founders)
     founders[draft.adoption_id] = record
     return InstallationProof(
-        draft.installation_id, Provenance.USER, draft.device, draft.inode, adoption
+        draft.installation_id,
+        Provenance.USER,
+        draft.device,
+        draft.inode,
+        adoption,
+        current.installation_source if same_root else None,
     ), same_root
 
 
@@ -116,6 +142,50 @@ def _clear_linked_adoption_tombstone(removed, adopted_removals):
         adopted_removals.discard(removed.operation_id)
 
 
+def _record_pending(record):
+    return (
+        record.pending
+        if isinstance(record, SkillPublicationRecord)
+        else record.state
+        in (
+            SkillMutationState.PREPARED,
+            SkillMutationState.CONFLICT,
+        )
+    )
+
+
+def _publication_installation(current, record):
+    require(current == record.draft.previous_installation)
+    root = record.draft.staged_tree.entries[0]
+    return InstallationProof(
+        record.operation_id,
+        record.provenance,
+        root.device,
+        root.inode,
+        installation_source="package_bundle"
+        if record.provenance is Provenance.BUNDLED
+        else "verified_acquisition",
+    )
+
+
+def _validate_removed_installation(current, record, founders):
+    root = record.draft.proof.entries[0]
+    if current is None:
+        require(record.provenance is Provenance.BUNDLED and record.draft.adoption is None)
+    else:
+        require(
+            (current.provenance, current.device, current.inode)
+            == (record.provenance, root.device, root.inode)
+        )
+        require(current.adoption == record.draft.adoption)
+        if current.adoption is not None:
+            require(current.adoption.active)
+            require(
+                record.draft.installation_source
+                == founders[current.adoption.adoption_id].draft.installation_source
+            )
+
+
 def _project_committed_records(
     records: tuple[CommonRecord, ...],
 ):
@@ -127,7 +197,10 @@ def _project_committed_records(
     adoption = None
     founders = {}
     for record in records:
-        if record.action is SkillMutationAction.CREATE:
+        if isinstance(record, SkillPublicationRecord):
+            current = _publication_installation(current, record)
+            historical_creation = adoption = removed = None
+        elif record.action is SkillMutationAction.CREATE:
             require(current is None)
             identity = record.draft.identity
             current = InstallationProof(
@@ -151,22 +224,8 @@ def _project_committed_records(
             current = _revoke_installation(current, record, founders)
             adoption = current.adoption
         elif record.action is SkillTreeAction.REMOVE:
-            root = record.draft.proof.entries[0]
-            if current is None:
-                require(record.provenance is Provenance.BUNDLED and record.draft.adoption is None)
-                historical_creation = None
-            else:
-                require(
-                    (current.provenance, current.device, current.inode)
-                    == (record.provenance, root.device, root.inode)
-                )
-                require(current.adoption == record.draft.adoption)
-                if current.adoption is not None:
-                    require(current.adoption.active)
-                    require(
-                        record.draft.installation_source
-                        == founders[current.adoption.adoption_id].draft.installation_source
-                    )
+            _validate_removed_installation(current, record, founders)
+            historical_creation = None if current is None else historical_creation
             current = None
             removed = record
             legacy_bundled_removed = _track_removed_tombstone(
@@ -198,80 +257,107 @@ def _project_committed_records(
     )
 
 
+def _timeline_rows(connection):
+    names = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        )
+    }
+    modern = {
+        "skill_tree_operations",
+        "skill_tree_events",
+        "skill_tree_snapshots",
+        "skill_tree_blobs",
+        "skill_mutation_timeline",
+    }
+    version = None
+    if "schema_version" in names:
+        versions = connection.execute("SELECT version FROM schema_version").fetchall()
+        require(len(versions) == 1 and type(versions[0][0]) is int and 0 <= versions[0][0] <= 11)
+        version = versions[0][0]
+    require(version in (10, 11) or not names & ORG_OBJECTS)
+    require(version == 11 or not names & PUBLICATION_TABLES)
+    if not names & modern:
+        require((version is None or version < 8) and not names & ADOPTION_TABLES)
+        return None
+    require(modern <= names and version in (8, 9, 10, 11))
+    adopted = version >= 9
+    require((names >= ORG_TABLES) if version in (10, 11) else not names & ORG_TABLES)
+    require((names >= ADOPTION_TABLES) if adopted else not names & ADOPTION_TABLES)
+    if adopted:
+        try:
+            if version == 11:
+                validate_publication_schema(connection)
+            else:
+                validate_adoption_schema(connection)
+            if version == 10:
+                validate_org_schema(connection)
+        except sqlite3.DatabaseError:
+            require(False)
+    require(
+        {"skill_mutation_operations", "skill_mutation_events", "skill_mutation_contents"} <= names
+    )
+    if version == 11:
+        rows = connection.execute(
+            "SELECT t.sequence,t.legacy_event,t.tree_event,COALESCE(l.operation_id,r.operation_id,a.operation_id,p.operation_id),COALESCE(l.state,r.state,a.state,p.state),t.adoption_event,t.publication_event "
+            "FROM skill_publication_timeline t LEFT JOIN skill_mutation_events l ON l.sequence=t.legacy_event "
+            "LEFT JOIN skill_tree_events r ON r.sequence=t.tree_event LEFT JOIN skill_adoption_events a ON a.sequence=t.adoption_event "
+            "LEFT JOIN skill_publication_events p ON p.sequence=t.publication_event ORDER BY t.sequence"
+        ).fetchall()
+    elif adopted:
+        rows = connection.execute(
+            "SELECT t.sequence,t.legacy_event,t.tree_event,COALESCE(l.operation_id,r.operation_id,a.operation_id),COALESCE(l.state,r.state,a.state),t.adoption_event,NULL "
+            "FROM skill_authority_timeline t LEFT JOIN skill_mutation_events l ON l.sequence=t.legacy_event "
+            "LEFT JOIN skill_tree_events r ON r.sequence=t.tree_event LEFT JOIN skill_adoption_events a ON a.sequence=t.adoption_event ORDER BY t.sequence"
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            "SELECT t.sequence,t.legacy_event,t.tree_event,COALESCE(l.operation_id,r.operation_id),COALESCE(l.state,r.state),NULL,NULL "
+            "FROM skill_mutation_timeline t LEFT JOIN skill_mutation_events l ON l.sequence=t.legacy_event "
+            "LEFT JOIN skill_tree_events r ON r.sequence=t.tree_event ORDER BY t.sequence"
+        ).fetchall()
+    families = ("mutation", "tree", "adoption") if adopted else ("mutation", "tree")
+    if version == 11:
+        families += ("publication",)
+    return rows, adopted, families
+
+
 def validate_skill_timeline(connection: sqlite3.Connection):
     """Atesta famílias e referências antes de usar a sequência comum."""
     with corrupt_errors():
-        names = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
-            )
-        }
-        modern = {
-            "skill_tree_operations",
-            "skill_tree_events",
-            "skill_tree_snapshots",
-            "skill_tree_blobs",
-            "skill_mutation_timeline",
-        }
-        version = None
-        if "schema_version" in names:
-            versions = connection.execute("SELECT version FROM schema_version").fetchall()
-            require(
-                len(versions) == 1 and type(versions[0][0]) is int and 0 <= versions[0][0] <= 10
-            )
-            version = versions[0][0]
-        require(version == 10 or not names & ORG_OBJECTS)
-        if not names & modern:
-            require((version is None or version < 8) and not names & ADOPTION_TABLES)
+        observed = _timeline_rows(connection)
+        if observed is None:
             return None
-        require(modern <= names and version in (8, 9, 10))
-        adopted = version >= 9
-        require((names >= ORG_TABLES) if version == 10 else not names & ORG_TABLES)
-        require((names >= ADOPTION_TABLES) if adopted else not names & ADOPTION_TABLES)
-        if adopted:
-            try:
-                validate_adoption_schema(connection)
-                if version == 10:
-                    validate_org_schema(connection)
-            except sqlite3.DatabaseError:
-                require(False)
-        require(
-            {"skill_mutation_operations", "skill_mutation_events", "skill_mutation_contents"}
-            <= names
-        )
-        if adopted:
-            rows = connection.execute(
-                "SELECT t.sequence,t.legacy_event,t.tree_event,COALESCE(l.operation_id,r.operation_id,a.operation_id),COALESCE(l.state,r.state,a.state),t.adoption_event "
-                "FROM skill_authority_timeline t LEFT JOIN skill_mutation_events l ON l.sequence=t.legacy_event "
-                "LEFT JOIN skill_tree_events r ON r.sequence=t.tree_event LEFT JOIN skill_adoption_events a ON a.sequence=t.adoption_event ORDER BY t.sequence"
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                "SELECT t.sequence,t.legacy_event,t.tree_event,COALESCE(l.operation_id,r.operation_id),COALESCE(l.state,r.state),NULL "
-                "FROM skill_mutation_timeline t LEFT JOIN skill_mutation_events l ON l.sequence=t.legacy_event "
-                "LEFT JOIN skill_tree_events r ON r.sequence=t.tree_event ORDER BY t.sequence"
-            ).fetchall()
-        families = ("mutation", "tree", "adoption") if adopted else ("mutation", "tree")
+        rows, adopted, families = observed
         seen = [set() for _ in families]
         last_event = [0 for _ in families]
         operations = [set() for _ in families]
         previous = 0
-        for sequence, legacy, tree, operation_id, state, authority in rows:
+        for sequence, legacy, tree, operation_id, state, authority, publication in rows:
             require(
                 type(sequence) is int
                 and sequence > previous
-                and sum(value is not None for value in (legacy, tree, authority)) == 1
+                and sum(value is not None for value in (legacy, tree, authority, publication)) == 1
             )
             family = next(
-                index for index, value in enumerate((legacy, tree, authority)) if value is not None
+                index
+                for index, value in enumerate((legacy, tree, authority, publication))
+                if value is not None
             )
-            event = (legacy, tree, authority)[family]
+            event = (legacy, tree, authority, publication)[family]
             require(type(event) is int and event > 0 and event not in seen[family])
             require(event > last_event[family])
             last_event[family] = event
             validate_id(operation_id)
-            SkillMutationState(state)
+            if publication is not None and state in (
+                "manifest_prepared",
+                "manifest_applied",
+                "source_cleaned",
+            ):
+                pass  # Confirmações são validadas pela família, sem reaplicar instalação.
+            else:
+                SkillMutationState(state)
             seen[family].add(event)
             operations[family].add(operation_id)
             previous = sequence
@@ -287,6 +373,10 @@ def validate_skill_timeline(connection: sqlite3.Connection):
             (
                 "SELECT sequence FROM skill_adoption_events",
                 "SELECT operation_id FROM skill_adoption_operations",
+            ),
+            (
+                "SELECT sequence FROM skill_publication_events",
+                "SELECT operation_id FROM skill_publication_operations",
             ),
         )
         for family, (events_query, operations_query) in enumerate(queries[: len(families)]):
@@ -451,7 +541,17 @@ class SkillMutationRepository:
         adopted = self._conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='skill_adoption_operations'"
         ).fetchone()
-        return None if adopted is None else self._adoption_repository().get(operation_id)
+        record = None if adopted is None else self._adoption_repository().get(operation_id)
+        if record is not None:
+            return record
+        published = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='skill_publication_operations'"
+        ).fetchone()
+        if published is not None:
+            from kairos_state.repositories.skill_publications import SkillPublicationRepository
+
+            return SkillPublicationRepository(self._conn, home_id=self.home_id).get(operation_id)
+        return None
 
     def content(self, operation_id: str):
         record = self.get(operation_id)
@@ -481,11 +581,7 @@ class SkillMutationRepository:
     def pending(self, name: str):
         validate_name(name)
         with corrupt_errors():
-            return tuple(
-                record
-                for record in self._records(name)
-                if record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
-            )
+            return tuple(record for record in self._records(name) if _record_pending(record))
 
     def latest_rollback(self, create_id: str):
         parent = self.get(create_id)
@@ -552,9 +648,7 @@ class SkillMutationRepository:
                     record for record in records if record.state is SkillMutationState.COMMITTED
                 )
             pending_ids = tuple(
-                record.operation_id
-                for record in records
-                if record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
+                record.operation_id for record in records if _record_pending(record)
             )
             return committed, pending_ids
 
@@ -598,7 +692,12 @@ class SkillMutationRepository:
             return any(
                 row[0] > removed_sequence
                 and row[3] in records
-                and records[row[3]].action in (SkillMutationAction.CREATE, SkillTreeAction.RESTORE)
+                and records[row[3]].action
+                in (
+                    SkillMutationAction.CREATE,
+                    SkillTreeAction.RESTORE,
+                    SkillPublicationAction.PUBLISH,
+                )
                 for row in committed
             )
 

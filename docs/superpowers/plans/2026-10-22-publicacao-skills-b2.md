@@ -10,9 +10,9 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 foi validada localmente na branch `feat/publicacao-skills-b2`. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
+**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3 foi validada localmente em 23/10 na branch `feat/publicacao-skills-b2`. A próxima tarefa é T4. O schema padrão permanece v10; execução não autoriza merge/deploy de B2.
 
-**Execução proposta:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
+**Execução:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
 ## Global Constraints
 
@@ -120,11 +120,11 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
 
 ### Task 3: projeção de instalação e bloqueio comum de pendências
 
-**Files:** modificar `repositories/skill_mutations.py`, `removal_contract.py`, `identification_contract.py`, `identification.py`, `removal_origin.py`, `removal_state.py`, `org_policy_guard.py`, `mutations.py`, `adoptions.py`, `mutation_recovery.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_authority.py` e `tests/test_skill_publication_pending.py`.
+**Files:** modificar `repositories/skill_mutations.py`, `repositories/skill_adoptions.py`, `repositories/skill_removals.py`, `removal_contract.py`, `identification_contract.py`, `identification.py`, `removal_origin.py`, `removal_state.py`, `org_policy_guard.py`, `mutations.py`, `adoptions.py`, `mutation_recovery.py`, `kairos_cli/skill_mutations.py`; criar `tests/test_skill_publication_authority.py` e `tests/test_skill_publication_pending.py`.
 
 **Interfaces — consome:** T1. **Produz:** `CommonRecord` inclui `SkillPublicationRecord`; `get/history/pending/installation_evidence/current_installation` reconhecem a quarta família. `pending(name)` inclui confirmações incompletas. `repository_guard` consulta o mesmo estado antes dos efeitos de todas as famílias.
 
-- [ ] **RED:** `test_publication_clears_old_adoption`, `test_unproven_acquisition_never_becomes_user`, `test_confirmation_does_not_reapply_publication`, `test_every_writer_refuses_committed_cleanup_pending`, `test_legacy_reader_has_no_home_effects`. Exemplos de invariantes:
+- [x] **RED:** `test_publication_clears_old_adoption`, `test_unproven_acquisition_never_becomes_user`, `test_confirmation_does_not_reapply_publication`, `test_every_writer_refuses_committed_cleanup_pending`, `test_legacy_reader_has_no_home_effects`. Exemplos de invariantes:
 
   ```python
   self.assertNotEqual(after.current.operation_id, before.current.operation_id)
@@ -134,14 +134,14 @@ Modificar arquivos existentes somente nas tarefas indicadas abaixo. Os nomes cur
   ```
 
   Parametrizar add/remove/rollback-restore/adopt/unadopt/sync/promote e recuperação antiga; verificar o ID bloqueador e zero efeitos na recusa.
-- [ ] **Testar sessões existentes:** `test_session_catalog_remains_immutable_after_publication` cria catálogo/assets reais, publica outra versão e exige os mesmos bytes/hashes no snapshot da sessão anterior; somente uma nova sessão pode observar o catálogo atualizado. Não alterar tabelas de catálogo para fazer a nova instalação parecer antiga.
-- [ ] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_authority.py tests/test_skill_publication_pending.py`.
-- [ ] **Implementar:** ampliar `InstallationProof.provenance` para `Provenance | None`, aceitando ausência somente na projeção de publicação comprovada; adoção exige USER como antes. Bundled confiável produz BUNDLED para a árvore nova. Aquisição produz prova de instalação com origem de aquisição verificável e proveniência/autorização destrutiva ausentes; não criar enum USER/SEDIMENT por conveniência. Nome, byte-idêntico e adoção anterior não autorizam a árvore nova.
-- [ ] **Implementar leitores:** `installation_source="verified_acquisition"` somente com recibo válido; sem provar o fornecedor remoto. Para publicação com proveniência ausente, `ownership="unknown"`, `authorization_basis="none"`, `removivel=False`. Preservar a convenção legada de exibição fora desse caso. Em `SkillMutationService.ownership`, recusar publicação sem autoridade em vez de usar `or Provenance.USER`; `resolve_removal_origin` não cai no manifesto para contornar uma publicação desconhecida.
-- [ ] **Implementar timeline:** aplicar cada commit de instalação uma única vez, na ordem canônica; confirmações não reinstalam nem recuperam adoção. Bloqueio de pendência precisa atingir também early returns/idempotência de operações antigas; recuperação A1/A2/B1 não despacha um record B2 a um adaptador legado. History/JSON mostram tipo, estado e pendência; rollback de ID de publicação recusa explicitamente, sem tentar restaurar como CREATE/RESTORE.
-- [ ] **Implementar metadados:** em `mutation_metadata`, tratar `SkillPublicationRecord` antes do ramo que usa `record.provenance.value` e `record.sha256`. Emitir origin nulo para origem não provada, writer, ID, estado, confirmação de manifesto/limpeza e pending; não inventar `reverts`, criação manual ou actor para bundled. `test_history_serializes_unknown_publication_without_user_fallback` percorre a CLI real.
-- [ ] **GREEN:** repetir os dois arquivos e `uv run pytest -q tests/test_skill_identification.py tests/test_skill_adoption_sync.py tests/test_skill_org_services.py`; preservar resultados A1/A2/B1 e leitura v8–v10 sem migração/sidecars no home original.
-- [ ] **Commit:** `feat(skills): integra publicações à autoridade e aos bloqueios comuns`.
+- [x] **Testar sessões existentes:** `test_session_catalog_remains_immutable_after_publication` cria catálogo/assets reais, publica outra versão e exige os mesmos bytes/hashes no snapshot da sessão anterior; somente uma nova sessão pode observar o catálogo atualizado. Não alterar tabelas de catálogo para fazer a nova instalação parecer antiga.
+- [x] **Verificar RED:** `uv run pytest -q tests/test_skill_publication_authority.py tests/test_skill_publication_pending.py`.
+- [x] **Implementar:** ampliar `InstallationProof.provenance` para `Provenance | None`, aceitando ausência somente na projeção de publicação comprovada; adoção exige USER como antes. Bundled confiável produz BUNDLED para a árvore nova. Aquisição produz prova de instalação com origem de aquisição verificável e proveniência/autorização destrutiva ausentes; não criar enum USER/SEDIMENT por conveniência. Nome, byte-idêntico e adoção anterior não autorizam a árvore nova.
+- [x] **Implementar leitores:** `installation_source="verified_acquisition"` somente com recibo válido; sem provar o fornecedor remoto. Para publicação com proveniência ausente, `ownership="unknown"`, `authorization_basis="none"`, `removivel=False`. Preservar a convenção legada de exibição fora desse caso. Em `SkillMutationService.ownership`, recusar publicação sem autoridade em vez de usar `or Provenance.USER`; `resolve_removal_origin` não cai no manifesto para contornar uma publicação desconhecida.
+- [x] **Implementar timeline:** aplicar cada commit de instalação uma única vez, na ordem canônica; confirmações não reinstalam nem recuperam adoção. Bloqueio de pendência precisa atingir também early returns/idempotência de operações antigas; recuperação A1/A2/B1 não despacha um record B2 a um adaptador legado. History/JSON mostram tipo, estado e pendência; rollback de ID de publicação recusa explicitamente, sem tentar restaurar como CREATE/RESTORE.
+- [x] **Implementar metadados:** em `mutation_metadata`, tratar `SkillPublicationRecord` antes do ramo que usa `record.provenance.value` e `record.sha256`. Emitir origin nulo para origem não provada, writer, ID, estado, confirmação de manifesto/limpeza e pending; não inventar `reverts`, criação manual ou actor para bundled. `test_history_serializes_unknown_publication_without_user_fallback` percorre a CLI real.
+- [x] **GREEN:** repetir os dois arquivos e `uv run pytest -q tests/test_skill_identification.py tests/test_skill_adoption_sync.py tests/test_skill_org_services.py`; preservar resultados A1/A2/B1 e leitura v8–v10 sem migração/sidecars no home original.
+- [x] **Commit:** `feat(skills): integra publicações à autoridade e aos bloqueios comuns`.
 
 ### Task 4: coordenador e recuperação observacional
 
@@ -277,7 +277,46 @@ registros integrais ficam no workspace ignorado `.superpowers/sdd/` deste
 plano. A validação entre devices no host não substitui o aceite na imagem
 real de T7.
 
-Próxima tarefa: T3, projeção de instalação, identificação e bloqueios comuns.
-T3–T7, revisão independente da branch, aceite integrado, CI remoto, merge e
-deploy permanecem pendentes. O schema padrão continua v10 e nenhuma instalação
+Ao concluir T2, a próxima tarefa era T3, projeção de instalação, identificação
+e bloqueios comuns. Nesse checkpoint, T3–T7, revisão independente da branch,
+aceite integrado, CI remoto, merge e deploy permaneciam pendentes; o avanço
+posterior está registrado abaixo. O schema padrão continua v10 e nenhuma instalação
 de produção foi migrada. Não liberar os commits intermediários como B2 pronta.
+
+
+## Execução local — T3, 23/10/2026
+
+A timeline comum reconhece a quarta família e suas confirmações sem reaplicar
+a instalação. Publicação cria uma identidade canônica nova, sem transportar
+a criação manual ou adoção anteriores, mesmo com bytes iguais. Aquisição
+verificada continua com proveniência ausente, `ownership=unknown`, sem
+autorização de remoção. Adoção foreground posterior é explícita e revogável;
+nome e conteúdo não a substituem. Troca de raiz também retira o diagnóstico
+de fonte verificada. Catálogos e assets de sessões anteriores são preservados.
+
+O guard comum bloqueia escritores em PREPARED/CONFLICT e em COMMITTED com
+manifesto ou limpeza pendentes, inclusive repetição de rollback/restore e
+recuperação legada. O histórico JSON informa escritor, origem, confirmações e
+pendência; ID de publicação não é aceito como criação/restauração antiga.
+Recusas de autoridade e de recuperação geram logging estruturado sanitizado.
+
+A execução ampliou pontualmente o mapa de arquivos de T3 para os repositórios
+de adoção e remoção: suas consultas ainda liam a timeline v9/v10 congelada e
+não conseguiam ler novos eventos em v11. O seletor usa somente nomes fixos de
+timeline; nenhuma linha histórica foi reescrita. Custo de rever essa decisão:
+revisar quatro consultas nesses dois repositórios. `InstallationProof` passou
+a carregar `installation_source` opcional para restringir proveniência ausente
+a uma publicação verificada; o formato v11 ainda não foi publicado.
+
+Validação: suíte integral com Codex 0.154.0, **3980 testes e 6436 subtestes
+aprovados**, 51 skips e 1 deselect. Após os ajustes finais de diagnóstico e
+logging, os arquivos afetados e regressões T1/T2 passaram com **112 testes e
+67 subtestes, sem skips**, incluindo cópia real entre devices. A rodada exigida
+para T3 e identificação/adoção/política passou com **62 testes e 50 subtestes**.
+Ruff check, format e diff-check passaram. Os testes exercitam arquivos, SQLite
+e a CLI; os casos de projeção preparam publicações com journal/arquivos reais,
+sem atribuir a T3 o coordenador de T4 ou o aceite na imagem de T7.
+
+Próxima tarefa: T4, coordenação da publicação e recuperação observacional por
+ID. T4–T7, revisão independente da branch e aceite integrado permanecem
+pendentes. Schema padrão v10, sem migração de produção, merge ou deploy.

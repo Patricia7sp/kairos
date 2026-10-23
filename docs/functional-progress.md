@@ -48,8 +48,11 @@ Prioridades de continuidade:
    autorizada em 22/10, após revisão de `02fb85e`, com revisão independente ao
    final. T1 foi commitada em `ff23200`, mantendo v11 explicitamente opt-in;
    T2 foi validada localmente e inclui aquisição exclusiva e teste de colisão
-   na quarentena, preservando a árvore e o recibo anteriores. Não há aceite
-   integral de B2, migração de produção, merge ou deploy deste recorte.
+   na quarentena, preservando a árvore e o recibo anteriores. Em 23/10, T3
+   foi validada localmente: publicações entram na timeline, identificação e
+   bloqueios comuns sem herdar autoria/adoção. A próxima tarefa é T4,
+   coordenador e recuperação por ID. Não há aceite integral de B2, migração
+   de produção, merge ou deploy deste recorte.
 2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de
    política nas fronteiras de efeitos.

@@ -1,10 +1,11 @@
 # B2 — publicação coordenada de skills
 
-Status em 22/10/2026: desenho escrito aprovado explicitamente pela usuária,
+Status de execução em 23/10/2026: desenho escrito aprovado pela usuária em 22/10,
 com referência ao conteúdo de `7fd4a12` no PR #111. O
 [plano de implementação](../plans/2026-10-22-publicacao-skills-b2.md) teve sua
 execução nativa autorizada em 22/10, sobre `02fb85e`. T1 está em `ff23200` e
-T2 foi validada localmente. T3–T7 e o aceite integrado permanecem pendentes.
+T2 está em `1103f0c`; T3 foi validada localmente em 23/10. T4–T7 e o
+aceite integrado permanecem pendentes.
 Base de execução atualizada: `44d890c` (main), com a correção do PR #111
 integrada em `74fba82` e a continuidade documental do PR #113 integrada.
 

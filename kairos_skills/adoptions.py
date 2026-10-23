@@ -113,6 +113,12 @@ class SkillAdoptionService:
                 return self._return_existing(name, before, captured, parent, origin)
             return parent.draft.installation_source
         if same_root and current is not None:
+            if (
+                current.provenance is None
+                and current.installation_source == "verified_acquisition"
+                and origin.identity_valid is True
+            ):
+                return "verified_acquisition"
             if current.provenance not in (Provenance.USER, Provenance.BUNDLED):
                 raise SkillMutationError(
                     "denied", "A proveniência registrada não pode ser adotada."
