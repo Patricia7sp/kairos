@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import copy
 import fcntl
 import io
 import multiprocessing
@@ -75,6 +76,131 @@ def rows(connection):
 
 
 class PublicationBackupTests(PublicationServiceFixture):
+    def cached_acquisition(self, text):
+        from kairos_skills.acquisitions import SkillAcquisitionService
+        from kairos_skills.hub import SkillBundle
+
+        self.receipt = SkillAcquisitionService(self.session).acquire(
+            SkillBundle(
+                self.name,
+                {
+                    "SKILL.md": text,
+                    ".cache/required.dat": b"canonical cache asset",
+                    "__pycache__/required.dat": b"canonical python asset",
+                    ".pytest_cache/required.dat": b"canonical test asset",
+                },
+            )
+        )
+        self.source = self.quarantine / self.receipt.acquisition_id / self.name
+
+    def test_backup_preserves_cache_named_installed_assets_and_local_edits(self):
+        self.start()
+        self.cached_acquisition(b"version one")
+        self.assertTrue(self.publish().complete)
+        local = self.target / ".cache/valuable.bin"
+        local.write_bytes(b"local valuable bytes")
+        local.chmod(0o600)
+        (self.home / ".cache").mkdir()
+        (self.home / ".cache/runtime.tmp").write_bytes(b"unrelated cache")
+        self.live.close()
+        archive = self.root / "backup.tar.gz"
+        archive.write_bytes(b"previous backup")
+        self.assertEqual(self.backup(archive)[0], 0)
+        with tarfile.open(archive) as tar:
+            self.assertIn(f"skills/{self.name}/.cache/required.dat", tar.getnames())
+            self.assertNotIn(".cache/runtime.tmp", tar.getnames())
+        restored = self.restored(archive)
+        for folder, data in (
+            (".cache", b"canonical cache asset"),
+            ("__pycache__", b"canonical python asset"),
+            (".pytest_cache", b"canonical test asset"),
+        ):
+            asset = restored / "skills" / self.name / folder / "required.dat"
+            self.assertEqual(asset.read_bytes(), data)
+            self.assertEqual(asset.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(
+            (restored / "skills" / self.name / ".cache/valuable.bin").read_bytes(),
+            b"local valuable bytes",
+        )
+
+    def test_backup_preserves_cache_named_staging_and_previous_assets(self):
+        self.start()
+        self.cached_acquisition(b"version one")
+        self.assertTrue(self.publish().complete)
+        self.previous = capture(self.target)
+        self.reopen()
+        self.cached_acquisition(b"version two")
+        record = self.stop_after(self.session.files, "retire")
+        self.live.close()
+        archive = self.root / "backup.tar.gz"
+        self.assertEqual(self.backup(archive)[0], 0)
+        restored = self.restored(archive)
+        area = restored / ".skill-publications" / record.operation_id
+        for version, text in (("staged", b"version two"), ("previous", b"version one")):
+            self.assertEqual((area / version / "SKILL.md").read_bytes(), text)
+            self.assertTrue((area / version / ".cache/required.dat").is_file())
+            self.assertEqual(
+                (area / version / "__pycache__/required.dat").read_bytes(),
+                b"canonical python asset",
+            )
+            self.assertEqual(
+                (area / version / ".pytest_cache/required.dat").stat().st_mode & 0o777, 0o600
+            )
+
+    def test_incomplete_or_changed_archive_preserves_previous_output(self):
+        self.start()
+        self.assertTrue(self.publish().complete)
+        self.live.close()
+        original = tarfile.TarFile.addfile
+        for mutation in ("omit", "bytes", "mode"):
+            with self.subTest(mutation=mutation):
+                archive = self.root / (mutation + ".tar.gz")
+                archive.write_bytes(b"previous backup")
+
+                def alter(tar, member, fileobj=None, *, mutation=mutation):
+                    if member.name == f"skills/{self.name}/SKILL.md":
+                        if mutation == "omit":
+                            return None
+                        if mutation == "bytes":
+                            fileobj = io.BytesIO(b"x" * member.size)
+                        if mutation == "mode":
+                            member = copy.copy(member)
+                            member.mode = 0o644
+                    return original(tar, member, fileobj)
+
+                with patch.object(tarfile.TarFile, "addfile", new=alter):
+                    self.assertNotEqual(self.backup(archive)[0], 0)
+                self.assertEqual(archive.read_bytes(), b"previous backup")
+
+    def test_backup_preserves_current_publication_in_prepared_replacement_previous(self):
+        self.start(replacement=True)
+        first = self.publish()
+        self.assertTrue(first.complete)
+        self.previous = capture(self.target)
+        self.reopen()
+        self.cached_acquisition(b"version two")
+        record = self.stop_after(self.session.files, "publish")
+        self.live.close()
+        archive = self.root / "backup.tar.gz"
+        self.assertEqual(self.backup(archive)[0], 0)
+        restored = self.restored(archive)
+        self.assertEqual(
+            (restored / "skills" / self.name / ".cache/required.dat").read_bytes(),
+            b"canonical cache asset",
+        )
+        self.assertEqual(
+            (
+                restored / ".skill-publications" / record.operation_id / "previous/SKILL.md"
+            ).read_bytes(),
+            b"new version",
+        )
+        self.assertEqual(
+            (
+                restored / ".skill-publications" / first.operation_id / "previous/SKILL.md"
+            ).read_bytes(),
+            b"previous version",
+        )
+
     def test_v11_database_created_after_absence_decision_restarts_locked_capture(self):
         from kairos_state import initialize_schema
 

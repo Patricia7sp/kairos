@@ -59,7 +59,7 @@ def restore(archive, destination, *, database_only=False):
 
 
 def run_backup_acceptance(root, quarantine_root):
-    case = create_case(root / "backup-case", quarantine_root, replacement=True)
+    case = create_case(root / "backup-case", quarantine_root, replacement=True, cache_assets=True)
     operation_id = kill_at(case, "after_commit")
     with opened(case) as (session, _service):
         record = session.publications.get(operation_id)
@@ -87,6 +87,13 @@ def run_backup_acceptance(root, quarantine_root):
             previous = destination / ".skill-publications" / operation_id / "previous"
             assert previous.stat().st_mode & 0o777 == 0o700
             assert (previous / "SKILL.md").read_bytes() == b"previous version"
+            assert (
+                previous / "__pycache__/required.bin"
+            ).read_bytes() == b"previous required asset"
+            assert (previous / "__pycache__/required.bin").stat().st_mode & 0o777 == 0o600
+            assert (
+                destination / "skills" / NAME / ".cache/required.bin"
+            ).read_bytes() == b"new required asset"
         transplanted = replace(case, home=destination)
         with opened(transplanted) as (_session, service):
             try:

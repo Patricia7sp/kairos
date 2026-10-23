@@ -55,9 +55,12 @@ Prioridades de continuidade:
    de limpeza independente. T5 foi validada localmente com escritores e
    manifesto pelo coordenador e saída real de `kairos sync now`. T6 foi validada localmente com backup integral e restauração sem renovar
    autoridade. T7 ativou v11 na branch e passou no CI local completo, incluindo
-   102 SIGKILLs na imagem real, clientes antigos e backup/restauração. Falta
-   a revisão independente de toda a branch; CI remoto permanece pendente.
-   O Quality Gate consultivo do Sonar está em erro. Não há aceite integral de B2, migração
+   102 SIGKILLs na imagem real, clientes antigos e backup/restauração. A revisão
+   independente encontrou seis falhas, corrigidas com regressões RED→GREEN.
+   A validação local pós-revisão passou: 4064 testes e 6502 subtestes, imagem32
+   sem skips e Docker offline26/1 skip. Checks remotos e Quality Gate da revisão
+   proposta devem ser conferidos no PR da implementação. A análise local anterior
+   do Sonar teve erro. Não há aceite de integração de B2, migração
    de produção, merge ou deploy deste recorte.
 2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
    a medição e definir uma observação estável. Não retirar revalidações de

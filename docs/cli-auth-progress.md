@@ -131,8 +131,10 @@ expõe IDs/confirmações/pendências e retorna falha em resultado parcial.
 T6 foi validada localmente com backup sob lock e restauração sem renovar
 autoridade. T7 ativou v11 na branch e passou no CI local completo, com
 102 SIGKILLs na imagem, clientes antigos reais e backup/restauração. A
-revisão independente da branch e o CI remoto permanecem pendentes; o
-Quality Gate consultivo do Sonar está em erro. Evidências e limites no
+revisão independente encontrou seis falhas, corrigidas e revalidadas localmente:
+4064 testes e 6502 subtestes passaram; imagem32 e Docker offline26 passaram.
+Os checks remotos devem ser conferidos no PR da implementação; o Quality Gate
+local anterior do Sonar teve erro e não comprova a revisão final. Evidências e limites no
 [relatório B2](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
 
 Restrição de workspace e autorização para automações sem terminal foram

@@ -108,7 +108,9 @@ def _snapshot_database(directory, descriptor, chain, snapshot, *, snapshot_guard
     snapshot.chmod(os.fstat(descriptor).st_mode & 0o777)
 
 
-def _archive_home_contents(home: Path, archive: Path, *, output, snapshot_guard) -> int:
+def _archive_home_contents(
+    home: Path, archive: Path, *, output, snapshot_guard, required_roots=()
+) -> int:
     home, archive = home.absolute(), archive.absolute()
     outputs = {archive} if output is None else {archive, output.absolute()}
     excludes = {"__pycache__", ".cache", ".pytest_cache"}
@@ -138,7 +140,9 @@ def _archive_home_contents(home: Path, archive: Path, *, output, snapshot_guard)
                 if path in outputs:
                     continue
                 relative = path.relative_to(home)
-                if any(part in excludes for part in relative.parts):
+                if any(part in excludes for part in relative.parts) and not any(
+                    relative == root or root in relative.parents for root in required_roots
+                ):
                     continue
                 if relative.as_posix() in {"state.db-wal", "state.db-shm", "state.db-journal"}:
                     continue
@@ -228,7 +232,10 @@ def _publication_area_safe(home):
 def _archive_publications(home, archive, *, output, directory, descriptor, chain):
     from kairos_skills.catalog import catalog_home_id
     from kairos_skills.mutation_lock import skill_mutation_lock
-    from kairos_skills.publication_backup import publication_backup_inventory
+    from kairos_skills.publication_backup import (
+        publication_backup_inventory,
+        validate_publication_archive,
+    )
     from kairos_skills.removal_state import database_connection
     from kairos_state.migrations import canonical_fingerprint
     from kairos_state.repositories.skill_publications import SkillPublicationRepository
@@ -247,7 +254,14 @@ def _archive_publications(home, archive, *, output, directory, descriptor, chain
             if _observed_version(snapshot) != 11 or canonical_fingerprint(snapshot) != fingerprint:
                 raise BackupBoundaryError
 
-        files = _archive_home_contents(home, archive, output=output, snapshot_guard=snapshot_guard)
+        files = _archive_home_contents(
+            home,
+            archive,
+            output=output,
+            snapshot_guard=snapshot_guard,
+            required_roots=tuple(Path(entry.relative_path) for entry in before),
+        )
+        validate_publication_archive(archive, before)
         _check_database(directory, descriptor, chain)
         if publication_backup_inventory(home, repository) != before:
             raise BackupBoundaryError

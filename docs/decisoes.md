@@ -2686,8 +2686,10 @@ recusam a operação antes da exclusão.
 ## D-CLI.SKILL.B2 — publicação coordenada e autoridade observada
 
 **Status: implementada e validada pelo CI local na branch
-`feat/publicacao-skills-b2`, em 23/10/2026; revisão independente e CI remoto
-pendentes. Não integrada à main nem implantada.**
+`feat/publicacao-skills-b2`, em 23/10/2026; revisão independente concluída
+com seis achados corrigidos e validação integrada local pós-revisão aprovada.
+Checks remotos devem ser conferidos no PR da implementação.
+Não integrada à main nem implantada.**
 [Spec](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md),
 [plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) e
 [relatório](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
@@ -2714,7 +2716,10 @@ eventos e inventários, sem renovar identidades, adoções ou bindings; banco
 isolado não é recuperação integral. Reparo recria derivados e não conclui
 pendências. Fonte externa não entra implicitamente no arquivo.
 
-O pacote atual tem SKILL.md acima de64KiB: o preflight sem pendência recusa o
-lote explicitamente. Não ampliar limites nem declarar sync completo desse
-pacote como validado. O CI local passou com102 SIGKILLs na imagem, backup e
-restore reais; o Quality Gate consultivo do Sonar continua em erro.
+O pacote tem fonte acima de 64 KiB: o preflight recusa o nome afetado e
+permite publicar as demais, com resultado parcial explícito e status não zero.
+Não ampliar limites nem declarar sync completo desse pacote como validado.
+A validação local pós-revisão passou com 4064 testes e 6502 subtestes, além
+de imagem32 sem skips e Docker offline26/1 skip. Inclui102 SIGKILLs, backup
+e restore reais. O Quality Gate local anterior do Sonar teve erro; conferir
+os checks e a análise da revisão proposta no PR antes de integrar.

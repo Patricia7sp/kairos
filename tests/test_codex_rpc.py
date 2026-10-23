@@ -116,6 +116,7 @@ async def test_process_exit_fails_subsequent_calls() -> None:
 async def test_unscoped_server_request_is_rejected_instead_of_waiting_forever() -> None:
     process, rpc = await rpc_process()
     try:
+        assert await asyncio.wait_for(rpc.call("fast", {}), timeout=5) == {"value": "fast"}
         result = await asyncio.wait_for(rpc.call("unscoped-request-test", {}), timeout=0.2)
         assert result == {"rejected": True}
     finally:

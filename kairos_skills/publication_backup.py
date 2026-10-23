@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
+import tarfile
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -72,6 +74,45 @@ class RestorationObservation:
         )
         require(type(self.inventory_valid) is bool and type(self.identity_valid) is bool)
         require(type(self.reasons) is tuple and all(type(reason) is str for reason in self.reasons))
+
+
+def validate_publication_archive(archive, entries):
+    """A prova na origem também deve corresponder aos bytes e modos no tar."""
+    with tarfile.open(archive) as tar:
+        members = {}
+        for member in tar.getmembers():
+            members.setdefault(member.name.rstrip("/"), []).append(member)
+        for entry in entries:
+            expected = {
+                entry.relative_path + ("/" + item.path if item.path else ""): item
+                for item in entry.proof.entries
+            }
+            actual = {
+                name
+                for name in members
+                if name == entry.relative_path or name.startswith(entry.relative_path + "/")
+            }
+            _archive_expect(actual == set(expected))
+            for name, item in expected.items():
+                _archive_expect(len(members[name]) == 1)
+                member = members[name][0]
+                _archive_expect(member.mode & 0o7777 == item.mode)
+                if item.kind == "directory":
+                    _archive_expect(member.isdir())
+                else:
+                    _archive_expect(member.isfile() and member.size == item.size)
+                    with tar.extractfile(member) as content:
+                        digest = hashlib.sha256()
+                        while chunk := content.read(65536):
+                            digest.update(chunk)
+                    _archive_expect(digest.hexdigest() == item.sha256)
+
+
+def _archive_expect(condition):
+    if not condition:
+        raise SkillMutationError(
+            "conflict", "Arquivo de backup não conserva o inventário de publicação."
+        )
 
 
 def _capture(path):
@@ -147,24 +188,33 @@ def _pending_layout(record, observed, *, inventory_only=False):
     )
 
 
-def _retired_installation(home, record, common):
-    expected = record.draft.staged_tree.entries[0]
-    candidates = [
-        item
-        for item in common.pending(record.name)
-        if isinstance(item, SkillTreeRecord)
-        and item.action is SkillTreeAction.REMOVE
-        and (
-            item.draft.proof.entries[0].device,
-            item.draft.proof.entries[0].inode,
-            item.draft.proof.entries[0].mount_id,
-        )
-        == (expected.device, expected.inode, expected.mount_id)
-    ]
+def _root_identity(proof):
+    root = proof.entries[0]
+    return root.device, root.inode, root.mount_id
+
+
+def _relocated_installation(home, record, common):
+    expected = _root_identity(record.draft.staged_tree)
+    candidates = []
+    for item in common.pending(record.name):
+        if isinstance(item, SkillTreeRecord) and item.action is SkillTreeAction.REMOVE:
+            proof = item.draft.proof
+            relative = f".skill-mutations/retired/{item.operation_id}"
+        elif (
+            isinstance(item, SkillPublicationRecord)
+            and item.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
+            and item.draft.previous_tree is not None
+        ):
+            proof = item.draft.previous_tree
+            relative = f".skill-publications/{item.operation_id}/previous"
+        else:
+            continue
+        if _root_identity(proof) == expected:
+            candidates.append((relative, proof))
     if len(candidates) != 1:
         _refuse(record)
-    removal = candidates[0]
-    path = home / ".skill-mutations" / "retired" / removal.operation_id
+    relative, expected_proof = candidates[0]
+    path = home / relative
     with publication_errors(), ExitStack() as stack:
         for directory in (path.parent.parent, path.parent):
             fd, chain = open_directory(stack, directory)
@@ -172,9 +222,9 @@ def _retired_installation(home, record, common):
                 _refuse(record)
             check_chain(chain)
     proof = _capture(path)
-    if proof != removal.draft.proof:
+    if proof != expected_proof:
         _refuse(record)
-    return PublicationBackupEntry(str(path.relative_to(home)), proof)
+    return PublicationBackupEntry(relative, proof)
 
 
 def _record_inventory(home, record, current, common):
@@ -192,8 +242,10 @@ def _record_inventory(home, record, current, common):
             _refuse(record)
         if current is not None and current.operation_id == record.operation_id:
             installed = _capture(paths["installed"])
-            if installed is None:
-                relocated = _retired_installation(home, record, common)
+            if installed is None or _root_identity(installed) != _root_identity(
+                record.draft.staged_tree
+            ):
+                relocated = _relocated_installation(home, record, common)
                 return (
                     relocated,
                     *(

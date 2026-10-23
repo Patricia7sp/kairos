@@ -95,7 +95,7 @@ def opened(case):
         yield session, SkillPublicationService(session)
 
 
-def create_case(root, quarantine_root, *, replacement):
+def create_case(root, quarantine_root, *, replacement, cache_assets=False):
     root.mkdir(mode=0o700)
     home = root / "home"
     home.mkdir(mode=0o700)
@@ -108,12 +108,17 @@ def create_case(root, quarantine_root, *, replacement):
         target = home / "skills" / NAME
         target.mkdir(parents=True, mode=0o700)
         (target / "SKILL.md").write_bytes(b"previous version")
+        if cache_assets:
+            (target / "__pycache__").mkdir(mode=0o700)
+            (target / "__pycache__/required.bin").write_bytes(b"previous required asset")
+            (target / "__pycache__/required.bin").chmod(0o600)
         previous = capture(target)
     case = Case(home, quarantine, policy, uuid.uuid4().hex, "", previous)
+    assets = {"SKILL.md": b"new version", "asset.txt": b"asset"}
+    if cache_assets:
+        assets[".cache/required.bin"] = b"new required asset"
     with opened(case) as (session, _service):
-        receipt = SkillAcquisitionService(session).acquire(
-            SkillBundle(NAME, {"SKILL.md": b"new version", "asset.txt": b"asset"})
-        )
+        receipt = SkillAcquisitionService(session).acquire(SkillBundle(NAME, assets))
     return replace(case, acquisition_id=receipt.acquisition_id)
 
 

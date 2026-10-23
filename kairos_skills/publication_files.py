@@ -34,10 +34,10 @@ def _expect(condition, message="Prova de publicação inválida.", *, kind="inpu
         raise SkillMutationError(kind, message)
 
 
-def capture_source(path):
+def capture_source(path, *, source_input=False):
     with publication_errors(), ExitStack() as stack:
         parent, chain = open_directory(stack, path.parent)
-        result = capture_skill(parent, path.name)
+        result = capture_skill(parent, path.name, observed=not source_input)
         check_chain(chain)
         return result
 

@@ -126,18 +126,30 @@ class RemovalSyncTests(unittest.TestCase):
             policy_receipt=personal_receipt(fixture_draft, self.repo),
         )
         (self.source / "SKILL.md").write_bytes(b"new bundle")
-        before = (self.home / "skills" / MANIFEST_NAME).read_bytes()
-        with self.assertRaises(SkillMutationError) as raised:
-            sync_bundled_skills(
-                self.bundle,
-                self.home / "skills",
-                policy=personal_policy(self, ((self.home / "skills").parent)),
-            )
-        self.assertEqual(raised.exception.kind, "conflict")
+        before = read_manifest(self.home / "skills" / MANIFEST_NAME)
+        pending = self.repo.pending(self.name)
+        unrelated = self.bundle / "unrelated"
+        unrelated.mkdir()
+        (unrelated / "SKILL.md").write_bytes(b"independent bundle")
+        result = sync_bundled_skills(
+            self.bundle,
+            self.home / "skills",
+            policy=personal_policy(self, self.home),
+        )
+        self.assertTrue(result.failed)
+        self.assertEqual(result.error_kinds, ["conflict"])
+        self.assertEqual(result.pending, [fixture_draft.operation_id])
+        self.assertEqual(result.copied, ["unrelated"])
         self.assertFalse((self.home / "skills" / self.name).exists())
-        self.assertEqual((self.home / "skills" / MANIFEST_NAME).read_bytes(), before)
+        after = read_manifest(self.home / "skills" / MANIFEST_NAME)
+        self.assertEqual(after[self.name], before[self.name])
+        self.assertEqual(set(after), set(before) | {"unrelated"})
+        self.assertEqual(
+            (self.home / "skills/unrelated/SKILL.md").read_bytes(), b"independent bundle"
+        )
+        self.assertEqual(self.repo.pending(self.name), pending)
 
-    def test_common_pending_blocks_sync_even_with_empty_bundle(self):
+    def test_common_pending_is_reported_even_with_empty_bundle(self):
         repo = self.repository()
         draft = creation_draft(self.home, name="revisar-docs")
         repo.prepare(draft, creation_text(), policy_receipt=personal_receipt(draft, repo))
@@ -146,13 +158,16 @@ class RemovalSyncTests(unittest.TestCase):
             if state is SkillMutationState.CONFLICT:
                 repo.finish(draft.operation_id, state)
             with self.subTest(state=state):
-                with self.assertRaises(SkillMutationError) as raised:
-                    sync_bundled_skills(
-                        self.bundle,
-                        self.home / "skills",
-                        policy=personal_policy(self, ((self.home / "skills").parent)),
-                    )
-                self.assertEqual(raised.exception.operation_id, draft.operation_id)
+                result = sync_bundled_skills(
+                    self.bundle,
+                    self.home / "skills",
+                    policy=personal_policy(self, self.home),
+                )
+                self.assertTrue(result.failed)
+                self.assertEqual(result.error_kinds, ["conflict"])
+                self.assertEqual(result.pending, [draft.operation_id])
+                self.assertEqual(result.copied, [])
+                self.assertEqual(repo.get(draft.operation_id).state, state)
                 self.assertFalse((self.home / "skills" / self.name).exists())
 
     def test_corrupt_or_incompatible_ledger_refuses_seeding(self):

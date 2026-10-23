@@ -11,6 +11,69 @@ from kairos_skills.sync import MANIFEST_NAME, read_manifest, write_manifest
 
 
 class PublicationManifestTests(PublicationWriterFixture):
+    def test_catalog_cleanup_uses_committed_bundle_after_aborted_update(self):
+        from test_skill_publication_service import Interrupted
+
+        from kairos_skills.mutation_contract import SkillMutationState
+        from kairos_skills.publication_files import PublicationFiles
+        from kairos_skills.publications import SkillPublicationService
+
+        source = self.skill()
+        first = self.sync().publications[0].operation_id
+        target = self.home / "skills" / source.name
+        installed = capture(target)
+        (source / "SKILL.md").write_bytes(b"aborted update")
+        with (
+            patch.object(PublicationFiles, "retire", side_effect=Interrupted),
+            self.assertRaises(Interrupted),
+        ):
+            self.sync()
+        with (
+            self.context() as context,
+            publication_session(self.home, policy=self.policy, context=context) as session,
+        ):
+            aborted = session.publications.history(name=source.name)[-1].operation_id
+            self.assertIs(
+                SkillPublicationService(session).recover(aborted).state, SkillMutationState.ABORTED
+            )
+        source.rename(self.root / "removed-package")
+        result = self.sync()
+        self.assertFalse(result.failed)
+        self.assertEqual(result.cleaned, [source.name])
+        self.assertEqual(result.publications[0].operation_id, first)
+        self.assertEqual(capture(target), installed)
+        self.assertNotIn(source.name, read_manifest(self.home / "skills" / MANIFEST_NAME))
+        self.assertFalse(self.sync().failed)
+
+    def test_catalog_cleanup_keeps_bundle_id_after_quarantine_replacement(self):
+        from kairos_state.repositories.skill_publications import SkillPublicationRepository
+
+        source, target = self.quarantine_replacement_of_bundle()
+        installed = capture(target)
+        with (
+            self.context() as context,
+            publication_session(self.home, policy=self.policy, context=context) as session,
+        ):
+            bundled, promoted = session.publications.history(name=source.name)
+        source.rename(self.root / "removed-package")
+        with patch.object(
+            SkillPublicationRepository,
+            "confirm_manifest",
+            side_effect=OSError("before confirmation"),
+        ):
+            incomplete = self.sync()
+        self.assertEqual(incomplete.pending, [bundled.operation_id])
+        result = self.sync()
+        self.assertFalse(result.failed)
+        self.assertEqual(result.publications[0].operation_id, bundled.operation_id)
+        self.assertEqual(capture(target), installed)
+        with (
+            self.context() as context,
+            publication_session(self.home, policy=self.policy, context=context) as session,
+        ):
+            self.assertEqual(session.publications.get(promoted.operation_id), promoted)
+        self.assertFalse(self.sync().failed)
+
     def test_catalog_cleanup_resumes_same_id_after_installed_tree_removed(self):
         from kairos_state.repositories.skill_publications import SkillPublicationRepository
 
@@ -69,19 +132,21 @@ class PublicationManifestTests(PublicationWriterFixture):
         self.assertEqual(result.publications[0].operation_id, first.pending[0])
         self.assertTrue(result.publications[0].complete)
 
-    def test_manifest_conflict_preserves_other_items(self):
+    def test_manifest_conflict_preserves_pending_name_and_cleans_retired_entry(self):
         self.skill()
         with patch.object(sync, "reconcile_manifest", side_effect=OSError("stop")):
             first = self.sync()
         path = self.home / "skills" / MANIFEST_NAME
         values = {"personal-skill": "a" * 32, "unrelated": "b" * 32}
         write_manifest(path, values)
-        before = path.read_bytes()
+        target = self.home / "skills/personal-skill"
+        installed = capture(target)
         result = self.sync()
         self.assertTrue(result.failed)
         self.assertEqual(result.pending, first.pending)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(read_manifest(path), values)
+        self.assertEqual(result.cleaned, ["unrelated"])
+        self.assertEqual(read_manifest(path), {"personal-skill": values["personal-skill"]})
+        self.assertEqual(capture(target), installed)
 
     def test_manifest_written_without_confirmation_recognizes_after(self):
         from kairos_state.repositories.skill_publications import SkillPublicationRepository

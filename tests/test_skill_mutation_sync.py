@@ -26,9 +26,9 @@ def sync_process(bundle, home, pipe, *, policy):
 
     original = sync._sync_discovered
 
-    def mutate(session, result):
+    def mutate(*args, **kwargs):
         pipe.send("mutation_started")
-        return original(session, result)
+        return original(*args, **kwargs)
 
     with (
         patch("kairos_skills.publication_sources.trusted_bundle_root", return_value=bundle),

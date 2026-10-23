@@ -10,7 +10,7 @@
 
 **Spec:** [desenho B2 aprovado em 22/10/2026](../specs/2026-10-21-publicacao-skills-b2-design.md), conteúdo de `7fd4a126a0ac09a897a4a9cccd171a14d8e059cc`.
 
-**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3–T6 foram validadas localmente em 23/10 na branch `feat/publicacao-skills-b2`. T7 foi validada pelo CI local completo; a revisão independente da branch permanece pendente. O schema padrão agora é v11 somente na branch; execução não autoriza merge/deploy de B2.
+**Estado:** execução nativa autorizada pela usuária em 22/10/2026, após revisão de `02fb85e`. Base de execução: `main` em `44d890ca632b40b78a21b62c5e05622200a5b23c`. A correção do PR #111 foi integrada em `74fba82`; o PR #113 integrou a continuidade documental. Não reaplicar essas entregas. T1 está em `ff23200`; T2 está em `1103f0c`; T3–T6 foram validadas localmente em 23/10 na branch `feat/publicacao-skills-b2`. T7 foi validada pelo CI local completo; a revisão independente foi concluída e seus seis achados foram corrigidos, com validação integrada local pós-revisão aprovada. O schema padrão agora é v11 somente na branch; execução não autoriza merge/deploy de B2.
 
 **Execução:** nativa, sequencial, pelo Root, com revisão independente ao final. As sete tarefas compartilham contratos, timeline e guards; não se justifica distribuir implementações concorrentes. A skill de orquestração governa qualquer exceção posterior.
 
@@ -467,7 +467,13 @@ Frontends17/204/18 e tsc verdes; lint, lock, recall e quatro builds verdes.
 Sonar scanner exit0 e processamento SUCCESS, mas Quality Gate ERROR por
 confiabilidade; análise local não comprova o commit final remoto.
 
-Revisão independente final da branch ainda pendente. CI remoto é gate antes
-de merge; nenhum merge, deploy ou migração de produção foi executado.
+Revisão independente final concluída: seis achados corrigidos com regressões
+RED→GREEN. Validação local pós-revisão:4064 testes/6502 subtestes, imagem32/26
+subtestes sem skips e Docker offline26/1 skip. Um timeout de startup no teste
+RPC foi reproduzido de forma controlada e corrigido por confirmação real de
+prontidão, mantendo os200ms da rejeição. O módulo passou sob cobertura;
+a suíte final completa passou no modo normal, sem cobertura. Não atribuir
+a aprovação instrumentada histórica ao código corrigido. CI remoto é gate
+antes de merge; nenhum merge, deploy ou migração de produção foi executado.
 Detalhes, digests, decisões e limites no
 [relatório](../reports/2026-10-22-publicacao-skills-b2.md).

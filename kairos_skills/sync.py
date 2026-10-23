@@ -80,6 +80,7 @@ class SyncResult:
     publications: list[PublicationResult] = field(default_factory=list)
     pending: list[str] = field(default_factory=list)
     error_kinds: list[str] = field(default_factory=list)
+    errors: list[dict[str, str | None]] = field(default_factory=list)
 
 
 def origin_hash(skill_dir: Path) -> str:
@@ -194,6 +195,10 @@ def prepare_sync_publication(session, name, *, previous, current, delta, source_
     if current is not None:
         published = session.publications.get(current.operation_id)
         if published is not None:
+            require(
+                published.draft.writer is PublicationWriter.BUNDLED_SYNC,
+                "Instalação não é bundled elegível.",
+            )
             require(published.draft.staged_tree == previous, "Instalação canônica alterada.")
         else:
             require(
@@ -223,29 +228,70 @@ def _accumulate(result, publication):
 
 def _recover_pending(session, result):
     common = SkillMutationRepository(session.connection, home_id=session.context.home_id)
-    publication_ids = {p.operation_id for p in session.publications.history()}
+    records = []
     for operation_id in dict.fromkeys(row[3] for row in common._timeline()):
         record = common.get(operation_id)
-        if not getattr(
-            record,
-            "pending",
-            record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT),
-        ):
-            continue
-        if record.operation_id not in publication_ids:
-            raise SkillMutationError(
-                "conflict",
-                "Operação de outra família bloqueia o sync.",
-                operation_id=record.operation_id,
+        if record is None:
+            _LOGGER.warning(
+                "skill_sync_incomplete",
+                extra={
+                    "action": "sync",
+                    "phase": "history",
+                    "kind": "corrupt",
+                    "operation_id": operation_id,
+                    "reason": "foreign_history",
+                },
             )
-        if record.draft.writer is not PublicationWriter.BUNDLED_SYNC:
-            result.pending.append(record.operation_id)
-            result.failed = True
+            raise SkillMutationError(
+                "corrupt",
+                "Histórico não corresponde ao home observado.",
+                operation_id=operation_id,
+            )
+        records.append(record)
+    publication_ids = {p.operation_id for p in session.publications.history()}
+    blocked = set()
+    for record in records:
+        pending = getattr(record, "pending", None)
+        if pending is None:
+            pending = record.state in (SkillMutationState.PREPARED, SkillMutationState.CONFLICT)
+        if not pending:
+            continue
+        if (
+            record.operation_id not in publication_ids
+            or record.draft.writer is not PublicationWriter.BUNDLED_SYNC
+        ):
+            if record.operation_id not in result.pending:
+                result.pending.append(record.operation_id)
+            blocked.add(record.name)
+            _sync_failure(
+                session,
+                record.name,
+                result,
+                SkillMutationError(
+                    "conflict",
+                    "Operação exige recuperação pelo escritor de origem.",
+                    operation_id=record.operation_id,
+                ),
+                phase="recovery",
+            )
             continue
         _manifest, session._manifest_observation = observe_manifest(session.home)
         publication = SkillPublicationService(session).recover(record.operation_id)
         _accumulate(result, publication)
-    return not result.failed
+        if not publication.complete:
+            blocked.add(record.name)
+            _sync_failure(
+                session,
+                record.name,
+                result,
+                SkillMutationError(
+                    publication.error_kind or "conflict",
+                    "Recuperação incompleta.",
+                    operation_id=record.operation_id,
+                ),
+                phase="recovery",
+            )
+    return blocked
 
 
 def retire_manifest_entry(name, *, session):
@@ -263,7 +309,17 @@ def retire_manifest_entry(name, *, session):
         return None
     delta = ManifestDelta(name, manifest[name], None)
     records = session.publications.history(name=name)
-    record = records[-1] if records else None
+    record = next(
+        (
+            item
+            for item in reversed(records)
+            if item.state is SkillMutationState.COMMITTED
+            and item.draft.writer is PublicationWriter.BUNDLED_SYNC
+            and item.projection_delta is not None
+            and item.projection_delta.after == delta.before
+        ),
+        None,
+    )
     if record is None:
 
         def legacy_guard():
@@ -307,8 +363,12 @@ def _sync_item(session, name, result):
     dest = session.home / "skills" / name
     before = manifest.get(name)
     exists = dest.exists() or dest.is_symlink()
+    current = common.current_installation(name) if exists else None
+    published = None if current is None else session.publications.get(current.operation_id)
     publication = None
-    if name not in manifest and exists:
+    if (published is not None and published.draft.writer is not PublicationWriter.BUNDLED_SYNC) or (
+        name not in manifest and exists
+    ):
         result.user_modified.append(name)
     elif name in manifest and not exists:
         result.user_deleted.append(name)
@@ -332,6 +392,9 @@ def _sync_failure(session, name, result, error, *, phase):
     if kind not in result.error_kinds:
         result.error_kinds.append(kind)
     result.failed = True
+    detail = {"name": name, "kind": kind, "operation_id": getattr(error, "operation_id", None)}
+    if detail not in result.errors:
+        result.errors.append(detail)
     if kind == "denied":
         result.blocked.append(name)
     for record in session.publications.pending(name):
@@ -350,15 +413,17 @@ def _sync_failure(session, name, result, error, *, phase):
     )
 
 
-def _sync_discovered(session, result):
-    for name in sorted(session.context._bundled):
+def _sync_discovered(session, result, blocked):
+    for name in sorted(session._bundled_preflight_proofs):
         try:
             _sync_item(session, name, result)
         except (SkillMutationError, OSError) as error:
             _sync_failure(session, name, result, error, phase="item")
     manifest, session._manifest_observation = observe_manifest(session.home)
     for name in sorted(
-        (set(manifest) & session._manifest_cleanup_candidates) - set(session.context._bundled)
+        (set(manifest) & session._manifest_cleanup_candidates)
+        - set(session.context._bundled)
+        - blocked
     ):
         try:
             record = retire_manifest_entry(name, session=session)
@@ -399,11 +464,16 @@ def sync_bundled_skills(bundled_dir: Path, user_dir: Path, *, policy, context=No
         manifest, session._manifest_observation = observe_manifest(session.home)
         session._manifest_cleanup_candidates = set(manifest)
         result.total_bundled = len(context._bundled)
-        if not _recover_pending(session, result):
-            return result
-        session._bundled_preflight_proofs = {
-            name: replace(capture_source(path), contents=None)
-            for name, path in sorted(context._bundled.items())
-        }
+        blocked = _recover_pending(session, result)
+        session._bundled_preflight_proofs = {}
+        for name, path in sorted(context._bundled.items()):
+            if name in blocked:
+                continue
+            try:
+                session._bundled_preflight_proofs[name] = replace(
+                    capture_source(path, source_input=True), contents=None
+                )
+            except (SkillMutationError, OSError) as error:
+                _sync_failure(session, name, result, error, phase="preflight")
         context.revalidate()
-        return _sync_discovered(session, result)
+        return _sync_discovered(session, result, blocked)

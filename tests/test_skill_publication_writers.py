@@ -13,6 +13,7 @@ from kairos_skills.mutation_contract import SkillMutationError
 from kairos_skills.mutations import SkillMutationService
 from kairos_skills.org_policy import observe_org_policy
 from kairos_skills.org_policy_contract import OrgPolicyContext
+from kairos_skills.publication_session import publication_session
 from kairos_skills.publication_sources import observe_bundled_source
 from kairos_skills.removal_state import database_connection
 from kairos_skills.sync import MANIFEST_NAME, NO_BUNDLED_SKILLS_MARKER, sync_bundled_skills
@@ -54,8 +55,81 @@ class PublicationWriterFixture(unittest.TestCase):
                 self.bundle, self.home / "skills", policy=self.policy, context=context
             )
 
+    def quarantine_replacement_of_bundle(self):
+        from skill_publication_writer_fixtures import acquired_source
+        from test_skill_publication_files import capture
+
+        source = self.skill()
+        self.assertFalse(self.sync().failed)
+        target = self.home / "skills" / source.name
+        quarantine = self.root / "quarantine"
+        acquired, context, acquisition_id = acquired_source(
+            self,
+            self.home,
+            quarantine,
+            SkillBundle(source.name, {"SKILL.md": b"package version"}),
+            policy=self.policy,
+            replacement=capture(target),
+        )
+        install_from_quarantine(
+            acquired,
+            quarantine,
+            self.home / "skills",
+            policy=self.policy,
+            context=context,
+            acquisition_id=acquisition_id,
+        )
+        return source, target
+
 
 class PublicationWriterTests(PublicationWriterFixture):
+    def test_bundle_update_preserves_identical_quarantine_replacement(self):
+        from test_skill_publication_files import capture
+
+        from kairos_skills.identification import identify_skill
+
+        source, target = self.quarantine_replacement_of_bundle()
+        before = capture(target)
+        self.assertEqual(
+            identify_skill(self.home, source.name, policy=self.policy).installation_source,
+            "verified_acquisition",
+        )
+        (source / "SKILL.md").write_bytes(b"future bundled update")
+        result = self.sync()
+        self.assertEqual(result.updated, [])
+        self.assertEqual(result.user_modified, [source.name])
+        self.assertFalse(result.failed)
+        self.assertEqual(capture(target), before)
+        observed = identify_skill(self.home, source.name, policy=self.policy)
+        self.assertEqual(observed.installation_source, "verified_acquisition")
+        self.assertFalse(observed.removivel)
+
+    def test_direct_bundled_publication_refuses_quarantine_origin(self):
+        from test_skill_publication_files import capture
+
+        from kairos_skills.publication_contract import ManifestDelta
+        from kairos_skills.publications import SkillPublicationService
+        from kairos_skills.sync import origin_hash, read_manifest
+
+        source, target = self.quarantine_replacement_of_bundle()
+        before = capture(target)
+        (source / "SKILL.md").write_bytes(b"future bundled update")
+        with (
+            self.context() as context,
+            publication_session(self.home, policy=self.policy, context=context) as session,
+        ):
+            history = session.publications.history(name=source.name)
+            delta = ManifestDelta(
+                source.name,
+                read_manifest(self.home / "skills" / MANIFEST_NAME)[source.name],
+                origin_hash(source),
+            )
+            with self.assertRaises(SkillMutationError) as caught:
+                SkillPublicationService(session).publish(source.name, manifest_delta=delta)
+            self.assertEqual(caught.exception.kind, "input")
+            self.assertEqual(session.publications.history(name=source.name), history)
+        self.assertEqual(capture(target), before)
+
     def test_legacy_hash_eligibility_matches_attested_path_order(self):
         import shutil
 

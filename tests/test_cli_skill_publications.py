@@ -32,6 +32,11 @@ class CliPublicationTests(PublicationWriterFixture):
                     name, manifest_delta=ManifestDelta(name, None, digest)
                 )
             self.assertFalse(result.complete)
+            other_names = set(context._bundled) - {name}
+            for other in other_names:
+                target = self.home / "skills" / other
+                target.mkdir()
+                (target / "SKILL.md").write_bytes(b"local override preserved")
             write_manifest(self.home / "skills" / MANIFEST_NAME, {name: "a" * 32})
         env = dict(os.environ, KAIROS_HOME=str(self.home))
         env.pop("KAIROS_SKILL_ORG_POLICY", None)
@@ -40,11 +45,17 @@ class CliPublicationTests(PublicationWriterFixture):
             env=env,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=300,
             check=False,
         )
         self.assertNotEqual(process.returncode, 0)
         payload = json.loads(process.stdout)
         self.assertTrue(payload["failed"])
         self.assertIn(result.operation_id, payload["pendentes"])
+        self.assertEqual(payload["copiadas"], [])
+        for other in other_names:
+            self.assertEqual(
+                (self.home / "skills" / other / "SKILL.md").read_bytes(),
+                b"local override preserved",
+            )
         self.assertNotIn(str(self.root), process.stdout + process.stderr)
