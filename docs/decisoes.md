@@ -2516,9 +2516,9 @@ gates.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
-**Status em 22/10/2026: B1 integrada em `f9f9a6d` (PR #108), com CI da main
-e job de deploy aprovados; desenho B2 aprovado, plano para revisão e sem
-implementação B2.** Spec B1 aprovada em 2026-10-14 e plano revisado pelo
+**Status em 24/10/2026: B1 integrada em `f9f9a6d` (PR #108); B2 integrada
+e implantada em `da7c58c` (PR #114). A main atual `b7346ad` (PR #115)
+tem CI, deploy e Quality Gate aprovados.** Spec B1 aprovada em 2026-10-14 e plano revisado pelo
 usuário: `docs/superpowers/specs/2026-10-14-politica-organizacional-b1-design.md`
 e `docs/superpowers/plans/2026-10-14-politica-organizacional-b1.md`.
 Evidências e limites: [relatório B1](superpowers/reports/2026-10-14-politica-organizacional-b1.md).
@@ -2608,6 +2608,12 @@ nas fronteiras. B1 não torna um lote de sync atômico nem instala política em 
 
 ## D-CLI.SKILL.PROMOTE — promoção sem substituição destrutiva
 
+Atualização em 24/10/2026: a restrição histórica abaixo foi sucedida por
+[D-CLI.SKILL.B2](#d-cliskillb2--publicação-coordenada-e-autoridade-observada).
+B2 já está integrada e implantada: substituição exige contexto, recibo e
+intenção foreground sobre a árvore exata, com journal e recuperação. A
+correção #111 permanece registrada como etapa anterior, sem `force`.
+
 **Status: integrada à main em 22/10/2026 pelo
 [PR #111](https://github.com/Patricia7sp/kairos/pull/111), `74fba82`, com
 [CI e deploy verdes](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
@@ -2685,11 +2691,10 @@ recusam a operação antes da exclusão.
 
 ## D-CLI.SKILL.B2 — publicação coordenada e autoridade observada
 
-**Status: implementada e validada pelo CI local na branch
-`feat/publicacao-skills-b2`, em 23/10/2026; revisão independente concluída
-com seis achados corrigidos e validação integrada local pós-revisão aprovada.
-Checks remotos devem ser conferidos no PR da implementação.
-Não integrada à main nem implantada.**
+**Status em 24/10/2026: integrada e implantada pelo PR #114 (`da7c58c`),
+com revisão independente e CI aprovados. O follow-up #115 (`b7346ad`)
+entregou backup síncrono; CI, deploy e Quality Gate da main aprovados.**
+Evidências e limites: [fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md).
 [Spec](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md),
 [plano](superpowers/plans/2026-10-22-publicacao-skills-b2.md) e
 [relatório](superpowers/reports/2026-10-22-publicacao-skills-b2.md).
@@ -2721,5 +2726,6 @@ permite publicar as demais, com resultado parcial explícito e status não zero.
 Não ampliar limites nem declarar sync completo desse pacote como validado.
 A validação local pós-revisão passou com 4064 testes e 6502 subtestes, além
 de imagem32 sem skips e Docker offline26/1 skip. Inclui102 SIGKILLs, backup
-e restore reais. O Quality Gate local anterior do Sonar teve erro; conferir
-os checks e a análise da revisão proposta no PR antes de integrar.
+e restore reais. O Quality Gate local anterior do Sonar teve erro; isso permanece evidência
+histórica. O follow-up #115 resolveu S7493 e a análise da main `b7346ad`
+aprovou o gate, com confiabilidade nova A.

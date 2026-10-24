@@ -1,11 +1,10 @@
 # Progresso funcional do Kairos
 
-Atualizado em 22/10/2026. Base integrada conferida: `main` em `74fba82`
-([PR #111](https://github.com/Patricia7sp/kairos/pull/111), de 22/10). Os
-checkpoints abaixo preservam suas datas e evidências; pendências históricas não
-substituem o estado consolidado desta seção.
+Atualizado em 24/10/2026. Base integrada e implantada conferida: `main` em
+`b7346adeee312368746fddb3ca7cfe3058c49b99`. Os checkpoints históricos abaixo
+preservam suas datas e evidências; o estado atual está consolidado nesta seção.
 
-## Continuidade em 22/10/2026
+## Continuidade em 24/10/2026
 
 | Entrega | Integração confirmada |
 |---|---|
@@ -21,55 +20,37 @@ substituem o estado consolidado desta seção.
 | Sonar consultivo com cobertura de subprocessos | PR #106, `96fb3c9` |
 | B1: continuidade de proteção organizacional | PR #108, `f9f9a6d` |
 | Promoção preserva instalação e quarentena; migração explícita v10 documentada | PR #111, `74fba82`; fecha #110 |
+| B2: publicação coordenada, recuperação, manifesto e backup v11 | PR #114, `da7c58c` |
+| Backup com API síncrona e correção S7493 | PR #115, `b7346ad` |
 
-O [CI da main de B1](https://github.com/Patricia7sp/kairos/actions/runs/39378947460)
-concluiu os 11 jobs, incluindo deploy no Komodo e envio da análise Sonar.
-Isso não constitui um novo smoke de produção nem atesta o Quality Gate da main.
-O PR #108 registra Quality Gate aprovado para o head `703189d`.
+A B2 foi integrada e implantada pelo [PR #114](https://github.com/Patricia7sp/kairos/pull/114).
+Sync e promoção usam o coordenador com lock, journal e recuperação por ID;
+confirmações de manifesto e limpeza são independentes. O schema v11 está em
+produção. Histórico, inventários e restore não concedem autoria ou autoridade.
+A implantação preservou os arquivos protegidos e o histórico, com backup e
+ensaio de restauração/migração verificados.
 
-O [CI da correção](https://github.com/Patricia7sp/kairos/actions/runs/39775355139)
-concluiu onze jobs verdes, incluindo o deploy no Komodo; com o check externo do
-SonarCloud são doze checks verdes. O checkout da stack aponta para `74fba82`,
-o container está healthy e o smoke direto pós-deploy respondeu `ok`.
+O [PR #115](https://github.com/Patricia7sp/kairos/pull/115) tornou o backup
+síncrono e resolveu S7493. O [CI da main 308](https://github.com/Patricia7sp/kairos/actions/runs/40046906636)
+concluiu onze jobs aprovados, incluindo deploy: 4.061 testes e 6.502 subtestes
+unitários; 32 testes e 26 subtestes na imagem. A análise Sonar do merge
+confirmou Quality Gate OK e confiabilidade nova A. Aplicação e broker healthy,
+fontes instaladas conferidas, backup sintético pelo CLI e smoke aprovados;
+banco íntegro no schema 11. Evidências e limites no
+[fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md).
 
-A correção de promoção e a documentação da migração v10 estão integradas pelo
-[PR #111](https://github.com/Patricia7sp/kairos/pull/111). Destino ocupado recusa
-preservando ambas as árvores; ver
-[relatório](superpowers/reports/2026-10-21-promocao-segura.md). A publicação
-inicial após rename ainda depende da recuperação prevista em B2.
+Próximo recorte: [custo do ledger, #109](https://github.com/Patricia7sp/kairos/issues/109).
+A continuidade solicitada em 24/10 começa pela reprodução da medição em
+revisões v9/v10/v11, com criações reais e perfil separado dos tempos.
+A [baseline foi concluída](superpowers/reports/2026-10-24-skill-writer-benchmark.md),
+com dados brutos e comando reproduzível; a #109 permanece aberta.
+A otimização ainda depende dessa evidência e de definir a observação estável,
+com invalidação e guards de política preservados nas fronteiras de efeitos.
 
-Prioridades de continuidade:
-
-1. Executar o [plano B2](superpowers/plans/2026-10-22-publicacao-skills-b2.md)
-   no [PR #112](https://github.com/Patricia7sp/kairos/pull/112), alinhado à base
-   integrada `44d890c`. O
-   [desenho](superpowers/specs/2026-10-21-publicacao-skills-b2-design.md) foi
-   aprovado pela usuária; a execução nativa e sequencial das sete tarefas foi
-   autorizada em 22/10, após revisão de `02fb85e`, com revisão independente ao
-   final. T1 foi commitada em `ff23200`, mantendo v11 explicitamente opt-in;
-   T2 foi validada localmente e inclui aquisição exclusiva e teste de colisão
-   na quarentena, preservando a árvore e o recibo anteriores. Em 23/10, T3
-   foi validada localmente: publicações entram na timeline, identificação e
-   bloqueios comuns sem herdar autoria/adoção. T4 acrescenta coordenador e
-   recuperação observacional por ID, com versões preservadas e confirmação
-   de limpeza independente. T5 foi validada localmente com escritores e
-   manifesto pelo coordenador e saída real de `kairos sync now`. T6 foi validada localmente com backup integral e restauração sem renovar
-   autoridade. T7 ativou v11 na branch e passou no CI local completo, incluindo
-   102 SIGKILLs na imagem real, clientes antigos e backup/restauração. A revisão
-   independente encontrou seis falhas, corrigidas com regressões RED→GREEN.
-   A validação local pós-revisão passou: 4064 testes e 6502 subtestes, imagem32
-   sem skips e Docker offline26/1 skip. Checks remotos e Quality Gate da revisão
-   proposta devem ser conferidos no PR da implementação. A análise local anterior
-   do Sonar teve erro. Não há aceite de integração de B2, migração
-   de produção, merge ou deploy deste recorte.
-2. Tratar o custo do ledger (#109) em recorte próprio, começando por reproduzir
-   a medição e definir uma observação estável. Não retirar revalidações de
-   política nas fronteiras de efeitos.
-
-Índice automático por padrão, `/learn`, curadoria integrada e workflows
-duráveis continuam pendentes; sua ordem posterior depende de recortes próprios.
-Ollama operacional permanece adiado. Instalar política em produção e isolamento
-contra adulteração pelo mesmo UID não foram entregues por B1.
+Índice automático por padrão, `/learn`, curadoria integrada e workflows duráveis
+continuam pendentes, sem ordem posterior fechada. Ollama permanece adiado.
+Instalar política em produção e isolar adulteração pelo mesmo UID não fazem
+parte destas entregas.
 
 ## Mandato e critérios
 
