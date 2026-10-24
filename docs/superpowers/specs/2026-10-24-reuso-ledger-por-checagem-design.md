@@ -4,8 +4,9 @@ Proposta escrita em 24/10/2026 para a [issue #109](https://github.com/Patricia7s
 A usuária escolheu reuso limitado por checagem ou transação, mantendo todas as
 varreduras e as 20 validações da timeline do benchmark. **Desenho escrito
 aprovado pela usuária em 24/10/2026, conteúdo `abeee0d1f3fccc38e2271b9a4abd47851fe34da2`.
-O [plano](../plans/2026-10-24-reuso-ledger-por-checagem.md) está para revisão;
-nenhuma implementação foi iniciada.**
+O [plano](../plans/2026-10-24-reuso-ledger-por-checagem.md) foi autorizado
+para execução nativa. T1/T2 estão implementadas; o gate de consistência de
+T3 reprovou a candidata. Ver [resultado](../reports/2026-10-24-reuso-ledger.md).**
 
 O [PR #116](https://github.com/Patricia7sp/kairos/pull/116), head `6e5ce1a`,
 permanece como baseline documental/diagnóstica, com seus checks concluídos.

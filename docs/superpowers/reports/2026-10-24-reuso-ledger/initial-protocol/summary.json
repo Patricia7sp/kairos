@@ -1,0 +1,58 @@
+{
+  "baseline_sha": "b7346adeee312368746fddb3ca7cfe3058c49b99",
+  "candidate_sha": "3e46d0f3c9145b911a10a4b4f476a29e1199382e",
+  "script_sha256": "677c19891ab704bc0db81be618439808f3e2c8f8f908ac26c9174ff42614a9fd",
+  "driver_sha256": "0d1f55fa583dda210cf669e95ebaeb5b922194fab1e3ded605d22c0321f8b499",
+  "measurements": [
+    "pair-1/baseline.json",
+    "pair-1/candidate.json",
+    "pair-2/candidate.json",
+    "pair-2/baseline.json",
+    "pair-3/baseline.json",
+    "pair-3/candidate.json"
+  ],
+  "accepted": false,
+  "failures": [
+    "pair_1_reconstructions_not_reduced",
+    "pair_2_reconstructions_not_reduced",
+    "pair_3_reconstructions_not_reduced",
+    "scenario_120_did_not_improve_in_every_pair",
+    "scenario_120_median_gain_below_10_percent",
+    "scenario_40_regression_above_5_percent_and_5_ms"
+  ],
+  "paired_gain_percent": {
+    "0": [
+      0.008035126669244538,
+      0.7347456482737841,
+      7.772015718170253
+    ],
+    "40": [
+      -20.669844799698367,
+      22.26639731342442,
+      -53.62076175033995
+    ],
+    "120": [
+      -25.10320906121399,
+      6.1049881864921804,
+      -1.931474335604905
+    ]
+  },
+  "paired_regression_ms": {
+    "0": [
+      -0.006749999999996703,
+      -0.566742000000005,
+      -6.530341000000007
+    ],
+    "40": [
+      78.81107500000002,
+      -117.88623799999999,
+      213.65621700000003
+    ],
+    "120": [
+      257.5758370000001,
+      -77.83918099999983,
+      24.841224999999895
+    ]
+  },
+  "median_gain_percent": -1.931474335604905
+}
