@@ -148,15 +148,36 @@ semântica. Consumo em bytes não foi medido.
   SQLite; foi substituída por inconsistência real de NOT NULL, detectada.
 - Ruff e formatação dos arquivos alterados e `git diff --check` passaram.
 - A primeira execução do CI foi interrompida deliberadamente após o achado do
-  harness; não é evidência de aprovação. A execução integral da revisão final,
-  imagem, integrações Docker, checks remotos e eventual análise Sonar são
-  registrados na descrição e nos checks do PR. Sucesso de upload não prova
-  Quality Gate; ausência de scanner/token permanece skip explícito.
+  harness; não é evidência de aprovação. A execução integral final terminou
+  com exit 1 apenas por formatação dos snippets Python do plano Markdown.
+  Corrigido o documento, `ruff check .`, `ruff format --check .` (719
+  arquivos) e `git diff --check` passaram. A suíte íntegra não foi repetida
+  por essa edição documental; runtime, testes, dependências e configuração
+  permanecem idênticos à candidata medida.
 
-A revisão independente conferiu os hashes/medianas dos brutos iniciais e
-identificou a interferência do harness, corrigida com prova RED→GREEN. O
-parecer final depende da rodada corrigida e da validação integrada. A
-reprovação de ROI persiste mesmo que todos os testes funcionais passem.
+| Verificação integrada local | Resultado |
+| --- | --- |
+| Suíte principal com cobertura | 4.100 passed; 21 skipped; 33 deselected; 6.539 subtestes; 1.278,69 s |
+| Recall G-19 | 20 passed |
+| TUI / web / desktop | 17 / 204 / 18 testes; TypeScript dos três aprovado |
+| Shellcheck e lock | aprovados |
+| Hadolint e checks estruturais Docker | aprovados |
+| Imagens principal, broker, stub e worker | construídas; probe do broker aprovado |
+| Imagem real instalada | 32 passed e 26 subtestes; 209,01 s |
+| Sessões Docker isoladas offline | 26 passed e um skipped; 68,08 s |
+| Sonar local | skip explícito; scanner/token ausente, `SONAR_TOKEN` removido do ambiente |
+
+A publicação da branch foi recusada pela revisão automática por falta de
+autorização específica para expor esse conteúdo no repositório público. Não
+há PR, checks remotos ou análise Sonar desta revisão. Sucesso de upload não
+provaria Quality Gate. Os skips e as deseleções acima não são aprovações dos
+caminhos não executados; providers reais/runtime_live não foram acionados.
+
+A revisão independente conferiu hashes, medianas, manifestos e gates dos
+dois conjuntos de brutos, identificou a interferência do harness e revisou
+a correção com prova RED→GREEN. O resultado é **não pronto para merge**:
+a reprovação de ROI persiste apesar dos testes funcionais aprovados, e os
+checks remotos não foram executados. O parecer completo fica no ledger local.
 
 Dois achados menores ficaram documentados para decisão posterior: erros
 `io`/`conflict` do observador podem chegar como `corrupt` pelo wrapper
@@ -184,12 +205,21 @@ proteção contra o mesmo UID; controle transacional externo continua fora do
 dono admitido. A recuperação de runtime, schema e política não foi ampliada.
 Rollback é reverter o código; não há migração ou cache persistido a restaurar.
 
-## Artefatos publicados
+Limites explicitamente mantidos pelo Root após a revisão: CI/Sonar remotos
+pendentes bloqueiam aceite; providers reais e caminhos pulados continuam
+sem atestado; mesmo UID e controle transacional externo conservam os limites
+do desenho aprovado; não se infere SLA, significância estatística ou memória
+em bytes; continuidade física depende dos guards, nunca do memo. Os custos
+residuais são, respectivamente, integração remota não verificada, cobertura
+restrita aos caminhos executados, ameaças fora da garantia, conclusões
+limitadas à rodada e ausência de autenticação física pelo próprio cache.
+
+## Artefatos locais preparados para revisão
 
 Cada rodada inclui JSON e log das seis execuções, summary e
 [manifesto inicial](2026-10-24-reuso-ledger/initial-protocol/sha256.json) /
 [manifesto corrigido](2026-10-24-reuso-ledger/corrected-protocol/sha256.json).
 Somente o prefixo do diretório pessoal do interpretador foi normalizado para
 `$HOME` nas cópias publicáveis; números, ordem, revisões e hashes de fontes
-permanecem originais. Os manifestos correspondem às cópias publicadas. Os
+permanecem originais. Os manifestos correspondem às cópias preparadas. Os
 brutos locais anteriores à normalização ficam no workspace da execução.

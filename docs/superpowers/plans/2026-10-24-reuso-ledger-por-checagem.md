@@ -109,12 +109,17 @@ def test_finish_returns_committed_after_its_insert(self):
     self.source.write_text(creation_text(name="new-target"))
     record = self.service.add(self.source, actor=Actor.USER_FOREGROUND)
     self.assertEqual(record.state, SkillMutationState.COMMITTED)
-    states = [row[0] for row in self.db.execute(
-        "SELECT state FROM skill_mutation_events WHERE operation_id=? ORDER BY sequence",
-        (record.operation_id,),
-    )]
+    states = [
+        row[0]
+        for row in self.db.execute(
+            "SELECT state FROM skill_mutation_events WHERE operation_id=? ORDER BY sequence",
+            (record.operation_id,),
+        )
+    ]
     self.assertEqual(states, ["prepared", "committed"])
-    self.assertEqual((self.home / "skills/new-target/SKILL.md").read_bytes(), self.source.read_bytes())
+    self.assertEqual(
+        (self.home / "skills/new-target/SKILL.md").read_bytes(), self.source.read_bytes()
+    )
 ```
 - [x] **Implementar o dono:** depois de BEGIN IMMEDIATE bem-sucedido criar token novo e memo somente quando explicitamente admitido. Executar o callback; fechar/remover memo em finally **antes** de commit/rollback. Retry recebe objeto novo. Importar o helper tardiamente no caminho de escrita; não adicionar cache a leitores avulsos. Preservar register_mutation_writer, Budget, ordem de SQL, erros e todos os guards.
 - [x] **RED de isolamento/recuperação:** acrescentar testes abaixo, com chamadas reais e fault injection nas fronteiras; executar os casos novos antes de corrigir cada lacuna.
@@ -143,7 +148,9 @@ O fixture local desse teste fornece `self.pairs` com três outputs completos e c
 
 ```python
 def test_complete_paired_gain_is_accepted(self):
-    result = compare_pairs(self.pairs, baseline_sha=self.baseline_sha, candidate_sha=self.candidate_sha)
+    result = compare_pairs(
+        self.pairs, baseline_sha=self.baseline_sha, candidate_sha=self.candidate_sha
+    )
     self.assertTrue(result["accepted"])
     self.assertGreaterEqual(result["median_gain_percent"], 10)
 ```
