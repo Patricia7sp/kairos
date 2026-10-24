@@ -2,8 +2,10 @@
 
 Proposta escrita em 24/10/2026 para a [issue #109](https://github.com/Patricia7sp/kairos/issues/109).
 A usuária escolheu reuso limitado por checagem ou transação, mantendo todas as
-varreduras e as 20 validações da timeline do benchmark. **A escolha da abordagem
-está aprovada; este desenho escrito ainda aguarda aprovação.**
+varreduras e as 20 validações da timeline do benchmark. **Desenho escrito
+aprovado pela usuária em 24/10/2026, conteúdo `abeee0d1f3fccc38e2271b9a4abd47851fe34da2`.
+O [plano](../plans/2026-10-24-reuso-ledger-por-checagem.md) está para revisão;
+nenhuma implementação foi iniciada.**
 
 O [PR #116](https://github.com/Patricia7sp/kairos/pull/116), head `6e5ce1a`,
 permanece como baseline documental/diagnóstica, com seus checks concluídos.
@@ -212,7 +214,7 @@ significância estatística):
   A mediana das três reduções percentuais pareadas deve ser de pelo menos
   10%, junto de redução reproduzível das reconstruções efetivas e manutenção
   das 20 validações. A escolha de 10% busca ganho útil frente à complexidade
-  adicionada; é proposta do Root sujeita à aprovação deste desenho.
+  adicionada; foi proposta do Root aprovada com este desenho.
 - Nos cenários 0 e 40, recusar se o aumento mediano pareado superar
   simultaneamente 5% e 5 ms. Publicar os três pares, amostras e faixas, inclusive
   casos que não passem; não selecionar somente a melhor rodada.
