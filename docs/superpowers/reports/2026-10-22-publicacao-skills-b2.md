@@ -1,9 +1,13 @@
 # Publicação coordenada de skills — B2
 
-Implementação na branch `feat/publicacao-skills-b2`, em 23/10/2026.
-**Revisão independente e correções concluídas; validação integrada local
-pós-revisão aprovada. CI remoto deve ser conferido no PR da implementação;
-sem merge, deploy ou migração de produção.**
+**Integrada e implantada:** PR #114, squash `da7c58c`, em 23/10/2026.
+O follow-up de backup síncrono foi integrado e implantado pelo PR #115,
+`b7346ad`, em 24/10. CI da main aprovado e Quality Gate Sonar OK, com
+confiabilidade nova A, na análise do merge #115. Evidências de integração,
+produção e limites no [fechamento B2/backup](2026-10-24-fechamento-b2-backup.md).
+
+As medições e decisões locais abaixo preservam o estado anterior ao merge;
+não constituem novas execuções sobre a produção.
 Base de código: `44d890ca632b40b78a21b62c5e05622200a5b23c`;
 plano aprovado: `02fb85e`.
 
