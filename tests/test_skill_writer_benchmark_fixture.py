@@ -49,10 +49,15 @@ class BenchmarkFixtureTests(RecordMemoFixture):
         self.assertEqual(dict(self.loads), dict.fromkeys(known, 1))
 
     def test_separate_inspection_still_refuses_real_integrity_violation(self):
-        self.db.execute("CREATE TABLE integrity_probe(value CHECK(value > 0))")
-        self.db.execute("PRAGMA ignore_check_constraints=ON")
-        self.db.execute("INSERT INTO integrity_probe VALUES(-1)")
-        self.db.execute("PRAGMA ignore_check_constraints=OFF")
+        self.db.execute("CREATE TABLE integrity_probe(value INTEGER)")
+        self.db.execute("INSERT INTO integrity_probe VALUES(NULL)")
         self.db.commit()
+        self.db.execute("PRAGMA writable_schema=ON")
+        self.db.execute(
+            "UPDATE sqlite_schema SET sql='CREATE TABLE integrity_probe(value INTEGER NOT NULL)' "
+            "WHERE name='integrity_probe'"
+        )
+        self.db.commit()
+        self.db.execute("PRAGMA writable_schema=OFF")
         with self.assertRaises(RuntimeError):
             benchmark.verify_fixture(self.db, self.home, self.created_trees(), 11)
