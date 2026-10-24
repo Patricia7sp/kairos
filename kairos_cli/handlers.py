@@ -882,11 +882,9 @@ def cmd_setup(args) -> int:
 
 
 def cmd_backup(args) -> int:
-    import asyncio
-
     from kairos_cli.backup import run_backup
 
-    return asyncio.run(run_backup(_home(), args))
+    return run_backup(_home(), args)
 
 
 def cmd_import_agent(args) -> int:

@@ -1,7 +1,6 @@
 """Backup inclui proteção durável e recusa família parcial sem publicar sucesso."""
 
 import argparse
-import asyncio
 import io
 import shutil
 import sqlite3
@@ -101,9 +100,7 @@ class OrgBackupTests(unittest.TestCase):
         target.write_bytes(b"previous-backup")
         output, error = io.StringIO(), io.StringIO()
         with redirect_stdout(output), redirect_stderr(error):
-            result = asyncio.run(
-                run_backup(self.home, argparse.Namespace(output=str(target), json=True))
-            )
+            result = run_backup(self.home, argparse.Namespace(output=str(target), json=True))
         self.assertEqual(result, 1)
         self.assertEqual(output.getvalue(), "")
         self.assertEqual(target.read_bytes(), b"previous-backup")
@@ -138,9 +135,7 @@ class OrgBackupTests(unittest.TestCase):
                 connection.commit()
                 output, error = io.StringIO(), io.StringIO()
                 with redirect_stdout(output), redirect_stderr(error):
-                    result = asyncio.run(
-                        run_backup(home, argparse.Namespace(output=str(target), json=True))
-                    )
+                    result = run_backup(home, argparse.Namespace(output=str(target), json=True))
                 self.assertEqual(result, 1)
                 self.assertEqual(output.getvalue(), "")
                 self.assertEqual(target.read_bytes(), b"previous-backup")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import io
 import json
 import multiprocessing
@@ -241,7 +240,7 @@ class SkillAdoptionBackupTests(unittest.TestCase):
         args = argparse.Namespace(output=str(target), json=True)
         output = io.StringIO()
         with redirect_stdout(output), redirect_stderr(io.StringIO()):
-            code = asyncio.run(run_backup(source_home, args))
+            code = run_backup(source_home, args)
         report = json.loads(output.getvalue())
         with tarfile.open(target, "r:gz") as bundle:
             archive_file_count = sum(member.isfile() for member in bundle.getmembers())
@@ -418,7 +417,7 @@ class SkillAdoptionBackupTests(unittest.TestCase):
         output, error = io.StringIO(), io.StringIO()
         args = argparse.Namespace(output=str(self.root / "invalid.tar.gz"), json=True)
         with redirect_stdout(output), redirect_stderr(error):
-            code = asyncio.run(run_backup(self.home, args))
+            code = run_backup(self.home, args)
         self.assertEqual(code, 1)
         self.assertEqual(output.getvalue(), "")
         self.assertTrue(error.getvalue())

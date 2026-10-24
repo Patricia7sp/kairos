@@ -1,7 +1,6 @@
 """Backup integral preserva provas históricas sem reautorizar cópias restauradas."""
 
 import argparse
-import asyncio
 import copy
 import fcntl
 import io
@@ -46,7 +45,7 @@ def paused_backup(home, archive, pipe):
         return result
 
     with patch.object(tarfile.TarFile, "add", new=pause):
-        code = asyncio.run(run_backup(home, argparse.Namespace(output=str(archive), json=True)))
+        code = run_backup(home, argparse.Namespace(output=str(archive), json=True))
     pipe.send(code)
     pipe.close()
 
@@ -443,9 +442,7 @@ class PublicationBackupTests(PublicationServiceFixture):
     def backup(self, output, *, home=None):
         out, error = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(error):
-            code = asyncio.run(
-                run_backup(home or self.home, argparse.Namespace(output=str(output), json=True))
-            )
+            code = run_backup(home or self.home, argparse.Namespace(output=str(output), json=True))
         self.assertNotIn(str(self.quarantine), error.getvalue())
         return code, out.getvalue(), error.getvalue()
 

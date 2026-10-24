@@ -1,7 +1,6 @@
 """Regressões de disponibilidade e recusa observadas na revisão B2."""
 
 import argparse
-import asyncio
 import io
 import json
 import os
@@ -153,9 +152,7 @@ class PublicationSyncReviewTests(PublicationWriterFixture):
         archive = self.root / "backup.tar.gz"
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(
-                asyncio.run(
-                    run_backup(self.home, argparse.Namespace(output=str(archive), json=True))
-                ),
+                run_backup(self.home, argparse.Namespace(output=str(archive), json=True)),
                 0,
             )
         return archive, operation_id
