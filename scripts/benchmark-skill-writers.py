@@ -29,6 +29,11 @@ COUNTED = {
     "validate_publication_schema",
     "validate_adoption_schema",
     "_get_validated",
+    "_get_validated_uncached",
+    "_legacy_get",
+    "_base",
+    "_blob",
+    "observe_database_stamp",
     "repository_guard",
     "protected_organizations",
     "receipt",
@@ -120,6 +125,21 @@ def verify_fixture(connection, home, created, version):
     }
 
 
+def loaded_module_hashes(root):
+    modules = {}
+    for name in (
+        "kairos_skills.mutations",
+        "kairos_state.repositories.skill_mutations",
+        "kairos_state.repositories.skill_record_memo",
+    ):
+        if name in sys.modules:
+            path = Path(inspect.getfile(sys.modules[name])).resolve()
+            if not path.is_relative_to(root):
+                raise RuntimeError("benchmark_imported_wrong_revision")
+            modules[str(path.relative_to(root))] = digest(path)
+    return modules
+
+
 def worker(arguments):
     root = arguments.worker_source.resolve()
     sys.path.insert(0, str(root))
@@ -191,6 +211,7 @@ def worker(arguments):
                 }
                 result["scenarios"].append(scenario)
                 print(json.dumps({"revision": arguments.revision, **scenario}), flush=True)
+    result["modules_sha256"] = loaded_module_hashes(root)
     arguments.output.write_text(json.dumps(result, indent=2) + "\n")
 
 
@@ -226,6 +247,7 @@ def main():
     cases = arguments.case or ["d730822:9", "f9f9a6d:10", "b7346ad:11"]
     result = {
         "python": platform.python_version(),
+        "python_executable": str(Path(sys.executable).resolve()),
         "platform": platform.platform(),
         "sqlite": sqlite3.sqlite_version,
         "cpu_affinity_count": len(os.sched_getaffinity(0)),
