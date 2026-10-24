@@ -399,6 +399,7 @@ class SkillMutationRepository:
         validate_hash(home_id)
         self._conn = connection
         self._home_id = home_id
+        self._record_memo = None
 
     @property
     def home_id(self):
@@ -532,6 +533,15 @@ class SkillMutationRepository:
             self._projection(name)
 
     def _get_validated(self, operation_id, *, modern):
+        if self._record_memo is not None:
+            return self._record_memo.load(
+                operation_id,
+                modern=modern,
+                loader=lambda: self._get_validated_uncached(operation_id, modern=modern),
+            )
+        return self._get_validated_uncached(operation_id, modern=modern)
+
+    def _get_validated_uncached(self, operation_id, *, modern):
         record = self._legacy_get(operation_id)
         if record is not None or not modern:
             return record
@@ -569,8 +579,17 @@ class SkillMutationRepository:
                 (name,),
             ).fetchall()
             ids = tuple(row[0] for row in rows)
-        records = tuple(
-            self._get_validated(operation_id, modern=timeline is not None) for operation_id in ids
+
+        def load_records(loader):
+            return tuple(loader(operation_id, modern=timeline is not None) for operation_id in ids)
+
+        records = (
+            load_records(self._get_validated)
+            if self._record_memo is None
+            else self._record_memo.run_batch(
+                lambda: load_records(self._get_validated),
+                uncached=lambda: load_records(self._get_validated_uncached),
+            )
         )
         require(all(record is not None for record in records))
         return tuple(record for record in records if record.name == name)
@@ -796,7 +815,7 @@ class SkillMutationRepository:
             draft, lambda tree: tree.prepare_restore(draft, policy_receipt=policy_receipt)
         )
 
-    def _write(self, operation):
+    def _write(self, operation, *, memo_records=False):
         register_mutation_writer(self._conn)
 
         def transaction():
@@ -804,7 +823,16 @@ class SkillMutationRepository:
                 raise SkillMutationError("io", "Mutação exige uma conexão sem transação pendente.")
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                result = operation()
+                if memo_records:
+                    from kairos_state.repositories.skill_record_memo import RecordMemo
+
+                    self._record_memo = RecordMemo(self._conn, self.home_id, owner_token=object())
+                try:
+                    result = operation()
+                finally:
+                    if self._record_memo is not None:
+                        self._record_memo.close()
+                        self._record_memo = None
                 self._conn.commit()
             except BaseException:
                 self._conn.rollback()
@@ -888,7 +916,7 @@ class SkillMutationRepository:
             )
             return self.get(draft.operation_id)
 
-        return self._write(operation)
+        return self._write(operation, memo_records=True)
 
     def finish(self, operation_id: str, state: SkillMutationState):
         validate_id(operation_id)
@@ -920,4 +948,4 @@ class SkillMutationRepository:
             )
             return self.get(operation_id)
 
-        return self._write(operation)
+        return self._write(operation, memo_records=True)
