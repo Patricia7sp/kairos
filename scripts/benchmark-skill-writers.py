@@ -20,7 +20,7 @@ import sys
 import tarfile
 import tempfile
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from pathlib import Path
 
 COUNTED = {
@@ -108,8 +108,11 @@ def verify_fixture(connection, home, created, version):
     )
     if states != {"prepared": len(created), "committed": len(created)}:
         raise RuntimeError("benchmark_left_pending")
-    if [row[0] for row in connection.execute("PRAGMA integrity_check")] != ["ok"]:
-        raise RuntimeError("benchmark_database_corrupted")
+    with closing(
+        sqlite3.connect((home / "state.db").as_uri() + "?mode=ro", uri=True)
+    ) as inspection:
+        if [row[0] for row in inspection.execute("PRAGMA integrity_check")] != ["ok"]:
+            raise RuntimeError("benchmark_database_corrupted")
     for name, text, device, inode in created:
         directory = home / "skills" / name
         status = directory.stat()
@@ -253,7 +256,7 @@ def main():
         "cpu_affinity_count": len(os.sched_getaffinity(0)),
         "initial_load": os.getloadavg(),
         "script_sha256": digest(Path(__file__)),
-        "method": "add real; conexão e política abertas; sem profiler nos tempos; fixtures temporárias; prefixo cresce com cada add medido; perfil separado; sem cobertura",
+        "method": "add real; conexão e política abertas; sem profiler nos tempos; fixtures temporárias; prefixo cresce com cada add medido; perfil separado; sem cobertura; integrity_check em conexão separada",
         "cases": [],
     }
     for case in cases:
