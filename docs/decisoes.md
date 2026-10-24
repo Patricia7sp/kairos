@@ -2366,11 +2366,13 @@ explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
 
 ## D-CLI.SKILL.PROVENANCE — identificação e adoção explícita de instalações
 
-**Status:** identificação A1 implementada; adoção/revogação A2 implementadas nesta
-branch. O aceite local e os nove jobs remotos do commit `5b84049` passaram
+**Status em 24/10/2026:** identificação A1 e adoção/revogação A2 integradas
+pelos PRs #102/#104. B1 e B2 também estão integradas e implantadas; seus
+contratos estão nas entradas D-CLI.SKILL.ORG e D-CLI.SKILL.B2.
+No checkpoint anterior ao merge de A2, o aceite local e os nove jobs de `5b84049` passaram
 ([CI](https://github.com/Patricia7sp/kairos/actions/runs/38485360298)).
-Ajustes posteriores são revalidados em seu próprio commit. B1/B2 continuam
-propostas; esta entrada não afirma merge ou aprovação de produção. Referência de design:
+Ajustes posteriores foram revalidados em seus próprios commits. As evidências
+históricas desta entrada não atestam as implantações posteriores. Referência de design:
 `docs/superpowers/specs/2026-10-10-proveniencia-skills-design.md`.
 Referências herdadas: `_reversa_sdd/adrs/009-proveniencia-de-skill.md`,
 Decisão e Alternativas; `skills/requirements.md` RF-04/RF-08;
@@ -2387,7 +2389,7 @@ na aquisição não comprova proteção organizacional autenticada.
 
 A entrega foi fatiada: A1 introduziu identificação somente leitura; A2 acrescenta
 adoção/revogação e sua linhagem. Publicações e continuidade de proteção por
-política permanecem nas propostas B1/B2. A interface de identificação é:
+política foram entregues posteriormente em B1/B2. A interface de identificação é:
 
 ```bash
 kairos skills identify revisar-docs
@@ -2508,11 +2510,11 @@ A revisão independente final encontrou uma falha no backup público, corrigida
 com testes RED→GREEN de checkpoint concorrente e banco inválido, seguidos
 por nova suíte integral e reconstrução da imagem. Os nove jobs remotos do
 commit `5b84049` passaram no [run 38485360298](https://github.com/Patricia7sp/kairos/actions/runs/38485360298),
-com deploy pulado pela condição de PR. Ajustes posteriores exigem novos checks;
-não há autorização de merge, deploy ou operação em home de produção.
+com deploy pulado pela condição de PR. Esse checkpoint de `5b84049` antecede
+o aceite posterior de merge/deploy e não o autoriza por si só.
 Detalhes e limites em [aceite A2](superpowers/reports/2026-10-13-cli-skills-adoption.md). A2 não cria prova SEDIMENT nem estabelece política
-organizacional geral. B1/B2 continuam propostas com seus próprios escopos e
-gates.
+organizacional geral. Os escopos B1/B2 foram entregues posteriormente, com
+gates e evidências próprios nas respectivas entradas abaixo.
 
 ## D-CLI.SKILL.ORG — continuidade de proteção por política local
 
@@ -2602,7 +2604,7 @@ resíduos privados, inclusive após saída de contexto ou coleta de lixo.
 A garantia é continuidade entre operações cooperativas. Não autentica uma
 organização nem isola configuração, banco e código contra o mesmo UID.
 `remove_file` tem contrato no guard, sem nova operação pública. `edit`, `patch`
-e `write_file` in-place permanecem fora deste veto. B2 propõe coordenar
+e `write_file` in-place permanecem fora deste veto. B2 coordena
 publicações permitidas e sua recuperação transacional, revalidando a proteção
 nas fronteiras. B1 não torna um lote de sync atômico nem instala política em produção.
 
@@ -2620,18 +2622,20 @@ correção #111 permanece registrada como etapa anterior, sem `force`.
 e a stack healthy.** A revisão pós-merge do PR #108 apontou exclusão do destino
 antes da tentativa de movimento.
 A recusa de política ou indisponibilidade do rename podia deixar a instalação
-anterior apagada. O recorte remove essa exclusão: toda promoção usa o movimento
-sem substituição existente. Destino ocupado, inclusive em corrida, é conflito;
-instalação e quarentena permanecem com suas identidades e conteúdo. Não existe
-`force`. Publicação inicial continua real e mantém os guards de B1.
+anterior apagada. Na entrega #111, a exclusão foi retirada e a promoção usava
+movimento sem substituição. Destino ocupado, inclusive em corrida, era conflito;
+instalação e quarentena mantinham suas identidades e conteúdo. O fluxo não
+oferecia `force`. Publicação inicial continuava real e mantinha os guards de B1.
 
-Esta é uma restrição deliberada do fluxo legado de promoção pessoal até B2:
-substituir uma instalação não é suportado por esta API nesta entrega. Não
-sugerir remover a instalação como etapa de uma atualização. Na publicação inicial, recusa ou falha após rename pode retornar erro com a
-árvore já no destino; não há recuperação automática nem garantia de quarentena
-ainda presente nessa fronteira. Sync mantém seu
-contrato próprio; este recorte não oferece journal/recuperação de publicação,
-nem atomicidade de lote. Evidências no
+Essa restrição histórica vigorou no fluxo legado entre #111 e B2: a API de
+#111 não suportava substituir uma instalação. B2 passou a oferecer substituição
+coordenada, com os contratos da seção própria; remover a instalação não é etapa
+de atualização. Na publicação inicial de #111, recusa ou falha após rename
+podia retornar erro com a árvore já no destino; não havia recuperação automática
+nem garantia de quarentena ainda presente nessa fronteira. Sync mantinha seu
+contrato próprio; #111 não oferecia journal/recuperação de publicação nem
+atomicidade de lote. Esses limites são históricos daquele recorte; B2 acrescentou
+journal e recuperação por item, sem prometer atomicidade de lote. Evidências de #111 no
 [relatório da correção](superpowers/reports/2026-10-21-promocao-segura.md).
 
 ## D-09.GATES — matriz de ações prevalece sobre contagem textual
