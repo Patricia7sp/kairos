@@ -1,7 +1,8 @@
 # Índice automático de skills no Chat da CLI
 
 Status: desenho aprovado e execução autorizada pela usuária em 25/10/2026
-(“aprovado, pode seguir”). Implementação em fechamento no PR #119, conforme o
+(“aprovado, pode seguir”). Implementação concluída e validada localmente na
+branch do PR #119, com publicação aguardando autorização, conforme o
 [plano](../plans/2026-10-25-indice-automatico-cli.md); merge e deploy não estão
 autorizados por essa aprovação. Base de runtime examinada:
 `89020109ad1d063f06dba9b685681e15cb22590a`, já implantada. O fechamento

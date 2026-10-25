@@ -128,8 +128,12 @@ Atualização em 25/10/2026: o reuso do ledger foi integrado pelo PR #117
 [desenho aprovado](superpowers/specs/2026-10-25-indice-automatico-cli-design.md)
 e [plano de execução](superpowers/plans/2026-10-25-indice-automatico-cli.md).
 As duas primeiras tarefas entregaram descoberta opcional estrita e decisão
-de ativação sob posse do turno. A terceira conclui CLI/interativo, documentação,
-validação integrada e revisão independente no PR #119, ainda em rascunho.
+de ativação sob posse do turno. A terceira está concluída localmente, com
+CLI/interativo, documentação, revisão independente e validação: 4.155 testes
+unitários e 32 de imagem aprovados, além dos subtestes. O
+[relatório](superpowers/reports/2026-10-25-indice-automatico-cli.md) preserva os
+limites e os comandos. O push foi bloqueado pela revisão automática; envio
+ao PR #119 em rascunho, CI remoto e Sonar aguardam autorização de publicação.
 `/learn`, curadoria e workflows duráveis continuam para recortes posteriores.
 
 Restrição de workspace e autorização para automações sem terminal foram

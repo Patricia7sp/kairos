@@ -6,11 +6,15 @@ A base do trabalho é `main` em `8902010`, com o reuso do ledger integrado pelo
 PR #117. O [PR #119](https://github.com/Patricia7sp/kairos/pull/119) continua o
 [índice automático de skills na CLI](superpowers/specs/2026-10-25-indice-automatico-cli-design.md),
 com desenho e execução aprovados. Descoberta opcional e ativação sob posse do
-turno já estão commitadas; a etapa de CLI/interativo está em fechamento local.
+turno, CLI/interativo e ajustes de integração estão concluídos localmente.
 O padrão anuncia somente índice e leitor sob demanda. Force/off explícitos,
 snapshot desde a primeira ativação positiva e capacidades por turno preservam
-os limites existentes. Revisão independente, CI completo e Sonar no SHA final
-compõem o aceite; este registro não declara merge ou deploy do PR #119.
+os limites existentes. Revisão independente sem achados; 4.155 testes e 6.542
+subtestes unitários aprovados, além de 32 testes e 26 subtestes de imagem.
+O [relatório local](superpowers/reports/2026-10-25-indice-automatico-cli.md)
+registra comandos, skips, correções de integração e a cobertura ainda pendente.
+A revisão automática de permissões bloqueou o push; publicação no PR #119,
+CI remoto e Sonar aguardam autorização. Não houve merge ou deploy.
 O fechamento documental anterior permanece separado no PR #118.
 
 ## Checkpoint integrado anterior

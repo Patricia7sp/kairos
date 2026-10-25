@@ -111,3 +111,19 @@ with pytest.raises(SkillCatalogError):
 Cobertura: T1 define ausência tipada e preserva a captura estrita; T2 concentra decisão, posse, persistência e avisos; T3 ativa a CLI/interativo e verifica superfícies excluídas. Os cinco Review Focus têm testes nomeados na tarefa proprietária. Função opcional de T1 e parâmetros/campos de T2 são os mesmos consumidos em T3. Schema, manifesto e limites não mudam. Nenhum passo depende de cache negativo, exceção por texto ou autorização de ferramentas gerais.
 
 Execução nativa e sequencial autorizada na conversa. Plano disponível para leitura durante a execução; mudanças que ultrapassem o desenho aprovado exigem resolver o novo escopo antes de implementar.
+
+## Checkpoint local de 25/10/2026
+
+T1/T2 e implementação de T3 concluídas, com revisão independente sem achados.
+A suíte unitária inteira passou: 4.155 testes, 6.542 subtestes, 21 skips e
+33 deselections; imagem final com 32 testes e 26 subtestes aprovados. O
+[relatório](../reports/2026-10-25-indice-automatico-cli.md) registra comandos,
+reuso das evidências não afetadas, skips e as correções de integração: retry
+do doctor sob migração concorrente e escopo do prazo no teste de cancelamento.
+
+A rodada instrumentada de CI foi interrompida e não atesta cobertura completa.
+Os checks restantes passaram e os testes afetados foram repetidos; CI remoto
+e Sonar continuam pendentes. A revisão automática bloqueou o push mesmo após
+conferir o destino. Publicação no PR #119 exige autorização explícita para
+enviar o conteúdo ao repositório público. As duas últimas caixas de entrega
+continuam abertas por essas pendências; nenhum merge ou deploy foi feito.
