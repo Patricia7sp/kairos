@@ -1,0 +1,16 @@
+{
+  "repository": "Patricia7sp/kairos",
+  "pull_request": 117,
+  "run_id": 40148739757,
+  "run_attempt": 1,
+  "job_id": 121035589432,
+  "artifact_id": 12581401584,
+  "artifact_name": "skill-writer-benchmark-0e2c9f265f8c61e05896204c9cc75e82e00d1df8-40148739757-1",
+  "artifact_zip_sha256": "3b80137a8ead1993f9d4cb2161e607367689e9a78c9630cd15561e8ede731bbb",
+  "artifact_created_at": "2026-10-25T01:03:59Z",
+  "run_url": "https://github.com/Patricia7sp/kairos/actions/runs/40148739757",
+  "copied_files_byte_identical_to_downloaded_artifact": true,
+  "comparison_recomputed_from_all_six_raw_json_files": true,
+  "module_hashes_verified_against_git_revisions": true,
+  "benchmark_label_removed_after_single_run": true
+}

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Roda localmente os MESMOS passos do CI (.github/workflows/ci.yml).
+# Roda localmente as verificações normais do CI (.github/workflows/ci.yml).
+# A medição opt-in `benchmark-ledger` usa runner exclusivo; o protocolo e os
+# artefatos são os do harness scripts/benchmark_skill_writer_pairs.py.
 #
 # Existe porque descobrir uma quebra no push é um ciclo de minutos e
 # descobrir aqui é de segundos — e porque o build da imagem e os testes de

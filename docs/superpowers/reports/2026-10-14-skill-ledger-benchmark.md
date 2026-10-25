@@ -4,6 +4,12 @@ Medição local de 2026-10-14 sobre `d730822`, com Python 3.11 e fixtures
 temporárias. [Dados brutos](2026-10-14-skill-ledger-benchmark.json) incluem
 amostras, plataforma, tempos de preparação e contagens por operação.
 
+Nota de 24/10: o harness volta a fixar explicitamente o fixture v9, evitando
+que o schema padrão v11 faça a contagem usar uma timeline congelada. Os números
+e hashes históricos abaixo permanecem relativos à execução de 14/10. A nova
+comparação entre revisões está no
+[benchmark de escritores](2026-10-24-skill-writer-benchmark.md).
+
 ## Método
 
 Executado no worktree `removal_design`:

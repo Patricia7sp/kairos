@@ -66,7 +66,7 @@ def seed_prefix(home, count):
             repository.prepare(draft, text)
             repository.finish(draft.operation_id, SkillMutationState.COMMITTED)
         migrate(connection, target=8)
-        migrate(connection)
+        migrate(connection, target=9)
     finally:
         connection.close()
 

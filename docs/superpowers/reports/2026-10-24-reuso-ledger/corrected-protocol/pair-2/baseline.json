@@ -1,0 +1,385 @@
+{
+  "python": "3.11.16",
+  "python_executable": "$HOME/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+  "sqlite": "3.53.1",
+  "cpu_affinity_count": 4,
+  "initial_load": [
+    1.13916015625,
+    1.09423828125,
+    0.9931640625
+  ],
+  "script_sha256": "ca919b8a0caa4e23d01cad223274177d7b7122856d6b62a1039848ff7bddeb83",
+  "method": "add real; conex\u00e3o e pol\u00edtica abertas; sem profiler nos tempos; fixtures tempor\u00e1rias; prefixo cresce com cada add medido; perfil separado; sem cobertura; integrity_check em conex\u00e3o separada",
+  "cases": [
+    {
+      "revision": "b7346adeee312368746fddb3ca7cfe3058c49b99",
+      "requested_schema": 11,
+      "module_sha256": "c40ad02361e7c28b0086a5e2b19d86f9493f0412120ac172f4d7b04967c51969",
+      "scenarios": [
+        {
+          "seed_creations": 0,
+          "seed_seconds": 1.0460003068146762e-06,
+          "warmup_adds": 1,
+          "samples": [
+            {
+              "prior_creations": 1,
+              "elapsed_ms": 209.57641
+            },
+            {
+              "prior_creations": 2,
+              "elapsed_ms": 64.836529
+            },
+            {
+              "prior_creations": 3,
+              "elapsed_ms": 71.05993
+            },
+            {
+              "prior_creations": 4,
+              "elapsed_ms": 79.877661
+            },
+            {
+              "prior_creations": 5,
+              "elapsed_ms": 88.170695
+            },
+            {
+              "prior_creations": 6,
+              "elapsed_ms": 94.122808
+            },
+            {
+              "prior_creations": 7,
+              "elapsed_ms": 102.055446
+            }
+          ],
+          "median_ms": 88.170695,
+          "min_ms": 64.836529,
+          "max_ms": 209.57641,
+          "profiled_add": {
+            "prior_creations": 8,
+            "elapsed_ms": 217.090239,
+            "profile": {
+              "kairos_skills/org_policy_guard.py:_check": {
+                "calls": 4,
+                "own_s": 7.6882e-05,
+                "cumulative_s": 0.096870142
+              },
+              "kairos_state/skill_org_schema.py:validate_org_schema": {
+                "calls": 22,
+                "own_s": 0.0016951260000000001,
+                "cumulative_s": 0.035471586
+              },
+              "kairos_state/skill_adoptions_schema.py:validate_adoption_schema": {
+                "calls": 22,
+                "own_s": 0.000991034,
+                "cumulative_s": 0.008738176
+              },
+              "kairos_state/skill_publications_schema.py:validate_publication_schema": {
+                "calls": 22,
+                "own_s": 0.00230599,
+                "cumulative_s": 0.059646847
+              },
+              "kairos_skills/org_policy.py:revalidate": {
+                "calls": 14,
+                "own_s": 0.00039328800000000005,
+                "cumulative_s": 0.005076032
+              },
+              "kairos_state/repositories/skill_mutations.py:_blob": {
+                "calls": 64,
+                "own_s": 0.000346593,
+                "cumulative_s": 0.11349922600000001
+              },
+              "kairos_state/repositories/skill_mutations.py:_base": {
+                "calls": 63,
+                "own_s": 0.0015668610000000001,
+                "cumulative_s": 0.123046346
+              },
+              "kairos_state/repositories/skill_mutations.py:_legacy_get": {
+                "calls": 63,
+                "own_s": 0.00043631000000000003,
+                "cumulative_s": 0.12507030400000002
+              },
+              "kairos_state/repositories/skill_mutations.py:_get_validated": {
+                "calls": 63,
+                "own_s": 5.5870000000000005e-05,
+                "cumulative_s": 0.125126174
+              },
+              "kairos_state/repositories/skill_mutations.py:validate_skill_timeline": {
+                "calls": 20,
+                "own_s": 0.0024350220000000002,
+                "cumulative_s": 0.065558542
+              },
+              "kairos_skills/mutations.py:_check": {
+                "calls": 4,
+                "own_s": 1.7862000000000003e-05,
+                "cumulative_s": 0.112317991
+              },
+              "kairos_state/repositories/skill_org_protections.py:protected_organizations": {
+                "calls": 4,
+                "own_s": 3.0037e-05,
+                "cumulative_s": 0.013184232
+              },
+              "kairos_skills/org_policy.py:receipt": {
+                "calls": 4,
+                "own_s": 3.2807e-05,
+                "cumulative_s": 0.0016788030000000002
+              },
+              "kairos_skills/org_policy_guard.py:repository_guard": {
+                "calls": 4,
+                "own_s": 5.5624e-05,
+                "cumulative_s": 0.015413656000000001
+              }
+            }
+          },
+          "final_creations": 9,
+          "active_timeline": "skill_publication_timeline",
+          "timeline_events": 18,
+          "real_installed_trees_verified": 9,
+          "integrity": "ok"
+        },
+        {
+          "seed_creations": 40,
+          "seed_seconds": 12.087998305999918,
+          "warmup_adds": 1,
+          "samples": [
+            {
+              "prior_creations": 41,
+              "elapsed_ms": 399.003221
+            },
+            {
+              "prior_creations": 42,
+              "elapsed_ms": 586.580577
+            },
+            {
+              "prior_creations": 43,
+              "elapsed_ms": 377.570089
+            },
+            {
+              "prior_creations": 44,
+              "elapsed_ms": 449.443564
+            },
+            {
+              "prior_creations": 45,
+              "elapsed_ms": 529.354618
+            },
+            {
+              "prior_creations": 46,
+              "elapsed_ms": 696.90502
+            },
+            {
+              "prior_creations": 47,
+              "elapsed_ms": 387.976189
+            }
+          ],
+          "median_ms": 449.443564,
+          "min_ms": 377.570089,
+          "max_ms": 696.90502,
+          "profiled_add": {
+            "prior_creations": 48,
+            "elapsed_ms": 1872.51898,
+            "profile": {
+              "kairos_skills/org_policy_guard.py:_check": {
+                "calls": 4,
+                "own_s": 0.000161807,
+                "cumulative_s": 0.9829375640000001
+              },
+              "kairos_state/skill_org_schema.py:validate_org_schema": {
+                "calls": 22,
+                "own_s": 0.0035509390000000004,
+                "cumulative_s": 0.21659209000000001
+              },
+              "kairos_state/skill_adoptions_schema.py:validate_adoption_schema": {
+                "calls": 22,
+                "own_s": 0.001969452,
+                "cumulative_s": 0.017612182
+              },
+              "kairos_state/skill_publications_schema.py:validate_publication_schema": {
+                "calls": 22,
+                "own_s": 0.004921512,
+                "cumulative_s": 0.270278254
+              },
+              "kairos_skills/org_policy.py:revalidate": {
+                "calls": 14,
+                "own_s": 0.0008257630000000001,
+                "cumulative_s": 0.011470624
+              },
+              "kairos_state/repositories/skill_mutations.py:_blob": {
+                "calls": 344,
+                "own_s": 0.004023695,
+                "cumulative_s": 1.310441484
+              },
+              "kairos_state/repositories/skill_mutations.py:_base": {
+                "calls": 343,
+                "own_s": 0.018493616,
+                "cumulative_s": 1.444230723
+              },
+              "kairos_state/repositories/skill_mutations.py:_legacy_get": {
+                "calls": 343,
+                "own_s": 0.005492783,
+                "cumulative_s": 1.470173315
+              },
+              "kairos_state/repositories/skill_mutations.py:_get_validated": {
+                "calls": 343,
+                "own_s": 0.0006104950000000001,
+                "cumulative_s": 1.4707838100000001
+              },
+              "kairos_state/repositories/skill_mutations.py:validate_skill_timeline": {
+                "calls": 20,
+                "own_s": 0.021317041000000002,
+                "cumulative_s": 0.347811605
+              },
+              "kairos_skills/mutations.py:_check": {
+                "calls": 4,
+                "own_s": 2.4405e-05,
+                "cumulative_s": 1.04631936
+              },
+              "kairos_state/repositories/skill_org_protections.py:protected_organizations": {
+                "calls": 4,
+                "own_s": 7.122500000000001e-05,
+                "cumulative_s": 0.088781723
+              },
+              "kairos_skills/org_policy.py:receipt": {
+                "calls": 4,
+                "own_s": 7.4066e-05,
+                "cumulative_s": 0.004527576
+              },
+              "kairos_skills/org_policy_guard.py:repository_guard": {
+                "calls": 4,
+                "own_s": 0.00010089900000000001,
+                "cumulative_s": 0.063339937
+              }
+            }
+          },
+          "final_creations": 49,
+          "active_timeline": "skill_publication_timeline",
+          "timeline_events": 98,
+          "real_installed_trees_verified": 49,
+          "integrity": "ok"
+        },
+        {
+          "seed_creations": 120,
+          "seed_seconds": 76.80309163699985,
+          "warmup_adds": 1,
+          "samples": [
+            {
+              "prior_creations": 121,
+              "elapsed_ms": 1539.490028
+            },
+            {
+              "prior_creations": 122,
+              "elapsed_ms": 1649.280697
+            },
+            {
+              "prior_creations": 123,
+              "elapsed_ms": 1447.620531
+            },
+            {
+              "prior_creations": 124,
+              "elapsed_ms": 1670.844014
+            },
+            {
+              "prior_creations": 125,
+              "elapsed_ms": 1330.557005
+            },
+            {
+              "prior_creations": 126,
+              "elapsed_ms": 1805.284301
+            },
+            {
+              "prior_creations": 127,
+              "elapsed_ms": 1865.737487
+            }
+          ],
+          "median_ms": 1649.280697,
+          "min_ms": 1330.557005,
+          "max_ms": 1865.737487,
+          "profiled_add": {
+            "prior_creations": 128,
+            "elapsed_ms": 2997.260308,
+            "profile": {
+              "kairos_skills/org_policy_guard.py:_check": {
+                "calls": 4,
+                "own_s": 8.589700000000001e-05,
+                "cumulative_s": 1.350790775
+              },
+              "kairos_state/skill_org_schema.py:validate_org_schema": {
+                "calls": 22,
+                "own_s": 0.002906652,
+                "cumulative_s": 0.405984436
+              },
+              "kairos_state/skill_adoptions_schema.py:validate_adoption_schema": {
+                "calls": 22,
+                "own_s": 0.001437769,
+                "cumulative_s": 0.013156703
+              },
+              "kairos_state/skill_publications_schema.py:validate_publication_schema": {
+                "calls": 22,
+                "own_s": 0.003640377,
+                "cumulative_s": 0.45646132700000003
+              },
+              "kairos_skills/org_policy.py:revalidate": {
+                "calls": 14,
+                "own_s": 0.00035019500000000003,
+                "cumulative_s": 0.004850483
+              },
+              "kairos_state/repositories/skill_mutations.py:_blob": {
+                "calls": 904,
+                "own_s": 0.006252067,
+                "cumulative_s": 2.107667255
+              },
+              "kairos_state/repositories/skill_mutations.py:_base": {
+                "calls": 903,
+                "own_s": 0.027635295,
+                "cumulative_s": 2.3106296090000003
+              },
+              "kairos_state/repositories/skill_mutations.py:_legacy_get": {
+                "calls": 903,
+                "own_s": 0.008077086,
+                "cumulative_s": 2.349611201
+              },
+              "kairos_state/repositories/skill_mutations.py:_get_validated": {
+                "calls": 903,
+                "own_s": 0.0009036710000000001,
+                "cumulative_s": 2.350514872
+              },
+              "kairos_state/repositories/skill_mutations.py:validate_skill_timeline": {
+                "calls": 20,
+                "own_s": 0.037230124,
+                "cumulative_s": 0.556734354
+              },
+              "kairos_skills/mutations.py:_check": {
+                "calls": 4,
+                "own_s": 1.5804e-05,
+                "cumulative_s": 1.4202914130000002
+              },
+              "kairos_state/repositories/skill_org_protections.py:protected_organizations": {
+                "calls": 4,
+                "own_s": 2.9554000000000002e-05,
+                "cumulative_s": 0.068268536
+              },
+              "kairos_skills/org_policy.py:receipt": {
+                "calls": 4,
+                "own_s": 3.5644e-05,
+                "cumulative_s": 0.001815336
+              },
+              "kairos_skills/org_policy_guard.py:repository_guard": {
+                "calls": 4,
+                "own_s": 8.327700000000001e-05,
+                "cumulative_s": 0.069475125
+              }
+            }
+          },
+          "final_creations": 129,
+          "active_timeline": "skill_publication_timeline",
+          "timeline_events": 258,
+          "real_installed_trees_verified": 129,
+          "integrity": "ok"
+        }
+      ],
+      "observed_schema": 11,
+      "modules_sha256": {
+        "kairos_skills/mutations.py": "c40ad02361e7c28b0086a5e2b19d86f9493f0412120ac172f4d7b04967c51969",
+        "kairos_state/repositories/skill_mutations.py": "f9bcc815afbd3d7d8b070357340713d5266bae9c7052c7a39e231b742319a7f1"
+      }
+    }
+  ]
+}
