@@ -41,7 +41,7 @@ def install(monkeypatch, tmp_path):
 
     def build(*calls):
         gateway = RoundGateway([mutator_round(*calls), answer_round()])
-        service = make_service(connection, gateway)
+        service = make_service(connection, gateway, skill_catalog_home=tmp_path)
 
         class Client:
             stream = service.stream

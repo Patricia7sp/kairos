@@ -42,7 +42,7 @@ def installed(tmp_path, monkeypatch):
         resources.append(connection)
         rounds = [mutator_round(*calls), answer_round()] if calls else [answer_round()]
         gateway = RoundGateway(rounds)
-        service = make_service(connection, gateway)
+        service = make_service(connection, gateway, skill_catalog_home=home)
         service._context_loader = SimpleNamespace(
             load=lambda turn: ModelSelectionContext(
                 message=turn.override,
@@ -266,7 +266,7 @@ def test_skill_nao_habilita_ferramentas_omitidas(installed, tmp_path, monkeypatc
     assert not marker.exists()
 
 
-def test_sem_selecao_nao_le_catalogo(installed, tmp_path, monkeypatch):
+def test_opt_out_sem_selecao_nao_le_catalogo(installed, tmp_path, monkeypatch):
     gateway, _ = installed()
     original_open = __import__("os").open
 
@@ -276,7 +276,7 @@ def test_sem_selecao_nao_le_catalogo(installed, tmp_path, monkeypatch):
         return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr("os.open", guarded_open)
-    assert main(["run", "--no-experiences", "pedido"]) == 0
+    assert main(["run", "--no-experiences", "--no-skills-catalog", "pedido"]) == 0
     assert gateway.requests[0].messages[-1].content[0].value == "pedido"
 
 
