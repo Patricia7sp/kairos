@@ -55,7 +55,7 @@
 
 **Interfaces:** produzir `capture_optional_skill_catalog(home: Path) -> SkillCatalogSnapshot | None`; `None` somente para home aberto com segurança e `skills` final ausente, ou raiz válida sem candidatos/omissões. Conservar `capture_skill_catalog(home: Path) -> SkillCatalogSnapshot` estrita. Extrair `_capture_skill_catalog(home, *, allow_empty: bool)` e permitir ausência final em `_root`, sem mudar os demais leitores.
 
-- [ ] **RED:** acrescentar `test_optional_empty_preserves_strict_capture`, parametrizado ausente/vazio; `test_optional_invalid_or_unobservable_is_not_empty`, com home ausente, link em componente, apenas entradas inválidas e OSError sanitizado. Asserções centrais:
+- [x] **RED:** acrescentar `test_optional_empty_preserves_strict_capture`, parametrizado ausente/vazio; `test_optional_invalid_or_unobservable_is_not_empty`, com home ausente, link em componente, apenas entradas inválidas e OSError sanitizado. Asserções centrais:
 
 ```python
 assert capture_optional_skill_catalog(home) is None
@@ -64,10 +64,10 @@ with pytest.raises(SkillCatalogError):
 ```
 
   Para os casos inseguros, ambas as APIs levantam `SkillCatalogError`, sem conteúdo ou path privado na mensagem. Injeção de EACCES/EIO altera apenas `os.open` no componente real visado e chama o original nos demais. Comparar snapshot positivo das duas APIs com instalação real.
-- [ ] **Verificar RED:** `.venv/bin/python -m pytest -q tests/test_skill_catalog_io.py`; falhas devem demonstrar API opcional ausente, não erro de fixture.
-- [ ] **GREEN:** compartilhar captura; capturar `FileNotFoundError` somente na abertura ancorada do componente final `skills` quando permitido. Vazio com omissões continua erro; limitações e leitura de assets atuais permanecem.
-- [ ] **Verificar:** repetir o arquivo e `tests/test_skill_catalog.py tests/test_skill_catalog_state.py`; Ruff e diff-check dos arquivos alterados.
-- [ ] **Commit:** `feat(skills): distingue ausência benigna na captura automática`.
+- [x] **Verificar RED:** `.venv/bin/python -m pytest -q tests/test_skill_catalog_io.py`; falhas devem demonstrar API opcional ausente, não erro de fixture.
+- [x] **GREEN:** compartilhar captura; capturar `FileNotFoundError` somente na abertura ancorada do componente final `skills` quando permitido. Vazio com omissões continua erro; limitações e leitura de assets atuais permanecem.
+- [x] **Verificar:** repetir o arquivo e `tests/test_skill_catalog.py tests/test_skill_catalog_state.py`; Ruff e diff-check dos arquivos alterados.
+- [x] **Commit:** `feat(skills): distingue ausência benigna na captura automática`.
 
 ### Task 2: intenção automática e decisão dentro do turno
 
