@@ -1,0 +1,137 @@
+{
+  "revision": "89020109ad1d063f06dba9b685681e15cb22590a",
+  "observed_at": "2026-10-25T02:34:21.873815+00:00",
+  "source_hashes": {
+    "kairos_state/repositories/skill_mutations.py": "546fae0d9c42d7ffce5811963ed3a11d5b98aa92283e33baaf0cf1aec3933cd3",
+    "kairos_state/repositories/skill_record_memo.py": "1eab78e49bbb9dca7b65c660f770a79447fdfbcfd8169b29a9cb028be0f4d430",
+    "kairos_skills/mutations.py": "c40ad02361e7c28b0086a5e2b19d86f9493f0412120ac172f4d7b04967c51969"
+  },
+  "source_matches_git": true,
+  "containers": [
+    {
+      "name": "/kairos",
+      "id": "ab1a88ac960a566ca77d47089178621a71265bd744f9f5dbf46bcae497d28475",
+      "image": "sha256:53e671c6950d5728e66fddff3794a81a28ed9787f75a5fde227ffaeefd5d4464",
+      "started_at": "2026-10-25T02:33:05.984966077Z",
+      "health": "healthy"
+    },
+    {
+      "name": "/kairos-runtime-broker",
+      "id": "2baf67e460565592659b990623872ade1ed04d49121137186539e03fa2736754",
+      "image": "sha256:6ba5177d0d81b4ba1857880fc5b318d938fecaabe3e111ea5315d757b7b1417c",
+      "started_at": "2026-10-25T02:33:11.665665063Z",
+      "health": "healthy"
+    }
+  ],
+  "application_recreated": true,
+  "image_changed": true,
+  "smoke_exit_code": 0,
+  "smoke_output": "smoke: consultando http://100.87.25.101:9119/api/health\nsmoke ok: ok\n",
+  "checkout_revision": "89020109ad1d063f06dba9b685681e15cb22590a",
+  "checkout_tracked_changes": false,
+  "ci": {
+    "run_id": 40153981766,
+    "number": 313,
+    "conclusion": "success",
+    "unit_tests": 4102,
+    "subtests": 6542,
+    "skipped": 24,
+    "deselected": 33,
+    "seconds": 764.24
+  },
+  "komodo": {
+    "job_id": 121053820238,
+    "update_id": "6add6a33d2fd3e9eed2cbe30",
+    "conclusion": "success",
+    "wrapper_commit_field": "?"
+  },
+  "sonar_main": {
+    "quality_gate": {
+      "projectStatus": {
+        "status": "OK",
+        "conditions": [
+          {
+            "status": "OK",
+            "metricKey": "new_reliability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_maintainability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_coverage",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "80",
+            "actualValue": "95.8"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_duplicated_lines_density",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "3",
+            "actualValue": "0.0"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_hotspots_reviewed",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "100",
+            "actualValue": "100.0"
+          }
+        ],
+        "periods": [
+          {
+            "index": 1,
+            "mode": "days",
+            "date": "2026-10-15T12:48:56+0000",
+            "parameter": "30"
+          }
+        ],
+        "ignoredConditions": false
+      }
+    },
+    "analyses": {
+      "paging": {
+        "pageIndex": 1,
+        "pageSize": 1,
+        "total": 12
+      },
+      "analyses": [
+        {
+          "key": "106c9917-ad2b-4ffb-9b9e-790b1266a981",
+          "date": "2026-10-25T02:32:37+0000",
+          "events": [
+            {
+              "key": "AaFw6Qr9K2qEEUTcHLmj",
+              "category": "VERSION",
+              "name": "not provided"
+            }
+          ],
+          "projectVersion": "not provided",
+          "manualNewCodePeriodBaseline": false,
+          "revision": "89020109ad1d063f06dba9b685681e15cb22590a"
+        }
+      ]
+    }
+  }
+}

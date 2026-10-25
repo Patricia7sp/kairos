@@ -114,7 +114,7 @@ do projeto.
 
 ## Próximas etapas
 
-Atualização em 24/10/2026: autoria/MCP, remoção A1, adoção A2 e política B1
+Atualização em 25/10/2026: autoria/MCP, remoção A1, adoção A2 e política B1
 estão integradas. A B2 foi integrada e implantada pelo PR #114 (`da7c58c`),
 com schema v11, coordenação de sync/promoção e recuperação. O PR #115
 (`b7346ad`) entregou o backup síncrono. Seu CI da main e deploy passaram;
@@ -123,9 +123,13 @@ O [checkpoint funcional](functional-progress.md) e o
 [fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md)
 consolidam as evidências e limites atuais. As execuções abaixo são históricas.
 
-A próxima frente registrada é medir o custo das validações do ledger (#109),
-antes de propor seu reuso dentro de uma observação estável. Índice automático,
-`/learn`, curadoria e workflows duráveis permanecem para recortes posteriores.
+O PR #117 (`8902010`) integrou e implantou o reuso transacional de registros
+do ledger no recorte da #109. O gate controlado passou com ganho mediano de
+11,5077% e as 20 validações preservadas; CI, Sonar, deploy e smoke aprovados.
+Ver o [fechamento](superpowers/reports/2026-10-25-fechamento-ledger.md).
+A recomendação de continuidade é definir o índice automático sobre o catálogo
+existente; `/learn`, curadoria e workflows duráveis continuam para recortes
+próprios. Nenhuma dessas funcionalidades recebe implementação presumida.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em

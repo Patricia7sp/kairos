@@ -1,10 +1,10 @@
 # Progresso funcional do Kairos
 
-Atualizado em 24/10/2026. Base integrada e implantada conferida: `main` em
-`b7346adeee312368746fddb3ca7cfe3058c49b99`. Os checkpoints históricos abaixo
+Atualizado em 25/10/2026. Base integrada e implantada conferida: `main` em
+`89020109ad1d063f06dba9b685681e15cb22590a`. Os checkpoints históricos abaixo
 preservam suas datas e evidências; o estado atual está consolidado nesta seção.
 
-## Continuidade em 24/10/2026
+## Continuidade em 25/10/2026
 
 | Entrega | Integração confirmada |
 |---|---|
@@ -22,6 +22,7 @@ preservam suas datas e evidências; o estado atual está consolidado nesta seç�
 | Promoção preserva instalação e quarentena; migração explícita v10 documentada | PR #111, `74fba82`; fecha #110 |
 | B2: publicação coordenada, recuperação, manifesto e backup v11 | PR #114, `da7c58c` |
 | Backup com API síncrona e correção S7493 | PR #115, `b7346ad` |
+| Reuso transacional de registros do ledger, mantendo as validações | PR #117, `8902010` |
 
 A B2 foi integrada e implantada pelo [PR #114](https://github.com/Patricia7sp/kairos/pull/114).
 Sync e promoção usam o coordenador com lock, journal e recuperação por ID;
@@ -39,16 +40,25 @@ fontes instaladas conferidas, backup sintético pelo CLI e smoke aprovados;
 banco íntegro no schema 11. Evidências e limites no
 [fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md).
 
-Próximo recorte: [custo do ledger, #109](https://github.com/Patricia7sp/kairos/issues/109).
-A continuidade solicitada em 24/10 começa pela reprodução da medição em
-revisões v9/v10/v11, com criações reais e perfil separado dos tempos.
-A [baseline foi concluída](superpowers/reports/2026-10-24-skill-writer-benchmark.md),
-com dados brutos e comando reproduzível; a #109 permanece aberta.
-A otimização ainda depende dessa evidência e de definir a observação estável,
-com invalidação e guards de política preservados nas fronteiras de efeitos.
+A [#109](https://github.com/Patricia7sp/kairos/issues/109) foi atendida no
+recorte aprovado pelo [PR #117](https://github.com/Patricia7sp/kairos/pull/117).
+A baseline v9/v10/v11 e as rodadas reprovadas permanecem preservadas. A rodada
+controlada do candidato corrigido passou: ganho mediano de 11,5077%, melhora
+nos três pares de 120, reconstruções 903 → 775 e 20 validações intactas.
+O memo só vive nos callbacks transacionais próprios de `prepare`/`finish`;
+nenhuma revalidação de política ou identidade foi retirada.
 
-Índice automático por padrão, `/learn`, curadoria integrada e workflows duráveis
-continuam pendentes, sem ordem posterior fechada. Ollama permanece adiado.
+O [CI da main #313](https://github.com/Patricia7sp/kairos/actions/runs/40153981766)
+concluiu verde, incluindo deploy no Komodo. Aplicação e broker recriados e
+healthy; checkout e fontes implantadas conferidos; smoke direto aprovado.
+O Sonar confirmou Quality Gate OK para `8902010`, com 95,8% de cobertura nova
+no período da main. Provas e limites no
+[fechamento do ledger](superpowers/reports/2026-10-25-fechamento-ledger.md).
+
+Recomendação de próxima frente: definir o recorte do índice automático de
+skills, sobre o catálogo existente. `/learn`, curadoria e workflows duráveis
+continuam pendentes, sem ordem posterior fechada. Essa recomendação não
+aprova um novo comportamento. Ollama permanece adiado.
 Instalar política em produção e isolar adulteração pelo mesmo UID não fazem
 parte destas entregas.
 
