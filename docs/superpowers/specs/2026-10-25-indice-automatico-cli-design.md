@@ -1,8 +1,9 @@
 # Índice automático de skills no Chat da CLI
 
-Status: abordagem **CLI primeiro** escolhida pela usuária em 25/10/2026.
-Desenho proposto para revisão; a escolha da abordagem não aprova este texto
-nem autoriza implementação, merge ou deploy. Base de runtime examinada:
+Status: desenho aprovado e execução autorizada pela usuária em 25/10/2026
+(“aprovado, pode seguir”). Implementação em fechamento no PR #119, conforme o
+[plano](../plans/2026-10-25-indice-automatico-cli.md); merge e deploy não estão
+autorizados por essa aprovação. Base de runtime examinada:
 `89020109ad1d063f06dba9b685681e15cb22590a`, já implantada. O fechamento
 documental do ledger está no PR #118, separado deste recorte.
 
@@ -229,6 +230,6 @@ conteúdo já registrado na conversa. Proteção contra o mesmo UID, telemetria,
 curadoria, memória em bytes e ganho de latência não são novas garantias deste
 recorte. Não repetir o benchmark do ledger para certificar esta interface.
 
-Após revisão do construtor e aprovação deste desenho escrito, elaborar o
-plano com TDD e executar a implementação. Nenhum código de produto foi alterado
-para produzir esta proposta.
+O construtor revisou a proposta e a usuária aprovou este desenho escrito antes
+do plano e da implementação. A proposta original não alterou código de produto;
+as evidências da execução ficam no plano e no relatório de fechamento.

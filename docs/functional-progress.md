@@ -1,5 +1,20 @@
 # Progresso funcional do Kairos
 
+## Frente atual em 25/10/2026
+
+A base do trabalho é `main` em `8902010`, com o reuso do ledger integrado pelo
+PR #117. O [PR #119](https://github.com/Patricia7sp/kairos/pull/119) continua o
+[índice automático de skills na CLI](superpowers/specs/2026-10-25-indice-automatico-cli-design.md),
+com desenho e execução aprovados. Descoberta opcional e ativação sob posse do
+turno já estão commitadas; a etapa de CLI/interativo está em fechamento local.
+O padrão anuncia somente índice e leitor sob demanda. Force/off explícitos,
+snapshot desde a primeira ativação positiva e capacidades por turno preservam
+os limites existentes. Revisão independente, CI completo e Sonar no SHA final
+compõem o aceite; este registro não declara merge ou deploy do PR #119.
+O fechamento documental anterior permanece separado no PR #118.
+
+## Checkpoint integrado anterior
+
 Atualizado em 24/10/2026. Base integrada e implantada conferida: `main` em
 `b7346adeee312368746fddb3ca7cfe3058c49b99`. Os checkpoints históricos abaixo
 preservam suas datas e evidências; o estado atual está consolidado nesta seção.

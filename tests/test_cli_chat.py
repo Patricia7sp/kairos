@@ -92,7 +92,11 @@ def test_cli_chat_uses_public_service_and_human_stdout(monkeypatch, tmp_path, ca
     assert captured.err == ""
     assert homes == [tmp_path]
     assert fake.close_calls == 1
-    assert fake.envelopes == [InteractionEnvelope(conversation_id="s1", source="cli", content="oi")]
+    assert fake.envelopes == [
+        InteractionEnvelope(
+            conversation_id="s1", source="cli", content="oi", skills_catalog_auto=True
+        )
+    ]
 
 
 def test_cli_maps_only_complete_provider_model_override(monkeypatch, tmp_path, capsys):

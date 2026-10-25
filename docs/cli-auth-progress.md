@@ -123,9 +123,14 @@ O [checkpoint funcional](functional-progress.md) e o
 [fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md)
 consolidam as evidências e limites atuais. As execuções abaixo são históricas.
 
-A próxima frente registrada é medir o custo das validações do ledger (#109),
-antes de propor seu reuso dentro de uma observação estável. Índice automático,
-`/learn`, curadoria e workflows duráveis permanecem para recortes posteriores.
+Atualização em 25/10/2026: o reuso do ledger foi integrado pelo PR #117
+(`8902010`). A frente atual é o índice automático na CLI, com
+[desenho aprovado](superpowers/specs/2026-10-25-indice-automatico-cli-design.md)
+e [plano de execução](superpowers/plans/2026-10-25-indice-automatico-cli.md).
+As duas primeiras tarefas entregaram descoberta opcional estrita e decisão
+de ativação sob posse do turno. A terceira conclui CLI/interativo, documentação,
+validação integrada e revisão independente no PR #119, ainda em rascunho.
+`/learn`, curadoria e workflows duráveis continuam para recortes posteriores.
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em
