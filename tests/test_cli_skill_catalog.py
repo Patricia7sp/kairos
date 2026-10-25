@@ -272,12 +272,15 @@ def test_cli_interactive_propagates_mode_each_turn(installed, tmp_path, monkeypa
         first, second = [
             next(m for m in gateway.requests[i].messages if m.role == "system") for i in (0, 2)
         ]
-        assert first == second and "Descrição nova." not in second.content[0].value
-        assert len(captures) == 2 and captures[0][0] is not captures[1][0]
+        assert first == second
+        assert "Descrição nova." not in second.content[0].value
+        assert len(captures) == 2
+        assert captures[0][0] is not captures[1][0]
         assert captures[1][1] > captures[0][2]
         for capability, _, _ in captures:
+            read = original(capability, "revisar-docs")
             with pytest.raises(SkillCatalogError):
-                asyncio.run(original(capability, "revisar-docs"))
+                asyncio.run(read)
     assert gateway.closed
 
 
@@ -305,8 +308,10 @@ def test_cli_auto_and_off_runtime_have_no_catalog_intent(tmp_path, monkeypatch, 
     flags = ["--no-skills-catalog"] if mode == "off" else []
     assert main(["run", "--session", "runtime-session", "--no-experiences", *flags, "pedido"]) == 0
     assert len(seen) == 1
-    assert not seen[0].skills_catalog and not seen[0].skills_catalog_auto
-    assert len(runtime.submitted) == 1 and model.envelopes == []
+    assert not seen[0].skills_catalog
+    assert not seen[0].skills_catalog_auto
+    assert len(runtime.submitted) == 1
+    assert model.envelopes == []
 
 
 @pytest.mark.parametrize("kind", ["empty", "unsupported", "unknown"])

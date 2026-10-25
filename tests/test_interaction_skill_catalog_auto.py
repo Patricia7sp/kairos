@@ -52,18 +52,17 @@ def test_invalid_selection_remains_an_error_for_each_catalog_mode(tmp_path, monk
             lambda *_args, **_kwargs: pytest.fail("consultou catálogo"),
         )
         try:
+            envelope = InteractionEnvelope(
+                "selection",
+                "cli",
+                "pedido",
+                skills_catalog=mode == "on",
+                skills_catalog_auto=mode == "auto",
+            )
             with pytest.raises(ModelSelectionUnavailableError):
-                await collect(
-                    service,
-                    InteractionEnvelope(
-                        "selection",
-                        "cli",
-                        "pedido",
-                        skills_catalog=mode == "on",
-                        skills_catalog_auto=mode == "auto",
-                    ),
-                )
-            assert gateway.requests == [] and gateway.preparations == 0
+                await collect(service, envelope)
+            assert gateway.requests == []
+            assert gateway.preparations == 0
         finally:
             await _close(db, service)
 
@@ -82,7 +81,8 @@ def test_auto_positive_reuses_snapshot_and_reads_on_demand(tmp_path, async_mode)
             assert not any(e.kind == "turn_error" for e in events)
             first, second = gateway.requests
             index = [m for m in first.messages if m.role == "system"]
-            assert len(index) == 1 and "Revise documentos." in index[0].content[0].value
+            assert len(index) == 1
+            assert "Revise documentos." in index[0].content[0].value
             assert "procedimento privado" not in index[0].content[0].value
             assert [t["function"]["name"] for t in first.tools] == ["skill_view"]
             assert [m for m in second.messages if m.role == "system"] == index
@@ -221,8 +221,9 @@ def test_auto_corruption_and_invalid_installation_refuse_before_provider(
                 gateway.preparations,
                 db.execute("SELECT COUNT(*) FROM messages").fetchone()[0],
             )
+            envelope = auto_turn()
             with pytest.raises(InteractionServiceError) as error:
-                await collect(service, auto_turn())
+                await collect(service, envelope)
             assert (
                 len(gateway.requests),
                 gateway.preparations,
@@ -348,18 +349,17 @@ def test_router_refuses_auto_catalog_intent_for_runtime(tmp_path):
 
     async def scenario():
         try:
+            envelope = InteractionEnvelope(
+                "runtime-session",
+                "cli",
+                "pedido",
+                skills_catalog_auto=True,
+                idempotency_key="fixture",
+            )
             with pytest.raises(RuntimeErrorInfo):
-                await collect(
-                    router,
-                    InteractionEnvelope(
-                        "runtime-session",
-                        "cli",
-                        "pedido",
-                        skills_catalog_auto=True,
-                        idempotency_key="fixture",
-                    ),
-                )
-            assert model.envelopes == [] and runtime.submitted == []
+                await collect(router, envelope)
+            assert model.envelopes == []
+            assert runtime.submitted == []
         finally:
             await router.aclose()
 
