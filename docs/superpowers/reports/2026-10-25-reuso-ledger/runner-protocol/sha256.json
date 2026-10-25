@@ -1,0 +1,17 @@
+{
+  "artifact.json": "1bc898075f2d0b9eeb66fa6bc44707d0d860a680a57aa5b3dfa7476ffca8974a",
+  "skill-writer-environment.json": "e466be1a1d167cca487a76fb7237c9322a3bcbdf2e86a665e6b99f935528f1ec",
+  "skill-writer-pairs/pair-1/baseline.json": "bb716d77211b0619f8c93e8824819ffde9b69e184a1acb26125d1bc3aa93ce9e",
+  "skill-writer-pairs/pair-1/baseline.log": "9c52cb8c651d5588aff749cfc794182e7a9b6223e03f6ceb82e8822cd71138ba",
+  "skill-writer-pairs/pair-1/candidate.json": "bcf5e134a86e531ee75d5071d0e77adc3826f658453a8f4b9da729613d8a7bf3",
+  "skill-writer-pairs/pair-1/candidate.log": "cf0b13b9ffadaba8dad0cfc393e615d04d189ee6dc5d9058ba543fff1c2da4d9",
+  "skill-writer-pairs/pair-2/baseline.json": "5f12fe43103a1e8f35cf9efcdb0c7ad81fd67def9b966e7330ec349de8cdc5af",
+  "skill-writer-pairs/pair-2/baseline.log": "fe47558d84e5e453e486b4278b089e043ac0d41061194d78f455d7421e05c7ca",
+  "skill-writer-pairs/pair-2/candidate.json": "e14f058b6afab8a5264ff4d9f6358217a2644890abb06d2ac883e9f2c63783a2",
+  "skill-writer-pairs/pair-2/candidate.log": "e1d2a6ea2577d14c7330e90dd4080d6d58d5ec60b49ecb41966b6eb4bb97575a",
+  "skill-writer-pairs/pair-3/baseline.json": "381454c35b4afb7eddd009e68f7080b5a13061e8d08e2f561c47bc88594822e4",
+  "skill-writer-pairs/pair-3/baseline.log": "93e4ddff8ab4eb59c19b4bec76524e762c79f9104f8cb8d6b69adacf743316de",
+  "skill-writer-pairs/pair-3/candidate.json": "2438c66bba05ba4ab66ddf9bfeb114f654aba732e7ab16f1ad0aea5f17867590",
+  "skill-writer-pairs/pair-3/candidate.log": "41a5d06bd0ca7bdc00d45f774da058e438c975d738bae6bf113986bb7a886e86",
+  "skill-writer-pairs/summary.json": "9fb476d544052b4f3a0f4d44eb59b773ae43d4a16f5b26d849570bb64bbaa3ef"
+}

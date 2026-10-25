@@ -1,0 +1,51 @@
+{
+  "baseline_sha": "b7346adeee312368746fddb3ca7cfe3058c49b99",
+  "candidate_sha": "0e2c9f265f8c61e05896204c9cc75e82e00d1df8",
+  "script_sha256": "ca919b8a0caa4e23d01cad223274177d7b7122856d6b62a1039848ff7bddeb83",
+  "driver_sha256": "0d1f55fa583dda210cf669e95ebaeb5b922194fab1e3ded605d22c0321f8b499",
+  "measurements": [
+    "pair-1/baseline.json",
+    "pair-1/candidate.json",
+    "pair-2/candidate.json",
+    "pair-2/baseline.json",
+    "pair-3/baseline.json",
+    "pair-3/candidate.json"
+  ],
+  "accepted": true,
+  "failures": [],
+  "paired_gain_percent": {
+    "0": [
+      4.025450978153577,
+      2.6872345840045098,
+      1.604871931243484
+    ],
+    "40": [
+      11.032399506645314,
+      12.056371413326449,
+      9.548046848412348
+    ],
+    "120": [
+      11.507711479836553,
+      10.839039810651297,
+      12.27973190318388
+    ]
+  },
+  "paired_regression_ms": {
+    "0": [
+      -2.813689999999994,
+      -1.8703200000000066,
+      -1.1015189999999961
+    ],
+    "40": [
+      -32.982167000000004,
+      -36.71946300000002,
+      -28.239705999999956
+    ],
+    "120": [
+      -86.50932599999999,
+      -80.6263909999999,
+      -92.22029699999996
+    ]
+  },
+  "median_gain_percent": 11.507711479836553
+}

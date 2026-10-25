@@ -1,0 +1,20 @@
+{
+  "candidate_sha": "0e2c9f265f8c61e05896204c9cc75e82e00d1df8",
+  "baseline_sha": "b7346adeee312368746fddb3ca7cfe3058c49b99",
+  "runner_os": "Linux",
+  "runner_arch": "X64",
+  "run_id": "40148739757",
+  "run_attempt": "1",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "python": "3.11.17",
+  "available_cpus": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "selected_cpus": [
+    0
+  ],
+  "gc_enabled": true
+}

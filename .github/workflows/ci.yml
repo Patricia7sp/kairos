@@ -236,10 +236,12 @@ jobs:
         with:
           enable-cache: true
       - name: Instalar ambiente congelado
-        run: uv sync --python "$PYTHON_VERSION" --extra dev --frozen
+        # O harness importa cada revisão extraída por SHA; não usa a instalação
+        # editável do checkout. Dependências sem wheel devem falhar aqui.
+        run: uv sync --python "$PYTHON_VERSION" --extra dev --frozen --no-build --no-install-project
       - name: Medir sequencialmente na mesma CPU do runner exclusivo
         run: |
-          env -u COVERAGE_PROCESS_START -u COVERAGE_FILE -u KAIROS_COVERAGE_ROOT uv run --frozen python - <<'PY'
+          env -u COVERAGE_PROCESS_START -u COVERAGE_FILE -u KAIROS_COVERAGE_ROOT .venv/bin/python - <<'PY'
           import gc
           import json
           import os
