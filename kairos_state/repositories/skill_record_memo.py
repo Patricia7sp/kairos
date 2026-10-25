@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from kairos_skills.removal_contract import CommonRecord
 
 T = TypeVar("T")
+_OBSERVATION_CHANGED = "Observação do ledger mudou; operação recusada."
+
+
+class RecordObservationError(SkillMutationError):
+    """Falha operacional originada na observação privada do memo."""
 
 
 @dataclass(frozen=True)
@@ -25,37 +30,39 @@ class DatabaseStamp:
     eligible: bool
 
 
+def _file_observation(filename, *, required):
+    try:
+        info = os.stat(filename, follow_symlinks=False)
+    except OSError as error:
+        if error.errno == errno.ENOENT:
+            return not required, None
+        if error.errno in (errno.EACCES, errno.ENOTDIR, errno.ELOOP):
+            return False, None
+        raise RecordObservationError(
+            "io", "Não foi possível observar o ledger com segurança."
+        ) from None
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        return False, None
+    return True, (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def _file_stamps(filename):
     if not filename:
         return None
     entries = []
     for suffix in ("", "-wal", "-shm", "-journal"):
-        try:
-            info = os.stat(filename + suffix, follow_symlinks=False)
-        except OSError as error:
-            if error.errno == errno.ENOENT:
-                if not suffix:
-                    return None
-                entries.append(None)
-                continue
-            if error.errno in (errno.EACCES, errno.ENOTDIR, errno.ELOOP):
-                return None
-            raise SkillMutationError(
-                "io", "Não foi possível observar o ledger com segurança."
-            ) from None
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        observable, stamp = _file_observation(filename + suffix, required=not suffix)
+        if not observable:
             return None
-        entries.append(
-            (
-                info.st_dev,
-                info.st_ino,
-                info.st_mode,
-                info.st_nlink,
-                info.st_size,
-                info.st_mtime_ns,
-                info.st_ctime_ns,
-            )
-        )
+        entries.append(stamp)
     return tuple(entries)
 
 
@@ -134,12 +141,12 @@ class RecordMemo:
             not self._connection.in_transaction
             or self._connection.total_changes != self._batch.sql_epoch[1]
         ):
-            raise SkillMutationError("conflict", "Observação do ledger mudou; operação recusada.")
+            raise RecordObservationError("conflict", _OBSERVATION_CHANGED)
 
     def _check_after_load(self, before, loader, record):
         after = observe_database_stamp(self._connection)
         if after.sql_epoch != before.sql_epoch:
-            raise SkillMutationError("conflict", "Observação do ledger mudou; operação recusada.")
+            raise RecordObservationError("conflict", _OBSERVATION_CHANGED)
         if not after.eligible or after.files != before.files:
             self._disable()
             return loader()
@@ -182,6 +189,7 @@ class RecordMemo:
             self._enabled
             and type(record) is SkillMutationRecord
             and record.draft.home_id == self._home_id
+            and record.operation_id == operation_id
             and self.entry_count < self._limit
         ):
             self._records[key] = record
@@ -201,9 +209,7 @@ class RecordMemo:
             finally:
                 self._batch = None
             if after.sql_epoch != before.sql_epoch:
-                raise SkillMutationError(
-                    "conflict", "Observação do ledger mudou; operação recusada."
-                )
+                raise RecordObservationError("conflict", _OBSERVATION_CHANGED)
             if not self._enabled or not after.eligible or after.files != before.files:
                 self._disable()
                 return uncached()

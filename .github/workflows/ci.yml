@@ -218,6 +218,78 @@ jobs:
       - name: uv lock --check
         run: uv lock --check
 
+  benchmark-ledger:
+    name: Benchmark pareado do ledger (opt-in)
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark-ledger')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAIROS_BENCHMARK_BASELINE: b7346adeee312368746fddb3ca7cfe3058c49b99
+      KAIROS_BENCHMARK_CANDIDATE: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - name: Instalar ambiente congelado
+        run: uv sync --python "$PYTHON_VERSION" --extra dev --frozen
+      - name: Medir sequencialmente na mesma CPU do runner exclusivo
+        run: |
+          env -u COVERAGE_PROCESS_START -u COVERAGE_FILE -u KAIROS_COVERAGE_ROOT uv run --frozen python - <<'PY'
+          import gc
+          import json
+          import os
+          import platform
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          candidate = os.environ["KAIROS_BENCHMARK_CANDIDATE"]
+          observed = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if observed != candidate or sys.gettrace() is not None or sys.getprofile() is not None:
+              raise RuntimeError("benchmark_checkout_or_tracing_invalid")
+          if not gc.isenabled():
+              raise RuntimeError("benchmark_garbage_collection_disabled")
+          available = sorted(os.sched_getaffinity(0))
+          os.sched_setaffinity(0, {available[0]})
+          environment = {
+              "candidate_sha": candidate,
+              "baseline_sha": os.environ["KAIROS_BENCHMARK_BASELINE"],
+              "runner_os": os.environ["RUNNER_OS"],
+              "runner_arch": os.environ["RUNNER_ARCH"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "platform": platform.platform(),
+              "python": platform.python_version(),
+              "available_cpus": available,
+              "selected_cpus": sorted(os.sched_getaffinity(0)),
+              "gc_enabled": gc.isenabled(),
+          }
+          temporary = Path(os.environ["RUNNER_TEMP"])
+          (temporary / "skill-writer-environment.json").write_text(json.dumps(environment, indent=2) + "\n")
+          print(json.dumps({"event": "benchmark_environment", **environment}), flush=True)
+          os.execv(sys.executable, [
+              sys.executable, "-m", "scripts.benchmark_skill_writer_pairs",
+              "--baseline", environment["baseline_sha"],
+              "--candidate", candidate,
+              "--output-dir", str(temporary / "skill-writer-pairs"),
+          ])
+          PY
+      - name: Preservar todos os pares e o ambiente
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-writer-benchmark-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/skill-writer-pairs/
+            ${{ runner.temp }}/skill-writer-environment.json
+          if-no-files-found: error
+          retention-days: 90
+
   # SonarQube Cloud: observabilidade de cobertura/duplicação/complexidade.
   # ADVISORY — não bloqueia merge e NÃO entra em `deploy.needs`. Consome o
   # `coverage.xml` do job `tests` por artefato; nunca reexecuta a suíte. Sem

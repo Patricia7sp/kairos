@@ -1,5 +1,6 @@
 """Transações reais conservam validações e só reutilizam reconstruções estáveis."""
 
+import errno
 import json
 import multiprocessing
 import os
@@ -304,3 +305,69 @@ class RecordMemoIntegrationTests(RecordMemoFixture):
                 os.replace(replacement, self.home / "state.db")
                 self.assertEqual(memo.load(record.operation_id, modern=True, loader=loader), record)
         self.assertEqual(caught.exception.kind, "conflict")
+
+    def test_observation_io_error_retains_category_through_real_prepare(self):
+        original_stat = os.stat
+        database = str(self.home / "state.db")
+
+        def unavailable(path, *args, **kwargs):
+            if self.repo._record_memo is not None and path == database:
+                raise OSError(errno.EIO, "private-observation-sentinel")
+            return original_stat(path, *args, **kwargs)
+
+        self.source.write_text(creation_text(name="unreadable-observation"))
+        with (
+            patch("os.stat", unavailable),
+            self.assertRaises(SkillMutationError) as caught,
+        ):
+            self.service.add(self.source, actor=Actor.USER_FOREGROUND)
+        self.assertEqual(caught.exception.kind, "io")
+        self.assertNotIn("private-observation-sentinel", str(caught.exception))
+        self.assertFalse((self.home / "skills/unreadable-observation").exists())
+        self.assertEqual(len(self.repo.history()), len(self.records))
+        self.assertIsNone(self.repo._record_memo)
+
+    def test_observation_conflict_retains_category_and_rolls_back_real_dml(self):
+        self.db.execute("CREATE TABLE observation_probe(value)")
+        original_load = self.repo._get_validated_uncached
+        changed = False
+
+        def changing(operation_id, *, modern):
+            nonlocal changed
+            result = original_load(operation_id, modern=modern)
+            if self.repo._record_memo is not None and not changed:
+                changed = True
+                self.db.execute("INSERT INTO observation_probe VALUES(1)")
+            return result
+
+        self.source.write_text(creation_text(name="changed-observation"))
+        with (
+            patch.object(self.repo, "_get_validated_uncached", changing),
+            self.assertRaises(SkillMutationError) as caught,
+        ):
+            self.service.add(self.source, actor=Actor.USER_FOREGROUND)
+        self.assertTrue(changed)
+        self.assertEqual(caught.exception.kind, "conflict")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM observation_probe").fetchone()[0], 0)
+        self.assertFalse((self.home / "skills/changed-observation").exists())
+        self.assertEqual(len(self.repo.history()), len(self.records))
+        self.assertIsNone(self.repo._record_memo)
+
+    def test_unmarked_validator_error_keeps_existing_corruption_classification(self):
+        original_load = self.repo._get_validated_uncached
+
+        def invalid(operation_id, *, modern):
+            result = original_load(operation_id, modern=modern)
+            if self.repo._record_memo is not None:
+                raise SkillMutationError("io", "validator-sentinel")
+            return result
+
+        self.source.write_text(creation_text(name="invalid-validator"))
+        with (
+            patch.object(self.repo, "_get_validated_uncached", invalid),
+            self.assertRaises(SkillMutationError) as caught,
+        ):
+            self.service.add(self.source, actor=Actor.USER_FOREGROUND)
+        self.assertEqual(caught.exception.kind, "corrupt")
+        self.assertFalse((self.home / "skills/invalid-validator").exists())
+        self.assertEqual(len(self.repo.history()), len(self.records))

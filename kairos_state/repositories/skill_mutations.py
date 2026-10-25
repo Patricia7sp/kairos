@@ -47,7 +47,12 @@ from kairos_state.writes import write_with_retry
 def corrupt_errors():
     try:
         yield
-    except (SkillMutationError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, KeyError, RecursionError) as error:
+        if isinstance(error, SkillMutationError) and error.kind in {"io", "conflict"}:
+            from kairos_state.repositories.skill_record_memo import RecordObservationError
+
+            if isinstance(error, RecordObservationError):
+                raise
         raise SkillMutationError(
             "corrupt", "Ledger de skills incoerente; operação recusada e arquivos preservados."
         ) from None

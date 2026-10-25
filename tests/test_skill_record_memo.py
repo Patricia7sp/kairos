@@ -269,3 +269,40 @@ class RecordMemoTests(RecordMemoFixture):
                     self.load_record(memo, record)
             finally:
                 self.db.set_authorizer(None)
+
+    def test_record_from_another_key_does_not_poison_subsequent_load(self):
+        requested, other, _ = self.records
+        with self.memo_scope() as memo:
+            wrong = memo.load(
+                requested.operation_id,
+                modern=True,
+                loader=lambda: self.repo._get_validated(other.operation_id, modern=True),
+            )
+            self.assertEqual(wrong, other)
+            self.assertEqual(self.load_record(memo, requested), requested)
+            self.assertEqual(self.loads[requested.operation_id], 1)
+
+    def test_unobservable_sidecar_is_not_treated_as_absent(self):
+        record = self.records[0]
+        target = self.root / "sidecar-target"
+        target.write_bytes(b"")
+        sidecar = self.home / "state.db-journal"
+        for kind in ("symlink", "hardlink", "directory"):
+            with self.subTest(kind=kind):
+                before = self.loads[record.operation_id]
+                with self.memo_scope() as memo:
+                    if kind == "symlink":
+                        sidecar.symlink_to(target)
+                    elif kind == "hardlink":
+                        os.link(target, sidecar)
+                    else:
+                        sidecar.mkdir()
+                    try:
+                        self.assertEqual(self.load_record(memo, record), record)
+                        self.assertEqual(self.load_record(memo, record), record)
+                    finally:
+                        if kind == "directory":
+                            sidecar.rmdir()
+                        else:
+                            sidecar.unlink()
+                self.assertEqual(self.loads[record.operation_id] - before, 2)

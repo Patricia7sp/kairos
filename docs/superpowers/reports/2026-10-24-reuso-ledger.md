@@ -1,5 +1,9 @@
 # Reuso transacional do ledger — resultado não aceito
 
+Este arquivo preserva a avaliação histórica da candidata `e86f49f`.
+A [correção e nova avaliação solicitadas em 25/10](2026-10-25-reuso-ledger-correcao.md)
+ficam separadas; não reclassificam os resultados abaixo.
+
 **O ganho não foi consistente nos três pares. A candidata permanece experimental,
 sem recomendação de merge ou deploy.** Na rodada válida, as reconstruções do
 cenário 120 caíram de 903 para 775 e as 20 validações da timeline foram
