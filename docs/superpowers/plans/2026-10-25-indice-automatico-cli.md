@@ -75,19 +75,19 @@ with pytest.raises(SkillCatalogError):
 
 **Interfaces:** consumir T1. Produzir `InteractionEnvelope.skills_catalog_auto: bool = False`, mutuamente exclusivo com `skills_catalog`, ambos somente `source="cli"`. Acrescentar `InteractionEventKind.SKILL_CATALOG_SKIPPED` e campo opcional `catalog_skip_reason`, aceitando somente `empty`/`model_tools_unavailable` para esse evento. Produzir `prepare_skill_catalog_turn(..., allow_empty: bool = False) -> SkillCatalogTurn | None`, mantendo default estrito e reusando snapshot positivo antes da captura. O serviço guarda motivo efêmero por turno, sem cache global ou persistência nova.
 
-- [ ] **RED de contrato:** `test_auto_intent_is_strict_exclusive_and_cli_only` exige rejeição de inteiro/string/combinação on+auto e de fontes não CLI; `test_skipped_event_validates_and_serializes_reason` verifica motivo tipado, ausência de nomes/digest e campos antigos do protocolo preservados.
-- [ ] **RED da vertical:** novo arquivo reusa `_service`, `_view` e `_close` dos testes reais do catálogo; parametrizar persistência síncrona/assíncrona. Testes e invariantes:
+- [x] **RED de contrato:** `test_auto_intent_is_strict_exclusive_and_cli_only` exige rejeição de inteiro/string/combinação on+auto e de fontes não CLI; `test_skipped_event_validates_and_serializes_reason` verifica motivo tipado, ausência de nomes/digest e campos antigos do protocolo preservados.
+- [x] **RED da vertical:** novo arquivo reusa `_service`, `_view` e `_close` dos testes reais do catálogo; parametrizar persistência síncrona/assíncrona. Testes e invariantes:
   - `test_auto_positive_reuses_snapshot_and_reads_on_demand`: provider recebe só índice/`skill_view`; segunda rodada recebe corpo lido e o mesmo bloco system.
   - `test_auto_unsupported_model_skips_without_catalog_io`: tools False/None; spies em captura e `SkillCatalogRepository.get` falham se chamados; provider normal responde, um skip entre start e delta.
   - `test_auto_empty_can_activate_later_but_positive_snapshot_stays_fixed`: ausência/vazio não cria linha; instalar ativa; editar, desligar, reiniciar e religar preserva digest/bytes antigos.
   - `test_auto_corruption_and_invalid_installation_refuse_before_provider`: snapshot adulterado/cache órfão/instalação só inválida recusam; sem fallback de captura, mensagem sanitizada.
   - `test_auto_retries_keep_one_selection_one_notice_and_one_index`: resolver spy chama original; retry real do gateway e rodada de leitura preservam seleção/credencial/índice, aviso único.
   - `test_auto_capability_closes_on_cancel_or_lost_ownership`: reutilizar padrões de cancelamento/perda de posse existentes; leitor capturado recusa após fechamento.
-- [ ] **Verificar RED:** arquivos novos/alterados com `pytest -q`; registrar asserções ou construção dos novos contratos ausentes, sem aceitar falha de infraestrutura como RED.
-- [ ] **GREEN:** em `_stream_owned`, resolver seleção uma vez para on/auto. Auto inapto pula antes de qualquer consulta/handler de catálogo. Modelo apto exige handler nativo; prepara snapshot/capacidade com `allow_empty` só para auto. Derivar envelope efetivo com auto=False e on igual à capacidade real; passar a mesma seleção ao loop. ContextVars efêmeros e reset/finally atuais preservam isolamento.
-- [ ] **Aviso e router:** emitir ready/skip no ponto de aviso depois de start, sem duplicar por retry; serializar skip com motivo validado. Runtime rejeita novo campo mesmo em dispatch direto. Off não consulta nem anuncia catálogo.
-- [ ] **Verificar:** novo arquivo, `tests/test_interaction_skill_catalog.py`, `tests/test_interaction_contract.py`, `tests/test_interaction_service.py tests/test_interaction_router.py tests/test_interaction_retry.py tests/test_interaction_turn_ownership.py`; referências de assets, corrupção, concorrência e cancelamento existentes continuam passando. Ruff/format/diff-check.
-- [ ] **Commit:** `feat(chat): resolve catálogo automático dentro da posse do turno`.
+- [x] **Verificar RED:** arquivos novos/alterados com `pytest -q`; registrar asserções ou construção dos novos contratos ausentes, sem aceitar falha de infraestrutura como RED.
+- [x] **GREEN:** em `_stream_owned`, resolver seleção uma vez para on/auto. Auto inapto pula antes de qualquer consulta/handler de catálogo. Modelo apto exige handler nativo; prepara snapshot/capacidade com `allow_empty` só para auto. Derivar envelope efetivo com auto=False e on igual à capacidade real; passar a mesma seleção ao loop. ContextVars efêmeros e reset/finally atuais preservam isolamento.
+- [x] **Aviso e router:** emitir ready/skip no ponto de aviso depois de start, sem duplicar por retry; serializar skip com motivo validado. Runtime rejeita novo campo mesmo em dispatch direto. Off não consulta nem anuncia catálogo.
+- [x] **Verificar:** novo arquivo, `tests/test_interaction_skill_catalog.py`, `tests/test_interaction_contract.py`, `tests/test_interaction_service.py tests/test_interaction_router.py tests/test_interaction_retry.py tests/test_interaction_turn_ownership.py`; referências de assets, corrupção, concorrência e cancelamento existentes continuam passando. Ruff/format/diff-check.
+- [x] **Commit:** `feat(chat): resolve catálogo automático dentro da posse do turno`.
 
 ### Task 3: CLI automática, interativo, compatibilidade e entrega
 

@@ -52,6 +52,46 @@ def test_envelope_exige_conversa_e_conteudo():
         InteractionEnvelope(conversation_id="", source="web", content="")
 
 
+def test_auto_intent_is_strict_exclusive_and_cli_only():
+    envelope = InteractionEnvelope("s", "cli", "pedido", skills_catalog_auto=True)
+    assert envelope.skills_catalog_auto is True
+    assert envelope.skills_catalog is False
+    assert InteractionEnvelope("s", "web", "pedido").skills_catalog_auto is False
+    for value in (1, "auto", None):
+        with pytest.raises(TypeError):
+            InteractionEnvelope("s", "cli", "pedido", skills_catalog_auto=value)
+    for source in ("web", "telegram", "gateway"):
+        with pytest.raises(ValueError):
+            InteractionEnvelope("s", source, "pedido", skills_catalog_auto=True)
+    with pytest.raises(ValueError):
+        InteractionEnvelope("s", "cli", "pedido", skills_catalog=True, skills_catalog_auto=True)
+
+
+def test_skipped_event_validates_and_serializes_reason():
+    from kairos_integration.event_protocol import interaction_event_to_json
+
+    for reason in ("empty", "model_tools_unavailable"):
+        event = InteractionEvent(
+            kind="skill_catalog_skipped", conversation_id="s", catalog_skip_reason=reason
+        )
+        assert interaction_event_to_json(event) == {
+            "type": "skill_catalog_skipped",
+            "protocol": 1,
+            "session_id": "s",
+            "reason": reason,
+        }
+    for reason in (None, "private/path", 1, []):
+        with pytest.raises(ValueError):
+            InteractionEvent(kind="skill_catalog_skipped", catalog_skip_reason=reason)
+    with pytest.raises(ValueError):
+        InteractionEvent(kind="delta", catalog_skip_reason="empty")
+    assert interaction_event_to_json(InteractionEvent(kind="delta", text="ok")) == {
+        "type": "delta",
+        "protocol": 1,
+        "text": "ok",
+    }
+
+
 def test_provider_finish_nao_vira_evento_duplicado():
     assert (
         InteractionEvent.from_provider(ProviderEvent(kind="finish", finish_reason="stop")) is None

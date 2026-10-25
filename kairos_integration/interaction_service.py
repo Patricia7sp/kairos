@@ -204,6 +204,9 @@ class InteractionService:
         self._turn_catalog: ContextVar[SkillCatalogTurn | None] = ContextVar(
             f"kairos-turn-catalog-{id(self)}", default=None
         )
+        self._turn_catalog_skip: ContextVar[str | None] = ContextVar(
+            f"kairos-turn-catalog-skip-{id(self)}", default=None
+        )
         self._billing_base_url = billing_base_url
         self._billing_mode = billing_mode
         self._retry_policy = retry_policy or RetryPolicy()
@@ -350,27 +353,43 @@ class InteractionService:
             finally:
                 self._turn_stream_hooks.reset(token)
 
+    async def _prepare_catalog(
+        self, envelope: InteractionEnvelope
+    ) -> tuple[InteractionSelectionSnapshot | None, SkillCatalogTurn | None, str | None]:
+        if not (envelope.skills_catalog or envelope.skills_catalog_auto):
+            return None, None, None
+        selection = self._resolve_snapshot(envelope)
+        if envelope.skills_catalog_auto and not self._catalog_model_supports_tools(selection.ref):
+            return selection, None, "model_tools_unavailable"
+        self._require_catalog_model(selection.ref)
+        if self._skill_catalog_home is None:
+            raise InteractionServiceError(
+                "skills_catalog", "Home do catálogo não configurado.", retryable=False
+            )
+        try:
+            catalog = await prepare_skill_catalog_turn(
+                envelope,
+                home=self._skill_catalog_home,
+                repository=self._skill_catalogs,
+                persistence=self._persistence,
+                allow_empty=envelope.skills_catalog_auto,
+            )
+        except SkillCatalogError as exc:
+            raise InteractionServiceError("skills_catalog", str(exc), retryable=False) from None
+        if catalog is None and envelope.skills_catalog:
+            raise InteractionServiceError(
+                "skills_catalog", "Catálogo exigido indisponível.", retryable=False
+            )
+        return selection, catalog, "empty" if catalog is None else None
+
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
         from kairos_tools.skill_view import skill_catalog_scope
 
-        catalog = None
-        initial_snapshot = None
-        if envelope.skills_catalog:
-            initial_snapshot = self._resolve_snapshot(envelope)
-            self._require_catalog_model(initial_snapshot.ref)
-            if self._skill_catalog_home is None:
-                raise InteractionServiceError(
-                    "skills_catalog", "Home do catálogo não configurado.", retryable=False
-                )
-            try:
-                catalog = await prepare_skill_catalog_turn(
-                    envelope,
-                    home=self._skill_catalog_home,
-                    repository=self._skill_catalogs,
-                    persistence=self._persistence,
-                )
-            except SkillCatalogError as exc:
-                raise InteractionServiceError("skills_catalog", str(exc), retryable=False) from None
+        initial_snapshot, catalog, skip_reason = await self._prepare_catalog(envelope)
+        if envelope.skills_catalog_auto:
+            envelope = replace(
+                envelope, skills_catalog=catalog is not None, skills_catalog_auto=False
+            )
 
         async def view(*args, **kwargs):
             if catalog is None or self._turn_ownership.is_lost():
@@ -385,6 +404,7 @@ class InteractionService:
             return page
 
         token = self._turn_catalog.set(catalog)
+        skip_token = self._turn_catalog_skip.set(skip_reason)
         try:
             with skill_catalog_scope(view if catalog is not None else None):
                 async with aclosing(self._stream_owned_loop(envelope, initial_snapshot)) as stream:
@@ -394,6 +414,7 @@ class InteractionService:
             if catalog is not None:
                 catalog.close()
             self._turn_catalog.reset(token)
+            self._turn_catalog_skip.reset(skip_token)
 
     async def _stream_owned_loop(
         self,
@@ -1249,10 +1270,13 @@ class InteractionService:
             return WEB_SEARCH_TOOLS + catalog_tools
         return catalog_tools
 
+    def _catalog_model_supports_tools(self, ref: ProviderModelRef) -> bool:
+        model = self._resolver._catalog.find(ref)
+        return model.capabilities.tools is True
+
     def _require_catalog_model(self, ref: ProviderModelRef) -> None:
         self._catalog_tool()
-        model = self._resolver._catalog.find(ref)
-        if model.capabilities.tools is not True:
+        if not self._catalog_model_supports_tools(ref):
             raise InteractionServiceError(
                 "skills_catalog",
                 "Catálogo exige um modelo com suporte confirmado a ferramentas; selecione outro modelo.",
@@ -1279,6 +1303,12 @@ class InteractionService:
 
         catalog = self._turn_catalog.get()
         if catalog is None:
+            if reason := self._turn_catalog_skip.get():
+                return InteractionEvent(
+                    kind="skill_catalog_skipped",
+                    conversation_id=conversation_id,
+                    catalog_skip_reason=reason,
+                )
             return None
         fixed = catalog.snapshot
         return InteractionEvent(

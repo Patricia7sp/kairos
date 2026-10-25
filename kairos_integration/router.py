@@ -92,6 +92,7 @@ class InteractionRouter:
             or envelope.tools
             or envelope.skills
             or envelope.skills_catalog
+            or envelope.skills_catalog_auto
             or any(key in envelope.parameters for key in _IDENTITY_PARAMETERS)
         ):
             raise RuntimeErrorInfo("invalid_event", "envelope de runtime inválido", False)
