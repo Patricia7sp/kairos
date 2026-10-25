@@ -78,6 +78,7 @@ def cmd_doctor(args) -> int:
     from kairos_state import connect, read_schema_version
     from kairos_state.contention import get_write_contention_stats
     from kairos_state.migrations import migrate
+    from kairos_state.writes import write_with_retry
 
     achados: list[str] = []
     db_path = _home() / "state.db"
@@ -87,7 +88,7 @@ def cmd_doctor(args) -> int:
         try:
             versao = read_schema_version(conn)
             if versao is None:
-                migrate(conn)
+                write_with_retry(lambda: migrate(conn), detail="doctor: inicializar schema")
                 versao = read_schema_version(conn)
             modo = conn.execute("PRAGMA journal_mode").fetchone()[0]
             fks = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])

@@ -1,0 +1,30 @@
+{
+  "modes": [
+    "auto",
+    "on",
+    "off"
+  ],
+  "network": "none",
+  "smoke": "passed",
+  "source_sha256": {
+    "kairos_cli/chat.py": "5d414e02dd8377786457b1ce98206f65abca4a9ec7fb28a49b1a6dc549a864aa",
+    "kairos_cli/handlers.py": "7653ce3bc0ec766cd166d44de6f29db1ab9bb150a9d9b424f3bbaa8dfebea52f",
+    "kairos_cli/main.py": "a05e3e378a3b0261b04bcd057aa99e3347e940066420c510da4e0a4c820edb5d",
+    "kairos_integration/interaction_service.py": "17fb05f81941663011f309bf12e2385bb6dcf01e10839e6d408d1ab927f00194",
+    "kairos_skills/catalog_io.py": "ba2ddc24b3bc226d1c5878df276c257b2427035a7a268f0bcd157192fe402e3f"
+  },
+  "controls": {
+    "uid": 10000,
+    "read_only": true,
+    "network": "none",
+    "cap_drop": "ALL",
+    "no_new_privileges": true,
+    "pids_limit": 128,
+    "memory": "512m",
+    "cpus": 1,
+    "temporary_home": true
+  },
+  "command": "docker run --rm --network none --user 10000:10000 --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --memory 512m --cpus 1 --tmpfs /tmp:rw,nosuid,nodev,noexec,size=128m -e HOME=/tmp --entrypoint /opt/kairos/.venv/bin/python -i kairos:test - < image-smoke.py",
+  "image_id": "sha256:549b219b8dcf30b1f33655e09f5501031be94c975f26667579ab4fb4f8241366",
+  "head": "bf7fb14"
+}

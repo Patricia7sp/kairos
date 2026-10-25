@@ -1,11 +1,96 @@
 """Leitor contido: arquivos instalados reais, sem seguir links."""
 
+import errno
 import os
 import subprocess
 import sys
 
 import pytest
 from test_skill_runtime import write_skill
+
+
+@pytest.mark.parametrize("root_kind", ["ausente", "vazio"])
+def test_optional_empty_preserves_strict_capture(tmp_path, root_kind):
+    from kairos_skills import catalog_io
+    from kairos_skills.catalog import SkillCatalogError
+
+    if root_kind == "vazio":
+        (tmp_path / "skills").mkdir()
+    assert catalog_io.capture_optional_skill_catalog(tmp_path) is None
+    with pytest.raises(SkillCatalogError):
+        catalog_io.capture_skill_catalog(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "kind", ["home-ausente", "home-link", "raiz-link", "raiz-arquivo", "so-invalidas"]
+)
+def test_optional_invalid_or_unobservable_is_not_empty(tmp_path, kind):
+    from kairos_skills import catalog_io
+    from kairos_skills.catalog import SkillCatalogError
+
+    home = tmp_path / "home"
+    if kind != "home-ausente":
+        home.mkdir()
+    if kind == "home-link":
+        moved = tmp_path / "real"
+        home.rename(moved)
+        home.symlink_to(moved, target_is_directory=True)
+    elif kind == "raiz-link":
+        external = tmp_path / "externo"
+        external.mkdir()
+        (home / "skills").symlink_to(external, target_is_directory=True)
+    elif kind == "raiz-arquivo":
+        (home / "skills").write_text("privado fictício")
+    elif kind == "so-invalidas":
+        write_skill(home).write_text("privado fictício sem frontmatter")
+    for capture in (catalog_io.capture_optional_skill_catalog, catalog_io.capture_skill_catalog):
+        with pytest.raises(SkillCatalogError) as error:
+            capture(home)
+        assert str(home) not in str(error.value)
+        assert "privado fictício" not in str(error.value)
+
+
+@pytest.mark.parametrize("code", [errno.EACCES, errno.EIO])
+def test_optional_open_failure_is_not_absence(tmp_path, monkeypatch, code):
+    from kairos_skills import catalog_io
+    from kairos_skills.catalog import SkillCatalogError
+
+    (tmp_path / "skills").mkdir()
+    original = os.open
+
+    def fail_skills(path, flags, *args, **kwargs):
+        if path == "skills" and kwargs.get("dir_fd") is not None:
+            raise OSError(code, "conteúdo privado fictício")
+        return original(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", fail_skills)
+    for capture in (catalog_io.capture_optional_skill_catalog, catalog_io.capture_skill_catalog):
+        with pytest.raises(SkillCatalogError) as error:
+            capture(tmp_path)
+        assert "conteúdo privado" not in str(error.value)
+        assert str(tmp_path) not in str(error.value)
+
+
+def test_optional_positive_matches_strict_and_preserves_omissions(tmp_path):
+    from kairos_skills import catalog_io
+
+    write_skill(tmp_path)
+    write_skill(tmp_path, "invalida").write_bytes(b"\xff")
+    result = catalog_io.capture_optional_skill_catalog(tmp_path)
+    assert result == catalog_io.capture_skill_catalog(tmp_path)
+    assert [entry.name for entry in result.entries] == ["revisar-docs"]
+    assert result.omitted_skills == 1
+
+
+def test_optional_resource_overflow_still_refuses(tmp_path, monkeypatch):
+    from kairos_skills import catalog_io
+    from kairos_skills.catalog import SkillCatalogError
+
+    write_skill(tmp_path, "primeira")
+    write_skill(tmp_path, "segunda")
+    monkeypatch.setattr(catalog_io, "MAX_SKILLS", 1)
+    with pytest.raises(SkillCatalogError):
+        catalog_io.capture_optional_skill_catalog(tmp_path)
 
 
 @pytest.mark.parametrize("root_kind", ["ausente", "link", "vazio"])

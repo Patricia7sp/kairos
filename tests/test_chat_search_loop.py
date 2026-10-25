@@ -27,7 +27,12 @@ from kairos_providers import (
 from kairos_providers.gateway import ProviderBillingMetadata
 from kairos_providers.selection import ModelSelectionResolver
 from kairos_state import connect, initialize_schema
-from kairos_state.repositories import MessageRepository, SessionRepository, UsageRepository
+from kairos_state.repositories import (
+    MessageRepository,
+    SessionRepository,
+    SkillCatalogRepository,
+    UsageRepository,
+)
 
 
 class RoundGateway:
@@ -88,7 +93,7 @@ def db(tmp_path):
     connection.close()
 
 
-def make_service(db, gateway, *, event_home=None, chat_sandbox=None):
+def make_service(db, gateway, *, event_home=None, chat_sandbox=None, skill_catalog_home=None):
     catalog = ModelCatalog()
     catalog.merge(
         [
@@ -113,6 +118,8 @@ def make_service(db, gateway, *, event_home=None, chat_sandbox=None):
         messages=MessageRepository(db),
         usage=UsageRepository(db),
         chat_sandbox=chat_sandbox,
+        skill_catalog_home=skill_catalog_home,
+        skill_catalogs=SkillCatalogRepository(db) if skill_catalog_home is not None else None,
     )
 
 

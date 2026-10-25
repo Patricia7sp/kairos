@@ -321,8 +321,9 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
         )
         parser.add_argument(
             "--skills-catalog",
-            action="store_true",
-            help="anuncia skills instaladas e habilita leitura sob demanda neste turno único",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="catálogo automático por padrão; exige quando ligado ou desliga índice e leitura",
         )
         parser.add_argument(
             "--skill",

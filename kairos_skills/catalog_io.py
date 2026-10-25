@@ -41,14 +41,19 @@ def _open(stack: ExitStack, name, flags: int, *, directory: int | None = None) -
     return fd
 
 
-def _root(stack: ExitStack, home: Path) -> int:
+def _root(stack: ExitStack, home: Path, *, allow_missing: bool = False) -> int | None:
     path = Path(home).expanduser().absolute()
     fd = _open(stack, path.anchor, os.O_RDONLY | os.O_DIRECTORY)
     for part in path.parts[1:]:
         if part == "..":
             raise SkillCatalogError("Home do catálogo deve usar um caminho sem escapes.")
         fd = _open(stack, part, os.O_RDONLY | os.O_DIRECTORY, directory=fd)
-    return _open(stack, "skills", os.O_RDONLY | os.O_DIRECTORY, directory=fd)
+    try:
+        return _open(stack, "skills", os.O_RDONLY | os.O_DIRECTORY, directory=fd)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise
 
 
 def _read(directory: int, filename: str, limit: int) -> str:
@@ -131,6 +136,38 @@ def _references(
 
 
 def capture_skill_catalog(home: Path) -> SkillCatalogSnapshot:
+    snapshot = _capture_skill_catalog(home, allow_empty=False)
+    assert snapshot is not None
+    return snapshot
+
+
+def capture_optional_skill_catalog(home: Path) -> SkillCatalogSnapshot | None:
+    return _capture_skill_catalog(home, allow_empty=True)
+
+
+def _capture_entry(
+    root: int, name: str, consume: Callable[[SkillAssetRecord], None]
+) -> tuple[SkillCatalogEntry | None, int]:
+    try:
+        validate_skill_name(name)
+        with ExitStack() as stack:
+            directory = _open(stack, name, os.O_RDONLY | os.O_DIRECTORY, directory=root)
+            text = _read(directory, "SKILL.md", MAX_SKILL_BYTES)
+            skill = SkillSnapshot(name, text)
+            record = _record(skill.name, None, text)
+            consume(record)
+            refs, count = _references(directory, name, consume)
+            return (
+                SkillCatalogEntry(skill.name, skill.description, skill.version, (record, *refs)),
+                count,
+            )
+    except _ResourceLimitError:
+        raise
+    except (OSError, SkillSelectionError, SkillCatalogError):
+        return None, 0
+
+
+def _capture_skill_catalog(home: Path, *, allow_empty: bool) -> SkillCatalogSnapshot | None:
     entries = []
     omitted_skills = omitted_refs = 0
     total_bytes = 0
@@ -143,40 +180,27 @@ def capture_skill_catalog(home: Path) -> SkillCatalogSnapshot:
 
     try:
         with ExitStack() as stack:
-            root = _root(stack, home)
+            root = _root(stack, home, allow_missing=allow_empty)
+            if root is None:
+                return None
             with os.scandir(root) as items:
                 for item in items:
                     if not item.is_dir(follow_symlinks=False) and not item.is_symlink():
                         continue
-                    try:
-                        validate_skill_name(item.name)
-                        with ExitStack() as entry_stack:
-                            directory = _open(
-                                entry_stack, item.name, os.O_RDONLY | os.O_DIRECTORY, directory=root
-                            )
-                            text = _read(directory, "SKILL.md", MAX_SKILL_BYTES)
-                            skill = SkillSnapshot(item.name, text)
-                            record = _record(skill.name, None, text)
-                            consume(record)
-                            refs, count = _references(directory, item.name, consume)
-                            entries.append(
-                                SkillCatalogEntry(
-                                    skill.name, skill.description, skill.version, (record, *refs)
-                                )
-                            )
-                            omitted_refs += count
-                    except (OSError, SkillSelectionError):
+                    entry, count = _capture_entry(root, item.name, consume)
+                    if entry is None:
                         omitted_skills += 1
-                    except _ResourceLimitError:
-                        raise
-                    except SkillCatalogError:
-                        omitted_skills += 1
+                        continue
+                    entries.append(entry)
+                    omitted_refs += count
                     if len(entries) > MAX_SKILLS:
                         raise SkillCatalogError("Catálogo acima do limite de skills.")
     except OSError:
         raise SkillCatalogError(
             "Não foi possível capturar o catálogo instalado sem links."
         ) from None
+    if allow_empty and not entries and not omitted_skills and not omitted_refs:
+        return None
     return SkillCatalogSnapshot(
         catalog_home_id(home),
         tuple(sorted(entries, key=lambda e: e.name)),

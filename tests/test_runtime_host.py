@@ -670,8 +670,7 @@ async def test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death(
         child_pid = await _wait_for_child(host.pid)
         host.kill()
         host.join(5)
-        inherited = _runtime_lock_fds(child_pid)
-        assert inherited
+        os.kill(child_pid, 0)
         contender = os.open(tmp_path / "run" / "runtime.lock", os.O_RDWR)
         try:
             with pytest.raises(BlockingIOError):

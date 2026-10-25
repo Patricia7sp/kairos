@@ -80,14 +80,12 @@ async def run_chat(
     workspace: str | None = None,
     allow_tools: tuple[str, ...] | list[str] = (),
     skill_names: tuple[str, ...] | list[str] = (),
-    skills_catalog: bool = False,
+    skills_catalog: bool | None = False,
 ) -> int:
     """Run a one-shot or interactive terminal session with one owned service graph."""
     session_id = _required_session_id(session_id)
-    if type(skills_catalog) is not bool:
+    if skills_catalog is not None and type(skills_catalog) is not bool:
         raise ChatUsageError("--skills-catalog exige um valor booleano")
-    if skills_catalog and not prompt.strip():
-        raise ChatUsageError("--skills-catalog exige uma mensagem para um único turno")
     override = _model_override(provider, model)
     if idempotency_key is not None and not idempotency_key.strip():
         raise ChatUsageError("--idempotency-key exige um valor não vazio")
@@ -149,6 +147,7 @@ async def run_chat(
             workspace=workspace,
             home=home,
             experiences=experiences,
+            skills_catalog=skills_catalog,
         )
     except InteractionServiceError as exc:
         print(exc.message, file=sys.stderr, flush=True)
@@ -223,6 +222,7 @@ async def _run_interactive(
     home: Path | None = None,
     experiences: bool = True,
     workspace: str | None = None,
+    skills_catalog: bool | None = False,
 ) -> int:
     if not quiet and not as_json:
         print("Kairos Agent CLI (digite 'sair' ou Ctrl+C para encerrar)")
@@ -251,6 +251,7 @@ async def _run_interactive(
                 workspace=workspace,
                 home=home,
                 experiences=experiences,
+                skills_catalog=skills_catalog,
             ),
         )
 
@@ -271,7 +272,7 @@ async def _run_turn(
     workspace: str | None = None,
     authorized_tools: frozenset[str] = frozenset(),
     skills: tuple[SkillSnapshot, ...] = (),
-    skills_catalog: bool = False,
+    skills_catalog: bool | None = False,
 ) -> int:
     content = _augment_with_experiences(content, home) if experiences and home else content
     envelope = InteractionEnvelope(
@@ -284,7 +285,8 @@ async def _run_turn(
         tools=tools,
         workspace=workspace,
         skills=skills,
-        skills_catalog=skills_catalog,
+        skills_catalog=skills_catalog is True,
+        skills_catalog_auto=skills_catalog is None and not runtime_session,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()
@@ -361,6 +363,16 @@ async def _handle_chat_event(
     as_json: bool,
     authorized_tools: frozenset[str] = frozenset(),
 ) -> None:
+    if event.kind is InteractionEventKind.SKILL_CATALOG_SKIPPED:
+        messages = {
+            "empty": "nenhuma skill instalada disponível.",
+            "model_tools_unavailable": "modelo sem suporte confirmado a ferramentas.",
+        }
+        message = messages.get(event.catalog_skip_reason)
+        if message is None:
+            raise ChatUsageError("Aviso de catálogo indisponível inválido")
+        print(f"Catálogo de skills automático: {message}", file=sys.stderr, flush=True)
+        return
     if event.kind is InteractionEventKind.SKILL_CATALOG_READY:
         notice = event.catalog_notice
         if notice is None:
