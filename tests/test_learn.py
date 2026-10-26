@@ -329,3 +329,23 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
             result = await execute_chat_tool(self.call(raw="\ud800"))
         self.assertTrue(result.is_error)
         self.assertEqual(list(self.home.iterdir()), [])
+
+
+class LearnAuthorshipContractTests(unittest.TestCase):
+    def test_prompt_preserves_canonical_authorship_order_from_spec(self):
+        from kairos_skills.learn import build_learn_prompt
+
+        prompt = build_learn_prompt("Use a conversa atual.")
+        headings = (
+            "título e introdução",
+            "When to Use",
+            "Prerequisites",
+            "How to Run",
+            "Quick Reference",
+            "Procedure",
+            "Pitfalls",
+            "Verification",
+        )
+        positions = [prompt.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("conte os caracteres", prompt)
