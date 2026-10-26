@@ -216,3 +216,116 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
         escaped = json.dumps({"name": "revisar-docs", "skill_md": creation_text(body="á" * 3000)})
         with self.assertRaises(SkillMutationError):
             self.turn().propose(self.call(raw=escaped))
+
+    async def test_owner_loss_during_filesystem_work_stops_publication(self):
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from kairos_skills.mutation_contract import SkillMutationError
+        from kairos_skills.mutations import SkillMutationService
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_scope
+
+        entered, release = threading.Event(), threading.Event()
+        lost = False
+
+        def guard():
+            if lost:
+                raise SkillMutationError("denied", "Turno perdido.")
+
+        turn = self.turn()
+        turn._guard = guard
+        original = SkillMutationService.add_text
+
+        def paused(service, *args, **kwargs):
+            entered.set()
+            release.wait(1)
+            return original(service, *args, **kwargs)
+
+        with skill_creation_scope(turn.capability):
+            proposal, _ = turn.propose(self.call())
+            turn.decide(proposal.id, "session", proposal.sha256, "criar revisar-docs")
+            with patch.object(SkillMutationService, "add_text", paused):
+                writer = asyncio.create_task(skill_create_tool(proposal.name, proposal.skill_md))
+                try:
+                    assert await asyncio.to_thread(entered.wait, 2)
+                    lost = True
+                finally:
+                    release.set()
+                result = await writer
+        self.assertIn("error", result)
+        self.assertFalse((self.home / "skills/revisar-docs").exists())
+
+    async def test_cancel_drains_inflight_writer_before_returning(self):
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from kairos_skills.mutations import SkillMutationService
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_scope
+
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        turn = self.turn()
+        original = SkillMutationService.add_text
+
+        def paused(service, *args, **kwargs):
+            entered.set()
+            release.wait(2)
+            try:
+                return original(service, *args, **kwargs)
+            finally:
+                finished.set()
+
+        with skill_creation_scope(turn.capability):
+            proposal, _ = turn.propose(self.call())
+            turn.decide(proposal.id, "session", proposal.sha256, "criar revisar-docs")
+            with patch.object(SkillMutationService, "add_text", paused):
+                writer = asyncio.create_task(skill_create_tool(proposal.name, proposal.skill_md))
+                self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                writer.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(writer.done())
+                release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await writer
+                self.assertTrue(finished.is_set())
+        self.assertFalse((self.home / "skills/revisar-docs").exists())
+
+    async def test_io_failure_after_commit_keeps_operation_id_and_closes(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        from kairos_skills.removal_state import database_connection
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_scope
+
+        @contextmanager
+        def fail_after_commit(*args, **kwargs):
+            with database_connection(*args, **kwargs) as connection:
+                yield connection
+            raise OSError("sensitive-path-fixture")
+
+        turn = self.turn()
+        with skill_creation_scope(turn.capability):
+            proposal, _ = turn.propose(self.call())
+            turn.decide(proposal.id, "session", proposal.sha256, "criar revisar-docs")
+            with (
+                patch("kairos_integration.learn_turn.database_connection", fail_after_commit),
+                self.assertLogs("kairos_integration.learn_turn", "WARNING") as captured,
+            ):
+                result = await skill_create_tool(proposal.name, proposal.skill_md)
+            self.assertIn("error", result)
+            self.assertTrue(result["operation_id"])
+            self.assertNotIn("sensitive-path-fixture", str(result) + str(captured.output))
+            self.assertTrue(turn.capability.closed)
+        self.assertEqual(
+            (self.home / "skills/revisar-docs/SKILL.md").read_text(), proposal.skill_md
+        )
+
+    async def test_invalid_utf8_direct_execution_returns_error(self):
+        from kairos_integration.chat_tools import execute_chat_tool
+        from kairos_tools.skill_create import skill_creation_scope
+
+        with skill_creation_scope(self.turn().capability):
+            result = await execute_chat_tool(self.call(raw="\ud800"))
+        self.assertTrue(result.is_error)
+        self.assertEqual(list(self.home.iterdir()), [])

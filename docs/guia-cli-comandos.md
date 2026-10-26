@@ -17,6 +17,35 @@ na CLI.
 - **Nada de lógica core na CLI.** Se o comando começou a duplicar o core,
   ele está no lugar errado: a lógica vai para a unit, o handler só a chama.
 
+## Aprender uma skill na conversa
+
+No Chat por modelo, escreva `/learn <pedido>`, ou execute em um terminal:
+
+```bash
+kairos run --session minha-conversa '/learn transforme a revisão anterior em procedimento'
+```
+
+O modelo usa a conversa ativa e o pedido. O turno habilita somente
+`skill_create`, mesmo sem `--tools`; não lê arquivos/URLs nem prepara ou injeta
+catálogo. A CLI mostra nome, descrição, hash e `SKILL.md` inteiro. Para publicar,
+digite exatamente `criar NOME`. `sim`, EOF e timeout recusam sem criar skill nem
+registro de autoria. O histórico do Chat e o consumo do provedor são mantidos.
+
+Cada `/learn` cria no máximo uma skill nova. O JSON completo dos argumentos
+precisa caber em 16 KiB. `--allow-tool` e aprovação genérica não autorizam essa
+criação; `--json`, pipe, Agent Runtime e seleção `--skill` são recusados.
+Se o modelo pedir esclarecimento, o turno termina sem criar: responda e repita
+`/learn`. A resposta comum não reativa a ferramenta. O prompt de autoria não
+fica no histórico persistido nem afeta turnos posteriores.
+
+O recibo nativo inclui o `operation_id` e o comando de rollback. A origem é
+`user`, com publicação e política iguais às da autoria manual. A nova skill
+entra no índice automático de uma nova sessão; o snapshot existente permanece
+fixo. Saídas: 0 exige criação comprovada e turno sem erro; 77 indica recusa ou
+ausência de confirmação interativa; 2 indica uso inválido; 1 indica ausência de
+criação ou falha. Uma criação já concluída conserva seu recibo se o provedor
+falhar depois. Diretórios/URLs, edição por modelo e curadoria ficam pendentes.
+
 ## Criar uma skill e reverter sua criação
 
 ```bash
@@ -83,7 +112,8 @@ Saídas 0/2/1/69 significam conclusão comprovada, entrada inválida,
 conflito/I/O/corrupção e recurso indisponível. Os avisos mostram ID e metadata,
 sem corpo, autor ou caminho absoluto. A criação fica disponível para `--skill`
 imediatamente e para catálogo de sessão nova; rollback conserva snapshots e
-páginas históricas. Este recorte é autoria manual, sem `/learn` ou curador.
+páginas históricas. Este comando é a entrada manual; `/learn` usa o mesmo
+serviço para o conteúdo confirmado. Curadoria permanece pendente.
 
 ## Adotar uma skill local existente
 

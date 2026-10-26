@@ -222,3 +222,59 @@ def test_cancel_pending_creation_revokes_proposal_without_skill_write(tmp_path):
             db.close()
 
     asyncio.run(scenario())
+
+
+def test_fixed_catalog_and_active_conversation_survive_learn(tmp_path, monkeypatch):
+    from test_skill_runtime import write_skill
+
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        write_skill(tmp_path)
+        gateway = RoundGateway(
+            [answer_round(), mutator_round(call(name="new-skill")), answer_round(), answer_round()]
+        )
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            first = InteractionEnvelope(
+                "learn-session", "cli", "procedimento anterior", skills_catalog=True
+            )
+            await collect(service, first)
+            original = service._skill_catalogs.export_session("learn-session")
+            await confirmed(service, learn())
+            authoring = gateway.requests[1]
+            assert authoring.messages[0].role == "user"
+            assert authoring.messages[0].content[0].value == "procedimento anterior"
+            assert not any(m.role == "system" for m in authoring.messages)
+            assert service._skill_catalogs.export_session("learn-session") == original
+            await collect(service, replace(first, content="continue"))
+            assert service._skill_catalogs.export_session("learn-session") == original
+            assert "new-skill" not in gateway.requests[-1].messages[0].content[0].value
+            assert [t["function"]["name"] for t in gateway.requests[-1].tools] == ["skill_view"]
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_approval_timeout_closes_creator_without_publication(tmp_path, monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(
+            "kairos_integration.interaction_service.TOOL_APPROVAL_TIMEOUT_SECONDS", 0.01
+        )
+        gateway = RoundGateway(
+            [mutator_round(call()), mutator_round(call("second", "other")), answer_round()]
+        )
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            events = await collect(service, learn())
+            assert len([e for e in events if e.kind == "tool_approval_request"]) == 1
+            assert all(e.tool_result.is_error for e in events if e.kind == "tool_result")
+            assert not (tmp_path / "skills").exists()
+        finally:
+            db.close()
+
+    asyncio.run(scenario())

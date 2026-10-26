@@ -2,6 +2,20 @@
 
 ## Frente atual em 26/10/2026
 
+Implementação em branch: `/learn` no Chat da CLI, conforme o
+[desenho aprovado](superpowers/specs/2026-10-26-learn-cli-design.md) e o
+[plano](superpowers/plans/2026-10-26-learn-cli.md). O modelo propõe uma skill,
+o usuário revisa o conteúdo integral e confirma `criar NOME`. O serviço publica
+com origem `user`, ledger e rollback existentes. Uma única criação por turno;
+prompt transitório; somente `skill_create`; sem catálogo, `skill_view`,
+aprovação genérica ou `--allow-tool`. Esclarecimento encerra e exige novo
+`/learn`. Este estado de branch não afirma merge, CI remoto ou deploy.
+
+O MVP cobre conversa ativa e pedido; fontes de diretório/URL, edição por
+modelo, telemetria, curador, workflows duráveis e hub continuam pendentes.
+Aceites com provedores reais e política organizacional em produção também
+permanecem separados dos testes controlados.
+
 A base integrada e implantada é `main` em
 `224532e8283298c65f287cbf6d507b4a32425429`. O
 [PR #119](https://github.com/Patricia7sp/kairos/pull/119) entregou o

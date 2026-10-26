@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sqlite3
 import uuid
 from collections.abc import Callable
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 
 from kairos_domain.ownership import Actor
+from kairos_providers._async_cleanup import run_persistent_cleanup
 from kairos_skills.catalog import catalog_home_id
 from kairos_skills.frontmatter import parse_frontmatter
 from kairos_skills.mutation_contract import (
@@ -24,6 +27,8 @@ from kairos_skills.removal_state import database_connection
 from kairos_state.migrations import migrate
 from kairos_state.repositories.skill_mutations import SkillMutationRepository
 from kairos_tools.skill_create import SkillCreationCapability
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _require(condition, message="Proposta de criação inválida.", *, kind="input"):
@@ -135,6 +140,28 @@ class LearnTurn:
         except SkillMutationError as error:
             return {"error": str(error), "status": error.kind}
         self._publishing = True
+        worker = asyncio.get_running_loop().run_in_executor(
+            None, copy_context().run, self._publish_approved, proposal
+        )
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError as cancellation:
+            self.close()
+
+            async def finish_writer():
+                await asyncio.shield(worker)
+
+            outcome = await run_persistent_cleanup(
+                finish_writer, task_name="kairos-learn-writer-drain"
+            )
+            if outcome.error is not None:
+                raise outcome.error from cancellation
+            raise
+        finally:
+            self.close()
+
+    def _publish_approved(self, proposal: CreationProposal):
+        record = None
         try:
             self.check()
             with (
@@ -162,8 +189,27 @@ class LearnTurn:
                     "sha256": record.sha256,
                 }
         except SkillMutationError as error:
-            return {"error": str(error), "status": error.kind, "operation_id": error.operation_id}
-        except (OSError, sqlite3.DatabaseError):
-            return {"error": "Falha ao publicar skill; consulte skills history.", "status": "io"}
+            operation_id = error.operation_id or (None if record is None else record.operation_id)
+            _LOGGER.warning(
+                "skill_learn_publication_refused",
+                extra={"kind": error.kind, "operation_id": operation_id, "phase": "publication"},
+            )
+            return {"error": str(error), "status": error.kind, "operation_id": operation_id}
+        except (OSError, sqlite3.DatabaseError) as error:
+            operation_id = None if record is None else record.operation_id
+            _LOGGER.warning(
+                "skill_learn_publication_failed",
+                extra={
+                    "kind": "io",
+                    "error_class": type(error).__name__,
+                    "operation_id": operation_id,
+                    "phase": "publication",
+                },
+            )
+            return {
+                "error": "Falha ao publicar skill; consulte skills history.",
+                "status": "io",
+                "operation_id": operation_id,
+            }
         finally:
             self.close()

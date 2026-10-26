@@ -200,9 +200,11 @@ def _arguments(raw: str) -> tuple[str, int]:
 
 def _body_arguments(raw: str) -> dict[str, Any] | None:
     """Argumentos JSON de uma chamada genérica, com rejeição de chaves duplicadas."""
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_ARGUMENT_BYTES:
+    if not isinstance(raw, str):
         return None
     try:
+        if len(raw.encode("utf-8")) > MAX_ARGUMENT_BYTES:
+            return None
         value = json.loads(raw, object_pairs_hook=_unique_object)
     except (ValueError, TypeError, RecursionError):
         return None
