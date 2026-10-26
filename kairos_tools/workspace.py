@@ -143,6 +143,10 @@ def restricted() -> bool:
 
 
 def tool_allowed(name: str, *, override: bool = False) -> bool:
+    if name == "skill_create":
+        from kairos_tools.skill_create import skill_creation_available
+
+        return not override and skill_creation_available()
     if name == "skill_view":
         from kairos_tools.skill_view import skill_catalog_available
 

@@ -147,6 +147,8 @@ def chat_tool_definitions(
 
 
 def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = None) -> bool:
+    if name == "skill_create":
+        return True
     if name.startswith("mcp__"):
         # Schema de terceiro não permite inferir mutação: fail-closed. Toda
         # chamada MCP exige aprovação por turno (decisão do passo 4).
