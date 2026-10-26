@@ -20,6 +20,34 @@ from kairos_state.repositories.skill_mutations import SkillMutationRepository
 
 
 class MutationServiceTests(unittest.TestCase):
+    def test_add_text_commits_exact_bytes_and_rolls_back(self):
+        text = creation_text(body="Revisão com acentos.")
+        record = self.service.add_text(text, actor=Actor.USER_FOREGROUND)
+        installed = self.home / "skills" / record.name / "SKILL.md"
+        self.assertEqual(installed.read_bytes(), text.encode())
+        self.assertEqual(self.repo.content(record.operation_id).text, text)
+        self.assertEqual(record.provenance, Provenance.USER)
+        self.assertEqual(record.state, SkillMutationState.COMMITTED)
+        with self.assertRaises(SkillMutationError):
+            self.service.add_text(text, actor=Actor.USER_FOREGROUND)
+        self.service.rollback(record.operation_id, actor=Actor.USER_FOREGROUND)
+        self.assertFalse(installed.exists())
+
+    def test_add_text_refuses_invalid_actor_text_and_guard_without_publication(self):
+        for actor, text in ((Actor.CURATOR, creation_text()), (Actor.USER_FOREGROUND, "bad")):
+            with self.subTest(actor=actor), self.assertRaises(SkillMutationError):
+                self.service.add_text(text, actor=actor)
+
+        def refuse():
+            raise SkillMutationError("denied", "Turno encerrado.")
+
+        with self.assertRaises(SkillMutationError):
+            self.service.add_text(
+                creation_text(), actor=Actor.USER_FOREGROUND, publication_guard=refuse
+            )
+        self.assertFalse((self.home / "skills" / "revisar-docs").exists())
+        self.assertEqual(self.repo.history(), ())
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
