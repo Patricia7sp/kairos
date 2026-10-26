@@ -1,11 +1,17 @@
 # Correção e nova avaliação do reuso do ledger
 
+Atualização posterior: o PR #117 foi integrado e implantado em `8902010`.
+O [fechamento operacional](2026-10-25-fechamento-ledger.md) registra CI,
+Sonar da main, checkout implantado, fontes e smoke. Os resultados abaixo
+preservam o estado da avaliação pré-merge.
+
 Continuidade solicitada pela usuária em 25/10/2026 para resolver o bloqueio
 do [PR #117](https://github.com/Patricia7sp/kairos/pull/117).
 O [resultado anterior](2026-10-24-reuso-ledger.md) permanece reprovado e seus
 dados não foram descartados ou reclassificados. **A nova candidata passou
 no gate integral em uma única rodada pré-definida:** os três pares de 120
-melhoraram, com ganho mediano de 11,507711479836553%. Não houve merge ou deploy.
+melhoraram, com ganho mediano de 11,507711479836553%. Naquele checkpoint
+ainda não havia merge ou deploy.
 
 ## Investigação
 

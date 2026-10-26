@@ -1,29 +1,41 @@
 # Progresso funcional do Kairos
 
-## Frente atual em 25/10/2026
+## Frente atual em 26/10/2026
 
-A base do trabalho é `main` em `8902010`, com o reuso do ledger integrado pelo
-PR #117. O [PR #119](https://github.com/Patricia7sp/kairos/pull/119) continua o
+A base integrada e implantada é `main` em
+`224532e8283298c65f287cbf6d507b4a32425429`. O
+[PR #119](https://github.com/Patricia7sp/kairos/pull/119) entregou o
 [índice automático de skills na CLI](superpowers/specs/2026-10-25-indice-automatico-cli-design.md),
-com desenho e execução aprovados. Descoberta opcional e ativação sob posse do
-turno, CLI/interativo e ajustes de integração estão concluídos localmente.
-O padrão anuncia somente índice e leitor sob demanda. Force/off explícitos,
-snapshot desde a primeira ativação positiva e capacidades por turno preservam
-os limites existentes. Revisão independente sem achados; 4.155 testes e 6.542
-subtestes unitários aprovados, além de 32 testes e 26 subtestes de imagem.
-O [relatório local](superpowers/reports/2026-10-25-indice-automatico-cli.md)
-registra comandos, skips, correções de integração e a cobertura ainda pendente.
-A revisão automática de permissões bloqueou o push; publicação no PR #119,
-CI remoto e Sonar aguardam autorização. Não houve merge ou deploy.
-O fechamento documental anterior permanece separado no PR #118.
+inclusive no interativo. Force/off explícitos, snapshot desde a primeira
+ativação positiva e capacidades por turno preservam os limites existentes.
+O padrão anuncia somente índice e leitor sob demanda.
 
-## Checkpoint integrado anterior
+Revisão independente sem achados; suíte local integral com 4.155 testes e
+6.542 subtestes aprovados. O
+[CI da main #319](https://github.com/Patricia7sp/kairos/actions/runs/40241432910)
+concluiu verde, incluindo deploy no Komodo. O checkout implantado e os nove
+módulos de produção alterados foram conferidos; container saudável e smoke
+pós-deploy com HTTP 200 e `status: ok`. O Sonar aprovou o Quality Gate do PR
+e da main. Os 12 apontamentos do PR foram corrigidos; sua cobertura nova
+ficou em 97%. O
+[relatório de fechamento](superpowers/reports/2026-10-25-indice-automatico-cli.md)
+registra as provas, os comandos e os limites.
 
-Atualizado em 24/10/2026. Base integrada e implantada conferida: `main` em
-`b7346adeee312368746fddb3ca7cfe3058c49b99`. Os checkpoints históricos abaixo
-preservam suas datas e evidências; o estado atual está consolidado nesta seção.
+A continuidade solicitada começa por reconciliar o fechamento documental
+do PR #118 com essa entrega. O inventário do Sonar em 26/10 ainda registra
+1.061 apontamentos na main: 987 de manutenção, 45 classificados como
+vulnerabilidades e 29 como bugs. São classificações do scanner, a verificar
+contra os contratos antes de corrigir; a contagem é a mesma anterior ao #119.
+O saneamento deve começar pelos achados de segurança e confiabilidade,
+em lotes com revisão e validação próprias. `/learn`, curadoria e workflows
+duráveis permanecem como frentes funcionais posteriores; Ollama continua adiado.
 
-## Continuidade em 24/10/2026
+## Checkpoint integrado anterior — 25/10/2026
+
+O reuso do ledger foi integrado e implantado em `8902010`. Os checkpoints abaixo
+preservam suas datas e evidências; o estado atual está consolidado na seção inicial.
+
+## Continuidade em 25/10/2026
 
 | Entrega | Integração confirmada |
 |---|---|
@@ -41,6 +53,8 @@ preservam suas datas e evidências; o estado atual está consolidado nesta seç�
 | Promoção preserva instalação e quarentena; migração explícita v10 documentada | PR #111, `74fba82`; fecha #110 |
 | B2: publicação coordenada, recuperação, manifesto e backup v11 | PR #114, `da7c58c` |
 | Backup com API síncrona e correção S7493 | PR #115, `b7346ad` |
+| Reuso transacional de registros do ledger, mantendo as validações | PR #117, `8902010` |
+| Índice automático de skills na CLI e no interativo | PR #119, `224532e` |
 
 A B2 foi integrada e implantada pelo [PR #114](https://github.com/Patricia7sp/kairos/pull/114).
 Sync e promoção usam o coordenador com lock, journal e recuperação por ID;
@@ -58,16 +72,25 @@ fontes instaladas conferidas, backup sintético pelo CLI e smoke aprovados;
 banco íntegro no schema 11. Evidências e limites no
 [fechamento B2/backup](superpowers/reports/2026-10-24-fechamento-b2-backup.md).
 
-Próximo recorte: [custo do ledger, #109](https://github.com/Patricia7sp/kairos/issues/109).
-A continuidade solicitada em 24/10 começa pela reprodução da medição em
-revisões v9/v10/v11, com criações reais e perfil separado dos tempos.
-A [baseline foi concluída](superpowers/reports/2026-10-24-skill-writer-benchmark.md),
-com dados brutos e comando reproduzível; a #109 permanece aberta.
-A otimização ainda depende dessa evidência e de definir a observação estável,
-com invalidação e guards de política preservados nas fronteiras de efeitos.
+A [#109](https://github.com/Patricia7sp/kairos/issues/109) foi atendida no
+recorte aprovado pelo [PR #117](https://github.com/Patricia7sp/kairos/pull/117).
+A baseline v9/v10/v11 e as rodadas reprovadas permanecem preservadas. A rodada
+controlada do candidato corrigido passou: ganho mediano de 11,5077%, melhora
+nos três pares de 120, reconstruções 903 → 775 e 20 validações intactas.
+O memo só vive nos callbacks transacionais próprios de `prepare`/`finish`;
+nenhuma revalidação de política ou identidade foi retirada.
 
-Índice automático por padrão, `/learn`, curadoria integrada e workflows duráveis
-continuam pendentes, sem ordem posterior fechada. Ollama permanece adiado.
+O [CI da main #313](https://github.com/Patricia7sp/kairos/actions/runs/40153981766)
+concluiu verde, incluindo deploy no Komodo. Aplicação e broker recriados e
+healthy; checkout e fontes implantadas conferidos; smoke direto aprovado.
+O Sonar confirmou Quality Gate OK para `8902010`, com 95,8% de cobertura nova
+no período da main. Provas e limites no
+[fechamento do ledger](superpowers/reports/2026-10-25-fechamento-ledger.md).
+
+O índice automático foi entregue posteriormente pelo PR #119, conforme o
+fechamento atual acima. `/learn`, curadoria e workflows duráveis continuam
+pendentes; a recomendação de continuidade não aprova novos comportamentos.
+Ollama permanece adiado.
 Instalar política em produção e isolar adulteração pelo mesmo UID não fazem
 parte destas entregas.
 
