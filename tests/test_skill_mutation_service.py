@@ -41,10 +41,9 @@ class MutationServiceTests(unittest.TestCase):
         def refuse():
             raise SkillMutationError("denied", "Turno encerrado.")
 
+        text = creation_text()
         with self.assertRaises(SkillMutationError):
-            self.service.add_text(
-                creation_text(), actor=Actor.USER_FOREGROUND, publication_guard=refuse
-            )
+            self.service.add_text(text, actor=Actor.USER_FOREGROUND, publication_guard=refuse)
         self.assertFalse((self.home / "skills" / "revisar-docs").exists())
         self.assertEqual(self.repo.history(), ())
 

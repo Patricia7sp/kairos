@@ -83,7 +83,8 @@ def test_single_commit_transient_prompt_and_next_normal_turn(
             assert (tmp_path / "skills/revisar-docs/SKILL.md").read_text() == creation_text()
             with database_connection(tmp_path) as connection:
                 records = read_skill_repository(connection, tmp_path).history()
-                assert len(records) == 1 and records[0].operation_id == receipt["operation_id"]
+                assert len(records) == 1
+                assert records[0].operation_id == receipt["operation_id"]
             prompt = build_learn_prompt("revisar")
             for request in gateway.requests:
                 assert [t["function"]["name"] for t in request.tools] == ["skill_create"]
@@ -176,8 +177,9 @@ def test_retry_uses_transient_prompt_and_clarification_drops_capability(tmp_path
 
 
 def test_source_and_model_tools_are_required_before_provider(tmp_path):
+    cli_envelope = learn()
     with pytest.raises(ValueError):
-        replace(learn(), source="web")
+        replace(cli_envelope, source="web")
 
     async def scenario():
         gateway = RoundGateway([answer_round()])
@@ -192,8 +194,9 @@ def test_source_and_model_tools_are_required_before_provider(tmp_path):
             origin=CatalogOrigin.CURATED,
         )
         try:
+            envelope = learn()
             with pytest.raises(InteractionServiceError):
-                await collect(service, learn())
+                await collect(service, envelope)
             assert gateway.requests == []
             assert not db.execute("SELECT 1 FROM messages WHERE role='user'").fetchone()
         finally:
@@ -409,9 +412,8 @@ def test_sqlite_heartbeat_refreshes_while_skill_writer_is_blocked(tmp_path, monk
         try:
             events = await asyncio.wait_for(confirmed(service, learn()), 5)
             assert not next(e.tool_result for e in events if e.kind == "tool_result").is_error
-            assert observed_deadlines and all(
-                after > before for before, after in observed_deadlines
-            )
+            assert observed_deadlines
+            assert all(after > before for before, after in observed_deadlines)
             assert not db.execute("SELECT 1 FROM session_turn_leases").fetchone()
         finally:
             release.set()

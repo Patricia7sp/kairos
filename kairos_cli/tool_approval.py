@@ -110,7 +110,7 @@ async def request_skill_creation(proposal, *, as_json: bool) -> str:
     )
     try:
         answer = await _read_answer(max_bytes=72)
-    except (OSError, ValueError, NotImplementedError, TimeoutError):
+    except (OSError, ValueError, NotImplementedError):
         print(
             "\nCriação recusada: resposta indisponível ou prazo expirado.",
             file=sys.stderr,

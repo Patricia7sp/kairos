@@ -155,7 +155,15 @@ class LearnTurn:
                 finish_writer, task_name="kairos-learn-writer-drain"
             )
             if outcome.error is not None:
-                raise outcome.error from cancellation
+                _LOGGER.warning(
+                    "skill_learn_cancel_cleanup_failed",
+                    extra={
+                        "kind": "cancelled",
+                        "error_class": type(outcome.error).__name__,
+                        "phase": "cleanup",
+                    },
+                )
+                raise cancellation from outcome.error
             raise
         finally:
             self.close()

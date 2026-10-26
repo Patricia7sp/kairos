@@ -147,25 +147,18 @@ def chat_tool_definitions(
 
 
 def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = None) -> bool:
-    if name == "skill_create":
-        return True
-    if name.startswith("mcp__"):
+    if name == "skill_create" or name.startswith("mcp__"):
         # Schema de terceiro não permite inferir mutação: fail-closed. Toda
         # chamada MCP exige aprovação por turno (decisão do passo 4).
         return True
-    if name == "git":
-        if isinstance(arguments, str):
-            parsed = _body_arguments(arguments)
-            arguments = parsed if parsed is not None else {}
-        subcommand = str((arguments or {}).get("subcommand", ""))
-        return subcommand in GIT_MUTATING_SUBCOMMANDS
-    if name == "calendar":
-        if isinstance(arguments, str):
-            parsed = _body_arguments(arguments)
-            arguments = parsed if parsed is not None else {}
-        subcommand = str((arguments or {}).get("subcommand", ""))
-        return subcommand in CALENDAR_MUTATING_SUBCOMMANDS
-    return name in MUTATING_TOOLS
+    if name not in {"git", "calendar"}:
+        return name in MUTATING_TOOLS
+    if isinstance(arguments, str):
+        parsed = _body_arguments(arguments)
+        arguments = parsed if parsed is not None else {}
+    subcommand = str((arguments or {}).get("subcommand", ""))
+    mutators = GIT_MUTATING_SUBCOMMANDS if name == "git" else CALENDAR_MUTATING_SUBCOMMANDS
+    return subcommand in mutators
 
 
 def denied_tool_result(call: CanonicalToolCall) -> InteractionToolResult:

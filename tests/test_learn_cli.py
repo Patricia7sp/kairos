@@ -174,8 +174,10 @@ def test_preview_escapes_controls_and_accepts_full_length_name(tmp_path, monkeyp
             with redirect_stderr(out):
                 assert await request_skill_creation(proposal, as_json=False) == "criar " + name
             rendered = out.getvalue()
-            assert "\x1b" not in rendered and "\u202e" not in rendered
-            assert "\\u001b" in rendered and "\\u202e" in rendered
+            assert "\x1b" not in rendered
+            assert "\u202e" not in rendered
+            assert "\\u001b" in rendered
+            assert "\\u202e" in rendered
             assert "| última linha" in rendered
             turn.close()
 

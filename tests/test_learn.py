@@ -73,8 +73,9 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
         with skill_creation_scope(turn.capability):
             retained = copy_context()
             proposal, future = turn.propose(self.call())
+            other_call = self.call("another")
             with self.assertRaises(SkillMutationError):
-                turn.propose(self.call("another"))
+                turn.propose(other_call)
             turn.decide(proposal.id, "session", proposal.sha256, "criar revisar-docs")
             self.assertEqual(await future, "allow")
             receipt = await skill_create_tool(proposal.name, proposal.skill_md)
@@ -85,8 +86,9 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
                 (self.home / "skills/revisar-docs/SKILL.md").read_text(), proposal.skill_md
             )
             self.assertIn("error", await skill_create_tool("another", proposal.skill_md))
+            other_call = self.call("another")
             with self.assertRaises(SkillMutationError):
-                turn.propose(self.call("another"))
+                turn.propose(other_call)
         import asyncio
 
         self.assertIn(
@@ -146,8 +148,9 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"name": "revisar-docs", "skill_md": creation_text(body="x" * 16384)}),
             "\ud800",
         ]:
+            invalid_call = self.call(raw=raw)
             with self.subTest(raw=raw[:30]), self.assertRaises(SkillMutationError):
-                turn.propose(self.call(raw=raw))
+                turn.propose(invalid_call)
         proposal, _ = turn.propose(self.call())
         self.assertEqual(proposal.name, "revisar-docs")
         turn.close()
@@ -211,11 +214,15 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
         proposal, _ = turn.propose(self.call(raw=raw))
         self.assertIn("á", proposal.skill_md)
         turn.close()
+        extra_turn = self.turn()
+        oversized_call = self.call(raw=raw + " ")
         with self.assertRaises(SkillMutationError):
-            self.turn().propose(self.call(raw=raw + " "))
+            extra_turn.propose(oversized_call)
         escaped = json.dumps({"name": "revisar-docs", "skill_md": creation_text(body="á" * 3000)})
+        escaped_turn = self.turn()
+        escaped_call = self.call(raw=escaped)
         with self.assertRaises(SkillMutationError):
-            self.turn().propose(self.call(raw=escaped))
+            escaped_turn.propose(escaped_call)
 
     async def test_owner_loss_during_filesystem_work_stops_publication(self):
         import asyncio
@@ -329,6 +336,36 @@ class LearnCapabilityTests(unittest.IsolatedAsyncioTestCase):
             result = await execute_chat_tool(self.call(raw="\ud800"))
         self.assertTrue(result.is_error)
         self.assertEqual(list(self.home.iterdir()), [])
+
+    async def test_cancel_remains_primary_when_writer_cleanup_fails(self):
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from kairos_skills.mutations import SkillMutationService
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_scope
+
+        entered, release = threading.Event(), threading.Event()
+
+        def fail_writer(*_, **__):
+            entered.set()
+            release.wait(2)
+            raise RuntimeError("controlled-writer-failure")
+
+        turn = self.turn()
+        with skill_creation_scope(turn.capability):
+            proposal, _ = turn.propose(self.call())
+            turn.decide(proposal.id, "session", proposal.sha256, "criar revisar-docs")
+            with patch.object(SkillMutationService, "add_text", fail_writer):
+                writer = asyncio.create_task(skill_create_tool(proposal.name, proposal.skill_md))
+                self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                writer.cancel()
+                await asyncio.sleep(0)
+                release.set()
+                with self.assertRaises(asyncio.CancelledError) as captured:
+                    await writer
+                self.assertIsInstance(captured.exception.__cause__, RuntimeError)
+        self.assertFalse((self.home / "skills/revisar-docs").exists())
 
 
 class LearnAuthorshipContractTests(unittest.TestCase):
