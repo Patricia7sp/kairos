@@ -66,7 +66,12 @@ def test_load_sem_config_usado_no_home_padroes(tmp_path):
     from kairos_runtime.execution import load_execution_limits
 
     assert (tmp_path / "config.yaml").exists() is False
-    assert load_execution_limits(tmp_path) == load_execution_limits(tmp_path)
+    limites = load_execution_limits(tmp_path)
+    assert (limites.timeout_seconds, limites.max_stdout_bytes, limites.max_stderr_bytes) == (
+        300,
+        50_000,
+        10_000,
+    )
 
 
 def test_load_aplica_code_execution_do_home(tmp_path):
