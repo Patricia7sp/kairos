@@ -278,3 +278,143 @@ def test_approval_timeout_closes_creator_without_publication(tmp_path, monkeypat
             db.close()
 
     asyncio.run(scenario())
+
+
+def test_two_simultaneous_homes_keep_proposals_and_writes_isolated(tmp_path, monkeypatch):
+    import threading
+
+    from kairos_skills.mutations import SkillMutationService
+
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        barrier = threading.Barrier(2)
+        original = SkillMutationService.add_text
+
+        def simultaneous(service, *args, **kwargs):
+            barrier.wait(timeout=2)
+            return original(service, *args, **kwargs)
+
+        monkeypatch.setattr(SkillMutationService, "add_text", simultaneous)
+        ready = asyncio.Barrier(2)
+        services, connections, proposals = [], [], [None, None]
+        for index in range(2):
+            home = tmp_path / str(index)
+            home.mkdir()
+            db = connect(home / "state.db")
+            initialize_schema(db)
+            text = creation_text(body="Procedimento da instalação " + str(index))
+            create = CanonicalToolCall(
+                "create", "skill_create", json.dumps({"name": "revisar-docs", "skill_md": text})
+            )
+            services.append(
+                make_service(
+                    db,
+                    RoundGateway([mutator_round(create), answer_round()]),
+                    skill_catalog_home=home,
+                )
+            )
+            connections.append(db)
+
+        async def run_one(index):
+            service = services[index]
+            async for event in service.stream(learn()):
+                if event.kind == "tool_approval_request":
+                    proposal = service.skill_creation_proposal(
+                        approval_id=event.tool_approval_id, session_id="learn-session"
+                    )
+                    proposals[index] = proposal
+                    await ready.wait()
+                    with pytest.raises(SkillMutationError):
+                        service.skill_creation_proposal(
+                            approval_id=proposals[1 - index].id, session_id="learn-session"
+                        )
+                    service.decide_skill_creation(
+                        approval_id=proposal.id,
+                        session_id="learn-session",
+                        sha256=proposal.sha256,
+                        answer="criar revisar-docs",
+                    )
+                if event.kind == "tool_result":
+                    assert not event.tool_result.is_error
+
+        try:
+            await asyncio.wait_for(asyncio.gather(run_one(0), run_one(1)), 5)
+            for index in range(2):
+                path = tmp_path / str(index) / "skills/revisar-docs/SKILL.md"
+                assert path.read_text() == creation_text(
+                    body="Procedimento da instalação " + str(index)
+                )
+        finally:
+            for db in connections:
+                db.close()
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_heartbeat_refreshes_while_skill_writer_is_blocked(tmp_path, monkeypatch):
+    import threading
+
+    from kairos_integration.turn_ownership import (
+        LeaseRefreshResult,
+        SessionTurnOwnership,
+        SQLiteAsyncTurnLeaseBackend,
+    )
+    from kairos_skills.mutations import SkillMutationService
+
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        observed_deadlines = []
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        original = SkillMutationService.add_text
+
+        def blocked(service, *args, **kwargs):
+            entered.set()
+            try:
+                if not release.wait(2):
+                    raise OSError("heartbeat não progrediu durante I/O")
+                return original(service, *args, **kwargs)
+            finally:
+                finished.set()
+
+        monkeypatch.setattr(SkillMutationService, "add_text", blocked)
+
+        class ObservedBackend(SQLiteAsyncTurnLeaseBackend):
+            async def refresh(self, conversation_id, holder, *, ttl_seconds):
+                before = db.execute(
+                    "SELECT expires_at FROM session_turn_leases WHERE conversation_id=?",
+                    (conversation_id,),
+                ).fetchone()[0]
+                result = await super().refresh(conversation_id, holder, ttl_seconds=ttl_seconds)
+                if (
+                    entered.is_set()
+                    and not finished.is_set()
+                    and result.result is LeaseRefreshResult.REFRESHED
+                ):
+                    after = db.execute(
+                        "SELECT expires_at FROM session_turn_leases WHERE conversation_id=?",
+                        (conversation_id,),
+                    ).fetchone()[0]
+                    observed_deadlines.append((before, after))
+                    release.set()
+                return result
+
+        service = make_service(
+            db, RoundGateway([mutator_round(call()), answer_round()]), skill_catalog_home=tmp_path
+        )
+        service._turn_ownership = SessionTurnOwnership(
+            ObservedBackend(tmp_path / "state.db"), ttl_seconds=1, refresh_interval=0.01
+        )
+        try:
+            events = await asyncio.wait_for(confirmed(service, learn()), 5)
+            assert not next(e.tool_result for e in events if e.kind == "tool_result").is_error
+            assert observed_deadlines and all(
+                after > before for before, after in observed_deadlines
+            )
+            assert not db.execute("SELECT 1 FROM session_turn_leases").fetchone()
+        finally:
+            release.set()
+            db.close()
+
+    asyncio.run(scenario())

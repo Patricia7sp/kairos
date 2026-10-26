@@ -39,6 +39,7 @@ class _HumanRenderer:
     failed: bool = False
     creation_committed: bool = False
     creation_denied: bool = False
+    creation_uncertain: bool = False
     creation_call_ids: set[str] = field(default_factory=set)
 
     def emit(self, event: InteractionEvent) -> None:
@@ -341,29 +342,30 @@ async def _run_turn(
             if runtime_session
             else service.stream(envelope)
         )
-        async for event in stream:
-            if isinstance(event, RuntimeEvent):
-                last_runtime_event = event
-                if as_json:
-                    print(
-                        json.dumps(
-                            runtime_event_to_json(event), ensure_ascii=False, sort_keys=True
-                        ),
-                        flush=True,
-                    )
-                else:
-                    await render_runtime_event(event, as_json=False, renderer=runtime_renderer)
-                if event.kind == "error":
-                    renderer.failed = True
-                continue
-            await _handle_chat_event(
-                service,
-                event,
-                renderer,
-                session_id=session_id,
-                as_json=as_json,
-                authorized_tools=authorized_tools,
-            )
+        async with aclosing(stream):
+            async for event in stream:
+                if isinstance(event, RuntimeEvent):
+                    last_runtime_event = event
+                    if as_json:
+                        print(
+                            json.dumps(
+                                runtime_event_to_json(event), ensure_ascii=False, sort_keys=True
+                            ),
+                            flush=True,
+                        )
+                    else:
+                        await render_runtime_event(event, as_json=False, renderer=runtime_renderer)
+                    if event.kind == "error":
+                        renderer.failed = True
+                    continue
+                await _handle_chat_event(
+                    service,
+                    event,
+                    renderer,
+                    session_id=session_id,
+                    as_json=as_json,
+                    authorized_tools=authorized_tools,
+                )
     except asyncio.CancelledError:
         if accepted_turn_id is not None:
             cursor = (
@@ -397,6 +399,8 @@ async def _run_turn(
 def _learn_exit_code(renderer):
     if renderer.creation_denied:
         return 77
+    if renderer.creation_uncertain:
+        return 1
     if not renderer.creation_committed:
         print(
             "Nenhuma skill criada. Para esclarecer ou revisar, repita /learn <pedido>.",
@@ -407,24 +411,31 @@ def _learn_exit_code(renderer):
     return 1 if renderer.failed else 0
 
 
-async def _handle_chat_event(
-    service,
-    event: InteractionEvent,
-    renderer: _HumanRenderer,
-    *,
-    session_id: str,
-    as_json: bool,
-    authorized_tools: frozenset[str] = frozenset(),
-) -> None:
+async def _handle_skill_creation_event(service, event, renderer, *, session_id, as_json) -> bool:
     if event.tool_call is not None and event.tool_call.name == "skill_create":
         renderer.creation_call_ids.add(event.tool_call.id)
     if (
         event.tool_result is not None
         and event.tool_result.tool_call_id in renderer.creation_call_ids
-        and not event.tool_result.is_error
     ):
         receipt = json.loads(event.tool_result.content)
-        if receipt.get("state") == "committed":
+        if event.tool_result.is_error and receipt.get("operation_id"):
+            renderer.creation_uncertain = True
+            renderer.finish_line()
+            print(
+                "Criação não comprovada: "
+                + json.dumps(
+                    {
+                        "operation_id": receipt["operation_id"],
+                        "status": receipt.get("status", "error"),
+                    },
+                    ensure_ascii=True,
+                )
+                + "\nConsulte kairos skills history antes de repetir /learn.",
+                file=sys.stderr,
+                flush=True,
+            )
+        elif not event.tool_result.is_error and receipt.get("state") == "committed":
             renderer.creation_committed = True
             renderer.finish_line()
             print(
@@ -449,6 +460,22 @@ async def _handle_chat_event(
         service.decide_skill_creation(
             approval_id=proposal.id, session_id=session_id, sha256=proposal.sha256, answer=answer
         )
+        return True
+    return False
+
+
+async def _handle_chat_event(
+    service,
+    event: InteractionEvent,
+    renderer: _HumanRenderer,
+    *,
+    session_id: str,
+    as_json: bool,
+    authorized_tools: frozenset[str] = frozenset(),
+) -> None:
+    if await _handle_skill_creation_event(
+        service, event, renderer, session_id=session_id, as_json=as_json
+    ):
         return
     if event.kind is InteractionEventKind.SKILL_CATALOG_SKIPPED:
         messages = {

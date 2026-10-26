@@ -297,3 +297,119 @@ def test_cli_entrypoint_creates_skill_without_workspace_or_tools(tmp_path, monke
         assert "Rollback: kairos skills rollback " in capsys.readouterr().err
     finally:
         db.close()
+
+
+def test_cancel_cli_consumer_revokes_pending_creation_before_return(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from kairos_integration.interaction_contract import InteractionServiceError
+    from kairos_skills.mutation_contract import SkillMutationError
+
+    async def scenario():
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        gateway = RoundGateway([mutator_round(call()), answer_round()])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        awaiting, suspended = asyncio.Event(), asyncio.Event()
+        proposals, streams, cancellations = [], [], []
+
+        def stream(envelope):
+            current = service.stream(envelope)
+            streams.append(current)
+            return current
+
+        async def confirm(proposal, **_):
+            proposals.append(proposal)
+            awaiting.set()
+            await suspended.wait()
+            return ""
+
+        client = SimpleNamespace(
+            stream=stream,
+            skill_creation_proposal=service.skill_creation_proposal,
+            decide_skill_creation=service.decide_skill_creation,
+        )
+        monkeypatch.setattr("kairos_cli.chat.request_skill_creation", confirm)
+        task = asyncio.create_task(
+            _run_turn(
+                client,
+                session_id="learn-session",
+                content="/learn revisar",
+                override=None,
+                as_json=False,
+                home=tmp_path,
+            )
+        )
+        try:
+            await asyncio.wait_for(awaiting.wait(), 2)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError as error:
+                cancellations.append(error)
+            assert cancellations
+            with pytest.raises((SkillMutationError, InteractionServiceError)):
+                service.skill_creation_proposal(
+                    approval_id=proposals[0].id, session_id="learn-session"
+                )
+            assert not (tmp_path / "skills").exists()
+        finally:
+            for current in streams:
+                await current.aclose()
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_cli_publication_error_shows_operation_id_without_claiming_absence(
+    tmp_path, monkeypatch, capsys
+):
+    from contextlib import contextmanager
+
+    from kairos_skills.removal_state import database_connection
+
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr(
+            "kairos_cli.tool_approval._read_answer", AsyncMock(return_value="criar revisar-docs")
+        )
+
+        @contextmanager
+        def fail_after_commit(*args, **kwargs):
+            with database_connection(*args, **kwargs) as connection:
+                yield connection
+            raise OSError("private-io-fixture")
+
+        monkeypatch.setattr("kairos_integration.learn_turn.database_connection", fail_after_commit)
+        gateway = RoundGateway([mutator_round(call()), answer_round()])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            assert (
+                await _run_turn(
+                    service,
+                    session_id="s",
+                    content="/learn revisar",
+                    override=None,
+                    as_json=False,
+                    home=tmp_path,
+                )
+                == 1
+            )
+            assert (tmp_path / "skills/revisar-docs/SKILL.md").read_text() == creation_text()
+            result = next(m for m in gateway.requests[-1].messages if m.role == "tool")
+            import json
+
+            operation_id = json.loads(result.content[0].value)["operation_id"]
+            output = capsys.readouterr().err
+            assert operation_id in output
+            assert "skills history" in output
+            assert "Nenhuma skill criada" not in output
+            assert "private-io-fixture" not in output
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
