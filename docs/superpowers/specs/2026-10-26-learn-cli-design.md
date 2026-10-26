@@ -1,8 +1,9 @@
 # `/learn` no Chat da CLI — criação por modelo com confirmação humana
 
-Status: proposta de desenho para aprovação. A abordagem e os seis requisitos
-de recorte foram fornecidos pela usuária em 26/10/2026; as decisões adicionais
-abaixo são propostas do implementador. Nenhum código de produto foi alterado.
+Status: aprovado em 26/10/2026 com as três correções obrigatórias incorporadas:
+uma criação por `/learn`, prompt transitório e esclarecimento encerra o turno.
+A autorização cobre plano e implementação deste recorte, sujeitos aos gates
+de qualidade. Nenhum código de produto foi alterado nesta revisão.
 
 Base examinada: `main` em `f106ba8a8934f21f19abe9484b5ba3cb710fb06a`, após
 os PRs #118 e #120, com CI e deploy #323 aprovados. Trabalho no worktree
@@ -65,8 +66,9 @@ remoção, anexos nem as demais ações de gerenciamento.
   `skill_create`. As opções normais de ferramentas da sessão voltam a valer no
   próximo turno comum. Nenhuma ferramenta de arquivo, web, shell ou MCP é
   implicitamente liberada para coletar fontes neste MVP.
-- O índice já fixado continua seguindo seu contrato. `/learn` não chama
-  `skill_view` nem injeta novos corpos de skills como fontes adicionais.
+- `/learn` liga o loop de ferramentas mesmo sem `--tools` e exige
+  `source == "cli"`. Não prepara nem injeta catálogo, mesmo se solicitado
+  pela sessão, e não expõe `skill_view`. O snapshot já fixado é preservado.
 - Uma seleção explícita `--skill` junto de uma mensagem `/learn` é recusada
   neste recorte, antes de carregar o arquivo; o usuário pode aprender de
   conteúdo de skill já presente na conversa ativa.
@@ -102,10 +104,17 @@ contexto como experiências. O envelope recebe uma intenção imutável de
 aprendizado, separada do texto. O serviço não infere essa autorização de
 texto de assistente, histórico, frontmatter ou argumentos de ferramenta.
 
-O texto visível preserva o pedido do usuário; a expansão efetivamente enviada
-vai em `api_content`, compondo com o contexto normal de forma determinística.
-Retries reutilizam o pedido persistido. O contexto enviado não ganha papel
-system por conter material de uma skill ou fonte externa.
+O texto visível e o `api_content` persistido preservam somente o pedido original.
+O prompt de autoria nunca é persistido: o montador de requests substitui em
+memória o conteúdo da mensagem user atual sob posse exclusiva do turno,
+reconstruindo a expansão determinística em cada montagem, inclusive rounds de
+ferramentas. Retries usam esse request transitório. Ao encerrar o turno, o
+contexto é revogado; turnos futuros usam `messages.for_api` sem a expansão.
+Não se promove a fonte a system.
+
+Se o modelo pedir esclarecimento em vez de criar, o turno termina sem escrita
+de skill/ledger e sem capacidade remanescente. O usuário responde e repete
+`/learn`; uma resposta comum não reabre a capacidade automaticamente.
 
 ## Capacidade do turno e ferramenta
 
@@ -132,7 +141,11 @@ posse do turno. `CHAT_TOOLS`, o conjunto normal de `--tools` e os schemas dos
 demais turnos não passam a conter criação. A chamada direta ao registry fora
 da capacidade também recusa, antes de qualquer publicação.
 
-Uma invocação pode confirmar no máximo uma criação. Validação inválida pode
+Cada `/learn` permite no máximo uma skill: no primeiro `COMMITTED`, a capacidade
+é encerrada imediatamente, antes do retorno do recibo. Novas chamadas no mesmo
+turno, inclusive no mesmo lote ou em contexto copiado, são recusadas sem nova
+aprovação e sem escrita. Uma reserva exclusiva impede propostas/publicações
+concorrentes dentro da mesma capacidade. Validação inválida pode
 ser corrigida pelo modelo dentro dos orçamentos existentes. Recusa humana,
 cancelamento ou timeout encerram a capacidade; uma revisão pelo usuário deve
 começar com novo `/learn <pedido de revisão>`, aproveitando o histórico.
@@ -272,6 +285,13 @@ histórico antigo para forçar atualização.
 - Modelo sem ferramentas confirmadas, Agent Runtime e `/learning`: nenhuma
   criação ou mudança de configuração/modelo. Falas de “salvei” sem recibo
   nunca contam como sucesso.
+- Primeiro `COMMITTED` revoga a capacidade: duas chamadas no mesmo lote, no
+  round seguinte e via contexto copiado resultam em uma única skill/entrada.
+- Prompt transitório presente nos requests/retries de `/learn`, ausente no
+  banco e no próximo turno comum. Esclarecimento encerra sem escrita; resposta
+  comum não dispõe da ferramenta, e novo `/learn` abre novo escopo.
+- `/learn` sem `--tools` executa o loop real; outra source é recusada; não há
+  preparação/injeção de catálogo nem exposição de `skill_view`.
 - Durante `/learn`, nenhuma coleta nova por arquivo, web, shell, MCP ou leitura
   de skill; nos turnos comuns, schemas, seleção, aprovações e payloads seguem
   seus contratos anteriores. Preservar snapshot desde a primeira ativação.
@@ -291,5 +311,5 @@ histórico antigo para forçar atualização.
 5. Exigir novo `/learn` para revisar após recusa humana e não prometer nova
    skill no índice de uma conversa com snapshot já fixado.
 
-Após a revisão do desenho e sua aprovação, o próximo passo será escrever o
-plano de implementação. Esta proposta não autoriza produção, merge ou deploy.
+Próximo passo autorizado: plano e implementação com os limites acima.
+A aprovação do desenho não substitui o gate de merge nem autoriza deploy antecipado.
