@@ -7,11 +7,11 @@ import json
 import sys
 import uuid
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from kairos_cli.runtime import RuntimeHumanRenderer, render_runtime_event
-from kairos_cli.tool_approval import AUTOMATION_TOOLS, request_tool_decision
+from kairos_cli.tool_approval import AUTOMATION_TOOLS, request_skill_creation, request_tool_decision
 from kairos_integration import (
     InteractionEnvelope,
     InteractionEvent,
@@ -23,6 +23,7 @@ from kairos_integration.interaction_contract import InteractionServiceError
 from kairos_providers import ProviderModelRef
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_runtime.wire import runtime_event_to_json
+from kairos_skills.learn import parse_learn_request
 from kairos_skills.runtime import SkillSelectionError, SkillSnapshot, load_selected_skills
 
 __all__ = ["ChatUsageError", "run_chat"]
@@ -36,6 +37,9 @@ class ChatUsageError(ValueError):
 class _HumanRenderer:
     line_open: bool = False
     failed: bool = False
+    creation_committed: bool = False
+    creation_denied: bool = False
+    creation_call_ids: set[str] = field(default_factory=set)
 
     def emit(self, event: InteractionEvent) -> None:
         if event.kind is InteractionEventKind.DELTA:
@@ -92,6 +96,9 @@ async def run_chat(
     if idempotency_key is not None and not prompt:
         raise ChatUsageError("--idempotency-key só pode ser usado com uma mensagem")
     runtime_session = _is_runtime_session(home, session_id)
+    learn_request = _learn_intent(prompt, runtime_session=runtime_session, skills=skill_names)
+    if learn_request is not None and not _learn_terminal(as_json):
+        return 77
     if skills_catalog and runtime_session:
         raise ChatUsageError(
             "--skills-catalog é uma opção do Chat por modelo, não do Agent Runtime"
@@ -171,6 +178,27 @@ def _selected_skills(home, names, *, prompt, runtime_session) -> tuple[SkillSnap
         return load_selected_skills(home, names)
     except SkillSelectionError as exc:
         raise ChatUsageError(str(exc)) from None
+
+
+def _learn_intent(content, *, runtime_session, skills):
+    try:
+        request = parse_learn_request(content) if content.strip() else None
+    except ValueError as error:
+        raise ChatUsageError(str(error)) from None
+    if request is not None and (runtime_session or skills):
+        raise ChatUsageError("/learn exige Chat por modelo e não aceita --skill.")
+    return request
+
+
+def _learn_terminal(as_json):
+    if as_json or not sys.stdin.isatty():
+        print(
+            "/learn exige terminal interativo sem --json para revisar e confirmar a skill.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    return True
 
 
 def _tool_authorization(names, *, tools, workspace, prompt, runtime_session) -> frozenset[str]:
@@ -274,19 +302,29 @@ async def _run_turn(
     skills: tuple[SkillSnapshot, ...] = (),
     skills_catalog: bool | None = False,
 ) -> int:
-    content = _augment_with_experiences(content, home) if experiences and home else content
+    learn_request = _learn_intent(content, runtime_session=runtime_session, skills=skills)
+    if learn_request is not None and not _learn_terminal(as_json):
+        return 77
+    content = (
+        _augment_with_experiences(content, home)
+        if experiences and home and learn_request is None
+        else content
+    )
     envelope = InteractionEnvelope(
         conversation_id=session_id,
         source="cli",
         content=content,
         override=override,
         idempotency_key=idempotency_key,
-        web_search=web_search,
-        tools=tools,
-        workspace=workspace,
+        web_search=web_search and learn_request is None,
+        tools=tools and learn_request is None,
+        workspace=workspace if learn_request is None else None,
         skills=skills,
-        skills_catalog=skills_catalog is True,
-        skills_catalog_auto=skills_catalog is None and not runtime_session,
+        skills_catalog=skills_catalog is True and learn_request is None,
+        skills_catalog_auto=skills_catalog is None
+        and not runtime_session
+        and learn_request is None,
+        learn_request=learn_request,
     )
     renderer = _HumanRenderer()
     runtime_renderer = RuntimeHumanRenderer()
@@ -351,6 +389,21 @@ async def _run_turn(
         raise
     finally:
         renderer.finish_line()
+    if learn_request is not None:
+        return _learn_exit_code(renderer)
+    return 1 if renderer.failed else 0
+
+
+def _learn_exit_code(renderer):
+    if renderer.creation_denied:
+        return 77
+    if not renderer.creation_committed:
+        print(
+            "Nenhuma skill criada. Para esclarecer ou revisar, repita /learn <pedido>.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
     return 1 if renderer.failed else 0
 
 
@@ -363,6 +416,40 @@ async def _handle_chat_event(
     as_json: bool,
     authorized_tools: frozenset[str] = frozenset(),
 ) -> None:
+    if event.tool_call is not None and event.tool_call.name == "skill_create":
+        renderer.creation_call_ids.add(event.tool_call.id)
+    if (
+        event.tool_result is not None
+        and event.tool_result.tool_call_id in renderer.creation_call_ids
+        and not event.tool_result.is_error
+    ):
+        receipt = json.loads(event.tool_result.content)
+        if receipt.get("state") == "committed":
+            renderer.creation_committed = True
+            renderer.finish_line()
+            print(
+                "Skill criada: "
+                + json.dumps(receipt, ensure_ascii=True)
+                + "\nRollback: kairos skills rollback "
+                + receipt["operation_id"],
+                file=sys.stderr,
+                flush=True,
+            )
+    if (
+        event.kind is InteractionEventKind.TOOL_APPROVAL_REQUEST
+        and event.tool_call is not None
+        and event.tool_call.name == "skill_create"
+    ):
+        renderer.finish_line()
+        proposal = service.skill_creation_proposal(
+            approval_id=event.tool_approval_id, session_id=session_id
+        )
+        answer = await request_skill_creation(proposal, as_json=as_json)
+        renderer.creation_denied = answer != f"criar {proposal.name}"
+        service.decide_skill_creation(
+            approval_id=proposal.id, session_id=session_id, sha256=proposal.sha256, answer=answer
+        )
+        return
     if event.kind is InteractionEventKind.SKILL_CATALOG_SKIPPED:
         messages = {
             "empty": "nenhuma skill instalada disponível.",

@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import unicodedata
 
 from kairos_integration.chat_tools import MUTATING_TOOLS, TOOL_APPROVAL_TIMEOUT_SECONDS
 from kairos_integration.interaction_contract import InteractionEvent
@@ -13,7 +14,7 @@ from kairos_integration.interaction_contract import InteractionEvent
 AUTOMATION_TOOLS = MUTATING_TOOLS
 
 
-async def _read_answer() -> str:
+async def _read_answer(*, max_bytes: int = 64) -> str:
     loop = asyncio.get_running_loop()
     descriptor = sys.stdin.fileno()
     answer = loop.create_future()
@@ -32,7 +33,7 @@ async def _read_answer() -> str:
         if not chunk or chunk == b"\n":
             value = data.decode("utf-8", errors="replace") if chunk and not oversized else ""
             answer.set_result(value)
-        elif len(data) < 64:
+        elif len(data) < max_bytes:
             data.extend(chunk)
         else:
             oversized = True
@@ -49,6 +50,8 @@ async def request_tool_decision(
 ) -> str:
     call = event.tool_call
     if call is None:
+        return "deny"
+    if call.name == "skill_create":
         return "deny"
     if call.name in authorized_tools:
         print(f"Execução autorizada explicitamente: {call.name}.", file=sys.stderr, flush=True)
@@ -77,3 +80,41 @@ async def request_tool_decision(
         )
         return "deny"
     return "allow" if answer.strip().casefold() in {"s", "sim", "y", "yes"} else "deny"
+
+
+def _terminal_text(text: str) -> str:
+    return "".join(
+        f"\\u{ord(char):04x}"
+        if unicodedata.category(char).startswith("C") or char in "\u2028\u2029"
+        else char
+        for char in text
+    )
+
+
+async def request_skill_creation(proposal, *, as_json: bool) -> str:
+    if as_json or not sys.stdin.isatty():
+        return ""
+    print(
+        f"\nCriar skill: {_terminal_text(proposal.name)}\nDescrição: {_terminal_text(proposal.description)}\nSHA-256: {proposal.sha256}\n----- SKILL.md completo -----",
+        file=sys.stderr,
+        flush=True,
+    )
+    for line in proposal.skill_md.split("\n"):
+        print("| " + _terminal_text(line), file=sys.stderr)
+    phrase = f"criar {proposal.name}"
+    print(
+        f"----- fim de SKILL.md -----\nPara confirmar, digite exatamente: {phrase}\n> ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        answer = await _read_answer(max_bytes=72)
+    except (OSError, ValueError, NotImplementedError, TimeoutError):
+        print(
+            "\nCriação recusada: resposta indisponível ou prazo expirado.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return ""
+    return answer.removesuffix("\r")
