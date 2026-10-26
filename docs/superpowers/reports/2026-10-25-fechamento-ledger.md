@@ -63,6 +63,8 @@ reimplantar. Não há migração ou cache persistido novo a restaurar.
 
 T1/T2/T3 do plano foram concluídas no escopo aprovado. O fechamento documental
 não amplia o memo a outros donos ou elimina revalidações nas fronteiras.
-Índice automático, `/learn`, curadoria e workflows duráveis continuam sendo
-recortes funcionais próprios, sem aprovação de implementação derivada desta
-medição. Ollama operacional permanece adiado.
+O índice automático foi entregue posteriormente pelo PR #119, com
+[integração e deploy verificados](2026-10-25-indice-automatico-cli.md).
+`/learn`, curadoria e workflows duráveis continuam sendo recortes funcionais
+próprios, sem aprovação de implementação derivada desta medição. Ollama
+operacional permanece adiado.

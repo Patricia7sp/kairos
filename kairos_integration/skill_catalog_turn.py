@@ -17,7 +17,11 @@ from kairos_skills.catalog import (
     catalog_asset,
     catalog_home_id,
 )
-from kairos_skills.catalog_io import capture_skill_catalog, read_catalog_asset
+from kairos_skills.catalog_io import (
+    capture_optional_skill_catalog,
+    capture_skill_catalog,
+    read_catalog_asset,
+)
 from kairos_skills.catalog_view import (
     SkillViewPage,
     encode_skill_view_page,
@@ -101,16 +105,20 @@ async def prepare_skill_catalog_turn(
     home: Path,
     repository: SkillCatalogRepository | None,
     persistence: SQLiteAsyncInteractionPersistence | None,
+    allow_empty: bool = False,
 ) -> SkillCatalogTurn | None:
-    if not envelope.skills_catalog:
+    if not (envelope.skills_catalog or envelope.skills_catalog_auto):
         return None
     if (repository is None) == (persistence is None):
         raise SkillCatalogError("Catálogo exige uma fronteira de persistência por sessão.")
     home_id = catalog_home_id(home)
+    capture = capture_optional_skill_catalog if allow_empty else capture_skill_catalog
     if persistence is not None:
         snapshot = await persistence.get_skill_catalog(envelope.conversation_id, home_id=home_id)
         if snapshot is None:
-            captured = await persistence._call(capture_skill_catalog, home)
+            captured = await persistence._call(capture, home)
+            if captured is None:
+                return None
             snapshot = await persistence.create_skill_catalog_if_absent(
                 envelope.conversation_id, captured
             )
@@ -118,7 +126,9 @@ async def prepare_skill_catalog_turn(
         assert repository is not None
         snapshot = repository.get(envelope.conversation_id, home_id=home_id)
         if snapshot is None:
-            captured = await _local_io(capture_skill_catalog, home)
+            captured = await _local_io(capture, home)
+            if captured is None:
+                return None
             snapshot = repository.create_if_absent(envelope.conversation_id, captured)
 
     cached: dict[SkillAssetRecord, str] = {}

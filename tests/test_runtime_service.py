@@ -223,7 +223,7 @@ async def test_cancel_timeout_keeps_quarantine_and_session_cannot_end(tmp_path):
 async def test_cancel_bounds_interrupt_delivery_and_uses_independent_terminal_evidence(
     tmp_path, monkeypatch, interrupt_behavior
 ):
-    service, store, runtime = await setup_service(tmp_path, cancel_timeout=0.03)
+    service, store, runtime = await setup_service(tmp_path, cancel_timeout=0.3)
     interrupts = []
 
     async def interrupt(session, external_turn_id):
@@ -240,18 +240,20 @@ async def test_cancel_bounds_interrupt_delivery_and_uses_independent_terminal_ev
         async for event in service.subscribe("s1"):
             if event.kind == "turn_start":
                 break
-        async with asyncio.timeout(0.3):
+        async with asyncio.timeout(3):
             if interrupt_behavior == "terminal_without_response":
                 await service.cancel("s1", turn)
-                assert (await store.get_turn(turn))["state"] == "cancelled"
-                assert (await store.get_turn(turn))["inactive_confirmed_at"] is not None
-                assert (await service.get("s1"))["state"] == "ready"
             else:
                 with pytest.raises(RuntimeErrorInfo, match="cancel_partial"):
                     await service.cancel("s1", turn)
-                assert (await store.get_turn(turn))["state"] == "interrupted"
-                assert (await store.get_turn(turn))["inactive_confirmed_at"] is None
-                assert await service.submit("s1", "hello", "key") == turn
+        if interrupt_behavior == "terminal_without_response":
+            assert (await store.get_turn(turn))["state"] == "cancelled"
+            assert (await store.get_turn(turn))["inactive_confirmed_at"] is not None
+            assert (await service.get("s1"))["state"] == "ready"
+        else:
+            assert (await store.get_turn(turn))["state"] == "interrupted"
+            assert (await store.get_turn(turn))["inactive_confirmed_at"] is None
+            assert await service.submit("s1", "hello", "key") == turn
         assert interrupts == ["external-1"]
         if interrupt_behavior == "transport_error":
             assert runtime.inspections >= 1

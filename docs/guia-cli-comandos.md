@@ -206,18 +206,31 @@ bash Docker mantêm suas restrições. Somente `SKILL.md` é carregado:
 ## Consultar o catálogo instalado
 
 ```bash
-kairos run --session trabalho --skills-catalog "Revise a documentação"
-kairos chat --session trabalho --skills-catalog "Continue a revisão"
+kairos run --session trabalho "Revise a documentação"
+kairos chat --session trabalho
+kairos run --session trabalho --skills-catalog "Exija o catálogo neste turno"
+kairos run --session trabalho --no-skills-catalog "Continue sem índice"
 ```
 
-`--skills-catalog` anuncia nomes e descrições das skills instaladas e permite
-ao modelo chamar `skill_view` para ler procedimentos ou referências. Exige
-mensagem única e modelo com suporte confirmado a tools; não funciona em modo
-interativo nem em sessões do Agent Runtime. Repita a opção em cada turno que
-precisar dessa leitura. Sem ela, não há nova varredura, índice ou ferramenta;
-resultados anteriores permanecem no histórico.
+No Chat da CLI, `run` e `chat` disponibilizam automaticamente nomes e descrições
+das skills instaladas e a ferramenta `skill_view` para ler procedimentos ou
+referências. O índice consome contexto e envia esses nomes/descrições ao
+provedor por padrão quando o modelo tem suporte confirmado a ferramentas.
+Instalação ausente ou genuinamente vazia e modelo sem suporte confirmado
+continuam o chat sem catálogo, com um aviso em stderr.
 
-O catálogo fica fixado na sessão, inclusive após reinício. Skills novas ou
+`--skills-catalog` exige catálogo válido não vazio e modelo apto; indisponibilidade
+recusa o turno. `--no-skills-catalog` desliga índice e leitura, sem consultar o
+catálogo nem emitir aviso. Se as opções se repetirem, a última prevalece.
+Os três modos funcionam também no interativo: a escolha vale para todas as
+mensagens daquela chamada, com capacidade e orçamento novos por turno.
+No Agent Runtime, automático e desligado preservam seu mecanismo próprio;
+`--skills-catalog` é recusado. Web e gateways não adotam esse padrão.
+
+O catálogo fica fixado desde a primeira ativação positiva na sessão, inclusive
+após reinício ou desligamento temporário. Uma sessão inicialmente sem skills
+pode capturar seu primeiro catálogo após a instalação; não se persiste índice
+vazio. Depois da primeira ativação, skills novas ou
 alteradas exigem outra sessão para atualizar o catálogo. Um arquivo já lido
 é reutilizado pelo conteúdo original verificado e persistido; alteração ou
 remoção de um arquivo ainda não lido retorna erro solicitando nova sessão.
@@ -234,8 +247,11 @@ e restrições de workspace.
 Até 256 skills, índice de 32 KiB, SKILL de 64 KiB, 128 referências por skill,
 256 KiB por referência e 64 MiB agregados de arquivos textuais. Referências
 têm profundidade máxima de oito subdiretórios. Entradas inválidas são omitidas
-e contadas no aviso em stderr; raiz inválida, catálogo vazio e excesso global
-recusam o turno. Links, hardlinks e arquivos especiais são recusados.
+e contadas no aviso em stderr; raiz inválida e excesso global recusam o turno.
+Só o componente final `skills` ausente em um home seguro, ou uma raiz válida
+sem candidatos nem omissões, contam como vazio no automático. Instalação só
+com entradas inválidas, corrupção, permissão negada e falha de I/O recusam o
+turno antes do provedor. Links, hardlinks e arquivos especiais são recusados.
 
 Cada turno admite 128 KiB de texto de páginas. Antes da leitura, reserva-se
 até quatro bytes por caractere e devolve-se a sobra: uma página ASCII pode
@@ -246,7 +262,9 @@ Nomes/descrições são enviados ao provedor nos turnos habilitados; corpos e
 referências somente após chamadas de leitura. O banco local retém o catálogo
 e o conteúdo integral dos arquivos lidos, além das páginas no histórico.
 Avisos não imprimem corpos, descrições ou caminhos. Backup do banco inclui
-esse conteúdo; omitir a opção não apaga o histórico nem o cache.
+esse conteúdo; `--no-skills-catalog` não apaga o histórico nem o cache. Avisos
+de catálogo ativo ou indisponível vão a stderr, inclusive com `--json`, sem
+alterar os eventos NDJSON de stdout.
 
 ## Conversar com ferramentas
 

@@ -1,0 +1,189 @@
+{
+  "observed_date_utc": "2026-10-25",
+  "pull_request": 119,
+  "reviewed_head": "5b6be7eaffa95d4b64797b46ac4d8d5f01e38806",
+  "merge_commit": "224532e8283298c65f287cbf6d507b4a32425429",
+  "parent_commit": "89020109ad1d063f06dba9b685681e15cb22590a",
+  "reviewed_tree": "65406540824e2eb6740fdd6a0d14c665c4487826",
+  "merged_tree": "65406540824e2eb6740fdd6a0d14c665c4487826",
+  "post_merge_diff_verified": true,
+  "files_deleted": 0,
+  "local_unit_tests": {
+    "exit_code": 0,
+    "passed": 4155,
+    "subtests_passed": 6542,
+    "skipped": 21,
+    "deselected": 33,
+    "duration_seconds": 720.03
+  },
+  "pr_workflow": {
+    "id": 40238269756,
+    "number": 318,
+    "conclusion": "success",
+    "verification_jobs_passed": 9
+  },
+  "main_workflow": {
+    "id": 40241432910,
+    "number": 319,
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/Patricia7sp/kairos/actions/runs/40241432910",
+    "jobs": [
+      {
+        "name": "Imagem + testes de integração",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Testes (unitários)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Frontends (vitest + tsc)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Lint (ruff)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Lint dos Dockerfiles (hadolint)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Sessões Docker isoladas (offline)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "uv.lock em dia",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Lint de shell (shellcheck)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Recall de compactação (gate)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Benchmark pareado do ledger (opt-in)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Deploy no Komodo",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "SonarQube Cloud (advisory)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "sonar": {
+    "pr_issues": 0,
+    "pr_accepted_issues": 0,
+    "pr_new_coverage": 97,
+    "main_quality_gate": "Quality Gate passed",
+    "main_new_issues": 1061,
+    "main_new_issues_before_merge": 1061,
+    "main_new_coverage": 95.9,
+    "main_security_hotspots": 0,
+    "main_duplication": 0,
+    "check_id": 121316799366,
+    "pr_check_id": 121306965858,
+    "pr_issues_api_total": 0
+  },
+  "deployment": {
+    "job_id": 121316316003,
+    "conclusion": "success",
+    "update_id": "6ade885958764b0d43dff8a4",
+    "reported_commit": "?",
+    "revision_confirmed_via": "Komodo managed checkout HEAD and hashes of all nine changed production modules in running container",
+    "health": "HTTP 200, status ok"
+  },
+  "production": {
+    "expected_revision": "224532e8283298c65f287cbf6d507b4a32425429",
+    "observed_revision": "224532e8283298c65f287cbf6d507b4a32425429",
+    "source_modules_verified": 9,
+    "source_hashes": {
+      "kairos_cli/chat.py": "5d414e02dd8377786457b1ce98206f65abca4a9ec7fb28a49b1a6dc549a864aa",
+      "kairos_cli/handlers.py": "7653ce3bc0ec766cd166d44de6f29db1ab9bb150a9d9b424f3bbaa8dfebea52f",
+      "kairos_cli/main.py": "a05e3e378a3b0261b04bcd057aa99e3347e940066420c510da4e0a4c820edb5d",
+      "kairos_integration/event_protocol.py": "819a20ca04f99f7485850090f31798bc6e0d238b505f682441abf5168b211f64",
+      "kairos_integration/interaction_contract.py": "05f09e7dd90790c24c96c6deedc84e527cb51b857a16997258bb12591df8e143",
+      "kairos_integration/interaction_service.py": "17fb05f81941663011f309bf12e2385bb6dcf01e10839e6d408d1ab927f00194",
+      "kairos_integration/router.py": "ad33dcaefe931e0631f5bfe5fcf19f82c6f824adb71a71514ddd16bdf5876ce2",
+      "kairos_integration/skill_catalog_turn.py": "ba11a9a359b7c108f090647bb019b4bdf6bd7cce4f9b2c2ac791773de6a4a117",
+      "kairos_skills/catalog_io.py": "3d4daf44fdbcd8572ca7a70a7854da4c43fd91af0adea6c009677a48dc241ff8"
+    },
+    "container_id": "216d6695dd9b5d1d05ae9ba16d70229e79aa77c65d645fdeb95ad26a2197ce54",
+    "image_id": "sha256:11227434d66158ef6a15e54affbd40200658f90dc45e4ecfd29c7692e610ec1a",
+    "status": "running",
+    "health": "healthy"
+  },
+  "post_deploy_health": {
+    "http_status": 200,
+    "status": "ok",
+    "smoke_exit_code": 0
+  },
+  "limits": [
+    "runtime_live not enabled",
+    "benchmark opt-in not enabled",
+    "host AppArmor/seccomp profile not enabled",
+    "main Sonar backlog is separate from PR issue count"
+  ],
+  "main_unit_tests": {
+    "passed": 4152,
+    "subtests_passed": 6542,
+    "skipped": 24,
+    "deselected": 33,
+    "duration_seconds": 631.49
+  },
+  "main_image_tests": {
+    "passed": 32,
+    "subtests_passed": 26,
+    "duration_seconds": 120.39
+  },
+  "main_offline_tests": {
+    "passed": 26,
+    "skipped": 1,
+    "duration_seconds": 37.63
+  },
+  "local_final_image": {
+    "exit_code": 0,
+    "passed": 32,
+    "subtests_passed": 26,
+    "duration_seconds": 257.61,
+    "image_id": "sha256:27972d94f8becf10f6ffa614e4b533edfff874f58af643b0974dea5a1f98a219",
+    "production_source_commit": "2f5d586fd76b7dbf9852b745fb3af81fd0b7495c",
+    "later_delta": "tests/test_runtime_host.py only"
+  },
+  "local_final_image_smoke": {
+    "modes": [
+      "auto",
+      "on",
+      "off"
+    ],
+    "source_hashes_matched": 5,
+    "source_commit": "2f5d586fd76b7dbf9852b745fb3af81fd0b7495c",
+    "source_hashes": {
+      "kairos_cli/chat.py": "5d414e02dd8377786457b1ce98206f65abca4a9ec7fb28a49b1a6dc549a864aa",
+      "kairos_cli/handlers.py": "7653ce3bc0ec766cd166d44de6f29db1ab9bb150a9d9b424f3bbaa8dfebea52f",
+      "kairos_cli/main.py": "a05e3e378a3b0261b04bcd057aa99e3347e940066420c510da4e0a4c820edb5d",
+      "kairos_integration/interaction_service.py": "17fb05f81941663011f309bf12e2385bb6dcf01e10839e6d408d1ab927f00194",
+      "kairos_skills/catalog_io.py": "3d4daf44fdbcd8572ca7a70a7854da4c43fd91af0adea6c009677a48dc241ff8"
+    }
+  }
+}

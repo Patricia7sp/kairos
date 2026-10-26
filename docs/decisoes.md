@@ -2329,7 +2329,7 @@ instalação corrente; snapshots e páginas já cacheadas de sessões permanecem
 
 ## D-CLI.SKILL — consumo explícito de skills como contexto do turno
 
-O catálogo sob demanda acrescenta `--skills-catalog`, opt-in por turno único
+O catálogo sob demanda começou com `--skills-catalog`, opt-in por turno único
 da CLI, conforme `2026-10-08-catalogo-skills-design.md`. RF-09/RF-17 usam
 snapshot imutável e cache verificado em tabelas canônicas SQLite, em vez de
 `skills/index-cache/`, para compartilhar posse, migração, backup e reparo com
@@ -2358,9 +2358,28 @@ a seleção não apaga o contexto já enviado em mensagens anteriores.
 
 Isso não muda schemas, aprovação, workspace, bash Docker ou credenciais.
 Scripts e anexos não são carregados; não há autoria, curadoria ou alterações
-de proveniência. RF-09/RF-17 permanecem parciais: índice automático com cache e
-leitura de referências sob demanda pertencem a recortes futuros. A seleção
+de proveniência. No primeiro recorte, RF-09/RF-17 permaneceram parciais: índice
+automático e leitura de referências sob demanda vieram depois. A seleção
 explícita evita inserir todo o catálogo ou uma ferramenta nova no core.
+
+### Índice automático na CLI — recorte de 25/10/2026
+
+O [desenho aprovado](superpowers/specs/2026-10-25-indice-automatico-cli-design.md)
+amplia o catálogo para `run` e `chat`, em mensagem única e no interativo. Sem
+flag, ativa índice e `skill_view` quando modelo e instalação permitem;
+`--skills-catalog` exige ativação e `--no-skills-catalog` a desliga sem I/O de
+catálogo. O automático só tolera modelo sem tools confirmadas ou ausência
+benigna/vazio genuíno; corrupção e estados inseguros continuam recusados.
+
+A seleção é congelada uma vez sob posse do turno. O snapshot passa a existir
+na primeira ativação positiva, sem persistência de vazio; permanece imutável
+após reinício ou alternância de modos. Desligar não apaga conteúdo já lido no
+histórico. Capacidade e orçamento fecham em cada turno; os avisos são únicos e
+vão a stderr, inclusive em JSON. Schema, limites, autorização e proveniência
+permanecem iguais. O booleano antigo do envelope conserva default desligado;
+a intenção automática é exclusiva da CLI. Runtime, Web e gateways preservam
+seus contratos. O PR #119 concentra a implementação e seu aceite, sem merge
+ou deploy implícitos.
 
 ---
 

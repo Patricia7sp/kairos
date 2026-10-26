@@ -40,6 +40,8 @@ def _event_fields(event: InteractionEvent) -> dict[str, Any]:  # noqa: PLR0912
             selection_reason=event.snapshot.reason.value,
             parameters=_json_value(event.snapshot.parameters),
         )
+    elif event.kind is InteractionEventKind.SKILL_CATALOG_SKIPPED:
+        payload["reason"] = event.catalog_skip_reason
     elif event.kind is InteractionEventKind.DELTA:
         payload["text"] = event.text
     elif event.kind is InteractionEventKind.REASONING_DELTA:

@@ -127,9 +127,25 @@ O PR #117 (`8902010`) integrou e implantou o reuso transacional de registros
 do ledger no recorte da #109. O gate controlado passou com ganho mediano de
 11,5077% e as 20 validações preservadas; CI, Sonar, deploy e smoke aprovados.
 Ver o [fechamento](superpowers/reports/2026-10-25-fechamento-ledger.md).
-A recomendação de continuidade é definir o índice automático sobre o catálogo
-existente; `/learn`, curadoria e workflows duráveis continuam para recortes
-próprios. Nenhuma dessas funcionalidades recebe implementação presumida.
+
+Atualização em 26/10/2026: o índice automático na CLI foi integrado pelo
+PR #119 em `224532e`, com
+[desenho aprovado](superpowers/specs/2026-10-25-indice-automatico-cli-design.md)
+e [plano de execução](superpowers/plans/2026-10-25-indice-automatico-cli.md).
+Descoberta opcional estrita, ativação sob posse do turno e CLI/interativo
+foram concluídos, revisados e implantados. A suíte local integral passou:
+4.155 testes e 6.542 subtestes. O
+[CI da main #319](https://github.com/Patricia7sp/kairos/actions/runs/40241432910)
+passou, incluindo imagem, frontends, integrações e deploy no Komodo. Sonar
+com Quality Gate aprovado e zero apontamentos do PR; a main mantém o backlog
+global anterior. Revisão implantada e hashes conferidos, container saudável
+e smoke pós-deploy HTTP 200/`status: ok`. O
+[relatório](superpowers/reports/2026-10-25-indice-automatico-cli.md) preserva
+as provas, os limites e os comandos. A próxima frente de qualidade é a
+triagem de segurança e confiabilidade do Sonar; `/learn`, curadoria e
+workflows duráveis continuam para recortes funcionais próprios.
+
+## Histórico das entregas — 7 a 10/10/2026
 
 Restrição de workspace e autorização para automações sem terminal foram
 integradas e implantadas pelos PRs #92 e #93. A seleção explícita de skills em
@@ -144,7 +160,7 @@ SQLite imutável por sessão e leitura paginada de SKILL/referências com hashes
 verificados. A CLI real foi testada com adapter local fictício, migração,
 reabertura, backup/rollback e contenção.
 
-O recorte atual implementa autoria manual: `skills add --file`, `history` e
+O recorte de autoria manual implementou `skills add --file`, `history` e
 `rollback`, proveniência USER explícita, ledger append-only e recuperação
 observacional sem substituir versões. Testes exercitam arquivos/SQLite,
 interrupção real de processos, edições concorrentes e consumo pelo adapter
@@ -164,9 +180,11 @@ geral, 16 skips e 26 deselects; `runtime_live` permaneceu desabilitado.
 O smoke instalado na imagem, sem rede e com home/banco temporários, comprovou
 CLI, consumo pelo adapter, catálogo/cache, rollback, recusa de edição,
 recuperação após morte de processo e stdin intacto; hashes dos módulos
-instalados coincidiram com os fontes. Merge exige nove checks remotos verdes;
-deploy e smoke no container publicado seguem o fluxo pós-merge.
-Índice automático por padrão, `/learn`, curador e workflows duráveis continuam pendentes.
+instalados coincidiram com os fontes. Naquela entrega, o merge dependia dos
+nove checks remotos verdes; deploy e smoke seguiam o fluxo pós-merge.
+Índice automático, `/learn`, curador e workflows duráveis estavam pendentes
+em 10/10. O índice foi entregue posteriormente pelo PR #119, conforme o
+fechamento atual acima.
 Não foram realizadas chamadas a provedores com credenciais reais.
 
 O recorte de administração MCP liga `mcp list`, `mcp test NOME` e

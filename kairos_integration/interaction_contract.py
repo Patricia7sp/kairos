@@ -41,6 +41,7 @@ class InteractionEventKind(StrEnum):
 
     TURN_START = "turn_start"
     SKILL_CATALOG_READY = "skill_catalog_ready"
+    SKILL_CATALOG_SKIPPED = "skill_catalog_skipped"
     DELTA = "delta"
     REASONING_DELTA = "reasoning_delta"
     TOOL_CALL = "tool_call"
@@ -120,12 +121,10 @@ class InteractionEnvelope:
     workspace: str | None = None
     skills: tuple[SkillSnapshot, ...] = ()
     skills_catalog: bool = False
+    skills_catalog_auto: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.skills_catalog) is not bool:
-            raise TypeError("skills_catalog deve ser booleano")
-        if self.skills_catalog and self.source != "cli":
-            raise ValueError("Catálogo de skills só está disponível em turnos únicos da CLI.")
+        self._validate_catalog_intent()
         if self.workspace is not None:
             from pathlib import Path
 
@@ -149,6 +148,16 @@ class InteractionEnvelope:
             raise TypeError("idempotency_key deve ser uma string ou None")
         object.__setattr__(self, "parameters", _immutable_parameters(self.parameters))
         object.__setattr__(self, "skills", validate_skill_snapshots(self.skills))
+
+    def _validate_catalog_intent(self) -> None:
+        if type(self.skills_catalog) is not bool:
+            raise TypeError("skills_catalog deve ser booleano")
+        if type(self.skills_catalog_auto) is not bool:
+            raise TypeError("skills_catalog_auto deve ser booleano")
+        if self.skills_catalog and self.skills_catalog_auto:
+            raise ValueError("Exigência explícita e catálogo automático são mutuamente exclusivos.")
+        if (self.skills_catalog or self.skills_catalog_auto) and self.source != "cli":
+            raise ValueError("Catálogo de skills só está disponível no Chat da CLI.")
 
 
 @dataclass(frozen=True)
@@ -231,6 +240,7 @@ class InteractionEvent:
     error_kind: str | None = None
     retryable: bool = False
     catalog_notice: SkillCatalogNotice | None = None
+    catalog_skip_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, InteractionEventKind):
@@ -238,6 +248,14 @@ class InteractionEvent:
                 object.__setattr__(self, "kind", InteractionEventKind(self.kind))
             except ValueError as exc:
                 raise ValueError(f"evento de interação desconhecido: {self.kind!r}") from exc
+        if self.kind is InteractionEventKind.SKILL_CATALOG_SKIPPED:
+            if type(self.catalog_skip_reason) is not str or self.catalog_skip_reason not in {
+                "empty",
+                "model_tools_unavailable",
+            }:
+                raise ValueError("Motivo de catálogo indisponível inválido.")
+        elif self.catalog_skip_reason is not None:
+            raise ValueError("Motivo de catálogo indisponível exige evento correspondente.")
 
     @classmethod
     def turn_start(

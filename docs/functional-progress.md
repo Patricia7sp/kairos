@@ -1,8 +1,39 @@
 # Progresso funcional do Kairos
 
-Atualizado em 25/10/2026. Base integrada e implantada conferida: `main` em
-`89020109ad1d063f06dba9b685681e15cb22590a`. Os checkpoints históricos abaixo
-preservam suas datas e evidências; o estado atual está consolidado nesta seção.
+## Frente atual em 26/10/2026
+
+A base integrada e implantada é `main` em
+`224532e8283298c65f287cbf6d507b4a32425429`. O
+[PR #119](https://github.com/Patricia7sp/kairos/pull/119) entregou o
+[índice automático de skills na CLI](superpowers/specs/2026-10-25-indice-automatico-cli-design.md),
+inclusive no interativo. Force/off explícitos, snapshot desde a primeira
+ativação positiva e capacidades por turno preservam os limites existentes.
+O padrão anuncia somente índice e leitor sob demanda.
+
+Revisão independente sem achados; suíte local integral com 4.155 testes e
+6.542 subtestes aprovados. O
+[CI da main #319](https://github.com/Patricia7sp/kairos/actions/runs/40241432910)
+concluiu verde, incluindo deploy no Komodo. O checkout implantado e os nove
+módulos de produção alterados foram conferidos; container saudável e smoke
+pós-deploy com HTTP 200 e `status: ok`. O Sonar aprovou o Quality Gate do PR
+e da main. Os 12 apontamentos do PR foram corrigidos; sua cobertura nova
+ficou em 97%. O
+[relatório de fechamento](superpowers/reports/2026-10-25-indice-automatico-cli.md)
+registra as provas, os comandos e os limites.
+
+A continuidade solicitada começa por reconciliar o fechamento documental
+do PR #118 com essa entrega. O inventário do Sonar em 26/10 ainda registra
+1.061 apontamentos na main: 987 de manutenção, 45 classificados como
+vulnerabilidades e 29 como bugs. São classificações do scanner, a verificar
+contra os contratos antes de corrigir; a contagem é a mesma anterior ao #119.
+O saneamento deve começar pelos achados de segurança e confiabilidade,
+em lotes com revisão e validação próprias. `/learn`, curadoria e workflows
+duráveis permanecem como frentes funcionais posteriores; Ollama continua adiado.
+
+## Checkpoint integrado anterior — 25/10/2026
+
+O reuso do ledger foi integrado e implantado em `8902010`. Os checkpoints abaixo
+preservam suas datas e evidências; o estado atual está consolidado na seção inicial.
 
 ## Continuidade em 25/10/2026
 
@@ -23,6 +54,7 @@ preservam suas datas e evidências; o estado atual está consolidado nesta seç�
 | B2: publicação coordenada, recuperação, manifesto e backup v11 | PR #114, `da7c58c` |
 | Backup com API síncrona e correção S7493 | PR #115, `b7346ad` |
 | Reuso transacional de registros do ledger, mantendo as validações | PR #117, `8902010` |
+| Índice automático de skills na CLI e no interativo | PR #119, `224532e` |
 
 A B2 foi integrada e implantada pelo [PR #114](https://github.com/Patricia7sp/kairos/pull/114).
 Sync e promoção usam o coordenador com lock, journal e recuperação por ID;
@@ -55,10 +87,10 @@ O Sonar confirmou Quality Gate OK para `8902010`, com 95,8% de cobertura nova
 no período da main. Provas e limites no
 [fechamento do ledger](superpowers/reports/2026-10-25-fechamento-ledger.md).
 
-Recomendação de próxima frente: definir o recorte do índice automático de
-skills, sobre o catálogo existente. `/learn`, curadoria e workflows duráveis
-continuam pendentes, sem ordem posterior fechada. Essa recomendação não
-aprova um novo comportamento. Ollama permanece adiado.
+O índice automático foi entregue posteriormente pelo PR #119, conforme o
+fechamento atual acima. `/learn`, curadoria e workflows duráveis continuam
+pendentes; a recomendação de continuidade não aprova novos comportamentos.
+Ollama permanece adiado.
 Instalar política em produção e isolar adulteração pelo mesmo UID não fazem
 parte destas entregas.
 
