@@ -34,6 +34,7 @@ from kairos_integration.interaction_contract import (
     InteractionServiceError,
     InteractionToolResult,
 )
+from kairos_integration.learn_turn import LearnTurn
 from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
 from kairos_integration.retry import RetryPolicy
 from kairos_integration.selection_context import SelectionContextLoader
@@ -213,6 +214,10 @@ class InteractionService:
         self._admission = admission
         self._event_home = event_home
         self._tool_approvals: dict[str, tuple[str, asyncio.Future[str]]] = {}
+        self._creation_approvals: dict[str, LearnTurn] = {}
+        self._turn_learn: ContextVar[LearnTurn | None] = ContextVar(
+            f"kairos-turn-learn-{id(self)}", default=None
+        )
         self._chat_sandbox = chat_sandbox
         self._hooks = hooks
         # D-PLUG.7: a família stream é despachante, não emitter. São objetos
@@ -383,9 +388,48 @@ class InteractionService:
         return selection, catalog, "empty" if catalog is None else None
 
     async def _stream_owned(self, envelope: InteractionEnvelope) -> AsyncIterator[InteractionEvent]:
+        from kairos_tools.skill_create import skill_creation_scope
+
+        learn = None
+        if envelope.learn_request is not None:
+            if self._skill_catalog_home is None:
+                raise InteractionServiceError(
+                    "learn", "Home de skills indisponível.", retryable=False
+                )
+
+            def guard():
+                if self._turn_ownership.is_lost():
+                    from kairos_skills.mutation_contract import SkillMutationError
+
+                    raise SkillMutationError("denied", "Posse do turno perdida.")
+
+            learn = LearnTurn(
+                home=self._skill_catalog_home,
+                session_id=envelope.conversation_id,
+                request=envelope.learn_request,
+                guard=guard,
+            )
+        token = self._turn_learn.set(learn)
+        try:
+            with skill_creation_scope(learn.capability if learn is not None else None):
+                async with aclosing(self._stream_catalog_owned(envelope)) as stream:
+                    async for event in stream:
+                        yield event
+        finally:
+            if learn is not None:
+                learn.close()
+            self._turn_learn.reset(token)
+
+    async def _stream_catalog_owned(
+        self, envelope: InteractionEnvelope
+    ) -> AsyncIterator[InteractionEvent]:
         from kairos_tools.skill_view import skill_catalog_scope
 
-        initial_snapshot, catalog, skip_reason = await self._prepare_catalog(envelope)
+        if envelope.learn_request is not None:
+            envelope = replace(envelope, skills_catalog=False, skills_catalog_auto=False)
+            initial_snapshot, catalog, skip_reason = None, None, None
+        else:
+            initial_snapshot, catalog, skip_reason = await self._prepare_catalog(envelope)
         if envelope.skills_catalog_auto:
             envelope = replace(
                 envelope, skills_catalog=catalog is not None, skills_catalog_auto=False
@@ -664,7 +708,12 @@ class InteractionService:
                 return
 
             limit_error = None
-            if not (envelope.tools or envelope.web_search or envelope.skills_catalog):
+            if not (
+                envelope.tools
+                or envelope.web_search
+                or envelope.skills_catalog
+                or envelope.learn_request is not None
+            ):
                 limit_error = InteractionServiceError(
                     "tools_disabled",
                     "as ferramentas estão desligadas para este turno",
@@ -784,7 +833,16 @@ class InteractionService:
                         return registry.dispatch(name, arguments)
                     return sandbox.dispatch(conversation_id, name, arguments)
 
-                if needs_tool_approval(call.name, call.arguments):
+                if call.name == "skill_create":
+                    async with aclosing(
+                        self._execute_skill_creation(
+                            call, conversation_id, source, selection, dispatch
+                        )
+                    ) as stream:
+                        async for event in stream:
+                            yield event
+                    continue
+                elif needs_tool_approval(call.name, call.arguments):
                     approval_id, future = self._open_approval(conversation_id)
                     yield InteractionEvent.tool_approval_request(approval_id, call, conversation_id)
                     decision = await self._await_approval(
@@ -808,6 +866,48 @@ class InteractionService:
                     )
             await self._persist_tool_result(conversation_id, call, result, selection)
             yield InteractionEvent.from_tool_result(result, conversation_id)
+
+    async def _execute_skill_creation(self, call, conversation_id, source, selection, dispatch):
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        learn = self._turn_learn.get()
+        try:
+            if learn is None or source != "cli":
+                raise SkillMutationError("denied", "Criação não habilitada neste turno.")
+            proposal, future = learn.propose(call)
+        except SkillMutationError as error:
+            result = _tool_error(call.id, str(error))
+        else:
+            self._creation_approvals[proposal.id] = learn
+            try:
+                yield InteractionEvent.tool_approval_request(proposal.id, call, conversation_id)
+                decision = await self._await_approval(
+                    proposal.id, future, call.name, conversation_id
+                )
+                if decision != "allow":
+                    result = denied_tool_result(call)
+                else:
+                    result = await self._run_tool_with_hooks(
+                        call, dispatch, conversation_id, source
+                    )
+            finally:
+                self._creation_approvals.pop(proposal.id, None)
+                learn.close()
+        await self._observe_tool(call, result, conversation_id=conversation_id, source=source)
+        await self._persist_tool_result(conversation_id, call, result, selection)
+        yield InteractionEvent.from_tool_result(result, conversation_id)
+
+    def skill_creation_proposal(self, *, approval_id: str, session_id: str):
+        from kairos_skills.mutation_contract import SkillMutationError
+
+        learn = self._creation_approvals.get(approval_id)
+        if learn is None:
+            raise SkillMutationError("denied", "Proposta expirada ou indisponível.")
+        return learn.proposal(approval_id, session_id)
+
+    def decide_skill_creation(self, *, approval_id: str, session_id: str, sha256: str, answer: str):
+        self.skill_creation_proposal(approval_id=approval_id, session_id=session_id)
+        self._creation_approvals[approval_id].decide(approval_id, session_id, sha256, answer)
 
     async def _run_tool_with_hooks(
         self,
@@ -1212,6 +1312,12 @@ class InteractionService:
             snapshot = self._resolve_snapshot(envelope)
         if envelope.skills_catalog:
             self._require_catalog_model(snapshot.ref)
+        if envelope.learn_request is not None:
+            self._creation_tool()
+            if not self._catalog_model_supports_tools(snapshot.ref):
+                raise InteractionServiceError(
+                    "learn", "/learn exige modelo com ferramentas confirmadas.", retryable=False
+                )
         prepared = self._prepare(snapshot.ref)
         snapshot = replace(snapshot, credential_id=prepared.credential_id)
         selection = ResolvedModelSelection(ref=snapshot.ref, reason=snapshot.reason)
@@ -1244,6 +1350,8 @@ class InteractionService:
         )
 
     def _chat_tools(self, envelope: InteractionEnvelope) -> tuple[dict[str, Any], ...]:
+        if envelope.learn_request is not None:
+            return (self._creation_tool(),)
         catalog_tools = (self._catalog_tool(),) if envelope.skills_catalog else ()
         if envelope.tools:
             definitions = chat_tool_definitions(web_search_enabled=envelope.web_search)
@@ -1284,6 +1392,19 @@ class InteractionService:
             )
 
     @staticmethod
+    def _creation_tool() -> dict[str, Any]:
+        import copy
+
+        from kairos_tools.skill_create import SKILL_CREATE_DEFINITION, skill_create_tool
+
+        entry = registry.snapshot_registration().get("skill_create")
+        if entry is None or entry.handler is not skill_create_tool or entry.override_of is not None:
+            raise InteractionServiceError(
+                "learn", "Handler nativo de skill_create indisponível.", retryable=False
+            )
+        return copy.deepcopy(SKILL_CREATE_DEFINITION)
+
+    @staticmethod
     def _catalog_tool() -> dict[str, Any]:
         import copy
 
@@ -1321,6 +1442,20 @@ class InteractionService:
 
     def _request_messages(self, conversation_id: str) -> tuple[CanonicalMessage, ...]:
         history = self._history(conversation_id)
+        learn = self._turn_learn.get()
+        if learn is not None:
+            from kairos_skills.learn import build_learn_prompt
+
+            for index in range(len(history) - 1, -1, -1):
+                if history[index].role == "user":
+                    current = replace(
+                        history[index],
+                        content=(
+                            ContentPart(kind="text", value=build_learn_prompt(learn.request)),
+                        ),
+                    )
+                    return (*history[:index], current, *history[index + 1 :])
+            raise InteractionServiceError("learn", "Mensagem atual indisponível.", retryable=False)
         catalog = self._turn_catalog.get()
         if catalog is None:
             return history

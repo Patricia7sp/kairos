@@ -93,6 +93,7 @@ class InteractionRouter:
             or envelope.skills
             or envelope.skills_catalog
             or envelope.skills_catalog_auto
+            or envelope.learn_request is not None
             or any(key in envelope.parameters for key in _IDENTITY_PARAMETERS)
         ):
             raise RuntimeErrorInfo("invalid_event", "envelope de runtime inválido", False)
@@ -109,6 +110,16 @@ class InteractionRouter:
         if decide is None:
             raise RuntimeErrorInfo("unavailable", "serviço de interação indisponível", False)
         decide(approval_id=approval_id, session_id=session_id, decision=decision)
+
+    def skill_creation_proposal(self, *, approval_id: str, session_id: str):
+        return self.model_service.skill_creation_proposal(
+            approval_id=approval_id, session_id=session_id
+        )
+
+    def decide_skill_creation(self, *, approval_id: str, session_id: str, sha256: str, answer: str):
+        return self.model_service.decide_skill_creation(
+            approval_id=approval_id, session_id=session_id, sha256=sha256, answer=answer
+        )
 
     async def aclose(self) -> None:
         if self._closed:

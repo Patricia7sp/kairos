@@ -263,14 +263,20 @@ async def execute_chat_tool(
     execute: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> InteractionToolResult:
     """Valida a chamada, executa a ferramenta e serializa com limites rígidos."""
-    if call.name == "skill_view":
+    if call.name in {"skill_view", "skill_create"}:
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_available
         from kairos_tools.skill_view import skill_catalog_available, skill_view_tool
 
-        entry = registry.snapshot_registration().get("skill_view")
+        available, handler = (
+            (skill_catalog_available, skill_view_tool)
+            if call.name == "skill_view"
+            else (skill_creation_available, skill_create_tool)
+        )
+        entry = registry.snapshot_registration().get(call.name)
         if (
-            not skill_catalog_available()
+            not available()
             or entry is None
-            or entry.handler is not skill_view_tool
+            or entry.handler is not handler
             or entry.override_of is not None
         ):
             return _error(call, "unsupported_tool")
@@ -278,7 +284,7 @@ async def execute_chat_tool(
         if arguments is None:
             return _error(call, "invalid_arguments")
         try:
-            value = await skill_view_tool(**arguments)
+            value = await handler(**arguments)
         except TypeError:
             return _error(call, "invalid_arguments")
         content = json.dumps(

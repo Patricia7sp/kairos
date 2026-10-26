@@ -122,8 +122,19 @@ class InteractionEnvelope:
     skills: tuple[SkillSnapshot, ...] = ()
     skills_catalog: bool = False
     skills_catalog_auto: bool = False
+    learn_request: str | None = None
+
+    def _validate_learn_intent(self) -> None:
+        if self.learn_request is not None:
+            if self.source != "cli":
+                raise ValueError("/learn só está disponível no Chat da CLI.")
+            if not isinstance(self.learn_request, str) or not self.learn_request.strip():
+                raise ValueError("/learn exige um pedido não vazio.")
+            if self.skills:
+                raise ValueError("/learn não aceita seleção explícita de skills.")
 
     def __post_init__(self) -> None:
+        self._validate_learn_intent()
         self._validate_catalog_intent()
         if self.workspace is not None:
             from pathlib import Path

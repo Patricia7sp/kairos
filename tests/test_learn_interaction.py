@@ -1,0 +1,224 @@
+"""/learn atravessa o loop real, persistência e publicação de skills."""
+
+import asyncio
+import json
+from dataclasses import replace
+
+import pytest
+from skill_mutation_fixtures import creation_text
+from test_chat_search_loop import RoundGateway, answer_round, collect, make_service
+from test_chat_tool_approval import mutator_round
+
+from kairos_integration import InteractionEnvelope
+from kairos_integration.interaction_contract import InteractionServiceError
+from kairos_integration.persistence import SQLiteAsyncInteractionPersistence
+from kairos_providers import CanonicalToolCall, CatalogOrigin, ProviderError, ProviderErrorKind
+from kairos_skills.learn import build_learn_prompt
+from kairos_skills.mutation_contract import SkillMutationError
+from kairos_skills.removal_state import database_connection, read_skill_repository
+from kairos_state import connect, initialize_schema
+
+
+def call(identifier="create", name="revisar-docs"):
+    return CanonicalToolCall(
+        identifier, "skill_create", json.dumps({"name": name, "skill_md": creation_text(name)})
+    )
+
+
+def learn(**kwargs):
+    return InteractionEnvelope(
+        "learn-session", "cli", "/learn revisar", learn_request="revisar", **kwargs
+    )
+
+
+async def confirmed(service, envelope, answer=None):
+    events = []
+    async for event in service.stream(envelope):
+        events.append(event)
+        if event.kind == "tool_approval_request":
+            proposal = service.skill_creation_proposal(
+                approval_id=event.tool_approval_id, session_id=envelope.conversation_id
+            )
+            with pytest.raises(InteractionServiceError):
+                service.decide_tool_approval(
+                    approval_id=proposal.id, session_id=envelope.conversation_id, decision="allow"
+                )
+            service.decide_skill_creation(
+                approval_id=proposal.id,
+                session_id=envelope.conversation_id,
+                sha256=proposal.sha256,
+                answer=answer or f"criar {proposal.name}",
+            )
+    return events
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("async_mode", [False, True])
+def test_single_commit_transient_prompt_and_next_normal_turn(
+    tmp_path, monkeypatch, automatic, async_mode
+):
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        gateway = RoundGateway(
+            [
+                mutator_round(call(), call("second", "other-skill")),
+                mutator_round(call("third", "third-skill")),
+                answer_round(),
+                answer_round(),
+            ]
+        )
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        if async_mode:
+            service._persistence = SQLiteAsyncInteractionPersistence(tmp_path / "state.db")
+        try:
+            events = await confirmed(service, learn(skills_catalog_auto=automatic))
+            assert not any(e.kind == "turn_error" for e in events)
+            assert len([e for e in events if e.kind == "tool_approval_request"]) == 1
+            results = [e.tool_result for e in events if e.kind == "tool_result"]
+            assert [r.is_error for r in results] == [False, True, True]
+            receipt = json.loads(results[0].content)
+            assert receipt["state"] == "committed"
+            assert (tmp_path / "skills/revisar-docs/SKILL.md").read_text() == creation_text()
+            with database_connection(tmp_path) as connection:
+                records = read_skill_repository(connection, tmp_path).history()
+                assert len(records) == 1 and records[0].operation_id == receipt["operation_id"]
+            prompt = build_learn_prompt("revisar")
+            for request in gateway.requests:
+                assert [t["function"]["name"] for t in request.tools] == ["skill_create"]
+                assert not any(m.role == "system" for m in request.messages)
+                assert any(
+                    m.role == "user" and m.content[0].value == prompt for m in request.messages
+                )
+            row = db.execute(
+                "SELECT content,api_content FROM messages WHERE role='user'"
+            ).fetchone()
+            assert tuple(row) == ("/learn revisar", "/learn revisar")
+            await collect(
+                service, InteractionEnvelope("learn-session", "cli", "obrigado", tools=True)
+            )
+            plain = gateway.requests[-1]
+            assert "skill_create" not in [t["function"]["name"] for t in plain.tools]
+            assert not any(prompt == part.value for m in plain.messages for part in m.content)
+            assert any(
+                m.role == "user" and m.content[0].value == "/learn revisar" for m in plain.messages
+            )
+        finally:
+            if service._persistence is not None:
+                await service._persistence.aclose()
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_no_catalog_preparation_even_with_explicit_catalog(tmp_path, monkeypatch):
+    async def scenario():
+        async def forbidden(*_, **__):
+            raise AssertionError("catálogo não deve ser preparado")
+
+        monkeypatch.setattr(
+            "kairos_integration.interaction_service.prepare_skill_catalog_turn", forbidden
+        )
+        gateway = RoundGateway([answer_round(), answer_round()])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            events = await collect(service, learn(tools=True, skills_catalog=True))
+            assert events[-1].kind == "turn_end"
+            assert [t["function"]["name"] for t in gateway.requests[0].tools] == ["skill_create"]
+            assert not any(m.role == "system" for m in gateway.requests[0].messages)
+            assert not (tmp_path / "skills").exists()
+            await collect(service, InteractionEnvelope("learn-session", "cli", "resposta"))
+            assert gateway.requests[-1].tools == ()
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_retry_uses_transient_prompt_and_clarification_drops_capability(tmp_path):
+    async def scenario():
+        gateway = RoundGateway(
+            [
+                [ProviderError(ProviderErrorKind.NETWORK, "fixture", retryable=True)],
+                answer_round(),
+                mutator_round(call()),
+                answer_round(),
+            ]
+        )
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            await collect(service, learn())
+            assert gateway.requests[0].messages == gateway.requests[1].messages
+            assert gateway.requests[0].messages[-1].content[0].value == build_learn_prompt(
+                "revisar"
+            )
+            events = await collect(
+                service, InteractionEnvelope("learn-session", "cli", "esclarecimento")
+            )
+            assert not any(e.kind == "tool_approval_request" for e in events)
+            assert next(e.tool_result for e in events if e.kind == "tool_result").is_error
+            assert not (tmp_path / "skills").exists()
+            assert (
+                not db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='skill_mutations'"
+                ).fetchone()
+                or not db.execute("SELECT 1 FROM skill_mutations").fetchone()
+            )
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_source_and_model_tools_are_required_before_provider(tmp_path):
+    with pytest.raises(ValueError):
+        replace(learn(), source="web")
+
+    async def scenario():
+        gateway = RoundGateway([answer_round()])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        model = service._resolver._catalog.find(
+            service._context_loader.load(learn()).global_default
+        )
+        service._resolver._catalog.merge(
+            [replace(model, capabilities=replace(model.capabilities, tools=False))],
+            origin=CatalogOrigin.CURATED,
+        )
+        try:
+            with pytest.raises(InteractionServiceError):
+                await collect(service, learn())
+            assert gateway.requests == []
+            assert not db.execute("SELECT 1 FROM messages WHERE role='user'").fetchone()
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+
+
+def test_cancel_pending_creation_revokes_proposal_without_skill_write(tmp_path):
+    async def scenario():
+        gateway = RoundGateway([mutator_round(call())])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        stream = service.stream(learn())
+        try:
+            async for event in stream:
+                if event.kind == "tool_approval_request":
+                    approval_id = event.tool_approval_id
+                    break
+            await stream.aclose()
+            with pytest.raises((InteractionServiceError, SkillMutationError)):
+                service.skill_creation_proposal(approval_id=approval_id, session_id="learn-session")
+            assert not (tmp_path / "skills").exists()
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
