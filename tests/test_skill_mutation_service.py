@@ -150,6 +150,7 @@ class MutationServiceTests(unittest.TestCase):
         from kairos_skills.mutation_io import SkillMutationFiles
 
         original_stage = SkillMutationFiles.stage
+        text = creation_text()
         changed = creation_text(body="Conteúdo concorrente preservado.")
 
         def stage(files, operation_id, creation):
@@ -163,7 +164,7 @@ class MutationServiceTests(unittest.TestCase):
             patch.object(self.repo, "prepare", side_effect=SkillMutationError("io", "fixture")),
             self.assertRaises(SkillMutationError) as raised,
         ):
-            self.service.add_text(creation_text(), actor=Actor.USER_FOREGROUND)
+            self.service.add_text(text, actor=Actor.USER_FOREGROUND)
         self.assertEqual(raised.exception.kind, "conflict")
         self.assertIsNone(raised.exception.operation_id)
         self.assertEqual(self.repo.history(), ())
@@ -178,6 +179,7 @@ class MutationServiceTests(unittest.TestCase):
         from kairos_skills.mutation_io import SkillMutationFiles
 
         original_publish = SkillMutationFiles.publish
+        text = creation_text()
         unavailable = patch.object(
             self.repo, "get", side_effect=sqlite3.OperationalError("private-read-fixture")
         )
@@ -192,7 +194,7 @@ class MutationServiceTests(unittest.TestCase):
                 patch.object(SkillMutationFiles, "publish", publish),
                 self.assertRaises(SkillMutationError) as raised,
             ):
-                self.service.add_text(creation_text(), actor=Actor.USER_FOREGROUND)
+                self.service.add_text(text, actor=Actor.USER_FOREGROUND)
         finally:
             unavailable.stop()
         self.assertEqual(raised.exception.kind, "io")
