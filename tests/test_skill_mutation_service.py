@@ -138,9 +138,69 @@ class MutationServiceTests(unittest.TestCase):
     def test_before_prepare_failure_cleans_only_known_staging(self):
         with (
             patch.object(self.repo, "prepare", side_effect=SkillMutationError("io", "fixture")),
-            self.assertRaises(SkillMutationError),
+            self.assertRaises(SkillMutationError) as raised,
         ):
             self.service.add(self.source, actor=Actor.USER_FOREGROUND)
+        self.assertIsNone(raised.exception.operation_id)
         self.assertFalse((self.home / "skills" / "revisar-docs").exists())
         self.assertEqual(list((self.home / ".skill-mutations" / "staging").iterdir()), [])
         self.assertEqual(self.repo.history(), ())
+
+    def test_changed_staging_before_prepare_preserves_bytes_without_unjournaled_id(self):
+        from kairos_skills.mutation_io import SkillMutationFiles
+
+        original_stage = SkillMutationFiles.stage
+        changed = creation_text(body="Conteúdo concorrente preservado.")
+
+        def stage(files, operation_id, creation):
+            entry = original_stage(files, operation_id, creation)
+            target = self.home / ".skill-mutations" / "staging" / operation_id / "SKILL.md"
+            target.write_text(changed)
+            return entry
+
+        with (
+            patch.object(SkillMutationFiles, "stage", stage),
+            patch.object(self.repo, "prepare", side_effect=SkillMutationError("io", "fixture")),
+            self.assertRaises(SkillMutationError) as raised,
+        ):
+            self.service.add_text(creation_text(), actor=Actor.USER_FOREGROUND)
+        self.assertEqual(raised.exception.kind, "conflict")
+        self.assertIsNone(raised.exception.operation_id)
+        self.assertEqual(self.repo.history(), ())
+        self.assertFalse((self.home / "skills" / "revisar-docs").exists())
+        staging = tuple((self.home / ".skill-mutations" / "staging").iterdir())
+        self.assertEqual(len(staging), 1)
+        self.assertEqual((staging[0] / "SKILL.md").read_text(), changed)
+
+    def test_publication_failure_keeps_id_when_journal_readback_is_unavailable(self):
+        import sqlite3
+
+        from kairos_skills.mutation_io import SkillMutationFiles
+
+        original_publish = SkillMutationFiles.publish
+        unavailable = patch.object(
+            self.repo, "get", side_effect=sqlite3.OperationalError("private-read-fixture")
+        )
+
+        def publish(files, operation_id, name):
+            original_publish(files, operation_id, name)
+            unavailable.start()
+            raise OSError("private-publication-fixture")
+
+        try:
+            with (
+                patch.object(SkillMutationFiles, "publish", publish),
+                self.assertRaises(SkillMutationError) as raised,
+            ):
+                self.service.add_text(creation_text(), actor=Actor.USER_FOREGROUND)
+        finally:
+            unavailable.stop()
+        self.assertEqual(raised.exception.kind, "io")
+        self.assertIsNotNone(raised.exception.operation_id)
+        record = self.repo.get(raised.exception.operation_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.state, SkillMutationState.PREPARED)
+        self.assertEqual(
+            (self.home / "skills" / "revisar-docs" / "SKILL.md").read_text(), creation_text()
+        )
+        self.assertNotIn("private-", str(raised.exception))

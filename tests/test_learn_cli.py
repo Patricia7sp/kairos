@@ -415,3 +415,120 @@ def test_cli_publication_error_shows_operation_id_without_claiming_absence(
             db.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("revocation", ["before_preview", "during_confirmation"])
+def test_cli_revoked_proposal_returns_public_failure_without_publication(
+    tmp_path, monkeypatch, capsys, revocation
+):
+    from contextlib import aclosing
+    from types import SimpleNamespace
+
+    from kairos_skills.removal_state import database_connection, read_skill_repository
+
+    async def scenario():
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: True)
+        monkeypatch.setattr("kairos_cli.chat._is_runtime_session", lambda *_: False)
+        gateway = RoundGateway([mutator_round(call())])
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        streams = []
+
+        async def stream(envelope):
+            async with aclosing(service.stream(envelope)) as current:
+                streams.append(current)
+                async for event in current:
+                    if revocation == "before_preview" and event.kind == "tool_approval_request":
+                        await current.aclose()
+                    yield event
+
+        async def confirm(proposal, **_):
+            assert revocation == "during_confirmation"
+            await streams[0].aclose()
+            return f"criar {proposal.name}"
+
+        client = SimpleNamespace(
+            stream=stream,
+            skill_creation_proposal=service.skill_creation_proposal,
+            decide_skill_creation=service.decide_skill_creation,
+            aclose=AsyncMock(),
+        )
+        monkeypatch.setattr("kairos_cli.chat.build_interaction_service", lambda _: client)
+        monkeypatch.setattr("kairos_cli.chat.request_skill_creation", confirm)
+        try:
+            code = await run_chat(
+                home=tmp_path,
+                session_id="learn-session",
+                prompt="/learn revisar",
+                provider=None,
+                model=None,
+                as_json=False,
+            )
+            assert code == 1
+            assert not (tmp_path / "skills").exists()
+            with database_connection(tmp_path) as connection:
+                assert read_skill_repository(connection, tmp_path).history() == ()
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+    output = capsys.readouterr().err
+    assert "proposta" in output.lower()
+    assert "/learn" in output
+    assert "SkillMutationError" not in output
+
+
+def test_cli_duplicate_name_reports_conflict_without_unjournaled_id(tmp_path, monkeypatch, capsys):
+    import json
+
+    from kairos_skills.removal_state import database_connection, read_skill_repository
+
+    async def scenario():
+        monkeypatch.setenv("KAIROS_ALLOW_TOOLS_IN_TESTS", "1")
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: True)
+        monkeypatch.setattr(
+            "kairos_cli.tool_approval._read_answer", AsyncMock(return_value="criar revisar-docs")
+        )
+        gateway = RoundGateway(
+            [
+                mutator_round(call()),
+                answer_round(),
+                mutator_round(call("duplicate")),
+                answer_round(),
+            ]
+        )
+        db = connect(tmp_path / "state.db")
+        initialize_schema(db)
+        service = make_service(db, gateway, skill_catalog_home=tmp_path)
+        try:
+            arguments = dict(
+                session_id="learn-session",
+                content="/learn revisar",
+                override=None,
+                as_json=False,
+                home=tmp_path,
+            )
+            assert await _run_turn(service, **arguments) == 0
+            target = tmp_path / "skills/revisar-docs/SKILL.md"
+            original = target.read_bytes()
+            with database_connection(tmp_path) as connection:
+                history = read_skill_repository(connection, tmp_path).history()
+            capsys.readouterr()
+            assert await _run_turn(service, **arguments) == 1
+            result = [m for m in gateway.requests[-1].messages if m.role == "tool"][-1]
+            receipt = json.loads(result.content[0].value)
+            assert receipt["status"] == "conflict"
+            assert receipt.get("operation_id") is None
+            assert target.read_bytes() == original
+            with database_connection(tmp_path) as connection:
+                assert read_skill_repository(connection, tmp_path).history() == history
+        finally:
+            db.close()
+
+    asyncio.run(scenario())
+    output = capsys.readouterr().err
+    assert "Criação não comprovada" not in output
+    assert "skills history" not in output

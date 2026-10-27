@@ -24,6 +24,7 @@ from kairos_providers import ProviderModelRef
 from kairos_runtime import RuntimeErrorInfo, RuntimeEvent, public_error
 from kairos_runtime.wire import runtime_event_to_json
 from kairos_skills.learn import parse_learn_request
+from kairos_skills.mutation_contract import SkillMutationError
 from kairos_skills.runtime import SkillSelectionError, SkillSnapshot, load_selected_skills
 
 __all__ = ["ChatUsageError", "run_chat"]
@@ -452,14 +453,24 @@ async def _handle_skill_creation_event(service, event, renderer, *, session_id, 
         and event.tool_call.name == "skill_create"
     ):
         renderer.finish_line()
-        proposal = service.skill_creation_proposal(
-            approval_id=event.tool_approval_id, session_id=session_id
-        )
-        answer = await request_skill_creation(proposal, as_json=as_json)
-        renderer.creation_denied = answer != f"criar {proposal.name}"
-        service.decide_skill_creation(
-            approval_id=proposal.id, session_id=session_id, sha256=proposal.sha256, answer=answer
-        )
+        try:
+            proposal = service.skill_creation_proposal(
+                approval_id=event.tool_approval_id, session_id=session_id
+            )
+            answer = await request_skill_creation(proposal, as_json=as_json)
+            renderer.creation_denied = answer != f"criar {proposal.name}"
+            service.decide_skill_creation(
+                approval_id=proposal.id,
+                session_id=session_id,
+                sha256=proposal.sha256,
+                answer=answer,
+            )
+        except SkillMutationError as error:
+            raise InteractionServiceError(
+                "skill_creation_approval",
+                f"{error} Repita /learn <pedido> para gerar uma nova proposta.",
+                retryable=False,
+            ) from None
         return True
     return False
 

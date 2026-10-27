@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
 import uuid
 from collections.abc import Callable
@@ -273,7 +274,22 @@ class SkillMutationService:
                         self._abort_staged(files, operation_id, entry)
                     raise
         except (SkillMutationError, OSError) as error:
-            raise operation_error(error, operation_id) from None
+            failure = operation_error(error, operation_id)
+            try:
+                recorded = self.repository.get(failure.operation_id)
+            except (SkillMutationError, OSError, sqlite3.DatabaseError) as read_error:
+                _LOGGER.warning(
+                    "skill_creation_journal_readback_failed",
+                    extra={
+                        "operation_id": failure.operation_id,
+                        "phase": "error_diagnosis",
+                        "error_class": type(read_error).__name__,
+                    },
+                )
+            else:
+                if recorded is None:
+                    failure = SkillMutationError(failure.kind, str(failure))
+            raise failure from None
 
     def rollback(self, create_id: str, *, actor: Actor):
         validate_actor(actor)
