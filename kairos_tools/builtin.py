@@ -174,6 +174,9 @@ def register_builtin_tools(reg: ToolRegistry | None = None) -> None:
     from kairos_tools.skill_view import register_skill_view_tools
 
     register_skill_view_tools(r)
+    from kairos_tools.skill_create import register_skill_create_tools
+
+    register_skill_create_tools(r)
 
     # 1. bash
     r.register(

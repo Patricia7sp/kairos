@@ -2752,3 +2752,34 @@ de imagem32 sem skips e Docker offline26/1 skip. Inclui102 SIGKILLs, backup
 e restore reais. O Quality Gate local anterior do Sonar teve erro; isso permanece evidência
 histórica. O follow-up #115 resolveu S7493 e a análise da main `b7346ad`
 aprovou o gate, com confiabilidade nova A.
+
+## D-CLI.SKILL.LEARN — autoria por modelo com confirmação vinculada
+
+Referências: `skills/requirements.md` RF-01/RF-02/RF-04/RF-08 e
+`skills/tasks.md` T-20–T-22; desenho
+`docs/superpowers/specs/2026-10-26-learn-cli-design.md`, aprovado com correções.
+
+O MVP reconhece `/learn <pedido>` somente na entrada CLI e ativa o loop normal
+com `skill_create` exclusivo, sem preparar/injetar catálogo ou `skill_view`.
+O prompt é montado no request transitório, nunca em `api_content`; retries
+mantêm o mesmo contexto e o turno seguinte relê somente o pedido original.
+Se o modelo pergunta, o turno encerra sem criação e novo `/learn` é necessário.
+
+A proposta validada fica em memória, ligada a conversa/chamada/ID/hash. O
+terminal mostra nome, descrição e texto completo com controles escapados;
+somente `criar NOME` libera a publicação. Aprovações genéricas, `--allow-tool`,
+JSON e pipe não autorizam. O primeiro COMMITTED revoga imediatamente a
+capacidade; reserva exclusiva, recusa e finally impedem reutilização.
+
+`SkillMutationService.add_text` compartilha a publicação manual: ator
+USER_FOREGROUND, proveniência USER, política organizacional, lock, journal,
+verificação de bytes/identidade e rollback. I/O roda em worker com contexto do
+turno; cancelamento revoga a capacidade e drena o escritor antes de liberar
+ownership. Guardas anteriores à publicação recusam perda de posse. Operação
+já publicada segue o journal, sem promessa de desfazer efeitos retroativamente.
+O JSON completo permanece limitado a 16 KiB; a entrada manual conserva 64 KiB.
+
+Conversa ativa e pedido cobrem RF-02 parcialmente. Diretórios/URLs, edição,
+curadoria, workflows e hub permanecem pendentes. Snapshots antigos não são
+ampliados pela criação. Não se afirma proteção contra outro processo do mesmo
+UID, aceite externo com credenciais reais, merge ou deploy por este recorte.

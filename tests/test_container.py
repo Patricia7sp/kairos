@@ -568,6 +568,35 @@ class RealImageTests(unittest.TestCase):
 
     # -- estrutura ---------------------------------------------------------
 
+    def test_learn_creation_confirmation_and_rollback_in_real_image(self):
+        from pathlib import Path
+
+        script = Path(__file__).parent.resolve() / "skill_learn_image_acceptance.py"
+        result = self.run_in(
+            "/acceptance/skill_learn_image_acceptance.py",
+            entrypoint="/opt/kairos/.venv/bin/python",
+            extra=(
+                "--user",
+                "10000:10000",
+                "--network",
+                "none",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--read-only",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,mode=1777",
+                "--mount",
+                f"type=bind,src={script},dst=/acceptance/skill_learn_image_acceptance.py,readonly",
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["creation"], "committed")
+        self.assertEqual(report["rollback"], "committed")
+        self.assertEqual(report["origin"], "user")
+
     def _publication_acceptance(self, mode):
         from pathlib import Path
 

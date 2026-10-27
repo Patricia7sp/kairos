@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from kairos_domain.ownership import Actor, Provenance
@@ -23,6 +25,7 @@ from kairos_skills.mutation_contract import (
     require,
     validate_actor,
     validate_id,
+    validate_skill_creation,
 )
 from kairos_skills.mutation_io import SkillMutationFiles, read_skill_creation
 from kairos_skills.mutation_lock import skill_mutation_lock
@@ -220,6 +223,19 @@ class SkillMutationService:
         validate_actor(actor)
         self.policy.revalidate()
         creation = read_skill_creation(source)
+        return self._add_creation(creation, actor=actor)
+
+    def add_text(
+        self, text: str, *, actor: Actor, publication_guard: Callable[[], None] | None = None
+    ):
+        validate_actor(actor)
+        self.policy.revalidate()
+        creation = validate_skill_creation(text)
+        return self._add_creation(creation, actor=actor, publication_guard=publication_guard)
+
+    def _add_creation(self, creation, *, actor, publication_guard=None):
+        if publication_guard is not None:
+            publication_guard()
         self._check(creation.name, OrgPolicyAction.CREATE)
         operation_id = uuid.uuid4().hex
         try:
@@ -244,6 +260,8 @@ class SkillMutationService:
                     self.repository.prepare(draft, creation.text, policy_receipt=receipt)
                     attempted = True
                     self._check(creation.name, OrgPolicyAction.CREATE)
+                    if publication_guard is not None:
+                        publication_guard()
                     files.publish(operation_id, creation.name)
                     if files.inspect_installed(creation.name) != entry:
                         raise SkillMutationError(
@@ -256,7 +274,22 @@ class SkillMutationService:
                         self._abort_staged(files, operation_id, entry)
                     raise
         except (SkillMutationError, OSError) as error:
-            raise operation_error(error, operation_id) from None
+            failure = operation_error(error, operation_id)
+            try:
+                recorded = self.repository.get(failure.operation_id)
+            except (SkillMutationError, OSError, sqlite3.DatabaseError) as read_error:
+                _LOGGER.warning(
+                    "skill_creation_journal_readback_failed",
+                    extra={
+                        "operation_id": failure.operation_id,
+                        "phase": "error_diagnosis",
+                        "error_class": type(read_error).__name__,
+                    },
+                )
+            else:
+                if recorded is None:
+                    failure = SkillMutationError(failure.kind, str(failure))
+            raise failure from None
 
     def rollback(self, create_id: str, *, actor: Actor):
         validate_actor(actor)

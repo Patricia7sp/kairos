@@ -239,6 +239,12 @@ class ToolRegistry:
         if entry is None:
             return tool_error(f"Unknown tool: {name}")
 
+        if entry.name == "skill_create":
+            from kairos_tools.skill_create import skill_create_tool
+
+            if entry.handler is not skill_create_tool or entry.override_of is not None:
+                return tool_error("Override de skill_create recusado; use o handler nativo.")
+
         if entry.name == "skill_view":
             from kairos_tools.skill_view import skill_view_tool
 

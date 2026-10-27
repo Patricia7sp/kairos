@@ -147,23 +147,18 @@ def chat_tool_definitions(
 
 
 def needs_tool_approval(name: str, arguments: Mapping[str, Any] | str | None = None) -> bool:
-    if name.startswith("mcp__"):
+    if name == "skill_create" or name.startswith("mcp__"):
         # Schema de terceiro não permite inferir mutação: fail-closed. Toda
         # chamada MCP exige aprovação por turno (decisão do passo 4).
         return True
-    if name == "git":
-        if isinstance(arguments, str):
-            parsed = _body_arguments(arguments)
-            arguments = parsed if parsed is not None else {}
-        subcommand = str((arguments or {}).get("subcommand", ""))
-        return subcommand in GIT_MUTATING_SUBCOMMANDS
-    if name == "calendar":
-        if isinstance(arguments, str):
-            parsed = _body_arguments(arguments)
-            arguments = parsed if parsed is not None else {}
-        subcommand = str((arguments or {}).get("subcommand", ""))
-        return subcommand in CALENDAR_MUTATING_SUBCOMMANDS
-    return name in MUTATING_TOOLS
+    if name not in {"git", "calendar"}:
+        return name in MUTATING_TOOLS
+    if isinstance(arguments, str):
+        parsed = _body_arguments(arguments)
+        arguments = parsed if parsed is not None else {}
+    subcommand = str((arguments or {}).get("subcommand", ""))
+    mutators = GIT_MUTATING_SUBCOMMANDS if name == "git" else CALENDAR_MUTATING_SUBCOMMANDS
+    return subcommand in mutators
 
 
 def denied_tool_result(call: CanonicalToolCall) -> InteractionToolResult:
@@ -198,9 +193,11 @@ def _arguments(raw: str) -> tuple[str, int]:
 
 def _body_arguments(raw: str) -> dict[str, Any] | None:
     """Argumentos JSON de uma chamada genérica, com rejeição de chaves duplicadas."""
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_ARGUMENT_BYTES:
+    if not isinstance(raw, str):
         return None
     try:
+        if len(raw.encode("utf-8")) > MAX_ARGUMENT_BYTES:
+            return None
         value = json.loads(raw, object_pairs_hook=_unique_object)
     except (ValueError, TypeError, RecursionError):
         return None
@@ -261,14 +258,20 @@ async def execute_chat_tool(
     execute: Callable[[str, dict[str, Any]], Any] | None = None,
 ) -> InteractionToolResult:
     """Valida a chamada, executa a ferramenta e serializa com limites rígidos."""
-    if call.name == "skill_view":
+    if call.name in {"skill_view", "skill_create"}:
+        from kairos_tools.skill_create import skill_create_tool, skill_creation_available
         from kairos_tools.skill_view import skill_catalog_available, skill_view_tool
 
-        entry = registry.snapshot_registration().get("skill_view")
+        available, handler = (
+            (skill_catalog_available, skill_view_tool)
+            if call.name == "skill_view"
+            else (skill_creation_available, skill_create_tool)
+        )
+        entry = registry.snapshot_registration().get(call.name)
         if (
-            not skill_catalog_available()
+            not available()
             or entry is None
-            or entry.handler is not skill_view_tool
+            or entry.handler is not handler
             or entry.override_of is not None
         ):
             return _error(call, "unsupported_tool")
@@ -276,7 +279,7 @@ async def execute_chat_tool(
         if arguments is None:
             return _error(call, "invalid_arguments")
         try:
-            value = await skill_view_tool(**arguments)
+            value = await handler(**arguments)
         except TypeError:
             return _error(call, "invalid_arguments")
         content = json.dumps(
