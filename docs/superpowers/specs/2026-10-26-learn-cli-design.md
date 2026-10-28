@@ -1,9 +1,14 @@
 # `/learn` no Chat da CLI — criação por modelo com confirmação humana
 
-Status: aprovado em 26/10/2026 com as três correções obrigatórias incorporadas:
+Estado em 28/10/2026: MVP da CLI integrado e implantado pelo PR #121, em
+`f474368`. O [fechamento](../reports/2026-10-28-fechamento-learn-cli.md)
+registra CI, revisão independente, deploy e hashes das fontes instaladas.
+RF-02 permanece parcial para fontes além de conversa ativa e pedido.
+
+Aprovação do desenho em 26/10/2026, com as três correções obrigatórias incorporadas:
 uma criação por `/learn`, prompt transitório e esclarecimento encerra o turno.
 A autorização cobre plano e implementação deste recorte, sujeitos aos gates
-de qualidade. Nenhum código de produto foi alterado nesta revisão.
+de qualidade. Nenhum código de produto foi alterado na revisão do desenho.
 
 Base examinada: `main` em `f106ba8a8934f21f19abe9484b5ba3cb710fb06a`, após
 os PRs #118 e #120, com CI e deploy #323 aprovados. Trabalho no worktree

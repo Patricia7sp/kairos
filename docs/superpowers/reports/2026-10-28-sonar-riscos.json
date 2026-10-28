@@ -1,0 +1,679 @@
+{
+  "observed_date": "2026-10-28",
+  "revision": "f474368b2b34bd630388fb1d29d550dad9b0dfd4",
+  "analysis_id": "8bc23911-7489-4eea-93f5-7eb3406632dc",
+  "source": "https://sonarcloud.io/api/issues/search?componentKeys=Patricia7sp_kairos&types=BUG,VULNERABILITY&resolved=false&ps=100",
+  "scope": "scanner classifications only; not confirmed defects",
+  "global_open": 1060,
+  "global_types": {
+    "CODE_SMELL": 987,
+    "VULNERABILITY": 45,
+    "BUG": 28
+  },
+  "selected_count": 73,
+  "selected_types": {
+    "VULNERABILITY": 45,
+    "BUG": 28
+  },
+  "issues": [
+    {
+      "key": "AaFDImbu91Ko4sQxGKf0",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 62,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaFDImbu91Ko4sQxGKf1",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 62,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaFDImbu91Ko4sQxGKf2",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 63,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaFDImbu91Ko4sQxGKf3",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 63,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaFDImbu91Ko4sQxGKf4",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 64,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaFDImbu91Ko4sQxGKf5",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 64,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNnWA4HaqsrPZgCy",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_integration/skill_catalog_turn.py",
+      "line": 93,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNi3A4HaqsrPZgCS",
+      "rule": "pythonsecurity:S2083",
+      "severity": "BLOCKER",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_tools/workspace.py",
+      "line": 178,
+      "message": "Path Traversal via file content in workspace.write_text()"
+    },
+    {
+      "key": "AaFDIjVi91Ko4sQxGKfx",
+      "rule": "pythonsecurity:S8707",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/execution.py",
+      "line": 124,
+      "message": "Path Traversal via faulty LLM-supplied CLI arguments in execution.load_execution_limits()"
+    },
+    {
+      "key": "AaE_nNq2A4HaqsrPZgDc",
+      "rule": "python:S5332",
+      "severity": "MINOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_gateway/adapters/email_adapter.py",
+      "line": 66,
+      "message": "Make sure STARTTLS is used to upgrade to a secure connection using SSL/TLS."
+    },
+    {
+      "key": "AaE_nNq2A4HaqsrPZgDd",
+      "rule": "python:S4830",
+      "severity": "CRITICAL",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_gateway/adapters/email_adapter.py",
+      "line": 100,
+      "message": "Enable server certificate validation on this SSL/TLS connection."
+    },
+    {
+      "key": "AaE_nNsDA4HaqsrPZgDs",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_gateway/inbound.py",
+      "line": 594,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNjCA4HaqsrPZgCU",
+      "rule": "pythonsecurity:S2083",
+      "severity": "BLOCKER",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_tools/memory.py",
+      "line": 292,
+      "message": "Path Traversal via file content in MemoryStore._detect_external_drift()"
+    },
+    {
+      "key": "AaE_nNY8A4HaqsrPZf_g",
+      "rule": "python:S7493",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_cli/setup.py",
+      "line": 19,
+      "message": "Use an asynchronous file API instead of synchronous os.open() in this async function."
+    },
+    {
+      "key": "AaE_nNY8A4HaqsrPZf_h",
+      "rule": "python:S7493",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_cli/setup.py",
+      "line": 20,
+      "message": "Use an asynchronous file API instead of synchronous os.fdopen() in this async function."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6D",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 245,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6I",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 281,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6J",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 285,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6F",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 265,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6G",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 268,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6H",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 274,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNMzA4HaqsrPZf75",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/server.py",
+      "line": 118,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6E",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 260,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJMA4HaqsrPZf6K",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/cron.js",
+      "line": 288,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNJtA4HaqsrPZf6p",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/provedores.js",
+      "line": 167,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNQ-A4HaqsrPZf9i",
+      "rule": "python:S2612",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/projects.py",
+      "line": 79,
+      "message": "Make sure this permission is safe."
+    },
+    {
+      "key": "AaE_nNQ-A4HaqsrPZf9m",
+      "rule": "python:S2612",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/projects.py",
+      "line": 262,
+      "message": "Make sure this permission is safe."
+    },
+    {
+      "key": "AaE_nNQ-A4HaqsrPZf9n",
+      "rule": "python:S2612",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/projects.py",
+      "line": 326,
+      "message": "Make sure this permission is safe."
+    },
+    {
+      "key": "AaE_nNQ-A4HaqsrPZf9o",
+      "rule": "python:S2612",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/projects.py",
+      "line": 332,
+      "message": "Make sure this permission is safe."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgES",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 159,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgET",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 159,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNQJA4HaqsrPZf9K",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_runtime/docker_backend/model_relay.py",
+      "line": 148,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNQJA4HaqsrPZf9L",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_runtime/docker_backend/model_relay.py",
+      "line": 159,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgDx",
+      "rule": "docker:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 12,
+      "message": "Omitting \"--only-binary :all:\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgDw",
+      "rule": "docker:S6470",
+      "severity": "CRITICAL",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 14,
+      "message": "Copying recursively might inadvertently add sensitive data to the container. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgDy",
+      "rule": "docker:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 17,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgDz",
+      "rule": "docker:S6505",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 18,
+      "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgD0",
+      "rule": "docker:S6505",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 19,
+      "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation."
+    },
+    {
+      "key": "AaE_nNsaA4HaqsrPZgD1",
+      "rule": "docker:S6505",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.devcontainer/Dockerfile",
+      "line": 20,
+      "message": "Omitting \"--ignore-scripts\" allows lifecycle scripts to run during package installation."
+    },
+    {
+      "key": "AaE_nNPLA4HaqsrPZf80",
+      "rule": "python:S5443",
+      "severity": "CRITICAL",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_runtime/experimental/worker_policy.py",
+      "line": 53,
+      "message": "Make sure publicly writable directories are used safely here."
+    },
+    {
+      "key": "AaE_nNzNA4HaqsrPZgFU",
+      "rule": "docker:S6506",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:Dockerfile",
+      "line": 52,
+      "message": "Not enforcing HTTPS here might allow for redirections to insecure websites. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNRWA4HaqsrPZf93",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_runtime/supervisor.py",
+      "line": 372,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNR0A4HaqsrPZf98",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_runtime/codex_rpc.py",
+      "line": 155,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNJBA4HaqsrPZf5v",
+      "rule": "javascript:S2871",
+      "severity": "CRITICAL",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/modelos.js",
+      "line": 124,
+      "message": "Provide a compare function to avoid sorting elements alphabetically."
+    },
+    {
+      "key": "AaE_nNbTA4HaqsrPZgAG",
+      "rule": "python:S7501",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_cli/chat.py",
+      "line": 262,
+      "message": "Wrap this call to input() with await asyncio.to_thread(input)."
+    },
+    {
+      "key": "AaE_nNoQA4HaqsrPZgDG",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_integration/persistence.py",
+      "line": 118,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNnNA4HaqsrPZgCv",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_integration/turn_ownership.py",
+      "line": 323,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNnNA4HaqsrPZgCx",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_integration/turn_ownership.py",
+      "line": 459,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaE_nNT4A4HaqsrPZf-f",
+      "rule": "python:S7497",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_providers/_async_cleanup.py",
+      "line": 109,
+      "message": "Ensure that the asyncio.CancelledError exception is re-raised after your cleanup code."
+    },
+    {
+      "key": "AaFDIk1r91Ko4sQxGKfy",
+      "rule": "pythonsecurity:S6549",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_security/credentials/io.py",
+      "line": 19,
+      "message": "Filesystem Oracle via file content in io.credential_file_lock()"
+    },
+    {
+      "key": "AaE_nNIWA4HaqsrPZf5X",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/views/skills.js",
+      "line": 185,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNMzA4HaqsrPZf8S",
+      "rule": "python:S2092",
+      "severity": "MINOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_web/server.py",
+      "line": 1459,
+      "message": "Make sure creating this cookie without the \"secure\" flag is safe."
+    },
+    {
+      "key": "AaE_nNK3A4HaqsrPZf62",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/app.js",
+      "line": 190,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNK3A4HaqsrPZf63",
+      "rule": "javascript:S9383",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_web/ui/js/app.js",
+      "line": 191,
+      "message": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator."
+    },
+    {
+      "key": "AaE_nNMzA4HaqsrPZf8T",
+      "rule": "pythonsecurity:S2083",
+      "severity": "BLOCKER",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_web/server.py",
+      "line": 1645,
+      "message": "Path Traversal via HTTP request in server.save_skill_content()"
+    },
+    {
+      "key": "AaE_nNVBA4HaqsrPZf-t",
+      "rule": "python:S5855",
+      "severity": "MAJOR",
+      "type": "BUG",
+      "component": "Patricia7sp_kairos:kairos_security/checks/source_code.py",
+      "line": 148,
+      "message": "Remove or rework this redundant alternative."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEU",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 202,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEV",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 202,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEW",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 208,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEX",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 208,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaFDIh3991Ko4sQxGKfw",
+      "rule": "pythonsecurity:S5145",
+      "severity": "MINOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:kairos_cron/schedule.py",
+      "line": 79,
+      "message": "Log Injection via file content in schedule.compute_next_run()"
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEE",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 39,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEF",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 39,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEI",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 77,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEJ",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 77,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEK",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 79,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEL",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 79,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEM",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 81,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEN",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 81,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEO",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 127,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEP",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 127,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgEQ",
+      "rule": "githubactions:S8541",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 150,
+      "message": "Omitting \"--no-build\" can lead to the execution of setup scripts. Make sure it is safe here."
+    },
+    {
+      "key": "AaE_nNuDA4HaqsrPZgER",
+      "rule": "githubactions:S8544",
+      "severity": "MAJOR",
+      "type": "VULNERABILITY",
+      "component": "Patricia7sp_kairos:.github/workflows/ci.yml",
+      "line": 150,
+      "message": "Using dependencies without locking resolved versions is security-sensitive."
+    }
+  ],
+  "global_source": "https://sonarcloud.io/api/issues/search?componentKeys=Patricia7sp_kairos&resolved=false&ps=1&facets=types",
+  "analysis_source": "https://sonarcloud.io/api/project_analyses/search?project=Patricia7sp_kairos&ps=1"
+}

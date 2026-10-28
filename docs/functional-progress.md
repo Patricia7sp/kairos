@@ -1,48 +1,43 @@
 # Progresso funcional do Kairos
 
-## Frente atual em 26/10/2026
+## Frente atual em 28/10/2026
 
-Implementação em branch: `/learn` no Chat da CLI, conforme o
-[desenho aprovado](superpowers/specs/2026-10-26-learn-cli-design.md) e o
-[plano](superpowers/plans/2026-10-26-learn-cli.md). O modelo propõe uma skill,
-o usuário revisa o conteúdo integral e confirma `criar NOME`. O serviço publica
-com origem `user`, ledger e rollback existentes. Uma única criação por turno;
-prompt transitório; somente `skill_create`; sem catálogo, `skill_view`,
-aprovação genérica ou `--allow-tool`. Esclarecimento encerra e exige novo
-`/learn`. Este estado de branch não afirma merge, CI remoto ou deploy.
+`/learn` no Chat da CLI foi integrado pelo
+[PR #121](https://github.com/Patricia7sp/kairos/pull/121), em
+`f474368b2b34bd630388fb1d29d550dad9b0dfd4`, e implantado pelo
+[CI pós-merge](https://github.com/Patricia7sp/kairos/actions/runs/40573120438).
+O modelo propõe uma skill, o usuário revisa o conteúdo integral e confirma
+`criar NOME`; o serviço publica com origem `user`, ledger e rollback existentes.
+Uma criação por turno, prompt transitório e ferramenta exclusiva preservam
+os limites do [desenho](superpowers/specs/2026-10-26-learn-cli-design.md).
+Propostas revogadas retornam erro público; falhas com estado incerto preservam
+o diagnóstico e o ID candidato, sem inventar ausência de criação.
 
-O MVP cobre conversa ativa e pedido; fontes de diretório/URL, edição por
-modelo, telemetria, curador, workflows duráveis e hub continuam pendentes.
-Aceites com provedores reais e política organizacional em produção também
-permanecem separados dos testes controlados.
+A suíte local completa passou com 4.208 testes e 6.551 subtestes; a main
+teve 4.205 testes e 6.551 subtestes aprovados. Imagem, sessões Docker,
+frontends, lint, lockfile, recall e deploy passaram. A árvore integrada é
+idêntica ao HEAD revisado. Em 28/10, os 337 módulos Python rastreados de
+produção coincidiram por SHA-256 na aplicação e no broker; ambos estavam
+healthy. O smoke direto respondeu `status: ok`. Evidências e limites no
+[fechamento de /learn](superpowers/reports/2026-10-28-fechamento-learn-cli.md).
 
-A base integrada e implantada é `main` em
-`224532e8283298c65f287cbf6d507b4a32425429`. O
-[PR #119](https://github.com/Patricia7sp/kairos/pull/119) entregou o
-[índice automático de skills na CLI](superpowers/specs/2026-10-25-indice-automatico-cli-design.md),
-inclusive no interativo. Force/off explícitos, snapshot desde a primeira
-ativação positiva e capacidades por turno preservam os limites existentes.
-O padrão anuncia somente índice e leitor sob demanda.
+O fechamento documental anterior foi integrado pelo PR #118 (`83e8c92`).
+O PR #120 (`f106ba8`) validou os padrões reais dos limites de execução.
+O índice automático do PR #119 permanece integrado, inclusive no interativo,
+com snapshot positivo fixo e leitura sob demanda por `skill_view`.
 
-Revisão independente sem achados; suíte local integral com 4.155 testes e
-6.542 subtestes aprovados. O
-[CI da main #319](https://github.com/Patricia7sp/kairos/actions/runs/40241432910)
-concluiu verde, incluindo deploy no Komodo. O checkout implantado e os nove
-módulos de produção alterados foram conferidos; container saudável e smoke
-pós-deploy com HTTP 200 e `status: ok`. O Sonar aprovou o Quality Gate do PR
-e da main. Os 12 apontamentos do PR foram corrigidos; sua cobertura nova
-ficou em 97%. O
-[relatório de fechamento](superpowers/reports/2026-10-25-indice-automatico-cli.md)
-registra as provas, os comandos e os limites.
+A continuidade escolhida em 28/10 é segurança e confiabilidade do Sonar,
+seguida por curadoria de skills. O inventário da análise `f474368` contém
+1.060 apontamentos abertos: 987 de manutenção, 45 classificados como
+vulnerabilidades e 28 como bugs. Os 73 alertas de segurança/confiabilidade
+exigem confronto com as guardas e reprodução; a classificação do scanner
+não comprova um defeito. O Quality Gate aprovado da main e os zero
+apontamentos do PR são resultados de escopos diferentes desse backlog global.
 
-A continuidade solicitada começa por reconciliar o fechamento documental
-do PR #118 com essa entrega. O inventário do Sonar em 26/10 ainda registra
-1.061 apontamentos na main: 987 de manutenção, 45 classificados como
-vulnerabilidades e 29 como bugs. São classificações do scanner, a verificar
-contra os contratos antes de corrigir; a contagem é a mesma anterior ao #119.
-O saneamento deve começar pelos achados de segurança e confiabilidade,
-em lotes com revisão e validação próprias. `/learn`, curadoria e workflows
-duráveis permanecem como frentes funcionais posteriores; Ollama continua adiado.
+O MVP de `/learn` cobre conversa ativa e pedido. Diretórios/URLs, edição por
+modelo, telemetria, curadoria, workflows duráveis e hub continuam pendentes.
+Aceites com provedores reais e política organizacional em produção ficam
+separados dos testes controlados. Ollama permanece adiado.
 
 ## Checkpoint integrado anterior — 25/10/2026
 
