@@ -2755,6 +2755,10 @@ aprovou o gate, com confiabilidade nova A.
 
 ## D-CLI.SKILL.LEARN — autoria por modelo com confirmação vinculada
 
+MVP da CLI integrado pelo PR #121 em `f474368`, em 27/10/2026; CI,
+deploy e conferência das fontes instaladas registrados no
+[fechamento](superpowers/reports/2026-10-28-fechamento-learn-cli.md).
+
 Referências: `skills/requirements.md` RF-01/RF-02/RF-04/RF-08 e
 `skills/tasks.md` T-20–T-22; desenho
 `docs/superpowers/specs/2026-10-26-learn-cli-design.md`, aprovado com correções.
@@ -2782,4 +2786,4 @@ O JSON completo permanece limitado a 16 KiB; a entrada manual conserva 64 KiB.
 Conversa ativa e pedido cobrem RF-02 parcialmente. Diretórios/URLs, edição,
 curadoria, workflows e hub permanecem pendentes. Snapshots antigos não são
 ampliados pela criação. Não se afirma proteção contra outro processo do mesmo
-UID, aceite externo com credenciais reais, merge ou deploy por este recorte.
+UID nem aceite externo com credenciais reais.

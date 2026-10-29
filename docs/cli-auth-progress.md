@@ -114,6 +114,21 @@ do projeto.
 
 ## Próximas etapas
 
+Atualização em 28/10/2026: `/learn` foi integrado e implantado pelo PR #121
+em `f474368`, com confirmação humana vinculada, uma criação por turno e
+publicação pelo journal existente. CI local e remoto completos passaram;
+aplicação e broker estão healthy, com 337 módulos Python coincidentes com a
+main por SHA-256. O
+[fechamento de /learn](superpowers/reports/2026-10-28-fechamento-learn-cli.md)
+registra os resultados e seus escopos. O PR #118 já foi integrado em `83e8c92`,
+e o #120 em `f106ba8`.
+
+A sequência escolhida é segurança/confiabilidade do Sonar e, depois,
+curadoria de skills. A análise atual da main registra 73 alertas desses
+tipos, ainda sujeitos a triagem, dentro de 1.060 apontamentos globais.
+Workflows duráveis continuam posteriores. Os checkpoints abaixo preservam
+as datas e as evidências das entregas anteriores.
+
 Atualização em 25/10/2026: autoria/MCP, remoção A1, adoção A2 e política B1
 estão integradas. A B2 foi integrada e implantada pelo PR #114 (`da7c58c`),
 com schema v11, coordenação de sync/promoção e recuperação. O PR #115

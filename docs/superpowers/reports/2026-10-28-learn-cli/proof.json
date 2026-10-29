@@ -1,0 +1,25 @@
+{
+  "containers": {
+    "kairos": {
+      "health": "healthy",
+      "mismatches": [],
+      "modules_checked": 337
+    },
+    "kairos-runtime-broker": {
+      "health": "healthy",
+      "mismatches": [],
+      "modules_checked": 337
+    }
+  },
+  "deployment": {
+    "ci_run": 40573120438,
+    "job_id": 122439500810,
+    "reported_commit": null,
+    "result": "success",
+    "update_id": "6ae10474ce4ff60e6b0adaf5"
+  },
+  "hash_manifest": "sha256.txt",
+  "observed_at": "2026-10-28T02:33:24.842004+00:00",
+  "revision": "f474368b2b34bd630388fb1d29d550dad9b0dfd4",
+  "scope": "tracked Python production modules only"
+}
