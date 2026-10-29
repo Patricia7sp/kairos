@@ -61,7 +61,9 @@ por comparação dos módulos Python com a main e pela saúde observada dos dois
 containers, sem acesso ao banco ou aos segredos. A prova cobre esses módulos,
 não todos os arquivos de imagem nem configurações de produção. Os registros
 estão em [proof.json](2026-10-28-learn-cli/proof.json) e no
-[manifesto SHA-256](2026-10-28-learn-cli/sha256.json).
+[manifesto SHA-256](2026-10-28-learn-cli/sha256.txt). O manifesto usa o formato
+padrão de `sha256sum`, com caminhos relativos à raiz da revisão histórica;
+seus valores são hashes dos arquivos, não credenciais de autenticação.
 
 ## Continuidade escolhida em 28 de outubro
 
