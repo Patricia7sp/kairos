@@ -1635,14 +1635,37 @@ class SkillContentRequest(BaseModel):
 
 @app.put("/api/skills/content")
 async def save_skill_content(req: SkillContentRequest):
+    import errno
+
+    from kairos_filesystem.contract import FilesystemError
+    from kairos_web.skill_content_io import write_skill_content
+
     # Escrita vai para a raiz do usuário: as embarcadas vêm da imagem e um
     # redeploy as sobrescreveria sem avisar.
     home = Path(os.environ.get("KAIROS_HOME", Path.home() / ".kairos"))
-    destino = (home / "skills" / req.name / "SKILL.md").resolve()
-    if (home / "skills").resolve() not in destino.parents:
-        return JSONResponse({"error": "invalid_name", "name": req.name}, status_code=400)
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    destino.write_text(req.content, encoding="utf-8")
+    try:
+        write_skill_content(home, req.name, req.content)
+    except (FilesystemError, OSError, UnicodeError) as error:
+        if isinstance(error, FilesystemError):
+            kind = error.kind
+        elif isinstance(error, UnicodeError):
+            kind = "content"
+        elif error.errno in {errno.ELOOP, errno.ENOTDIR, errno.EISDIR, errno.ENXIO}:
+            kind = "input"
+        else:
+            kind = "io"
+        logger.warning(
+            "skill_content_write_refused",
+            extra={"kind": kind, "phase": "write", "error_class": type(error).__name__},
+        )
+        label = {
+            "input": "invalid_name",
+            "content": "invalid_content",
+            "conflict": "skill_content_conflict",
+        }.get(kind, "skill_write_failed")
+        status = {"input": 400, "content": 400, "conflict": 409}.get(kind, 500)
+        safe_name = req.name.encode("utf-8", errors="backslashreplace").decode("utf-8")
+        return JSONResponse({"error": label, "name": safe_name}, status_code=status)
     return {"name": req.name, "saved": True}
 
 

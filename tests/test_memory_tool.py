@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from kairos_tools.memory import MemoryStore, memory_tool, register_memory_tool
 from kairos_tools.registry import ToolRegistry
@@ -86,6 +87,132 @@ class MemoryStoreTests(unittest.TestCase):
             "escrita pela ferramenta",
             (self.home / "memories" / "MEMORY.md").read_text(encoding="utf-8"),
         )
+
+    def test_deriva_nao_segue_symlink_no_nome_previsivel_do_backup(self):
+        self.store.add("memory", "entrada original")
+        path = self.home / "memories" / "MEMORY.md"
+        raw = path.read_text(encoding="utf-8") + "\n§\n"
+        path.write_text(raw, encoding="utf-8")
+        outside = self.home / "outside-preserved"
+        outside.write_text("conteúdo externo preservado", encoding="utf-8")
+        link = path.with_suffix(path.suffix + ".bak.1234567890")
+        link.symlink_to(outside)
+
+        with patch("kairos_tools.memory.time.time", return_value=1234567890):
+            result = self.store.replace("memory", "entrada original", "substituta")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(outside.read_text(encoding="utf-8"), "conteúdo externo preservado")
+        self.assertTrue(link.is_symlink())
+        backup = Path(result["drift_backup"])
+        self.assertNotEqual(backup, link)
+        self.assertEqual(backup.read_text(encoding="utf-8"), raw)
+        self.assertEqual(path.read_text(encoding="utf-8"), raw)
+
+    def test_derivas_no_mesmo_segundo_preservam_cada_backup(self):
+        self.store.add("memory", "entrada original")
+        path = self.home / "memories" / "MEMORY.md"
+        original = path.read_text(encoding="utf-8")
+        first_raw = original + "\n§\n"
+        second_raw = original + "\n§\n segunda deriva "
+
+        with patch("kairos_tools.memory.time.time", return_value=1234567890):
+            path.write_text(first_raw, encoding="utf-8")
+            first = self.store.replace("memory", "entrada original", "substituta")
+            path.write_text(second_raw, encoding="utf-8")
+            second = self.store.remove("memory", "entrada original")
+
+        first_backup = Path(first["drift_backup"])
+        second_backup = Path(second["drift_backup"])
+        self.assertNotEqual(first_backup, second_backup)
+        self.assertEqual(first_backup.read_text(encoding="utf-8"), first_raw)
+        self.assertEqual(second_backup.read_text(encoding="utf-8"), second_raw)
+        self.assertEqual(path.read_text(encoding="utf-8"), second_raw)
+
+    def test_backup_de_deriva_tem_permissao_privada(self):
+        self.store.add("memory", "entrada original")
+        path = self.home / "memories" / "MEMORY.md"
+        raw = path.read_text(encoding="utf-8") + "\n§\n"
+        path.write_text(raw, encoding="utf-8")
+
+        result = self.store.remove("memory", "entrada original")
+
+        self.assertFalse(result["success"])
+        backup = Path(result["drift_backup"])
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(backup.read_text(encoding="utf-8"), raw)
+
+    def test_falha_ao_criar_backup_recusa_sem_inventar_caminho(self):
+        self.store.add("memory", "entrada original")
+        path = self.home / "memories" / "MEMORY.md"
+        raw = path.read_text(encoding="utf-8") + "\n§\n"
+        path.write_text(raw, encoding="utf-8")
+
+        with patch("tempfile.NamedTemporaryFile", side_effect=OSError("sem espaço")):
+            result = self.store.replace("memory", "entrada original", "substituta")
+
+        self.assertFalse(result["success"])
+        self.assertIn("backup", result["error"].lower())
+        self.assertNotIn("drift_backup", result)
+        self.assertEqual(path.read_text(encoding="utf-8"), raw)
+
+    def test_falha_de_escrita_preserva_original_sem_expor_erro_interno(self):
+        self.store.add("memory", "entrada original")
+        path = self.home / "memories" / "MEMORY.md"
+        raw = path.read_text(encoding="utf-8") + "\n§\n"
+        path.write_text(raw, encoding="utf-8")
+        outside = self.home / "outside-preserved"
+        outside.write_bytes(b"bytes externos preservados")
+        sentinel = f"private-sentinel:{outside}"
+        real_named_temporary_file = tempfile.NamedTemporaryFile
+
+        class FailingWriteContext:
+            def __enter__(self):
+                self.handle = real_named_temporary_file(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=path.parent,
+                    prefix="MEMORY.md.bak.",
+                    delete=False,
+                )
+                self.handle.__enter__()
+                return self
+
+            @property
+            def name(self):
+                return self.handle.name
+
+            def write(self, content):
+                self.handle.write(content[:4])
+                raise OSError(sentinel)
+
+            def __exit__(self, *args):
+                return self.handle.__exit__(*args)
+
+        with (
+            patch(
+                "tempfile.NamedTemporaryFile",
+                side_effect=lambda **kwargs: FailingWriteContext(),
+            ),
+            self.assertLogs("kairos_tools.memory", level="WARNING") as captured,
+        ):
+            result = self.store.replace("memory", "entrada original", "substituta")
+
+        logged = captured.records[0]
+        self.assertEqual(logged.error_class, "OSError")
+        self.assertEqual(logged.kind, "memory_drift_backup")
+        self.assertEqual(logged.phase, "write")
+        self.assertNotIn(sentinel, captured.output[0])
+        self.assertFalse(result["success"])
+        self.assertNotIn("drift_backup", result)
+        self.assertNotIn(sentinel, str(result))
+        self.assertIn("backup", result["error"].lower())
+        self.assertEqual(path.read_text(encoding="utf-8"), raw)
+        self.assertEqual(outside.read_bytes(), b"bytes externos preservados")
+        partial_backups = list(path.parent.glob("MEMORY.md.bak.*"))
+        self.assertEqual(len(partial_backups), 1)
+        self.assertEqual(partial_backups[0].read_text(encoding="utf-8"), raw[:4])
+        self.assertEqual(partial_backups[0].stat().st_mode & 0o777, 0o600)
 
     def test_arquivo_existente_ilegivel_e_recusa_como_vazio(self):
         path = self.home / "memories" / "MEMORY.md"

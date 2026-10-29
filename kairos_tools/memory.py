@@ -17,13 +17,17 @@ recusa a mutação e arquiva `.bak` antes de qualquer escrita.
 
 from __future__ import annotations
 
+import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 from kairos_security.credentials.io import credential_file_lock, secure_atomic_write_text
 from kairos_tools.registry import ToolRegistry, registry
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_MEMORY_CHAR_LIMIT",
@@ -48,6 +52,12 @@ class _ReadFailed:
     Tipo próprio (em vez de `object()`) para o narrowing estático: o chamador
     precisa abortar a mutação em vez de persistir sobre um arquivo ilegível.
     """
+
+    __slots__ = ()
+
+
+class _BackupFailed:
+    """Falha ao preservar a deriva; a mutação deve continuar recusada."""
 
     __slots__ = ()
 
@@ -149,6 +159,8 @@ class MemoryStore:
             bak = self._reload_target(target)
             if bak is _READ_FAILED:
                 return self._read_failed_error(self._path_for(target))
+            if isinstance(bak, _BackupFailed):
+                return self._drift_backup_failed_error(self._path_for(target))
             if isinstance(bak, str):
                 return self._drift_error(self._path_for(target), bak)
 
@@ -185,6 +197,8 @@ class MemoryStore:
             bak = self._reload_target(target)
             if bak is _READ_FAILED:
                 return self._read_failed_error(self._path_for(target))
+            if isinstance(bak, _BackupFailed):
+                return self._drift_backup_failed_error(self._path_for(target))
             if isinstance(bak, str):
                 return self._drift_error(self._path_for(target), bak)
 
@@ -249,7 +263,9 @@ class MemoryStore:
     def _total_chars(entries: list[str]) -> int:
         return len(ENTRY_DELIMITER.join(entries)) if entries else 0
 
-    def _reload_target(self, target: str, *, skip_drift: bool = False) -> str | _ReadFailed | None:
+    def _reload_target(
+        self, target: str, *, skip_drift: bool = False
+    ) -> str | _ReadFailed | _BackupFailed | None:
         """Relê o disco sob lock; devolve o backup de deriva ou a sentinela.
 
         Uma única leitura alimenta a checagem de deriva e a recarga de entradas —
@@ -265,7 +281,7 @@ class MemoryStore:
         self._set_entries(target, fresh)
         return bak
 
-    def _detect_external_drift(self, target: str, raw: str) -> str | None:
+    def _detect_external_drift(self, target: str, raw: str) -> str | _BackupFailed | None:
         """Retorna o caminho do `.bak` se o arquivo não round-trip.
 
         O arquivo de memória deve ser uma lista de entradas pequenas gravadas
@@ -287,11 +303,33 @@ class MemoryStore:
             return None
 
         ts = int(time.time())
-        bak_path = path.with_suffix(path.suffix + f".bak.{ts}")
+        bak_path: Path | None = None
+        phase = "create"
         try:
-            bak_path.write_text(raw, encoding="utf-8")
-        except OSError:
-            return str(bak_path) + " (BACKUP FALHOU — arquivo intacto no disco)"
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.mem_dir,
+                prefix=f"{path.name}.bak.{ts}.",
+                delete=False,
+            ) as backup_file:
+                bak_path = Path(backup_file.name)
+                phase = "write"
+                backup_file.write(raw)
+        except OSError as exc:
+            error_class = type(exc).__name__
+            logger.warning(
+                "memory_drift_backup_failed",
+                extra={
+                    "error_class": error_class,
+                    "kind": "memory_drift_backup",
+                    "phase": phase,
+                },
+            )
+            # Preserva o temporário parcial 0600: após fechar, o caminho
+            # sozinho não comprova a identidade criada nesta operação.
+            return _BackupFailed()
+        assert bak_path is not None
         return str(bak_path)
 
     @staticmethod
@@ -372,7 +410,7 @@ class MemoryStore:
             "error": (
                 f"Recusa gravar {path.name}: o arquivo em disco tem conteúdo que não "
                 "round-trip pela ferramenta (editado via patch, shell, mão ou "
-                "sessão concorrente). Snapshot salvo em {bak_path}. Resolva a "
+                f"sessão concorrente). Snapshot salvo em {bak_path}. Resolva a "
                 "deriva primeiro — reescreva o arquivo como lista limpa de "
                 "entradas § ou mova o conteúdo extra para fora — e refaça."
             ),
@@ -381,6 +419,16 @@ class MemoryStore:
                 "Abra o .bak, integre as entradas ausentes uma a uma via "
                 "memory(action=add, content=...) e então reescreva o original "
                 "num estado limpo."
+            ),
+        }
+
+    def _drift_backup_failed_error(self, path: Path) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": (
+                f"Recusa gravar {path.name}: o arquivo tem deriva e não foi possível "
+                "concluir o backup. O arquivo original foi mantido intacto; "
+                "resolva a deriva e tente novamente."
             ),
         }
 
