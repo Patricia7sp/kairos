@@ -114,11 +114,14 @@ do projeto.
 
 ## Próximas etapas
 
-Em desenvolvimento em 30/10/2026: primeiro lote de segurança/confiabilidade,
+Em branch em 30/10/2026: primeiro lote de segurança/confiabilidade,
 com [triagem e correção da verificação SMTP](superpowers/reports/2026-10-30-email-verificacao-tls.md).
 A verificação passa a exigir o STARTTLS configurado e EHLO aceito; conexões
-também são encerradas após falhas anteriores ao envio. Os testes direcionados
-passaram; CI integral ainda em execução, sem afirmar integração ou deploy.
+também são encerradas após falhas anteriores ao envio. Suíte local com 4.237
+testes e 6.560 subtestes aprovada, assim como lint, frontends e integrações
+Docker. SMTP/TLS também passou na imagem real. O script local terminou com
+exit 1 somente pela análise Sonar interrompida antes do upload por não ter
+branch explícita. CI remoto e Sonar do PR ainda a verificar; sem merge/deploy.
 
 Atualização em 28/10/2026: `/learn` foi integrado e implantado pelo PR #121
 em `f474368`, com confirmação humana vinculada, uma criação por turno e

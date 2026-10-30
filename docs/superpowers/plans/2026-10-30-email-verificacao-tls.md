@@ -38,6 +38,6 @@ Arquivos: `kairos_gateway/adapters/email_adapter.py`, `tests/smtp_sink.py`,
 
 ### Task 2: Validação integrada e revisão
 
-- [ ] Executar `scripts/ci.sh` com ferramentas disponíveis; registrar skips e bloqueios explicitamente.
+- [x] Executar `scripts/ci.sh` com ferramentas disponíveis; registrar skips e bloqueios explicitamente (exit 1 apenas pelo Sonar local interrompido; demais checks aprovados).
 - [x] Solicitar revisão independente do diff e resolver achados importantes com RED→GREEN (nenhum Critical/Important encontrado).
-- [ ] Registrar resultados, escopo do Sonar e pendências de integração no checkpoint.
+- [x] Registrar resultados, escopo do Sonar e pendências de integração no checkpoint.

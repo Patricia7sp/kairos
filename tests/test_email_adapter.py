@@ -60,7 +60,19 @@ class EmailAdapterTests(unittest.TestCase):
             sink.recusar_ehlo = True
             resultado = self._adapter(sink).verify()
             self.assertFalse(resultado["ok"])
+            self.assertNotIn("EHLO recusado", resultado["message"])
             self.assertEqual(sink.capturadas, [])
+
+    def test_send_recusa_ehlo_inicial_sem_auth_e_fecha_conexao(self):
+        with SmtpSink() as sink:
+            sink.recusar_ehlo = True
+            resultado = self._adapter(sink).send("email:destino@test", "x")
+            self.assertFalse(resultado.ok)
+            self.assertEqual(resultado.error_kind, "smtp")
+            self.assertNotIn("AUTH", sink.comandos)
+            self.assertEqual(sink.capturadas, [])
+            self.assertIn("QUIT", sink.comandos)
+            self.assertTrue(sink.conexao_fechada.wait(1))
 
     def test_falha_de_tls_fecha_conexao_sem_auth_ou_envio(self):
         with SmtpSink() as sink:
