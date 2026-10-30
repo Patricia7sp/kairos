@@ -11,6 +11,7 @@ sem socket fake, sem monkeypatch de biblioteca: o caminho é o fio de verdade.
 from __future__ import annotations
 
 import socketserver
+import ssl
 import threading
 from typing import Any
 
@@ -42,6 +43,7 @@ class _SmtpHandler(socketserver.BaseRequestHandler):
             comando, _, _arg = self._readline().partition(" ")
             if not comando:
                 break
+            self.server.state.comandos.append(comando.upper())
             acao = _COMANDOS.get(comando.upper())
             if acao is None:
                 self._send("500 comando desconhecido")
@@ -49,10 +51,34 @@ class _SmtpHandler(socketserver.BaseRequestHandler):
             if acao(self, _arg.strip()):
                 break
 
+    def finish(self) -> None:
+        self.request.close()
+        self.server.state.conexao_fechada.set()
+
     def _ehlo(self, argumento: str) -> bool:
+        sink = self.server.state
+        if sink.recusar_ehlo or (sink.recusar_ehlo_tls and sink.tls_estabelecido.is_set()):
+            self._send("550 EHLO recusado")
+            return False
         self._send("250-sink")
+        if sink.tls_context is not None and not sink.tls_estabelecido.is_set():
+            self._send("250-STARTTLS")
         self._send("250-AUTH PLAIN LOGIN")
         self._send("250 8BITMIME")
+        return False
+
+    def _starttls(self, argumento: str) -> bool:
+        sink = self.server.state
+        if sink.tls_context is None or sink.recusar_tls:
+            self._send("454 TLS indisponivel")
+            return False
+        self._send("220 iniciar TLS")
+        try:
+            self.request = sink.tls_context.wrap_socket(self.request, server_side=True)
+        except ssl.SSLError as exc:
+            sink.falhas_tls.append(type(exc).__name__)
+            return True
+        sink.tls_estabelecido.set()
         return False
 
     def _helo(self, argumento: str) -> bool:
@@ -122,6 +148,9 @@ class _SmtpHandler(socketserver.BaseRequestHandler):
         return False
 
     def _quit(self, argumento: str) -> bool:
+        if self.server.state.recusar_quit:
+            self._send("500 QUIT recusado")
+            return False
         self._send("221 atencao")
         return True
 
@@ -138,6 +167,7 @@ class _SmtpHandler(socketserver.BaseRequestHandler):
 _COMANDOS = {
     "HELO": _SmtpHandler._helo,
     "EHLO": _SmtpHandler._ehlo,
+    "STARTTLS": _SmtpHandler._starttls,
     "AUTH": _SmtpHandler._auth,
     "MAIL": _SmtpHandler._mail,
     "RCPT": _SmtpHandler._rcpt,
@@ -161,8 +191,17 @@ class SmtpSink:
     ``recusar_rcpt`` e ``auth_invalida`` ligam os ramos de recusa permanente.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, tls_context: ssl.SSLContext | None = None) -> None:
         self.capturadas: list[dict[str, Any]] = []
+        self.comandos: list[str] = []
+        self.conexao_fechada = threading.Event()
+        self.tls_context = tls_context
+        self.tls_estabelecido = threading.Event()
+        self.falhas_tls: list[str] = []
+        self.recusar_tls = False
+        self.recusar_ehlo = False
+        self.recusar_ehlo_tls = False
+        self.recusar_quit = False
         self.recusar_rcpt = False
         self.auth_invalida = False
         self._server: _ThreadingServer | None = None

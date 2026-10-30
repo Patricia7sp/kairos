@@ -14,7 +14,7 @@ Divergências registradas:
 - O legado dependia de ``EMAIL_HOME_ADDRESS`` (env var não documentada na
   spec); aqui o alvo home é ``address_default`` (config não-secreta) e se
   resolve pela superfície que testa/envia, nunca por variável de ambiente.
-- ``verify()`` faz conexão + EHLO reais e **nunca envia**; provar autenticação
+- ``verify()`` negocia o STARTTLS configurado e **nunca envia**; provar autenticação
   é enviar um teste para o alvo home.
 - Sem fonte de entrada (IMAP/POP3): este adapter é só o **canal de saída**.
 """
@@ -59,22 +59,38 @@ class EmailAdapter:
             return None
         return destino
 
+    def _negotiate(self, server: smtplib.SMTP) -> None:
+        code, message = server.ehlo()
+        if code != 250:
+            raise smtplib.SMTPHeloError(code, message)
+        if self._tls:
+            server.starttls(context=ssl.create_default_context())
+            code, message = server.ehlo()
+            if code != 250:
+                raise smtplib.SMTPHeloError(code, message)
+
+    @staticmethod
+    def _close(server: smtplib.SMTP) -> None:
+        try:
+            server.quit()
+        except (smtplib.SMTPException, OSError):
+            pass
+        finally:
+            server.close()
+
     def verify(self) -> dict[str, object]:
-        """Conexão + EHLO reais. Não envia nada — credencial só se comprova
+        """Conexão, EHLO e STARTTLS configurado reais. Não envia nada — credencial só se comprova
         com um envio de teste (alvo home), assumido pela superfície."""
         try:
             server = smtplib.SMTP(self._host, self._port, timeout=self._timeout)
         except (smtplib.SMTPException, OSError) as exc:
-            return {"ok": False, "message": f"conexão SMTP falhou: {exc}"}
+            return {"ok": False, "message": f"conexão SMTP falhou: {type(exc).__name__}"}
         try:
-            server.ehlo()
+            self._negotiate(server)
         except (smtplib.SMTPException, OSError) as exc:
-            return {"ok": False, "message": f"EHLO falhou: {exc}"}
+            return {"ok": False, "message": f"negociação SMTP falhou: {type(exc).__name__}"}
         finally:
-            try:
-                server.quit()
-            except (smtplib.SMTPException, OSError):
-                pass
+            self._close(server)
         return {"ok": True, "message": f"SMTP {self._host}:{self._port} respondeu"}
 
     def send(self, target: str, payload: str) -> SendResult:
@@ -96,23 +112,15 @@ class EmailAdapter:
             return SendResult(ok=False, retryable=True, error_kind="smtp")
 
         try:
-            if self._tls:
-                server.starttls(context=ssl.create_default_context())
-            server.ehlo()
+            self._negotiate(server)
             server.login(self._from_addr, self._password)
+            server.send_message(mensagem)
         except smtplib.SMTPAuthenticationError:
             return SendResult(ok=False, retryable=False, error_kind="auth")
-        except (smtplib.SMTPException, OSError):
-            return SendResult(ok=False, retryable=True, error_kind="smtp")
-        try:
-            server.send_message(mensagem)
         except smtplib.SMTPRecipientsRefused:
             return SendResult(ok=False, retryable=False, error_kind="destino_rejeitado")
         except (smtplib.SMTPException, OSError):
             return SendResult(ok=False, retryable=True, error_kind="smtp")
         finally:
-            try:
-                server.quit()
-            except (smtplib.SMTPException, OSError):
-                pass
+            self._close(server)
         return SendResult(ok=True)

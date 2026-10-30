@@ -1913,12 +1913,17 @@ Decisões:
 
 ### D-T28.2 — `verify()` conecta de verdade e nunca envia
 
-Provar autenticação SMTP exige enviar (AUTH só responde dentro de MAIL/‌DATA).
-Então `verify()` faz conexão + EHLO reais e reporta `never sent`; a superfície
+`verify()` verifica o transporte, sem autenticar. Faz conexão e EHLO reais;
+com `tls=True`, exige STARTTLS com certificado/nome válidos e repete EHLO
+depois da negociação. Resposta EHLO negativa ou TLS recusado produz falha,
+sem fallback para texto claro. O modo `tls=False` explicitamente configurado
+continua disponível. A verificação reporta `never sent`; a superfície
 `kairos email test` tem dois modos honestos: sem alvo, só verifica e imprime
 "nada foi enviado"; com alvo (ou alvo home), envia um teste de verdade. O teste
 de `slack/telegram/whatsapp test` segue o mesmo contrato — o trio também nunca
-finge envio.
+finge envio. A confirmação de autenticação e entrega permanece no envio de
+teste. Conexões são fechadas também após falhas de negociação/autenticação;
+falha no QUIT não transforma uma mensagem já aceita em envio a repetir.
 
 ### D-T28.3 — A recusa é um efeito: 69 com diagnóstico, não lembrete mudo
 

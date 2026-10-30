@@ -45,6 +45,60 @@ class EmailAdapterTests(unittest.TestCase):
             resultado = self._adapter(sink).verify()
             self.assertTrue(resultado["ok"], resultado["message"])
             self.assertEqual(sink.capturadas, [], "verify não pode gerar mensagem no fio")
+            self.assertNotIn("AUTH", sink.comandos)
+
+    def test_verify_com_tls_exige_starttls_sem_autenticar_ou_enviar(self):
+        with SmtpSink() as sink:
+            resultado = self._adapter(sink, tls=True).verify()
+            self.assertFalse(resultado["ok"])
+            self.assertNotIn("AUTH", sink.comandos)
+            self.assertEqual(sink.capturadas, [])
+            self.assertIn("QUIT", sink.comandos)
+
+    def test_verify_recusa_ehlo_negativo(self):
+        with SmtpSink() as sink:
+            sink.recusar_ehlo = True
+            resultado = self._adapter(sink).verify()
+            self.assertFalse(resultado["ok"])
+            self.assertNotIn("EHLO recusado", resultado["message"])
+            self.assertEqual(sink.capturadas, [])
+
+    def test_send_recusa_ehlo_inicial_sem_auth_e_fecha_conexao(self):
+        with SmtpSink() as sink:
+            sink.recusar_ehlo = True
+            resultado = self._adapter(sink).send("email:destino@test", "x")
+            self.assertFalse(resultado.ok)
+            self.assertEqual(resultado.error_kind, "smtp")
+            self.assertNotIn("AUTH", sink.comandos)
+            self.assertEqual(sink.capturadas, [])
+            self.assertIn("QUIT", sink.comandos)
+            self.assertTrue(sink.conexao_fechada.wait(1))
+
+    def test_falha_de_tls_fecha_conexao_sem_auth_ou_envio(self):
+        with SmtpSink() as sink:
+            resultado = self._adapter(sink, tls=True).send("email:destino@test", "x")
+            self.assertFalse(resultado.ok)
+            self.assertEqual(resultado.error_kind, "smtp")
+            self.assertNotIn("AUTH", sink.comandos)
+            self.assertEqual(sink.capturadas, [])
+            self.assertIn("QUIT", sink.comandos)
+
+    def test_autenticacao_recusada_fecha_conexao(self):
+        with SmtpSink() as sink:
+            sink.auth_invalida = True
+            resultado = self._adapter(sink).send("email:destino@test", "x")
+            self.assertFalse(resultado.ok)
+            self.assertEqual(resultado.error_kind, "auth")
+            self.assertIn("QUIT", sink.comandos)
+            self.assertTrue(sink.conexao_fechada.wait(1))
+
+    def test_quit_recusado_fecha_socket_apos_envio_aceito(self):
+        with SmtpSink() as sink:
+            sink.recusar_quit = True
+            resultado = self._adapter(sink).send("email:destino@test", "x")
+            self.assertTrue(resultado.ok, resultado.error_kind)
+            self.assertEqual(len(sink.capturadas), 1)
+            self.assertTrue(sink.conexao_fechada.wait(1))
 
     def test_alvo_sem_arroba_recusa_antes_de_conectar(self):
         with SmtpSink() as sink:
