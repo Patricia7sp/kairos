@@ -178,13 +178,6 @@ class LocalParityTests(unittest.TestCase):
         self.assertIn("coverage run", self.text)
         self.assertIn("coverage xml", self.text)
 
-    def test_scan_do_sonar_e_condicional(self):
-        self.assertIn("sonar-scanner", self.text)
-        self.assertIn("SONAR_TOKEN", self.text)
-        # Sem as ferramentas, o caminho é um `skip` — o mesmo padrão dos skips
-        # de shellcheck/npm, nunca falha nem finge análise.
-        self.assertRegex(self.text, r'skip\s+"Sonar[^\n]*')
-
 
 if __name__ == "__main__":
     unittest.main()

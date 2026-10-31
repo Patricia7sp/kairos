@@ -10,11 +10,38 @@
 # Uso:
 #   scripts/ci.sh          # tudo que estiver disponível
 #   scripts/ci.sh --fast   # pula o que exige Docker
+#   scripts/ci.sh --sonar-pr N  # solicita análise local do PR
+#   scripts/ci.sh --sonar-main  # solicita análise local da main
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 FAST=0
-[ "${1:-}" = "--fast" ] && FAST=1
+SONAR_MODE=""
+SONAR_PR=""
+usage() {
+  printf 'Uso: scripts/ci.sh [--fast] [--sonar-pr N | --sonar-main]\n'
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fast) FAST=1; shift ;;
+    --sonar-pr)
+      if [ -n "$SONAR_MODE" ] || [ "$#" -lt 2 ] || [[ ! "${2:-}" =~ ^[1-9][0-9]*$ ]]; then
+        usage >&2
+        exit 2
+      fi
+      SONAR_MODE="pr"
+      SONAR_PR="$2"
+      shift 2
+      ;;
+    --sonar-main)
+      if [ -n "$SONAR_MODE" ]; then usage >&2; exit 2; fi
+      SONAR_MODE="main"
+      shift
+      ;;
+    --help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
 
 falhas=()
 run() {
@@ -28,6 +55,47 @@ run() {
   fi
 }
 skip() { printf '\n\033[1m▸ %s\033[0m\n  \033[33mpulado — %s\033[0m\n' "$1" "$2"; }
+
+# Invocada indiretamente por `run`.
+# shellcheck disable=SC2317,SC2329
+sonar_local() {
+  local top branch revision changes
+  if [ -n "${GIT_DIR+x}${GIT_WORK_TREE+x}${GIT_COMMON_DIR+x}${GIT_INDEX_FILE+x}" ]; then
+    printf 'erro: Sonar local exige descoberta Git do checkout, sem overrides de árvore, metadados ou índice.\n' >&2
+    return 2
+  fi
+  if ! top="$(git rev-parse --show-toplevel)" \
+      || ! branch="$(git symbolic-ref --quiet --short HEAD)" \
+      || ! revision="$(git rev-parse --verify HEAD)" \
+      || ! changes="$(git status --porcelain --untracked-files=all)"; then
+    printf 'erro: Sonar local exige um checkout Git com branch e revisão observáveis.\n' >&2
+    return 2
+  fi
+  if [ "$top" != "$(pwd -P)" ]; then
+    printf 'erro: Sonar local exige os metadados Git deste checkout.\n' >&2
+    return 2
+  fi
+  if [ -n "$changes" ]; then
+    printf 'erro: Sonar local exige checkout limpo; confirme as alterações antes da análise.\n' >&2
+    return 2
+  fi
+  local -a arguments=("-Dsonar.scm.revision=$revision")
+  if [ "$SONAR_MODE" = main ]; then
+    if [ "$branch" != main ]; then
+      printf 'erro: --sonar-main exige a branch main.\n' >&2
+      return 2
+    fi
+    arguments+=("-Dsonar.branch.name=main")
+  else
+    if [ "$branch" = main ]; then
+      printf 'erro: --sonar-pr exige a branch de origem do PR.\n' >&2
+      return 2
+    fi
+    arguments+=("-Dsonar.pullrequest.key=$SONAR_PR"
+      "-Dsonar.pullrequest.branch=$branch" "-Dsonar.pullrequest.base=main")
+  fi
+  sonar-scanner "${arguments[@]}"
+}
 
 UV="${UV:-uv}"
 command -v "$UV" >/dev/null 2>&1 || UV="$HOME/.local/bin/uv"
@@ -48,10 +116,11 @@ run "Testes (unitários, com cobertura)" \
 run "Combinar cobertura"       "$UV" run coverage combine
 run "Relatório de cobertura"   "$UV" run coverage xml
 
-# O scanner só roda com binário E token; sem eles, skip explícito — mesma forma
-# dos skips de shellcheck/npm. Nunca reportar análise que não ocorreu.
-if command -v sonar-scanner >/dev/null 2>&1 && [ -n "${SONAR_TOKEN:-}" ]; then
-  run "Sonar (análise)" sonar-scanner
+# O destino é pedido nesta invocação; token herdado não solicita exportação.
+if [ -z "$SONAR_MODE" ]; then
+  skip "Sonar (análise)" "não solicitado; use --sonar-pr N ou --sonar-main"
+elif command -v sonar-scanner >/dev/null 2>&1 && [ -n "${SONAR_TOKEN:-}" ]; then
+  run "Sonar (análise)" sonar_local
 else
   skip "Sonar (análise)" "sonar-scanner ou SONAR_TOKEN ausente"
 fi

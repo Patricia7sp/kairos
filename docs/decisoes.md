@@ -771,6 +771,19 @@ Decisões que a integração respeita:
   O passo é condicional e, sem token, o job passa sem scanear, com mensagem
   explícita de que a análise foi pulada. Nunca reportar sucesso de análise que
   não ocorreu.
+- **Destino local explícito (29/10/2026).** Um token herdado não solicita
+  exportação. `scripts/ci.sh` pula o scan por padrão; `--sonar-pr N` seleciona
+  um PR da branch de origem, e `--sonar-main` exige a branch `main`. O checkout
+  deve estar limpo, com branch/commit observáveis e metadados Git da própria
+  raiz analisada. Os argumentos vinculam destino e SHA; token continua no
+  ambiente. Recusa ou erro do scanner permanece falha, sem afetar a detecção
+  automática do job remoto. Isso corrige o envio local sem escopo observado
+  durante a validação do PR #123.
+  Na revisão de 31/10, o contrato foi fechado para recusar overrides ambientais
+  de árvore, metadados ou índice (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+  `GIT_INDEX_FILE`). Comparar apenas a raiz informada pelo Git permitia vincular
+  bytes locais ao SHA de outro repositório. Worktrees vinculadas são descobertas
+  normalmente pelo próprio `.git`, sem esses overrides.
 - **Sinal para humano, não para loop.** Cobertura do Sonar é sinal para
   revisão; não é alvo de otimização por agente autônomo — perseguir o número
   produz teste de fachada.

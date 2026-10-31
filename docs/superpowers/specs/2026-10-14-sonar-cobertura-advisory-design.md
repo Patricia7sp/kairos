@@ -60,9 +60,19 @@ Do `AGENTS.md`:
    scanear. Não reportar sucesso de análise que não ocorreu (princípio
    "sem efeito real é pior que ausência"): a mensagem deve dizer
    explicitamente que a análise foi pulada.
-6. **Paridade local.** `scripts/ci.sh` gera a cobertura (sempre) e roda o
-   `sonar-scanner` **somente** se `sonar-scanner` estiver instalado e
-   `SONAR_TOKEN` presente; senão, `skip` — mesmo padrão de shellcheck/npm.
+6. **Paridade local e destino explícito.** `scripts/ci.sh` gera a cobertura
+   sempre. A exportação local exige `--sonar-pr N` ou `--sonar-main`, além de
+   scanner instalado e `SONAR_TOKEN` presente. Sem opção ou pré-requisito,
+   há `skip` explícito. PR exige uma branch de origem diferente de `main`;
+   main exige a branch `main`. Ambos recusam HEAD destacado, metadados de
+   outro checkout e alterações staged, unstaged ou não rastreadas. O scanner
+   recebe branch/PR e o SHA observado por argumentos; o token fica no ambiente.
+   A descoberta Git deve partir do próprio checkout: `GIT_DIR`, `GIT_WORK_TREE`,
+   `GIT_COMMON_DIR` e `GIT_INDEX_FILE` definidos no ambiente recusam a análise,
+   inclusive quando apontam para a raiz local. Worktrees vinculadas continuam
+   aceitas pela descoberta normal do arquivo `.git`.
+   Falha de observação ou do scanner faz o CI local falhar. O workflow remoto
+   conserva a detecção de destino do GitHub Actions e não é alterado.
 
 ## Mudanças de arquivo
 

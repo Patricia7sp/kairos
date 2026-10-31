@@ -1,5 +1,36 @@
 # Progresso funcional do Kairos
 
+## Retomada em 31/10/2026
+
+O PR #124 foi integrado em `aa1200e`, com CI, Sonar e deploy confirmados no
+[fechamento do PR](https://github.com/Patricia7sp/kairos/pull/124). A frente
+pendente é o ajuste de escopo do Sonar local, preservado em
+`fix/sonar-escopo-local` e alinhado a essa main.
+
+A revisão independente encontrou um caso em que `GIT_DIR` externo junto de
+`GIT_WORK_TREE` apontando à raiz local atribuía a análise ao SHA errado. O
+caso foi reproduzido antes da correção. A análise agora recusa overrides de
+árvore/metadados/índice; worktrees vinculadas descobertas normalmente continuam
+válidas. A validação integral da árvore final está em andamento, sem exportação
+Sonar local. O recorte segue para PR em rascunho; merge/deploy não fazem parte
+desta etapa.
+
+## Frente atual em 29/10/2026
+
+A continuidade retoma o ajuste do Sonar local em `fix/sonar-escopo-local`.
+`scripts/ci.sh` gera cobertura, mas só exporta uma análise quando recebe
+`--sonar-pr N` ou `--sonar-main`, com scanner e token disponíveis. A seleção
+vincula destino e revisão a um checkout limpo; HEAD destacado, metadados de
+outro checkout e branch incompatível recusam a análise. Arquivos novos são
+verificados mesmo quando a configuração do Git os oculta no status habitual.
+O token continua no ambiente e o workflow remoto mantém seu comportamento.
+
+O ajuste segue para validação integral e PR em rascunho, sem exportação Sonar
+local nem merge/deploy nesta etapa. A revisão independente não encontrou
+achados; as regressões focadas passaram com 32 testes e 7 subtestes.
+Segurança e confiabilidade do backlog Sonar continuam antes da curadoria
+de skills; os checkpoints históricos abaixo preservam seus escopos e datas.
+
 ## Frente atual em 28/10/2026
 
 `/learn` no Chat da CLI foi integrado pelo
