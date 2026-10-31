@@ -63,9 +63,32 @@ de credenciais/workspace.
   A primeira baseline na sandbox ficou aguardando em código assíncrono e foi
   interrompida; a repetição com permissões para os subprocessos locais passou.
   A tentativa interrompida não é atribuída como aprovação.
-- Revisão independente, CI integral e validação na imagem ainda pendentes
-  nesta versão do relatório. Os resultados finais serão registrados antes
-  de preparar o PR.
+- Revisão independente por GPT-6 Luna/high sobre `08b213f..e245b1a`, somente
+  leitura: nenhum Critical/Important/Minor; `Declined to judge` vazio. O revisor
+  não executou testes; a validação integrada abaixo foi executada pelo Root.
+
+| Validação local final | Resultado |
+| --- | --- |
+| `scripts/ci.sh` completo, em `e245b1a` | Exit 0, com Python 3.11.16 e Codex 0.154.0; afinidade em uma CPU |
+| Suíte Python com cobertura | 4.272 testes e 6.571 subtestes aprovados; 21 skips e 34 deselections, sem `runtime_live` |
+| Ruff, shellcheck, recall e lockfile | Aprovados; recall com 20 testes |
+| TypeScript e Vitest dos três frontends | Aprovados; 17 testes TUI, 204 Web e 18 desktop |
+| Receitas e builds | Hadolint e builds/checks da aplicação, broker, stub e worker aprovados |
+| Integração da imagem real | 33 testes e 26 subtestes aprovados, sem skips |
+| Sessões Docker offline | 26 testes aprovados, um skip pelo opt-in de AppArmor/seccomp do host |
+| Smoke do loader instalado na imagem | Quatro testes unittest aprovados, incluindo cenários de entradas inválidas e privacidade |
+
+O smoke usou a imagem produzida pelo CI local, sem bind dos fontes ou de
+dados de produção: usuário `10000:10000`, rede `none`, filesystem somente
+leitura, capabilities removidas e `no-new-privileges`. O hash do módulo
+instalado coincidiu com `e245b1a`. O código corrigido e os testes permanecem
+iguais nessa evidência; as edições posteriores registram somente os
+resultados em documentação. Os lockfiles dos frontends foram comparados
+antes da cópia isolada das dependências existentes.
+
+A exportação Sonar local foi pulada explicitamente. CI e Sonar remotos
+pertencem ao SHA publicado no PR da branch `fix/triagem-fronteiras-arquivos`
+e têm suas próprias evidências; sucesso local não atesta essa análise.
 
 ## Continuidade
 

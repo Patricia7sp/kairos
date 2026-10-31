@@ -51,6 +51,8 @@
 - [x] Exercitar JobStore reaberto a partir de JSON com campo `path` externo, NUL ou link cíclico; comprovar leitura do job correto e ausência de efeito no alvo externo.
 - [x] Classificar S2083, S8707 e S6549 separadamente, distinguindo os fluxos não reproduzidos das falhas associadas efetivamente corrigidas.
 - [x] Atualizar o fechamento do #125 e registrar curadoria como decisão posterior.
-- [ ] Revisão independente da branch, CI local completo e preparação de PR em rascunho. Informar o estado real do CI/Sonar remoto, sem antecipar aprovação.
+- [x] Revisão independente da branch e CI local completo, incluindo smoke do loader na imagem real.
+
+**Entrega:** preparar PR em rascunho e informar o estado real do CI/Sonar remoto do SHA publicado, sem antecipar aprovação.
 
 **Validation:** testes direcionados e `scripts/ci.sh` completo com Codex fixado, sem exportação Sonar local nem provedores reais.

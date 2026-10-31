@@ -12,8 +12,11 @@ em `fix/triagem-fronteiras-arquivos`. Foram reproduzidos defaults indevidos
 para configuração existente não regular e exposição de conteúdo em
 diagnósticos do loader. A correção e os limites dos três fluxos estão no
 [relatório](superpowers/reports/2026-10-31-fronteiras-arquivos.md).
-Validação integral e revisão independente deste lote ainda pendentes;
-sem merge ou deploy da correção. A curadoria permanece sem escopo escolhido.
+Revisão independente sem achados e CI local integral aprovados: 4.272 testes
+Python e 6.571 subtestes, 33 testes na imagem e 26 testes Docker offline.
+O smoke específico do loader instalado também passou. A integração deste
+lote deve ser conferida no PR da branch; o relatório delimita as evidências.
+A curadoria permanece sem escopo escolhido.
 
 ## Retomada em 31/10/2026
 
