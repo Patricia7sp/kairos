@@ -2089,6 +2089,13 @@ Codex não passam por esse executor; são regidos pela atestação do container
 contável no executor atual — e o teto único do fio (`outputBytesCap`) aplica
 `max_stdout_bytes`.
 
+O fechamento da fronteira de leitura distingue configuração ausente de
+entrada presente inválida: diretório, FIFO, link quebrado e ciclo recusam.
+Alias para arquivo regular permanece válido. A leitura valida o descritor
+regular aberto sem bloquear em FIFO; os diagnósticos não reproduzem conteúdo
+ou chaves arbitrárias da configuração. Evidências e escopo em
+[triagem de arquivos](superpowers/reports/2026-10-31-fronteiras-arquivos.md).
+
 ### D-RT.4 — Turno comum: sandbox só para `bash`/`terminal`, sem fallback para o host
 
 **Escopo deliberado** (lote P3, Opção 2, recorte com a usuária em 2026-09-28):

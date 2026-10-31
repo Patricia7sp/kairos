@@ -8,6 +8,11 @@ por calar a entrada inválida.
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
+import traceback
+from uuid import uuid4
 
 import pytest
 
@@ -123,6 +128,88 @@ def test_load_topo_nao_mapeamento_fail_closed(tmp_path):
     (tmp_path / "config.yaml").write_text("- um\n- dois\n", encoding="utf-8")
     with pytest.raises(ValueError, match="mapeamento de topo"):
         load_execution_limits(tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["directory", "directory_link", "dangling_link", "cycle"])
+def test_load_config_presente_nao_regular_recusa(tmp_path, kind):
+    from kairos_runtime.execution import load_execution_limits
+
+    path = tmp_path / "config.yaml"
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "directory_link":
+        path.symlink_to(tmp_path, target_is_directory=True)
+    elif kind == "dangling_link":
+        path.symlink_to(tmp_path / "ausente.yaml")
+    else:
+        path.symlink_to(path)
+    with pytest.raises(ValueError, match=r"config.yaml"):
+        load_execution_limits(tmp_path)
+
+
+def test_load_fifo_recusa_sem_bloquear(tmp_path):
+    os.mkfifo(tmp_path / "config.yaml")
+    program = """from pathlib import Path
+import sys
+from kairos_runtime.execution import load_execution_limits
+try:
+    load_execution_limits(Path(sys.argv[1]))
+except ValueError:
+    print('recusado')
+else:
+    raise SystemExit(3)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path)],
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "recusado"
+
+
+@pytest.mark.parametrize("kind", ["yaml", "unknown_key", "utf8"])
+def test_load_diagnostico_nao_expoe_config(tmp_path, kind):
+    from kairos_runtime.execution import load_execution_limits
+
+    marker = uuid4().hex
+    path = tmp_path / "config.yaml"
+    if kind == "yaml":
+        path.write_text(f'api_key: ["{marker}"\ncode_execution: {{}}\n')
+    elif kind == "unknown_key":
+        path.write_text(f"code_execution:\n  {marker}: 1\n")
+    else:
+        path.write_bytes(f"api_key: {marker}".encode() + b"\xff")
+    with pytest.raises(ValueError) as captured:
+        load_execution_limits(tmp_path)
+    error = captured.value
+    assert "config.yaml" in str(error) or "code_execution" in str(error)
+    assert marker not in str(error)
+    assert marker not in "".join(traceback.format_exception(error))
+
+
+def test_load_alias_regular_aplica_limites(tmp_path):
+    from kairos_runtime.execution import load_execution_limits
+
+    source = tmp_path / "selecionada.yaml"
+    source.write_text("code_execution:\n  timeout_seconds: 17\n")
+    (tmp_path / "config.yaml").symlink_to(source)
+    assert load_execution_limits(tmp_path).timeout_seconds == 17
+
+
+def test_sandbox_recusa_config_presente_nao_regular(tmp_path):
+    from kairos_integration.chat_sandbox import ChatBashSandbox
+
+    (tmp_path / "config.yaml").mkdir()
+    sandbox = None
+    try:
+        with pytest.raises(ValueError, match=r"config.yaml"):
+            sandbox = ChatBashSandbox(tmp_path)
+    finally:
+        if sandbox is not None:
+            asyncio.run(sandbox.aclose())
 
 
 def test_execute_aplica_limites_configurados(tmp_path):
