@@ -60,6 +60,10 @@ skip() { printf '\n\033[1m▸ %s\033[0m\n  \033[33mpulado — %s\033[0m\n' "$1" 
 # shellcheck disable=SC2317,SC2329
 sonar_local() {
   local top branch revision changes
+  if [ -n "${GIT_DIR+x}${GIT_WORK_TREE+x}${GIT_COMMON_DIR+x}${GIT_INDEX_FILE+x}" ]; then
+    printf 'erro: Sonar local exige descoberta Git do checkout, sem overrides de árvore, metadados ou índice.\n' >&2
+    return 2
+  fi
   if ! top="$(git rev-parse --show-toplevel)" \
       || ! branch="$(git symbolic-ref --quiet --short HEAD)" \
       || ! revision="$(git rev-parse --verify HEAD)" \

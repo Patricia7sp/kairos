@@ -114,6 +114,14 @@ do projeto.
 
 ## Próximas etapas
 
+Retomada em 31/10/2026: a correção SMTP abaixo foi integrada em `aa1200e`
+pelo [PR #124](https://github.com/Patricia7sp/kairos/pull/124), com
+[CI da main e deploy aprovados](https://github.com/Patricia7sp/kairos/actions/runs/40998138172)
+e Sonar da revisão conferido. O próximo fechamento é o
+[escopo explícito do Sonar local](superpowers/plans/2026-10-29-sonar-escopo-local.md),
+que impede exportação implícita e vinculação da análise a metadados Git externos.
+Segurança/confiabilidade continuam antes de curadoria de skills.
+
 Em branch em 30/10/2026: primeiro lote de segurança/confiabilidade,
 com [triagem e correção da verificação SMTP](superpowers/reports/2026-10-30-email-verificacao-tls.md).
 A verificação passa a exigir o STARTTLS configurado e EHLO aceito; conexões

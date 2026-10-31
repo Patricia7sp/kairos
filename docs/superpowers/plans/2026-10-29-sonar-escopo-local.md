@@ -24,6 +24,7 @@
 - PR ausente/malformado ou opções incompatíveis: erro antes de qualquer exportação.
 - Main pedida a partir de uma feature, PR pedido da main ou HEAD destacado: recusar sem scanner.
 - Arquivo modificado, staged ou não rastreado: recusar para não atribuir bytes diferentes ao commit informado.
+- Metadados externos com `GIT_WORK_TREE` igual à raiz local: recusar; overrides de árvore/metadados/índice são incompatíveis com a atestação. Worktree vinculada descoberta normalmente continua válida.
 - Falha do scanner: o CI local deve terminar em falha, sem mensagem de análise aprovada.
 
 ### Task 1: Seleção de destino e comprovação do checkout
@@ -46,6 +47,7 @@
 - [x] Implementar opções, atestação Git e argumentos explícitos no script existente.
 - [x] Cobrir PR, main, pré-requisitos ausentes, entradas inválidas, HEAD destacado, árvores sujas e erro do scanner; observar GREEN.
 - [x] Atualizar os contratos documentais e executar ruff, shellcheck e checks de diff.
+- [x] Corrigir o achado da revisão de 31/10: metadados externos com raiz local passaram pela comparação de top-level. Regressão RED confirmou envio com revisão errada; recusa dos overrides e aceitação de worktree vinculada exercitadas com Git real.
 - [ ] Executar `scripts/ci.sh` completo sem selecionar exportação local; revisar independentemente o delta.
 - [ ] Publicar PR em rascunho e conferir CI/Sonar do SHA final. Merge/deploy exigem instrução específica posterior.
 

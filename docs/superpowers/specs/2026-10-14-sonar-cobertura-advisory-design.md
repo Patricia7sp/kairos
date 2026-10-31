@@ -67,6 +67,10 @@ Do `AGENTS.md`:
    main exige a branch `main`. Ambos recusam HEAD destacado, metadados de
    outro checkout e alterações staged, unstaged ou não rastreadas. O scanner
    recebe branch/PR e o SHA observado por argumentos; o token fica no ambiente.
+   A descoberta Git deve partir do próprio checkout: `GIT_DIR`, `GIT_WORK_TREE`,
+   `GIT_COMMON_DIR` e `GIT_INDEX_FILE` definidos no ambiente recusam a análise,
+   inclusive quando apontam para a raiz local. Worktrees vinculadas continuam
+   aceitas pela descoberta normal do arquivo `.git`.
    Falha de observação ou do scanner faz o CI local falhar. O workflow remoto
    conserva a detecção de destino do GitHub Actions e não é alterado.
 

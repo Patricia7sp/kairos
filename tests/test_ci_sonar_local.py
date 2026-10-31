@@ -177,6 +177,53 @@ class LocalSonarScopeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertFalse(self.log.exists())
 
+    def test_git_externo_com_raiz_local_recusa_sem_scanner(self):
+        other = self.root / "other"
+        self.git("clone", "--quiet", "--local", str(self.checkout), str(other))
+        self.git(
+            "-C",
+            str(other),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "outro commit",
+        )
+        self.environment.update(GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(self.checkout))
+        result = self.run_ci("--sonar-pr", "124")
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(self.log.exists())
+
+    def test_worktree_vinculada_preserva_branch_e_revisao(self):
+        linked = self.root / "linked"
+        self.git("worktree", "add", "--quiet", "-b", "feature/linked", str(linked))
+        self.checkout = linked
+        result = self.run_ci("--sonar-pr", "124")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = self.arguments()
+        self.assertEqual(arguments["sonar.pullrequest.branch"], "feature/linked")
+        self.assertEqual(arguments["sonar.scm.revision"], self.revision)
+
+    def test_overrides_git_recusam_sem_scanner(self):
+        for key, value in (
+            ("GIT_DIR", str(self.checkout / ".git")),
+            ("GIT_WORK_TREE", str(self.checkout)),
+            ("GIT_COMMON_DIR", str(self.checkout / ".git")),
+            ("GIT_INDEX_FILE", str(self.checkout / ".git/index")),
+        ):
+            with self.subTest(variable=key):
+                self.environment[key] = value
+                try:
+                    result = self.run_ci("--sonar-pr", "124")
+                    self.assertEqual(result.returncode, 1)
+                    self.assertFalse(self.log.exists())
+                finally:
+                    self.environment.pop(key)
+                    self.log.unlink(missing_ok=True)
+
     def test_status_git_ilegivel_recusa_sem_scanner(self):
         (self.checkout / ".git/index").write_bytes(b"invalid")
         result = self.run_ci("--sonar-pr", "124")
