@@ -1,6 +1,6 @@
 # Triagem das fronteiras de arquivos — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans para executar sequencialmente. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans para executar sequencialmente. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Classificar três fluxos Sonar com evidência comportamental e corrigir as falhas reproduzidas no carregamento de limites.
 
@@ -33,13 +33,13 @@
 
 **Interfaces:** `load_execution_limits(home: Path) -> ExecutionLimits` e `parse_execution_limits(raw: object) -> ExecutionLimits`, sem mudança de assinatura. Falhas continuam `ValueError` nomeadas.
 
-- [ ] Escrever `test_load_config_presente_nao_regular_recusa` para diretório, link para diretório, link quebrado e ciclo; esperar ValueError.
-- [ ] Escrever `test_load_fifo_recusa_sem_bloquear`, em subprocesso com timeout, e `test_load_diagnostico_nao_expoe_config` para YAML inválido, chave desconhecida e UTF-8 inválido; verificar mensagem e traceback sem canário.
-- [ ] Escrever positivo de alias regular e integração `ChatBashSandbox` recusando configuração presente inválida.
-- [ ] Executar os novos testes e observar RED antes de alterar produção.
-- [ ] Abrir com descritor não bloqueante, validar arquivo regular antes da leitura, fechar em todos os desfechos e usar diagnóstico seguro com causa suprimida. Remover eco da chave arbitrária do parser.
-- [ ] Executar `tests/test_execution.py` e `tests/test_chat_sandbox.py`; esperar aprovação.
-- [ ] Commit: `fix(runtime): recusa configurações inválidas e protege diagnósticos`.
+- [x] Escrever `test_load_config_presente_nao_regular_recusa` para diretório, link para diretório, link quebrado e ciclo; esperar ValueError.
+- [x] Escrever `test_load_fifo_recusa_sem_bloquear`, em subprocesso com timeout, e `test_load_diagnostico_nao_expoe_config` para YAML inválido, chave desconhecida e UTF-8 inválido; verificar mensagem e traceback sem canário.
+- [x] Escrever positivo de alias regular e integração `ChatBashSandbox` recusando configuração presente inválida.
+- [x] Executar os novos testes e observar RED antes de alterar produção.
+- [x] Abrir com descritor não bloqueante, validar arquivo regular antes da leitura, fechar em todos os desfechos e usar diagnóstico seguro com causa suprimida. Remover eco da chave arbitrária do parser.
+- [x] Executar `tests/test_execution.py` e `tests/test_chat_sandbox.py`; esperar aprovação.
+- [x] Commit: `fix(runtime): recusa configurações inválidas e protege diagnósticos`.
 
 ### Task 2: Provas dos fluxos e fechamento da triagem
 
@@ -47,10 +47,10 @@
 
 **Interfaces:** Consome o loader corrigido e os contratos existentes de `ToolRegistry.dispatch` e `JobStore.get`. Não muda políticas de workspace ou autoria.
 
-- [ ] Exercitar edição com conteúdo contendo caminhos externos, com e sem workspace explícito, e comprovar destino original e sentinela externa preservados.
-- [ ] Exercitar JobStore reaberto a partir de JSON com campo `path` externo, NUL ou link cíclico; comprovar leitura do job correto e ausência de efeito no alvo externo.
-- [ ] Classificar S2083, S8707 e S6549 separadamente, distinguindo os fluxos não reproduzidos das falhas associadas efetivamente corrigidas.
-- [ ] Atualizar o fechamento do #125 e registrar curadoria como decisão posterior.
+- [x] Exercitar edição com conteúdo contendo caminhos externos, com e sem workspace explícito, e comprovar destino original e sentinela externa preservados.
+- [x] Exercitar JobStore reaberto a partir de JSON com campo `path` externo, NUL ou link cíclico; comprovar leitura do job correto e ausência de efeito no alvo externo.
+- [x] Classificar S2083, S8707 e S6549 separadamente, distinguindo os fluxos não reproduzidos das falhas associadas efetivamente corrigidas.
+- [x] Atualizar o fechamento do #125 e registrar curadoria como decisão posterior.
 - [ ] Revisão independente da branch, CI local completo e preparação de PR em rascunho. Informar o estado real do CI/Sonar remoto, sem antecipar aprovação.
 
 **Validation:** testes direcionados e `scripts/ci.sh` completo com Codex fixado, sem exportação Sonar local nem provedores reais.

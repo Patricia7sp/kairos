@@ -114,6 +114,12 @@ do projeto.
 
 ## Próximas etapas
 
+O escopo explícito do Sonar local foi integrado e implantado pelo PR #125
+em `08b213f`, com CI/Sonar e saúde pós-deploy conferidos. A próxima entrega
+está na [triagem de fronteiras de arquivos](superpowers/reports/2026-10-31-fronteiras-arquivos.md):
+correção do loader de limites e classificação delimitada de três alertas.
+Curadoria segue para definição posterior; os checkpoints abaixo são históricos.
+
 Retomada em 31/10/2026: a correção SMTP abaixo foi integrada em `aa1200e`
 pelo [PR #124](https://github.com/Patricia7sp/kairos/pull/124), com
 [CI da main e deploy aprovados](https://github.com/Patricia7sp/kairos/actions/runs/40998138172)

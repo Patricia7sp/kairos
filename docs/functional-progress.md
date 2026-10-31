@@ -1,5 +1,20 @@
 # Progresso funcional do Kairos
 
+## Triagem de fronteiras em 31/10/2026
+
+O PR #125 está integrado em `08b213f`, com CI da main, Sonar, deploy,
+readiness e smoke aprovados. O checkout do Komodo foi conferido; os módulos
+Python instalados coincidiram com a revisão. As seções anteriores abaixo
+preservam seus estados históricos.
+
+A continuidade autorizada é a triagem de arquivos/configuração/credenciais,
+em `fix/triagem-fronteiras-arquivos`. Foram reproduzidos defaults indevidos
+para configuração existente não regular e exposição de conteúdo em
+diagnósticos do loader. A correção e os limites dos três fluxos estão no
+[relatório](superpowers/reports/2026-10-31-fronteiras-arquivos.md).
+Validação integral e revisão independente deste lote ainda pendentes;
+sem merge ou deploy da correção. A curadoria permanece sem escopo escolhido.
+
 ## Retomada em 31/10/2026
 
 O PR #124 foi integrado em `aa1200e`, com CI, Sonar e deploy confirmados no
