@@ -1,6 +1,8 @@
 """Conteúdo recebido não escolhe destinos de escrita nem locks de agendamento."""
 
+import fcntl
 import json
+import os
 from datetime import UTC, datetime
 
 import pytest
@@ -34,7 +36,7 @@ def test_conteudo_com_caminhos_nao_redireciona_edicao(tmp_path, monkeypatch, res
 
 
 @pytest.mark.parametrize("kind", ["absolute", "relative", "nul", "cycle"])
-def test_path_no_documento_nao_redireciona_lock_do_jobstore(tmp_path, kind):
+def test_path_no_documento_nao_redireciona_lock_do_jobstore(tmp_path, monkeypatch, kind):
     home = tmp_path / "home"
     store = JobStore(home)
     job = store.create(
@@ -58,9 +60,22 @@ def test_path_no_documento_nao_redireciona_lock_do_jobstore(tmp_path, kind):
     document["jobs"][0]["path"] = value
     document_path.write_text(json.dumps(document))
     original = document_path.read_bytes()
+    lock_path = home / "cron/jobs.json.lock"
+    lock_path.unlink()
+    read = JobStore._read
+
+    def read_under_lock(store):
+        descriptor = os.open(lock_path, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(descriptor)
+        return read(store)
+
+    monkeypatch.setattr(JobStore, "_read", read_under_lock)
     observed = JobStore(home).get(job["id"])
     assert observed["id"] == job["id"]
-    assert observed["path"] == value
     assert document_path.read_bytes() == original
     assert outside.read_text() == "sentinela"
     assert not outside.with_suffix(".json.lock").exists()

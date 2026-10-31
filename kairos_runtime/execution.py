@@ -19,11 +19,11 @@ A justificativa da separação está em `docs/decisoes.md` (D-RT.3).
 
 from __future__ import annotations
 
-import os
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from kairos_filesystem.config import read_config_text
 
 __all__ = [
     "DEFAULT_MAX_STDERR_BYTES",
@@ -87,7 +87,10 @@ def parse_execution_limits(raw: object) -> ExecutionLimits:
         key for key in raw if key not in {"timeout_seconds", "max_stdout_bytes", "max_stderr_bytes"}
     ]
     if confuso:
-        raise ValueError("code_execution com chave desconhecida")
+        raise ValueError(
+            "code_execution com chave desconhecida; permitidas: "
+            "timeout_seconds, max_stdout_bytes, max_stderr_bytes"
+        )
     timeout = _positivo(
         raw.get("timeout_seconds"),
         "code_execution.timeout_seconds",
@@ -117,25 +120,14 @@ def load_execution_limits(home: Path) -> ExecutionLimits:
     contrário de `kairos_cli.config.load_config`, aqui silêncio seria fingir
     que a fronteira tem limites que não tem).
     """
-    path = Path(home) / "config.yaml"
-    try:
-        path.lstat()
-    except FileNotFoundError:
+    text = read_config_text(home)
+    if text is None:
         return ExecutionLimits()
-    except OSError as exc:
-        raise ValueError(f"config.yaml ilegível: {type(exc).__name__}") from None
     import yaml
 
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
-        try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise ValueError("config.yaml deve ser um arquivo regular")
-            with open(descriptor, encoding="utf-8", closefd=False) as source:
-                raw = yaml.safe_load(source.read())
-        finally:
-            os.close(descriptor)
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
         raise ValueError(f"config.yaml ilegível: {type(exc).__name__}") from None
     if not isinstance(raw, dict):
         raise ValueError("config.yaml deve conter um mapeamento de topo")

@@ -188,6 +188,9 @@ def test_load_diagnostico_nao_expoe_config(tmp_path, kind):
     assert "config.yaml" in str(error) or "code_execution" in str(error)
     assert marker not in str(error)
     assert marker not in "".join(traceback.format_exception(error))
+    if kind == "unknown_key":
+        for field in ("timeout_seconds", "max_stdout_bytes", "max_stderr_bytes"):
+            assert field in str(error)
 
 
 def test_load_alias_regular_aplica_limites(tmp_path):

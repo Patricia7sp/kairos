@@ -56,3 +56,29 @@
 **Entrega:** preparar PR em rascunho e informar o estado real do CI/Sonar remoto do SHA publicado, sem antecipar aprovação.
 
 **Validation:** testes direcionados e `scripts/ci.sh` completo com Codex fixado, sem exportação Sonar local nem provedores reais.
+
+### Task 3: Fechar as lacunas da revisão recebida
+
+**Files:** `kairos_filesystem/config.py`, loaders em `kairos_runtime`,
+`kairos_providers/settings.py`, `kairos_integration/composition.py` e testes.
+
+**Interfaces:** `read_config_text(home: Path) -> str | None` retorna `None`
+somente na ausência da entrada; os consumidores mantêm suas regras de
+documento vazio e seus erros públicos. As assinaturas existentes não mudam.
+
+- [x] Reproduzir link quebrado aceito pela composição real e FIFO bloqueando os loaders.
+- [x] Observar RED antes de compartilhar a leitura regular por descritor.
+- [x] Aplicar a leitura também no loader dos providers, executado antes da composição.
+- [x] Cobrir a construção real da composição e o status do host, além dos loaders isolados.
+- [x] Preservar ausência, documento vazio/null e alias regular conforme cada consumidor.
+- [x] Verificar o lock correto adquirido durante a leitura do JobStore e retirar a asserção sobre o campo desconhecido.
+- [x] Mostrar apenas as chaves permitidas no diagnóstico de chave desconhecida.
+- [x] Validar os módulos afetados e Ruff; comprovar que retirar o lock faz o teste falhar.
+- [x] Conferir revisão complementar independente do delta.
+- [ ] Conferir CI remoto sobre o novo SHA publicado.
+
+O CI local integral de `e245b1a` continua sendo evidência apenas da versão
+anterior. Uma falha de I/O colocou o filesystem local em somente leitura;
+o complemento usa uma cópia integral da base em armazenamento temporário.
+CI local completo e imagem nova exigem ambiente recuperado; o PR permanece
+em rascunho, sem merge/deploy e sem reclassificação automática do Sonar.

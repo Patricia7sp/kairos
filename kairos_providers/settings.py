@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import yaml
 
+from kairos_filesystem.config import read_config_text
 from kairos_providers.catalog import CatalogSnapshot
 from kairos_providers.catalog_store import CatalogSnapshotStore
 from kairos_providers.provider_profiles import custom_profile
@@ -22,12 +23,13 @@ class CredentialTransferConfirmationRequired(ValueError):
 
 
 def load_config_document(home: Path) -> dict[str, Any]:
-    try:
-        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    text = read_config_text(home)
+    if text is None:
         return {}
-    except yaml.YAMLError as exc:
-        raise ValueError("config.yaml inválido") from exc
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError:
+        raise ValueError("config.yaml inválido") from None
     if raw is None:
         return {}
     if not isinstance(raw, dict):

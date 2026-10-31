@@ -2096,6 +2096,14 @@ regular aberto sem bloquear em FIFO; os diagnósticos não reproduzem conteúdo
 ou chaves arbitrárias da configuração. Evidências e escopo em
 [triagem de arquivos](superpowers/reports/2026-10-31-fronteiras-arquivos.md).
 
+A leitura regular é compartilhada também pelos loaders dos providers, da
+composição do Chat e do host de runtime, incluindo o primeiro carregamento
+antes da construção da sandbox. Neles, documento vazio/null conserva o
+mapeamento vazio já aceito; entrada presente inválida recusa. O host publica
+`unavailable` com `invalid_policy`, em vez de tratar link quebrado como runtime
+desabilitado. Isso não torna atômicas as várias leituras de configuração nem
+isola alterações concorrentes do mesmo UID.
+
 ### D-RT.4 — Turno comum: sandbox só para `bash`/`terminal`, sem fallback para o host
 
 **Escopo deliberado** (lote P3, Opção 2, recorte com a usuária em 2026-09-28):

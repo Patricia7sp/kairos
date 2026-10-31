@@ -67,7 +67,7 @@ de credenciais/workspace.
   leitura: nenhum Critical/Important/Minor; `Declined to judge` vazio. O revisor
   não executou testes; a validação integrada abaixo foi executada pelo Root.
 
-| Validação local final | Resultado |
+| Validação local da versão anterior (`e245b1a`) | Resultado |
 | --- | --- |
 | `scripts/ci.sh` completo, em `e245b1a` | Exit 0, com Python 3.11.16 e Codex 0.154.0; afinidade em uma CPU |
 | Suíte Python com cobertura | 4.272 testes e 6.571 subtestes aprovados; 21 skips e 34 deselections, sem `runtime_live` |
@@ -81,14 +81,62 @@ de credenciais/workspace.
 O smoke usou a imagem produzida pelo CI local, sem bind dos fontes ou de
 dados de produção: usuário `10000:10000`, rede `none`, filesystem somente
 leitura, capabilities removidas e `no-new-privileges`. O hash do módulo
-instalado coincidiu com `e245b1a`. O código corrigido e os testes permanecem
-iguais nessa evidência; as edições posteriores registram somente os
-resultados em documentação. Os lockfiles dos frontends foram comparados
+instalado coincidiu com `e245b1a`. Entre essa revisão e `ed09068`, somente
+resultados em documentação foram acrescentados. O complemento abaixo tem
+suas próprias evidências. Os lockfiles dos frontends foram comparados
 antes da cópia isolada das dependências existentes.
 
 A exportação Sonar local foi pulada explicitamente. CI e Sonar remotos
 pertencem ao SHA publicado no PR da branch `fix/triagem-fronteiras-arquivos`
 e têm suas próprias evidências; sucesso local não atesta essa análise.
+
+## Complemento após a revisão do PR #126
+
+A revisão externa apontou que o teste direto de `ChatBashSandbox` não
+comprovava a composição real. A reprodução confirmou a lacuna: um link
+quebrado em `config.yaml` permitia construir o serviço sem sandbox; FIFO
+bloqueava tanto composição quanto host. Há uma ressalva ao caso de
+diretório: a composição normal já recusava antes, no loader dos providers;
+o loader privado da composição, chamado depois, ainda retornava `{}`.
+
+A leitura por descritor regular foi extraída para
+`kairos_filesystem.config.read_config_text` e aplicada a execução, providers,
+composição e host. O loader dos providers também precisava da correção,
+pois lê a configuração antes da composição. Cada consumidor preserva seu
+contrato para ausência e documento vazio/null. YAML inválido não mantém a
+causa com trechos do arquivo. O host real passa a publicar indisponibilidade
+para entrada presente inválida. Não se promete um snapshot atômico entre
+os carregamentos nem contenção contra outro processo do mesmo UID.
+
+O teste do JobStore agora remove o lock anterior e, durante a leitura real,
+abre um descritor independente do lock esperado e comprova a exclusão por
+`flock`. Retirar o lock de `get`, ou criar o arquivo sem adquirir o lock,
+produz quatro falhas em cada mutação. A asserção sobre preservação de
+`observed["path"]` foi retirada. O diagnóstico de chave desconhecida lista
+os três campos permitidos sem reproduzir a chave recebida.
+
+Validação do complemento em cópia integral de `ed09068`, com Python 3.11.16:
+
+- RED: 22 falhas e 18 positivos preservados antes da correção.
+- GREEN integrado: 259 testes e 27 subtestes aprovados, em dez módulos.
+- Ruff 0.16.4 check/format da cópia integral aprovados; wheel conferido com
+  o SHA-256 já fixado no `uv.lock`.
+- Codex 0.154.0 conferido por SHA-256. A primeira rodada integrada usou
+  o executável global incompatível e falhou em
+  `test_pinned_codex_retains_lock_descriptor_after_abrupt_host_death`;
+  a repetição com o binário fixado aprovou todos os testes acima.
+- Revisão complementar independente por GPT-6 Luna/high: nenhum
+  Critical/Important/Minor. A revisão foi estática, com conferência dos
+  hashes do patch e dos oito arquivos; testes e checks são evidências do
+  Root. Outros leitores fora desse delta não foram auditados.
+
+O filesystem do host entrou em somente leitura com erros de I/O. O checkout
+original foi preservado; o complemento e suas evidências foram preparados
+em armazenamento temporário. O CI local integral e o smoke da imagem
+anteriores não aprovam este complemento. CI/Sonar do SHA novo devem ser
+conferidos no PR antes de qualquer integração.
+Nenhuma classificação Sonar foi modificada; S8707 permanece uma decisão
+explícita, mesmo com os testes de comportamento aprovados.
 
 ## Continuidade
 
