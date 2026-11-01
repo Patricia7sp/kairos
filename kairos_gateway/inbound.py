@@ -36,6 +36,7 @@ import httpx
 
 from kairos_gateway.adapters.config import load_config, platform_secret
 from kairos_gateway.service import DRAIN_MARKER
+from kairos_providers._async_cleanup import cancel_owned_task, complete_cleanup
 
 __all__ = [
     "TelegramChannel",
@@ -480,9 +481,9 @@ class TelegramInbound:
             text, error = await self._stream_turn(envelope, chat_id, conversation_id)
         finally:
             stop_typing.set()
-            typing_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await typing_task
+            await complete_cleanup(
+                lambda: cancel_owned_task(typing_task), task_name="telegram-typing-close"
+            )
         final = text or error or "Sem resposta."
         await self._send_chunked(chat_id, final)
 
@@ -536,6 +537,8 @@ class TelegramInbound:
                     await self._handle_approval_event(chat_id, conversation_id, event)
                 elif kind == "turn_error":
                     return None, getattr(event, "error", "falha desconhecida")
+        except asyncio.CancelledError:
+            raise
         except BaseException as exc:  # noqa: BLE001
             return None, f"falha ao executar: {exc}"
         text = "".join(accumulated).strip()
@@ -584,15 +587,12 @@ class TelegramInbound:
     # --- typing indicator ---
 
     async def _typing_loop(self, chat_id: int, stop: asyncio.Event) -> None:
-        try:
-            while not stop.is_set():
-                await self._channel.send_typing(chat_id)
-                try:
-                    await asyncio.wait_for(stop.wait(), timeout=_TYPING_INTERVAL)
-                except TimeoutError:
-                    pass
-        except asyncio.CancelledError:
-            return
+        while not stop.is_set():
+            await self._channel.send_typing(chat_id)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=_TYPING_INTERVAL)
+            except TimeoutError:
+                pass
 
     # --- envio final ---
 

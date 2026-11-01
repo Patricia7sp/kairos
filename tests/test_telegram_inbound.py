@@ -703,5 +703,111 @@ class InboundExperienceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("restart no roteador", fake.envelopes[0].content)
 
 
+class TelegramCancellationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_typing_task_retains_external_cancellation(self):
+        entered = asyncio.Event()
+
+        class Channel:
+            async def send_typing(self, chat_id):
+                entered.set()
+
+        inbound = object.__new__(TelegramInbound)
+        inbound._channel = Channel()
+        typing = asyncio.create_task(inbound._typing_loop(CHAT, asyncio.Event()))
+        await entered.wait()
+        typing.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await typing
+
+    async def _verify_dispatch_cancel(self, *, during_stream):
+        entered = asyncio.Event()
+        messages = []
+        owner = None
+
+        class Channel:
+            async def send_typing(self, chat_id):
+                if not during_stream:
+                    asyncio.current_task().add_done_callback(lambda completed: owner.cancel())
+                entered.set()
+
+            async def send_text(self, chat_id, text):
+                messages.append(text)
+
+        class Router:
+            async def stream(self, envelope):
+                await entered.wait()
+                if during_stream:
+                    await asyncio.Event().wait()
+                yield FakeEvent("turn_end")
+
+        inbound = object.__new__(TelegramInbound)
+        inbound._channel = Channel()
+        inbound._router = Router()
+        inbound._experiences = False
+        update = TelegramUpdate(update_id=1, message_id=1, chat_id=CHAT, text="cancel probe")
+        owner = asyncio.create_task(inbound._dispatch_agent(update))
+        try:
+            await entered.wait()
+            if during_stream:
+                owner.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await owner
+            self.assertEqual(messages, [])
+        finally:
+            if not owner.done():
+                owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
+
+    async def test_active_turn_cancel_does_not_send_final_message(self):
+        await self._verify_dispatch_cancel(during_stream=True)
+
+    async def test_cancel_at_typing_completion_does_not_send_final_message(self):
+        await self._verify_dispatch_cancel(during_stream=False)
+
+    async def test_repeated_cancel_waits_for_typing_cleanup(self):
+        entered, draining, release, stopped = (asyncio.Event() for _ in range(4))
+        messages = []
+
+        class Channel:
+            async def send_typing(self, chat_id):
+                try:
+                    entered.set()
+                    await asyncio.Event().wait()
+                finally:
+                    draining.set()
+                    await release.wait()
+                    stopped.set()
+
+            async def send_text(self, chat_id, text):
+                messages.append(text)
+
+        class Router:
+            async def stream(self, envelope):
+                await entered.wait()
+                yield FakeEvent("turn_end")
+
+        inbound = object.__new__(TelegramInbound)
+        inbound._channel = Channel()
+        inbound._router = Router()
+        inbound._experiences = False
+        update = TelegramUpdate(update_id=2, message_id=2, chat_id=CHAT, text="drain probe")
+        owner = asyncio.create_task(inbound._dispatch_agent(update))
+        try:
+            await draining.wait()
+            owner.cancel()
+            await asyncio.sleep(0)
+            owner.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(owner.done())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await owner
+            self.assertTrue(stopped.is_set())
+            self.assertEqual(messages, [])
+        finally:
+            release.set()
+            await asyncio.gather(owner, return_exceptions=True)
+
+
 if __name__ == "__main__":
     unittest.main()
