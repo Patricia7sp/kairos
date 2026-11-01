@@ -131,8 +131,9 @@ def _raise_cleanup_outcome(
     outcome: PersistentCleanupOutcome, inherited: BaseException | None
 ) -> None:
     if outcome.error is not None:
-        if isinstance(outcome.cancellation, asyncio.CancelledError):
-            raise outcome.error from outcome.cancellation
+        cause: BaseException | None = outcome.cancellation
+        if isinstance(cause, BaseException):
+            raise outcome.error from cause
         if isinstance(inherited, asyncio.CancelledError):
             raise outcome.error from inherited
         raise outcome.error

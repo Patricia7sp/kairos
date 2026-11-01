@@ -220,5 +220,23 @@
         "status": "Corrigido por RED→GREEN pelo Root; nova validação completa e Sonar registrados no PR127."
       }
     ]
+  },
+  "cause_type_followup": {
+    "previous_head": "85e1883f87748f2ca321fa32840f6d715dd3df4d",
+    "previous_workflow": "https://github.com/Patricia7sp/kairos/actions/runs/41342454388",
+    "previous_remote_ci": "success",
+    "previous_sonar": {
+      "status": "ERROR",
+      "issues": 1,
+      "remaining_rule": "python:S5707",
+      "new_coverage": 92.2,
+      "new_duplication": 0.0,
+      "scm_revision_matches_head": true
+    },
+    "local_ci_previous": "Interrompido explicitamente antes da mudança de fonte, exit143; não é aprovação integral. Apenas cinco processos do subtree próprio foram encerrados.",
+    "change": "A causa do carrier é copiada para variável local BaseException|None e estreitada com isinstance(BaseException); o objeto original é preservado.",
+    "verification": "Ruff/formatação e recorte de266 testes +4793 subtestes, exit0. É esclarecimento de tipo para análise estática, não uma falha de runtime reproduzida.",
+    "helper_sha256": "036cbb7a9186a1de0ee6a40b9d857a0df8f697ed6800c7272c4b2b55e17d71c6",
+    "final_ci_and_sonar": "Repetidos para o novo commit e registrados na descrição/checks do PR127; não reutilizar resultado integral de fonte anterior."
   }
 }

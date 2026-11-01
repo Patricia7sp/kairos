@@ -218,3 +218,15 @@ e é passado à etapa que aguarda as tarefas auxiliares. O recorte corrigido
 passou em **266 testes e 4.793 subtestes**, Ruff e formatação aprovados.
 Essa correção ainda requer a repetição integrada indicada acima; não se
 atribui ao parecer independente a execução posterior feita pelo Root.
+
+O [CI remoto seguinte](https://github.com/Patricia7sp/kairos/actions/runs/41342454388)
+passou no SHA `85e1883f87748f2ca321fa32840f6d715dd3df4d`. O Sonar eliminou
+nove achados; restou S5707 na causa acessada diretamente no carrier,
+com cobertura nova de 92,2% e duplicação de 0%. O ajuste final copia essa
+causa para variável local `BaseException | None` e verifica `BaseException`
+antes de encadear, conservando o objeto original. O comportamento dos
+266 testes e 4.793 subtestes continua aprovado, assim como Ruff e formatação;
+não se alega uma falha de runtime reproduzida nesse esclarecimento de tipo.
+A rodada local de `85e1883` foi interrompida explicitamente (exit 143)
+antes de alterar a fonte e não conta como CI completo aprovado. A nova
+rodada integrada e a análise do commit posterior são registradas no PR.
