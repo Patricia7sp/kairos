@@ -22,6 +22,7 @@ from kairos_providers._async_cleanup import (
     AsyncCleanupCoordinator,
     cancel_owned_task,
     complete_cleanup,
+    complete_cleanup_steps,
 )
 
 PROTOCOL_VERSION = 1
@@ -177,31 +178,24 @@ class ModelRelay:
         )
 
     async def _close_once(self) -> None:
-        errors: list[BaseException] = []
-        for cleanup in (
-            (lambda: cancel_owned_task(self._runner)) if self._runner is not None else None,
+        async def stop_runner() -> None:
+            if self._runner is not None:
+                await cancel_owned_task(self._runner)
+
+        await complete_cleanup_steps(
+            stop_runner,
             self._cancel_request,
-        ):
-            if cleanup is None:
-                continue
-            try:
-                await cleanup()
-            except BaseException as exc:  # noqa: BLE001 - fecha os demais recursos antes de falhar
-                errors.append(exc)
+            self._close_writer,
+            task_name="model-relay-close-step",
+        )
+
+    async def _close_writer(self) -> None:
+        self.writer.close()
         try:
-            self.writer.close()
-        except BaseException as exc:  # noqa: BLE001 - permite retry do fechamento real
-            errors.append(exc)
-        else:
-            try:
-                async with asyncio.timeout(IO_TIMEOUT):
-                    await self.writer.wait_closed()
-            except (OSError, TimeoutError):
-                pass
-            except BaseException as exc:  # noqa: BLE001 - publica depois do dreno
-                errors.append(exc)
-        if errors:
-            raise errors[0]
+            async with asyncio.timeout(IO_TIMEOUT):
+                await self.writer.wait_closed()
+        except (OSError, TimeoutError):
+            pass
 
     async def _read(self) -> dict:
         while True:

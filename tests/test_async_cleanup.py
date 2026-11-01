@@ -8,6 +8,7 @@ import pytest
 
 from kairos_providers._async_cleanup import (
     AsyncCleanupCoordinator,
+    complete_cleanup_steps,
     run_persistent_cleanup,
 )
 
@@ -197,3 +198,69 @@ def test_falha_do_launcher_e_outcome_sem_coroutine_orfa(monkeypatch):
     assert outcome.cancellation is None
     assert calls == 0
     assert not [warning for warning in caught if "was never awaited" in str(warning.message)]
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [RuntimeError, asyncio.CancelledError, GeneratorExit, SystemExit, KeyboardInterrupt],
+)
+def test_cleanup_steps_drain_all_resources_and_preserve_first_failure(error_type):
+    async def run():
+        closed = []
+        first_error = error_type("first resource")
+
+        async def reader():
+            closed.append("reader")
+            raise first_error
+
+        async def background():
+            closed.append("background")
+            raise RuntimeError("later resource")
+
+        async def writer():
+            closed.append("writer")
+
+        with pytest.raises(error_type) as caught:
+            await complete_cleanup_steps(reader, background, writer, task_name="steps-failure")
+        assert caught.value is first_error
+        assert closed == ["reader", "background", "writer"]
+
+    asyncio.run(run())
+
+
+def test_cleanup_steps_keep_late_and_repeated_cancellation_until_last_effect(tmp_path):
+    target = tmp_path / "closed.txt"
+
+    async def run():
+        entered, release = asyncio.Event(), asyncio.Event()
+        waiter = None
+
+        async def reader():
+            asyncio.current_task().add_done_callback(lambda completed: waiter.cancel("late"))
+
+        async def background():
+            entered.set()
+            await release.wait()
+
+        async def writer():
+            target.write_text("closed")
+
+        waiter = asyncio.create_task(
+            complete_cleanup_steps(reader, background, writer, task_name="steps-cancel")
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            waiter.cancel("repeated")
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            assert not target.exists()
+            release.set()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await waiter
+            assert str(caught.value) == "late"
+            assert target.read_text() == "closed"
+        finally:
+            release.set()
+            await asyncio.gather(waiter, return_exceptions=True)
+
+    asyncio.run(run())

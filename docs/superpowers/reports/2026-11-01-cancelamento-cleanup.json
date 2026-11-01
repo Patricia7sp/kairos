@@ -151,5 +151,43 @@
       "decision": "Sanitização ampla de logger.exception preexistentes de ownership fora do diff; logs novos sanitizados e testados.",
       "cost": "Aceite não certifica a sanitização desses logs antigos."
     }
-  ]
+  ],
+  "sonar_followup": {
+    "initial_head": "43c27b26ed54bb660ffc024a8c5a75cfe382297e",
+    "initial_workflow": "https://github.com/Patricia7sp/kairos/actions/runs/41339664579",
+    "initial_workflow_conclusion": "success",
+    "initial_quality_gate": "ERROR",
+    "new_issues": {
+      "python:S5707": 1,
+      "python:S5754": 7,
+      "python:S3776": 1,
+      "python:S5778": 1
+    },
+    "initial_new_coverage": 80.6,
+    "initial_new_duplication": 0,
+    "initial_sonar_scm_revision_matches_head": true,
+    "initial_remote_unit": {
+      "passed": 4342,
+      "skipped": 24,
+      "deselected": 34,
+      "subtests_passed": 6571
+    },
+    "remote_coverage_limitation": "Seis fragmentos inválidos de cobertura no checkout limpo; o recorte local isolado não teve warnings.",
+    "change": "Estreitamento explícito da causa; sequenciamento de cleanup por PersistentCleanupOutcome em RPC/relay; métodos menores; uma invocação no teste de exceção.",
+    "new_step_tests": 6,
+    "mutation_control": "6 falhas com espera direta sem barreira; implementação restaurada. Não é RED contra a main.",
+    "focused_after_restore": {
+      "passed": 263,
+      "subtests_passed": 4793,
+      "exit_code": 0
+    },
+    "source_delta_sha256": {
+      "kairos_providers/_async_cleanup.py": "a462682ec4b2baef79f7976fec84f80430ff3411ff3f21debb8d7241a07df3d1",
+      "kairos_runtime/codex_rpc.py": "0c0e8807dd224d96c15c3c5dcc967c611f1dd27f0bb41319f7a8fe55ed0fbe11",
+      "kairos_runtime/docker_backend/model_relay.py": "905a2d8ade7dbd090131cd527c494a61067867838dc86d9c76190c6b093bcdaa",
+      "tests/test_async_cleanup.py": "4362615b74da1bdf1eeb836be7815ee77090885bf2667e7b7e4a8321776ef5bf",
+      "tests/test_cancellation_contracts.py": "35f6ec4596dfe1d23c91b1779eb437ef8b0493044932b6dd3e508d4c228c8118"
+    },
+    "status_at_commit": "Focado aprovado; revisão complementar e nova validação integrada/CI/Sonar registradas no PR #127 após este commit."
+  }
 }

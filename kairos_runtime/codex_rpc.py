@@ -11,6 +11,7 @@ from kairos_providers._async_cleanup import (
     AsyncCleanupCoordinator,
     cancel_owned_task,
     complete_cleanup,
+    complete_cleanup_steps,
 )
 
 from .errors import RuntimeErrorInfo
@@ -161,34 +162,30 @@ class CodexRpc:
         )
 
     async def _close_once(self, caller: asyncio.Task[Any] | None) -> None:
-        errors: list[BaseException] = []
-        reader_task = self._reader_task
-        if reader_task is not None and reader_task is not caller:
-            try:
+        async def stop_reader() -> None:
+            reader_task = self._reader_task
+            if reader_task is not None and reader_task is not caller:
                 await cancel_owned_task(reader_task)
-            except BaseException as exc:  # noqa: BLE001 - tenta fechar os demais recursos
-                errors.append(exc)
-        if self._background_tasks:
-            tasks = tuple(self._background_tasks)
-            await asyncio.gather(*tasks, return_exceptions=True)
-            for task in tasks:
-                try:
-                    task.result()
-                except BaseException as exc:  # noqa: BLE001 - falhas são propagadas após fechar
-                    errors.append(exc)
+
+        await complete_cleanup_steps(
+            stop_reader,
+            self._finish_background_tasks,
+            self._close_writer,
+            task_name="codex-rpc-close-step",
+        )
+
+    async def _finish_background_tasks(self) -> None:
+        tasks = tuple(self._background_tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for task in tasks:
+            task.result()
+
+    async def _close_writer(self) -> None:
+        self._writer.close()
         try:
-            self._writer.close()
-        except BaseException as exc:  # noqa: BLE001 - retém a falha para retry
-            errors.append(exc)
-        else:
-            try:
-                await self._writer.wait_closed()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            except BaseException as exc:  # noqa: BLE001 - retém a falha para retry
-                errors.append(exc)
-        if errors:
-            raise errors[0]
+            await self._writer.wait_closed()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     async def _write(self, message: dict[str, Any]) -> None:
         encoded = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"

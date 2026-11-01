@@ -20,6 +20,7 @@ __all__ = [
     "PersistentCleanupOutcome",
     "cancel_owned_task",
     "complete_cleanup",
+    "complete_cleanup_steps",
     "run_persistent_cleanup",
 ]
 
@@ -123,15 +124,34 @@ async def complete_cleanup(cleanup: Callable[[], Awaitable[None]], *, task_name:
     """Barreira sem teto global; falha real conserva o cancelamento como causa."""
     inherited = sys.exception()
     outcome = await run_persistent_cleanup(cleanup, task_name=task_name)
+    _raise_cleanup_outcome(outcome, inherited)
+
+
+def _raise_cleanup_outcome(
+    outcome: PersistentCleanupOutcome, inherited: BaseException | None
+) -> None:
     if outcome.error is not None:
-        cancellation = outcome.cancellation
-        if cancellation is None and isinstance(inherited, asyncio.CancelledError):
-            cancellation = inherited
-        if cancellation is not None:
-            raise outcome.error from cancellation
+        if isinstance(outcome.cancellation, asyncio.CancelledError):
+            raise outcome.error from outcome.cancellation
+        if isinstance(inherited, asyncio.CancelledError):
+            raise outcome.error from inherited
         raise outcome.error
     if outcome.cancellation is not None:
         raise outcome.cancellation
+
+
+async def complete_cleanup_steps(*steps: Callable[[], Awaitable[None]], task_name: str) -> None:
+    """Drena todas as etapas e propaga a primeira falha, com causa preservada."""
+    inherited = sys.exception()
+    first_error: BaseException | None = None
+    cancellation: asyncio.CancelledError | None = None
+    for index, step in enumerate(steps):
+        outcome = await run_persistent_cleanup(step, task_name=f"{task_name}:{index}")
+        if first_error is None:
+            first_error = outcome.error
+        if cancellation is None:
+            cancellation = outcome.cancellation
+    _raise_cleanup_outcome(PersistentCleanupOutcome(first_error, cancellation), inherited)
 
 
 async def cancel_owned_task(task: asyncio.Task[Any]) -> None:

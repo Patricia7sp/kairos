@@ -408,8 +408,9 @@ def test_cleanup_failure_preserves_terminal_and_logs_only_error_type(
                 await started.wait()
                 raise terminal
 
+        task = asyncio.create_task(owner())
         with pytest.raises(type(terminal)) as caught:
-            await asyncio.create_task(owner())
+            await task
         assert caught.value is terminal
         assert (
             connection.execute(

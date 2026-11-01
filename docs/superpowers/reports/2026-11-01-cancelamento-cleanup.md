@@ -102,9 +102,10 @@ de regra, suppressions ou alterações de perfil Sonar.
 A revisão independente do **desenho** foi estática e não executou testes;
 é preliminar, não validação da implementação.
 
-Fonte validada: `44d2a70226e59dfc49bdedc590bae65d69bf9b46`. Os commits
-posteriores de documentação não mudam produção, testes, dependências ou
-configuração. [Registro estruturado do aceite local e da revisão](2026-11-01-cancelamento-cleanup.json).
+Primeira fonte validada: `44d2a70226e59dfc49bdedc590bae65d69bf9b46`.
+Os resultados desta seção são históricos e vinculados a essa fonte;
+o ajuste posterior solicitado pelo Sonar está discriminado ao final.
+[Registro estruturado do aceite local, revisão e ajuste Sonar](2026-11-01-cancelamento-cleanup.json).
 
 `scripts/ci.sh` completo terminou com **exit 0**:
 
@@ -167,3 +168,36 @@ Não houve achado menor adiado. A aprovação da implementação é condicionada
 consultado nos checks e na descrição atualizada do PR. Não exportar este
 XML local nem reclassificar os onze S7497 integra esta entrega.
 Merge e deploy desta nova branch aguardam decisão sobre o PR concreto.
+
+## Ajuste após a primeira análise do PR
+
+O [CI remoto inicial](https://github.com/Patricia7sp/kairos/actions/runs/41339664579)
+passou no SHA `43c27b26ed54bb660ffc024a8c5a75cfe382297e`, incluindo a
+análise Sonar efetivamente executada. O **quality gate ficou ERROR**, com
+um S5707, sete S5754, um S3776 e um S5778 nos trechos novos. A análise não
+trouxe novos S7497; cobertura nova foi 80,6% e duplicação nova 0%. O log do
+scanner confirmou o SHA acima. O job unitário remoto passou em 4.342 testes
+e 6.571 subtestes, com 24 skips e 34 deselecionados; a combinação remota
+também avisou sobre seis fragmentos de cobertura inválidos.
+
+O ajuste mantém o contrato aprovado: o tipo da causa fica explícito nos
+raises; `complete_cleanup_steps` reaproveita o carrier existente para
+drenar todas as etapas antes de propagar a primeira falha; RPC e relay
+separam a espera das tarefas e o fechamento do writer. Isso elimina as
+sete capturas amplas novas e reduz a complexidade do RPC. O teste de
+ownership prepara a tarefa antes do bloco que verifica sua exceção.
+
+Seis casos adicionais verificam a primeira falha após todas as etapas
+(RuntimeError, CancelledError, GeneratorExit, SystemExit e KeyboardInterrupt)
+e cancelamento tardio/repetido antes da última escrita real. Um controle
+por mutação temporária, que substituiu o carrier por espera direta, falhou
+nos seis casos; a barreira foi restaurada. Esse RED é do controle por
+mutação, não da main. O recorte completo restaurado passou em **263 testes
+e 4.793 subtestes**, e Ruff/formatação passaram. O JSON versionado vincula
+esse recorte aos hashes dos cinco arquivos alterados.
+
+A revisão complementar e a repetição do CI completo/Sonar sobre essa fonte
+posterior são necessárias; os resultados finais são registrados na
+descrição e nos checks do [PR #127](https://github.com/Patricia7sp/kairos/pull/127).
+Os resultados históricos acima não substituem essa repetição. Nenhuma
+classificação remota foi alterada.
