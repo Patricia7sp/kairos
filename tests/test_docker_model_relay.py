@@ -57,6 +57,176 @@ async def setup_relay(transport):
     return relay, reader, writer
 
 
+def test_close_preserves_caller_cancelled_at_runner_completion():
+    async def run():
+        async def transport(body):
+            yield b""
+
+        relay, _reader, writer = await setup_relay(transport)
+        closer = None
+        relay._runner.add_done_callback(lambda completed: closer.cancel())
+        closer = asyncio.create_task(relay.aclose())
+        with pytest.raises(asyncio.CancelledError):
+            await closer
+        assert writer.closed
+
+    asyncio.run(run())
+
+
+def test_end_turn_preserves_caller_cancelled_at_request_completion():
+    async def run():
+        entered, stopped = asyncio.Event(), asyncio.Event()
+
+        async def transport(body):
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+                yield b""
+            finally:
+                stopped.set()
+
+        relay, reader, writer = await setup_relay(transport)
+        try:
+            relay.allow_turn("turn")
+            feed(reader, request())
+            await entered.wait()
+            closer = None
+            relay._request.add_done_callback(lambda completed: closer.cancel())
+            closer = asyncio.create_task(relay.end_turn("turn"))
+            with pytest.raises(asyncio.CancelledError):
+                await closer
+            assert stopped.is_set()
+            feed(reader, request(2))
+            await eventually(lambda: any(frame.get("id") == 2 for frame in writer.frames))
+            assert writer.frames[-1]["status"] == 403
+        finally:
+            await relay.aclose()
+
+    asyncio.run(run())
+
+
+def test_close_shares_blocked_attempt_and_can_retry_after_failure():
+    async def run():
+        class GatedWriter(Writer):
+            def __init__(self):
+                super().__init__()
+                self.entered, self.release = asyncio.Event(), asyncio.Event()
+                self.failure = RuntimeError("synthetic relay close failure")
+                self.attempts = 0
+
+            async def wait_closed(self):
+                self.attempts += 1
+                self.entered.set()
+                await self.release.wait()
+                if self.failure is not None:
+                    raise self.failure
+
+        async def transport(body):
+            yield b""
+
+        reader, writer = asyncio.StreamReader(), GatedWriter()
+        relay = ModelRelay(reader, writer, transport, "test-model")
+        feed(reader, {"type": "ready", "protocol": 1})
+        await relay.start()
+        first, second = asyncio.create_task(relay.aclose()), None
+        try:
+            await writer.entered.wait()
+            second = asyncio.create_task(relay.aclose())
+            first.cancel()
+            await asyncio.sleep(0)
+            first.cancel()
+            await asyncio.sleep(0)
+            assert not first.done()
+            assert not second.done()
+            writer.release.set()
+            with pytest.raises(RuntimeError) as caught:
+                await first
+            assert isinstance(caught.value.__cause__, asyncio.CancelledError)
+            with pytest.raises(RuntimeError):
+                await second
+            assert writer.attempts == 1
+            writer.failure = None
+            await relay.aclose()
+            await relay.aclose()
+            assert writer.attempts == 2
+            assert writer.closed
+        finally:
+            writer.release.set()
+            await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_request_drain_survives_repeated_cancel_and_concurrent_close():
+    async def run():
+        entered, cleanup_started, release, stopped = (asyncio.Event() for _ in range(4))
+
+        async def transport(body):
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+                yield b""
+            finally:
+                cleanup_started.set()
+                await release.wait()
+                stopped.set()
+
+        relay, reader, writer = await setup_relay(transport)
+        relay.allow_turn("turn")
+        feed(reader, request())
+        await entered.wait()
+        ending, closing = asyncio.create_task(relay.end_turn("turn")), None
+        try:
+            await cleanup_started.wait()
+            ending.cancel()
+            await asyncio.sleep(0)
+            ending.cancel()
+            closing = asyncio.create_task(relay.aclose())
+            await asyncio.sleep(0)
+            assert not ending.done()
+            assert not stopped.is_set()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await ending
+            await closing
+            assert stopped.is_set()
+            assert writer.closed
+        finally:
+            release.set()
+            await asyncio.gather(ending, *([closing] if closing else []), return_exceptions=True)
+            await relay.aclose()
+
+    asyncio.run(run())
+
+
+def test_request_cleanup_is_not_reused_by_a_later_turn():
+    async def run():
+        entered = [asyncio.Event(), asyncio.Event()]
+        stopped = []
+
+        async def transport(body):
+            index = int(body["input"][0]["content"])
+            try:
+                entered[index].set()
+                await asyncio.Event().wait()
+                yield b""
+            finally:
+                stopped.append(index)
+
+        relay, reader, _writer = await setup_relay(transport)
+        try:
+            for index in range(2):
+                relay.allow_turn(str(index))
+                feed(reader, request(index + 1, input=[{"role": "user", "content": str(index)}]))
+                await asyncio.wait_for(entered[index].wait(), 2)
+                await relay.end_turn(str(index))
+            assert stopped == [0, 1]
+        finally:
+            await relay.aclose()
+
+    asyncio.run(run())
+
+
 def test_streams_only_active_turn_and_never_forwards_envelope_headers():
     async def run():
         seen = []
