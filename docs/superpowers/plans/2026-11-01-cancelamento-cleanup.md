@@ -75,6 +75,6 @@
 - [x] Versionar testes/evidência sanitizada dos seis candidatos: operação real de thread e SQLite, carrier de cleanup, supervisor e os dois except de ownership. Preservar as classificações como propostas até revisão final.
 - [x] GREEN: `uv run pytest -q tests/test_interaction_turn_ownership.py tests/test_cancellation_contracts.py`; esperado: zero falhas.
 - [x] Commit: `fix(runtime): preserva cancelamento durante liberação de leases`.
-- [ ] Rodar `scripts/ci.sh` completo com pin de Codex por SHA; revisar resultados/skips e manter logs vinculados ao SHA final.
-- [ ] Revisão independente da branch, com execução focada declarada e validação integrada pelo Root. Corrigir achados relevantes por RED→GREEN.
+- [x] Rodar `scripts/ci.sh` completo com pin de Codex por SHA; revisar resultados/skips e manter logs vinculados ao SHA final.
+- [x] Revisão independente da branch, com execução focada declarada e validação integrada pelo Root. Corrigir achados relevantes por RED→GREEN.
 - [ ] Publicar branch/PR concretos e conferir CI/Sonar do SHA efetivo. Apresentar resultado antes da decisão de merge; não reaproveitar autorização do PR #126.

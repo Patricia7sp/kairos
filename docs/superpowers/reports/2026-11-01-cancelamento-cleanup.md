@@ -102,8 +102,68 @@ de regra, suppressions ou alterações de perfil Sonar.
 A revisão independente do **desenho** foi estática e não executou testes;
 é preliminar, não validação da implementação.
 
-Pendente nesta revisão do relatório: revisão independente da branch com
-execução focada, `scripts/ci.sh` completo com Docker e Codex 0.154.0
-verificado por SHA-256, e CI/Sonar do SHA efetivamente publicado no PR.
-`runtime_live` e exportação Sonar local permanecem desabilitados.
-Merge e deploy desta nova branch aguardam decisão sobre a entrega concreta.
+Fonte validada: `44d2a70226e59dfc49bdedc590bae65d69bf9b46`. Os commits
+posteriores de documentação não mudam produção, testes, dependências ou
+configuração. [Registro estruturado do aceite local e da revisão](2026-11-01-cancelamento-cleanup.json).
+
+`scripts/ci.sh` completo terminou com **exit 0**:
+
+| Verificação | Resultado |
+| --- | --- |
+| Suíte Python com cobertura | 4.345 testes e 6.571 subtestes; 21 skips e 34 deselecionados |
+| Imagem real | 33 testes e 26 subtestes |
+| Sessões Docker offline, com opt-in externo | 26 testes; 1 skip do opt-in separado de AppArmor/seccomp do host |
+| Recall | 20 testes |
+| Frontends, Vitest + TypeScript | TUI: 17; Web: 204; desktop: 18; três verificações TypeScript aprovadas |
+| Lint e lock | Ruff, formatação, shellcheck, hadolint e `uv lock --check` aprovados |
+| Builds | Aplicação, broker, stub e worker aprovados |
+
+Os 33 testes de imagem deselecionados na suíte unitária foram executados
+na etapa própria. `runtime_live` permaneceu deselecionado. Os opt-ins Docker
+da suíte unitária foram exercitados na etapa offline; o opt-in separado
+de sandbox interna do host não foi solicitado neste lote.
+
+A combinação de cobertura padrão avisou sobre **nove fragmentos inválidos**,
+incluindo dados anteriores à execução e fragmentos de subprocessos
+interrompidos. O XML agregado local não fundamenta uma métrica quantitativa
+neste aceite e não foi exportado. Para resolver a lacuna nos módulos
+alterados, o Root repetiu o recorte dos nove arquivos acima com um prefixo
+de cobertura novo e sem instrumentação automática dos subprocessos:
+**257 testes e 4.793 subtestes**, exit 0, XML gerado sem warnings. O recorte
+cobriu 1.767 de 2.174 linhas dos seis módulos completos (81,28%); isso não
+é cobertura da aplicação inteira nem métrica de linhas novas do Sonar.
+
+A revisão independente final foi realizada por **GPT-6 Astra/high**,
+somente leitura, no range `a2987cc..44d2a70`. O revisor executou os nove
+arquivos do recorte, incluindo `tests/test_codex_supervisor.py`: **257 testes
+e 4.793 subtestes**, exit 0, em 24,14s. Não encontrou achados Critical,
+Important ou Minor. As tentativas no sandbox restrito ficaram retidas no
+recorte RPC e foram interrompidas; o teste isolado e o recorte completo
+passaram fora dessa restrição. O revisor não executou Docker nem CI completo;
+essas verificações foram realizadas pelo Root, como discriminado acima.
+
+A imagem `sha256:a87976fb8b589115326d0781d9c24744e12d8cab406144b54ab394d22a4a3411`
+foi inspecionada como UID 10000, sem rede, capabilities ou código do host
+montado e com filesystem somente leitura. Os seis módulos alterados foram
+importados e seus hashes coincidem com a fonte validada. O Codex 0.154.0
+no host e nessa imagem tem SHA-256
+`3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022`;
+o tarball permanece pinado pelo Dockerfile em
+`fc6e3e3b85f2cf7d664520ee5c66a7fe4aa12bae7d46834f47e2f165fd0d6f78`.
+
+Decisões de escopo após a revisão, com seus custos:
+
+1. Conservar o dreno sem teto global: um recurso permanentemente preso pode
+   bloquear o chamador indefinidamente.
+2. Manter fora do lote a auditoria geral de cancelamento repetido antes
+   de estabelecer posse em `_acquire_durable`/`_offload`: nenhum defeito novo
+   foi reproduzido; este aceite não cobre integralmente essa fase preexistente.
+3. Manter fora do diff a sanitização ampla dos `logger.exception` antigos
+   de ownership: os logs novos foram testados; este aceite não certifica
+   a sanitização de todas as mensagens preexistentes.
+
+Não houve achado menor adiado. A aprovação da implementação é condicionada
+à conferência de CI/Sonar do SHA publicado; o resultado remoto deve ser
+consultado nos checks e na descrição atualizada do PR. Não exportar este
+XML local nem reclassificar os onze S7497 integra esta entrega.
+Merge e deploy desta nova branch aguardam decisão sobre o PR concreto.

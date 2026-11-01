@@ -1,0 +1,155 @@
+{
+  "source_binding": {
+    "revision": "44d2a70226e59dfc49bdedc590bae65d69bf9b46",
+    "tree": "07c6b38242fc593955b48e8e65c7d4c36e996a2d",
+    "codex_binary_sha256": "3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022",
+    "lock_sha256": "1bcfd55b47e5fabb6721832d1134e2dbe92e3d0e7215b899e135962a965c27d8",
+    "scope": "scripts/ci.sh completo; sem runtime_live e sem exportação Sonar local",
+    "affinity": [
+      0,
+      1
+    ]
+  },
+  "local_ci": {
+    "command": "PATH=<Codex 0.154.0 verificado> KAIROS_RUNTIME_LIVE=0 taskset -c 0,1 bash scripts/ci.sh",
+    "exit_code": 0,
+    "unit": {
+      "passed": 4345,
+      "skipped": 21,
+      "deselected": 34,
+      "subtests_passed": 6571
+    },
+    "image_integration": {
+      "passed": 33,
+      "subtests_passed": 26
+    },
+    "docker_offline": {
+      "passed": 26,
+      "skipped": 1,
+      "skip_reason": "opt-in host AppArmor + seccomp não solicitado"
+    },
+    "recall_gate_passed": 20,
+    "frontends": {
+      "ui-tui": 17,
+      "web": 204,
+      "apps/desktop": 18,
+      "typescript_all_passed": true
+    },
+    "lint": [
+      "ruff check",
+      "ruff format --check",
+      "shellcheck",
+      "hadolint Dockerfile e Dockerfile.stub"
+    ],
+    "builds": [
+      "application",
+      "runtime-broker",
+      "stub",
+      "external-sandbox"
+    ],
+    "lock_check_passed": true,
+    "local_sonar_export": false,
+    "full_log_sha256": "18b835f2e3973aad0c71a3d932ea92edec12bbe27704260743c18b52918f131c",
+    "coverage_limitation": "Combinação padrão encontrou nove fragmentos inválidos, incluindo dados anteriores à execução e dados de subprocessos interrompidos. O XML agregado local não fundamenta métrica quantitativa nem foi exportado ao Sonar."
+  },
+  "isolated_focused_coverage": {
+    "command": "coverage run -m pytest -q <os nove arquivos do recorte independente>; coverage combine; coverage xml --include=<seis módulos alterados>",
+    "child_process_auto_coverage": false,
+    "reason": "Resolver lacuna do agregado local usando prefixo novo e nenhuma cobertura de execuções anteriores.",
+    "exit_code": 0,
+    "passed": 257,
+    "subtests_passed": 4793,
+    "warnings": 0,
+    "lines_valid": 2174,
+    "lines_covered": 1767,
+    "line_rate": 0.8128,
+    "scope": "Módulos completos no recorte focado, não métrica de linhas novas nem cobertura integral da aplicação.",
+    "xml_sha256": "1f6ba573254088830480855f9fe869aa69a4d62970ec3905af881afe106fb133"
+  },
+  "independent_review": {
+    "kind": "independent_code_review",
+    "base": "a2987ccbebe94bfed0049024ee0d4fdb067653b5",
+    "head": "44d2a70226e59dfc49bdedc590bae65d69bf9b46",
+    "reviewer_model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "read_only": true,
+    "reviewer_ran_tests": true,
+    "command": ".venv/bin/python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=35 tests/test_async_cleanup.py tests/test_codex_rpc.py tests/test_docker_model_relay.py tests/test_web_shutdown_cancellation.py tests/test_web.py tests/test_telegram_inbound.py tests/test_interaction_turn_ownership.py tests/test_cancellation_contracts.py tests/test_codex_supervisor.py",
+    "command_environment": {
+      "python": "3.11.16",
+      "codex": "0.154.0",
+      "codex_sha256": "3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022",
+      "timeout_seconds": 120,
+      "coverage": false,
+      "providers_live": false
+    },
+    "exit_code": 0,
+    "passed": 257,
+    "subtests_passed": 4793,
+    "skips_reported": 0,
+    "elapsed_seconds": 24.14,
+    "findings": {
+      "critical": [],
+      "important": [],
+      "minor": []
+    },
+    "declined_to_judge": [
+      "Auditoria geral de cancelamento repetido antes de estabelecer posse em _acquire_durable e SQLiteAsyncTurnLeaseBackend._offload: preexistente fora dos onze alertas; nenhum defeito novo reproduzido.",
+      "Sanitização ampla de logger.exception preexistentes de ownership: fora do diff; logs novos revisados e testados."
+    ],
+    "environment_limitation": "Duas execuções em sandbox restrito retidas no recorte RPC foram interrompidas (exit130). RPC isolado e recorte completo passaram fora da restrição. Nenhum defeito da branch demonstrado por essas retenções.",
+    "verdict": "Implementação examinada aprovada, condicionada a CI completo/Docker e CI/Sonar do SHA publicado pelo Root."
+  },
+  "image_attestation": {
+    "uid": 10000,
+    "modules": {
+      "kairos_providers._async_cleanup": {
+        "path": "/opt/kairos/kairos_providers/_async_cleanup.py",
+        "sha256": "8215c3a40a4cfbf2ff38514032478b3a34a64b7b79a16807981025ccf9b738cb"
+      },
+      "kairos_runtime.codex_rpc": {
+        "path": "/opt/kairos/kairos_runtime/codex_rpc.py",
+        "sha256": "87ca2fe77101dd4b2ddcf5e470b72af3d3970a9d3aa1be46f094acb4c3174139"
+      },
+      "kairos_runtime.docker_backend.model_relay": {
+        "path": "/opt/kairos/kairos_runtime/docker_backend/model_relay.py",
+        "sha256": "e1db815f04a29090f52b2cdfab9d4c0a7d4ab5d34432d76248eaa8f43ce5e815"
+      },
+      "kairos_web.server": {
+        "path": "/opt/kairos/kairos_web/server.py",
+        "sha256": "4e79a62d9e50505a5ec5e0ae27ec93c83240ea4dd6bb92eb856a47fd22edeca0"
+      },
+      "kairos_gateway.inbound": {
+        "path": "/opt/kairos/kairos_gateway/inbound.py",
+        "sha256": "2be59adf277726e86cbbe1bc74fd31d8caa76641acbdd7265f78f7c54a45c061"
+      },
+      "kairos_integration.turn_ownership": {
+        "path": "/opt/kairos/kairos_integration/turn_ownership.py",
+        "sha256": "cac3de23027fc77ee880d2de9aa7040e0b403f89b029a3c213509a60ae6802c3"
+      }
+    },
+    "codex_version": "codex-cli 0.154.0",
+    "codex_sha256": "3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022",
+    "image_id": "sha256:a87976fb8b589115326d0781d9c24744e12d8cab406144b54ab394d22a4a3411",
+    "network": "none",
+    "read_only": true,
+    "capabilities": "dropped all",
+    "host_source_mounts": false,
+    "matched_modules": 6
+  },
+  "sonar_remote_classifications_changed": false,
+  "rulings": [
+    {
+      "decision": "Sem teto global de dreno; timeouts locais preservados.",
+      "cost": "Espera indefinida se um recurso nunca concluir."
+    },
+    {
+      "decision": "Auditoria geral de cancelamento repetido antes de estabelecer posse em _acquire_durable/_offload fora dos onze alertas selecionados.",
+      "cost": "Aceite não cobre integralmente essa fase preexistente da aquisição; nenhum defeito novo foi reproduzido."
+    },
+    {
+      "decision": "Sanitização ampla de logger.exception preexistentes de ownership fora do diff; logs novos sanitizados e testados.",
+      "cost": "Aceite não certifica a sanitização desses logs antigos."
+    }
+  ]
+}
