@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from kairos_container import CONTAINER_MODE_FILENAME
+from kairos_filesystem.config import read_config_text
 
 from .auth import RuntimeAuth
 from .codex_adapter import CodexAppServerAdapter
@@ -573,11 +574,13 @@ def _unlink_owned_socket(path: Path) -> None:
 
 
 def _load_config(home: Path) -> _Config:
-    path = home / "config.yaml"
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, yaml.YAMLError) as exc:
-        raise RuntimeErrorInfo("invalid_policy", "configuração de runtime inválida", False) from exc
+        text = read_config_text(home)
+        raw = yaml.safe_load(text) if text is not None else {}
+    except (ValueError, yaml.YAMLError):
+        raise RuntimeErrorInfo(
+            "invalid_policy", "configuração de runtime inválida", False
+        ) from None
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):

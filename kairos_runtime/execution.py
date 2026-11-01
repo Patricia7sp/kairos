@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairos_filesystem.config import read_config_text
+
 __all__ = [
     "DEFAULT_MAX_STDERR_BYTES",
     "DEFAULT_MAX_STDOUT_BYTES",
@@ -85,7 +87,10 @@ def parse_execution_limits(raw: object) -> ExecutionLimits:
         key for key in raw if key not in {"timeout_seconds", "max_stdout_bytes", "max_stderr_bytes"}
     ]
     if confuso:
-        raise ValueError(f"code_execution com chave desconhecida: {confuso[0]}")
+        raise ValueError(
+            "code_execution com chave desconhecida; permitidas: "
+            "timeout_seconds, max_stdout_bytes, max_stderr_bytes"
+        )
     timeout = _positivo(
         raw.get("timeout_seconds"),
         "code_execution.timeout_seconds",
@@ -115,15 +120,15 @@ def load_execution_limits(home: Path) -> ExecutionLimits:
     contrário de `kairos_cli.config.load_config`, aqui silêncio seria fingir
     que a fronteira tem limites que não tem).
     """
-    path = Path(home) / "config.yaml"
-    if not path.is_file():
+    text = read_config_text(home)
+    if text is None:
         return ExecutionLimits()
     import yaml
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise ValueError(f"config.yaml ilegível: {exc}") from exc
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"config.yaml ilegível: {type(exc).__name__}") from None
     if not isinstance(raw, dict):
         raise ValueError("config.yaml deve conter um mapeamento de topo")
     return parse_execution_limits(raw.get(_CONFIG_KEY))

@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from kairos_integration.admission import InteractionAdmissionGate
 from kairos_integration.chat_sandbox import ChatBashSandbox, parse_chat_sandbox_config
 from kairos_integration.interaction_contract import InteractionEnvelope, InteractionEvent
@@ -28,6 +26,7 @@ from kairos_providers._async_cleanup import AsyncCleanupCoordinator, run_persist
 from kairos_providers.composition import build_provider_gateway
 from kairos_providers.gateway import CredentialSelectionRequiredError
 from kairos_providers.selection import ModelSelectionUnavailableError
+from kairos_providers.settings import load_config_document
 from kairos_security.credentials import VaultError
 from kairos_state import connect
 from kairos_state.migrations import migrate
@@ -70,14 +69,7 @@ class _TurnScopedDependency:
 
 
 def _load_config(home: Path) -> Mapping[str, Any]:
-    path = home / "config.yaml"
-    if not path.exists():
-        return {}
-    try:
-        config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return {}
-    return config if isinstance(config, Mapping) else {}
+    return load_config_document(home)
 
 
 def _run_async_cleanup(cleanup: Callable[[], Awaitable[None]]) -> None:
