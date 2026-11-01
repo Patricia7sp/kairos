@@ -183,11 +183,42 @@
     },
     "source_delta_sha256": {
       "kairos_providers/_async_cleanup.py": "a462682ec4b2baef79f7976fec84f80430ff3411ff3f21debb8d7241a07df3d1",
-      "kairos_runtime/codex_rpc.py": "0c0e8807dd224d96c15c3c5dcc967c611f1dd27f0bb41319f7a8fe55ed0fbe11",
+      "kairos_runtime/codex_rpc.py": "75bcfaa2a160ee3a7e4520af2a7c3516861fd113759f45180ce5cedc8161dfb6",
       "kairos_runtime/docker_backend/model_relay.py": "905a2d8ade7dbd090131cd527c494a61067867838dc86d9c76190c6b093bcdaa",
       "tests/test_async_cleanup.py": "4362615b74da1bdf1eeb836be7815ee77090885bf2667e7b7e4a8321776ef5bf",
-      "tests/test_cancellation_contracts.py": "35f6ec4596dfe1d23c91b1779eb437ef8b0493044932b6dd3e508d4c228c8118"
+      "tests/test_cancellation_contracts.py": "35f6ec4596dfe1d23c91b1779eb437ef8b0493044932b6dd3e508d4c228c8118",
+      "tests/test_codex_rpc.py": "b9260c8f68b4f17b4e681bb17062f70e3250b725b8033c28f10049de667819ca"
     },
     "status_at_commit": "Focado aprovado; revisão complementar e nova validação integrada/CI/Sonar registradas no PR #127 após este commit."
+  },
+  "supplemental_review": {
+    "reviewer_model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "read_only": true,
+    "base": "43c27b26ed54bb660ffc024a8c5a75cfe382297e",
+    "head": "0a73b4755c8970f642c4833473fb17ca4544fbf2",
+    "reviewer_ran_tests": true,
+    "passed": 263,
+    "subtests_passed": 4793,
+    "exit_code": 0,
+    "elapsed_seconds": 17.85,
+    "critical": [],
+    "minor": [],
+    "declined_to_judge_additional": [],
+    "important": [
+      {
+        "finding": "Erro de background perdido na suspensão entre stop_reader e snapshot posterior.",
+        "comparative_probe": "Base43c27b2 propaga RuntimeError e fecha writer; HEAD0a73b47 retorna sucesso com exceção órfã; três agendamentos reproduzidos.",
+        "root_fix": "Snapshot capturado no finally de stop_reader antes de retornar ao helper; etapa seguinte recebe esse snapshot.",
+        "root_red": "3 casos falharam em0a73b47: DID NOT RAISE RuntimeError.",
+        "root_green": {
+          "focused_passed": 266,
+          "subtests_passed": 4793,
+          "exit_code": 0
+        },
+        "regression_test": "tests/test_codex_rpc.py::test_close_keeps_background_failure_after_reader_callback",
+        "status": "Corrigido por RED→GREEN pelo Root; nova validação completa e Sonar registrados no PR127."
+      }
+    ]
   }
 }

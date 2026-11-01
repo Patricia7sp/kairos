@@ -201,3 +201,20 @@ posterior são necessárias; os resultados finais são registrados na
 descrição e nos checks do [PR #127](https://github.com/Patricia7sp/kairos/pull/127).
 Os resultados históricos acima não substituem essa repetição. Nenhuma
 classificação remota foi alterada.
+
+A revisão independente complementar, GPT-6 Astra/high, examinou
+`43c27b2..0a73b47` e executou **263 testes e 4.793 subtestes**, exit 0.
+Encontrou um achado Important novo: a suspensão entre etapas permitia
+que uma tarefa auxiliar RPC saísse do conjunto antes de o fechamento
+capturar seu erro. O probe comparativo confirmou que `43c27b2` propagava
+a falha, enquanto `0a73b47` retornava sucesso e deixava uma exceção órfã.
+Não houve Critical, Minor ou limite adicional não julgado.
+
+O Root incorporou três agendamentos da reprodução em
+`test_close_keeps_background_failure_after_reader_callback`: os três
+falharam com `DID NOT RAISE RuntimeError` antes do ajuste. O snapshot agora
+fica no `finally` da etapa que drena o leitor, antes de retornar ao helper,
+e é passado à etapa que aguarda as tarefas auxiliares. O recorte corrigido
+passou em **266 testes e 4.793 subtestes**, Ruff e formatação aprovados.
+Essa correção ainda requer a repetição integrada indicada acima; não se
+atribui ao parecer independente a execução posterior feita pelo Root.

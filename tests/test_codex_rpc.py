@@ -136,6 +136,42 @@ async def test_close_finishes_writer_after_unexpected_reader_failure():
     assert writer.closed
 
 
+@pytest.mark.parametrize("ticks", [0, 1, 2])
+@async_test
+async def test_close_keeps_background_failure_after_reader_callback(ticks):
+    failure = RuntimeError("synthetic background failure")
+    diagnostics = []
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda loop, context: diagnostics.append(context.get("exception")))
+
+    class Writer(ClosingWriter):
+        async def drain(self):
+            self.entered.set()
+            await self.release.wait()
+            for _ in range(ticks):
+                await asyncio.sleep(0)
+            raise failure
+
+    writer = Writer(blocked=True)
+    rpc = CodexRpc(asyncio.StreamReader(), writer, generation="background-close-test")
+    try:
+        await rpc.start()
+        rpc._schedule_rejection("request")
+        await writer.entered.wait()
+        rpc._reader_task.add_done_callback(lambda completed: writer.release.set())
+        with pytest.raises(RuntimeError) as caught:
+            await rpc.aclose()
+        assert caught.value is failure
+        assert writer.closed
+        await asyncio.sleep(0)
+        assert not diagnostics
+    finally:
+        writer.release.set()
+        await asyncio.sleep(0)
+        loop.set_exception_handler(previous_handler)
+
+
 async def rpc_process(mode: str = "rpc") -> tuple[asyncio.subprocess.Process, CodexRpc]:
     process = await asyncio.create_subprocess_exec(
         sys.executable,

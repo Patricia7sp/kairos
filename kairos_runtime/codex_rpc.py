@@ -162,20 +162,25 @@ class CodexRpc:
         )
 
     async def _close_once(self, caller: asyncio.Task[Any] | None) -> None:
+        background: tuple[asyncio.Task[None], ...] = ()
+
         async def stop_reader() -> None:
-            reader_task = self._reader_task
-            if reader_task is not None and reader_task is not caller:
-                await cancel_owned_task(reader_task)
+            nonlocal background
+            try:
+                reader_task = self._reader_task
+                if reader_task is not None and reader_task is not caller:
+                    await cancel_owned_task(reader_task)
+            finally:
+                background = tuple(self._background_tasks)
 
         await complete_cleanup_steps(
             stop_reader,
-            self._finish_background_tasks,
+            lambda: self._finish_background_tasks(background),
             self._close_writer,
             task_name="codex-rpc-close-step",
         )
 
-    async def _finish_background_tasks(self) -> None:
-        tasks = tuple(self._background_tasks)
+    async def _finish_background_tasks(self, tasks: tuple[asyncio.Task[None], ...]) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
         for task in tasks:
             task.result()
