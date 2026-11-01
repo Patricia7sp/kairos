@@ -8,6 +8,7 @@ desse loop: eles observam apenas um ``concurrent.futures.Future`` thread-safe.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future as ConcurrentFuture
@@ -17,6 +18,9 @@ from typing import Any
 __all__ = [
     "AsyncCleanupCoordinator",
     "PersistentCleanupOutcome",
+    "cancel_owned_task",
+    "complete_cleanup",
+    "complete_cleanup_steps",
     "run_persistent_cleanup",
 ]
 
@@ -114,6 +118,49 @@ async def run_persistent_cleanup(
     except BaseException as exc:  # noqa: BLE001 - cancel externo também é cleanup failure
         error = exc
     return PersistentCleanupOutcome(error=error, cancellation=cancellation)
+
+
+async def complete_cleanup(cleanup: Callable[[], Awaitable[None]], *, task_name: str) -> None:
+    """Barreira sem teto global; falha real conserva o cancelamento como causa."""
+    inherited = sys.exception()
+    outcome = await run_persistent_cleanup(cleanup, task_name=task_name)
+    _raise_cleanup_outcome(outcome, inherited)
+
+
+def _raise_cleanup_outcome(
+    outcome: PersistentCleanupOutcome, inherited: BaseException | None
+) -> None:
+    if outcome.error is not None:
+        cause: BaseException | None = outcome.cancellation
+        if isinstance(cause, BaseException):
+            raise outcome.error from cause
+        if isinstance(inherited, asyncio.CancelledError):
+            raise outcome.error from inherited
+        raise outcome.error
+    if outcome.cancellation is not None:
+        raise outcome.cancellation
+
+
+async def complete_cleanup_steps(*steps: Callable[[], Awaitable[None]], task_name: str) -> None:
+    """Drena todas as etapas e propaga a primeira falha, com causa preservada."""
+    inherited = sys.exception()
+    first_error: BaseException | None = None
+    cancellation: asyncio.CancelledError | None = None
+    for index, step in enumerate(steps):
+        outcome = await run_persistent_cleanup(step, task_name=f"{task_name}:{index}")
+        if first_error is None:
+            first_error = outcome.error
+        if cancellation is None:
+            cancellation = outcome.cancellation
+    _raise_cleanup_outcome(PersistentCleanupOutcome(first_error, cancellation), inherited)
+
+
+async def cancel_owned_task(task: asyncio.Task[Any]) -> None:
+    """Consome o cancelamento solicitado ao filho, sem suprimir o do waiter."""
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    if not task.cancelled():
+        task.result()
 
 
 @dataclass(slots=True)

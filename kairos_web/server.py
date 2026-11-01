@@ -33,6 +33,7 @@ from kairos_integration.interaction_contract import (
     InteractionServiceUnavailableError,
 )
 from kairos_observability.service_events import record_service_event_async
+from kairos_providers._async_cleanup import cancel_owned_task, complete_cleanup
 from kairos_providers.adapters.openrouter import OpenRouterRoutingPolicy
 from kairos_providers.catalog import UnknownModelError
 from kairos_providers.composition import build_provider_gateway
@@ -110,29 +111,32 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
         )
         yield
     finally:
-        try:
+
+        async def shutdown() -> None:
             try:
-                cron_task.cancel()
                 try:
-                    await cron_task
-                except asyncio.CancelledError:
-                    pass
+                    await cancel_owned_task(cron_task)
+                finally:
+                    if owns_service:
+                        await service.aclose()
             finally:
-                if owns_service:
-                    await service.aclose()
-        finally:
-            del application.state.cron_task
-            del application.state.cron_scheduler
-            if getattr(application.state, "delivery_adapters", None) is not None:
-                del application.state.delivery_adapters
-            if owns_service and getattr(application.state, "interaction_service", None) is service:
-                del application.state.interaction_service
-            if (
-                installed_runtime_client
-                and getattr(application.state, "runtime_client", None) is runtime_client
-            ):
-                del application.state.runtime_client
-            await record_service_event_async(_application_home(application), "web.stopped")
+                del application.state.cron_task
+                del application.state.cron_scheduler
+                if getattr(application.state, "delivery_adapters", None) is not None:
+                    del application.state.delivery_adapters
+                if (
+                    owns_service
+                    and getattr(application.state, "interaction_service", None) is service
+                ):
+                    del application.state.interaction_service
+                if (
+                    installed_runtime_client
+                    and getattr(application.state, "runtime_client", None) is runtime_client
+                ):
+                    del application.state.runtime_client
+                await record_service_event_async(_application_home(application), "web.stopped")
+
+        await complete_cleanup(shutdown, task_name="kairos-web-shutdown")
 
 
 app = FastAPI(title="Kairos Web API", version="0.1.0", lifespan=_lifespan)

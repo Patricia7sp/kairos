@@ -7,6 +7,13 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from kairos_providers._async_cleanup import (
+    AsyncCleanupCoordinator,
+    cancel_owned_task,
+    complete_cleanup,
+    complete_cleanup_steps,
+)
+
 from .errors import RuntimeErrorInfo
 
 __all__ = ["CodexAccountSubscription", "CodexRpc", "CodexSubscription"]
@@ -75,6 +82,7 @@ class CodexRpc:
         self._next_id = 1
         self._reader_task: asyncio.Task[None] | None = None
         self._closed_error: RuntimeErrorInfo | None = None
+        self._close = AsyncCleanupCoordinator(task_name="codex-rpc-close")
 
     async def start(self) -> None:
         if self._reader_task is None:
@@ -147,15 +155,37 @@ class CodexRpc:
 
     async def aclose(self) -> None:
         self._fail(_transport())
-        reader_task = self._reader_task
-        if reader_task is not None and reader_task is not asyncio.current_task():
-            reader_task.cancel()
+        caller = asyncio.current_task()
+        await complete_cleanup(
+            lambda: self._close.run(lambda: self._close_once(caller)),
+            task_name="codex-rpc-close-barrier",
+        )
+
+    async def _close_once(self, caller: asyncio.Task[Any] | None) -> None:
+        background: tuple[asyncio.Task[None], ...] = ()
+
+        async def stop_reader() -> None:
+            nonlocal background
             try:
-                await reader_task
-            except asyncio.CancelledError:
-                pass
-        if self._background_tasks:
-            await asyncio.gather(*tuple(self._background_tasks))
+                reader_task = self._reader_task
+                if reader_task is not None and reader_task is not caller:
+                    await cancel_owned_task(reader_task)
+            finally:
+                background = tuple(self._background_tasks)
+
+        await complete_cleanup_steps(
+            stop_reader,
+            lambda: self._finish_background_tasks(background),
+            self._close_writer,
+            task_name="codex-rpc-close-step",
+        )
+
+    async def _finish_background_tasks(self, tasks: tuple[asyncio.Task[None], ...]) -> None:
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for task in tasks:
+            task.result()
+
+    async def _close_writer(self) -> None:
         self._writer.close()
         try:
             await self._writer.wait_closed()

@@ -18,6 +18,13 @@ import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 
+from kairos_providers._async_cleanup import (
+    AsyncCleanupCoordinator,
+    cancel_owned_task,
+    complete_cleanup,
+    complete_cleanup_steps,
+)
+
 PROTOCOL_VERSION = 1
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 8765
@@ -109,6 +116,8 @@ class ModelRelay:
         self._count = 0
         self._last_id = 0
         self._closed = False
+        self._close = AsyncCleanupCoordinator(task_name="model-relay-close")
+        self._request_close: AsyncCleanupCoordinator | None = None
 
     async def start(self) -> None:
         if self._closed or self._runner is not None:
@@ -141,24 +150,46 @@ class ModelRelay:
         await self._cancel_request()
 
     async def _cancel_request(self) -> None:
-        if self._request is not None:
-            self._request.cancel()
+        request = self._request
+        if request is None:
+            return
+        coordinator = self._request_close
+        if coordinator is None:
+            coordinator = AsyncCleanupCoordinator(task_name="model-relay-request-close")
+            self._request_close = coordinator
+
+        async def drain() -> None:
             try:
-                await self._request
-            except asyncio.CancelledError:
-                pass
-            self._request = None
+                await cancel_owned_task(request)
+            finally:
+                if request.done() and self._request is request:
+                    self._request = None
+                    self._request_close = None
+
+        await complete_cleanup(
+            lambda: coordinator.run(drain), task_name="model-relay-request-barrier"
+        )
 
     async def aclose(self) -> None:
         self._closed = True
         self._turn = None
-        if self._runner is not None:
-            self._runner.cancel()
-            try:
-                await self._runner
-            except asyncio.CancelledError:
-                pass
-        await self._cancel_request()
+        await complete_cleanup(
+            lambda: self._close.run(self._close_once), task_name="model-relay-close-barrier"
+        )
+
+    async def _close_once(self) -> None:
+        async def stop_runner() -> None:
+            if self._runner is not None:
+                await cancel_owned_task(self._runner)
+
+        await complete_cleanup_steps(
+            stop_runner,
+            self._cancel_request,
+            self._close_writer,
+            task_name="model-relay-close-step",
+        )
+
+    async def _close_writer(self) -> None:
         self.writer.close()
         try:
             async with asyncio.timeout(IO_TIMEOUT):
@@ -250,13 +281,16 @@ class ModelRelay:
                     continue
                 self._count += 1
                 self._request = asyncio.create_task(self._forward(request_id, frame["body"]))
+                self._request_close = AsyncCleanupCoordinator(task_name="model-relay-request-close")
         except (ValueError, EOFError, OSError, TimeoutError):
             pass
         finally:
             self._closed = True
             self._turn = None
-            await self._cancel_request()
-            self.writer.close()
+            try:
+                await self._cancel_request()
+            finally:
+                self.writer.close()
 
     async def _forward(self, request_id: int, body: dict) -> None:
         try:
