@@ -8,6 +8,7 @@ desse loop: eles observam apenas um ``concurrent.futures.Future`` thread-safe.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import Future as ConcurrentFuture
@@ -120,10 +121,14 @@ async def run_persistent_cleanup(
 
 async def complete_cleanup(cleanup: Callable[[], Awaitable[None]], *, task_name: str) -> None:
     """Barreira sem teto global; falha real conserva o cancelamento como causa."""
+    inherited = sys.exception()
     outcome = await run_persistent_cleanup(cleanup, task_name=task_name)
     if outcome.error is not None:
-        if outcome.cancellation is not None:
-            raise outcome.error from outcome.cancellation
+        cancellation = outcome.cancellation
+        if cancellation is None and isinstance(inherited, asyncio.CancelledError):
+            cancellation = inherited
+        if cancellation is not None:
+            raise outcome.error from cancellation
         raise outcome.error
     if outcome.cancellation is not None:
         raise outcome.cancellation

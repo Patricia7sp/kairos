@@ -30,51 +30,51 @@
 **Files:** `kairos_providers/_async_cleanup.py`, `kairos_runtime/codex_rpc.py`, `tests/test_async_cleanup.py`, `tests/test_codex_rpc.py`.
 **Interfaces:** adicionar `complete_cleanup(cleanup, *, task_name) -> None` que propaga `PersistentCleanupOutcome`; adicionar `cancel_owned_task(task) -> None` que consome somente o cancelamento esperado do filho. `CodexRpc.aclose()` preserva assinatura e compõe barreira externa com um coordinator por instância.
 
-- [ ] RED: testes de cancelamento no fim do leitor, dreno bloqueado, close repetido/concorrente, falha de writer e retry. Aguardar efeitos reais do RPC; controlar somente transporte e agendamento.
-- [ ] Implementar helpers e fechamento completo do RPC, incluindo writer após falhas, com tentativa compartilhada e cancelamento depois do dreno.
-- [ ] GREEN: `uv run pytest -q tests/test_async_cleanup.py tests/test_codex_rpc.py`; esperado: zero falhas.
-- [ ] Commit: `fix(runtime): preserva cancelamento no fechamento do RPC`.
+- [x] RED: testes de cancelamento no fim do leitor, dreno bloqueado, close repetido/concorrente, falha de writer e retry. Aguardar efeitos reais do RPC; controlar somente transporte e agendamento.
+- [x] Implementar helpers e fechamento completo do RPC, incluindo writer após falhas, com tentativa compartilhada e cancelamento depois do dreno.
+- [x] GREEN: `uv run pytest -q tests/test_async_cleanup.py tests/test_codex_rpc.py`; esperado: zero falhas.
+- [x] Commit: `fix(runtime): preserva cancelamento no fechamento do RPC`.
 
 ### Task 2: Relay
 
 **Files:** `kairos_runtime/docker_backend/model_relay.py`, `tests/test_docker_model_relay.py`.
 **Interfaces:** manter `end_turn(turn_id)` e `aclose()`; um coordinator por fechamento do relay e por requisição ativa. Consumir os helpers da Task 1.
 
-- [ ] RED: cancelamento no fim de runner/requisição, dreno bloqueado e cancelado novamente, close repetido/concorrente e requisição seguinte após end_turn.
-- [ ] Proteger fechamento integral e dreno de requisição; revogar admissão antes de aguardar e não apagar referência de uma requisição nova.
-- [ ] GREEN: `uv run pytest -q tests/test_async_cleanup.py tests/test_codex_rpc.py tests/test_docker_model_relay.py`; esperado: zero falhas.
-- [ ] Commit: `fix(runtime): drena o relay antes de propagar cancelamento`.
+- [x] RED: cancelamento no fim de runner/requisição, dreno bloqueado e cancelado novamente, close repetido/concorrente e requisição seguinte após end_turn.
+- [x] Proteger fechamento integral e dreno de requisição; revogar admissão antes de aguardar e não apagar referência de uma requisição nova.
+- [x] GREEN: `uv run pytest -q tests/test_async_cleanup.py tests/test_codex_rpc.py tests/test_docker_model_relay.py`; esperado: zero falhas.
+- [x] Commit: `fix(runtime): drena o relay antes de propagar cancelamento`.
 
 ### Task 3: Shutdown Web
 
 **Files:** `kairos_web/server.py`, `tests/test_web_shutdown_cancellation.py`.
 **Interfaces:** manter `_lifespan(application)` e as regras de ownership de serviço/runtime_client.
 
-- [ ] RED: cancelamento no fim do scheduler e durante close do serviço, inclusive repetido; serviço próprio fecha, injetado permanece sob responsabilidade externa, estado é limpo e falha permanece explícita.
-- [ ] Proteger o shutdown completo com a barreira persistente e conservar os registros operacionais.
-- [ ] GREEN: `uv run pytest -q tests/test_web_shutdown_cancellation.py tests/test_web.py`; esperado: zero falhas.
-- [ ] Commit: `fix(web): conclui shutdown antes de propagar cancelamento`.
+- [x] RED: cancelamento no fim do scheduler e durante close do serviço, inclusive repetido; serviço próprio fecha, injetado permanece sob responsabilidade externa, estado é limpo e falha permanece explícita.
+- [x] Proteger o shutdown completo com a barreira persistente e conservar os registros operacionais.
+- [x] GREEN: `uv run pytest -q tests/test_web_shutdown_cancellation.py tests/test_web.py`; esperado: zero falhas.
+- [x] Commit: `fix(web): conclui shutdown antes de propagar cancelamento`.
 
 ### Task 4: Telegram
 
 **Files:** `kairos_gateway/inbound.py`, `tests/test_telegram_inbound.py`.
 **Interfaces:** manter dispatch, protocolo e autorização; o stream deve relançar cancelamento e a digitação deve terminar antes da propagação do cancelamento do despacho.
 
-- [ ] RED: cancelamento direto da digitação, durante stream e no fim da digitação; nenhum envio final após cancelamento; erro operacional comum conserva tratamento anterior.
-- [ ] Corrigir somente as fronteiras de cancelamento e dreno; não alterar outros canais.
-- [ ] GREEN: `uv run pytest -q tests/test_telegram_inbound.py`; esperado: zero falhas.
-- [ ] Commit: `fix(telegram): preserva cancelamento e impede envio tardio`.
+- [x] RED: cancelamento direto da digitação, durante stream e no fim da digitação; nenhum envio final após cancelamento; erro operacional comum conserva tratamento anterior.
+- [x] Corrigir somente as fronteiras de cancelamento e dreno; não alterar outros canais.
+- [x] GREEN: `uv run pytest -q tests/test_telegram_inbound.py`; esperado: zero falhas.
+- [x] Commit: `fix(telegram): preserva cancelamento e impede envio tardio`.
 
 ### Task 5: Ownership, provas portáveis e aceite final
 
 **Files:** `kairos_integration/turn_ownership.py`, `tests/test_interaction_turn_ownership.py`, `tests/test_cancellation_contracts.py`, relatório em `docs/superpowers/reports/2026-11-01-cancelamento-cleanup.md`.
 **Interfaces:** manter acquire/refresh/release e seus resultados; usar o helper de dreno com barreira durante a liberação, conservando expiração natural após tentativas esgotadas.
 
-- [ ] RED: cancelamento ao terminar heartbeat e deadline, repetição durante dreno, sucessor sem sobreposição e liberação com tentativas esgotadas.
-- [ ] Corrigir os finally sem mudar os except já corretos; preservar perda de posse e erros aninhados.
-- [ ] Versionar testes/evidência sanitizada dos seis candidatos: operação real de thread e SQLite, carrier de cleanup, supervisor e os dois except de ownership. Preservar as classificações como propostas até revisão final.
-- [ ] GREEN: `uv run pytest -q tests/test_interaction_turn_ownership.py tests/test_cancellation_contracts.py`; esperado: zero falhas.
-- [ ] Commit: `fix(runtime): preserva cancelamento durante liberação de leases`.
+- [x] RED: cancelamento ao terminar heartbeat e deadline, repetição durante dreno, sucessor sem sobreposição e liberação com tentativas esgotadas.
+- [x] Corrigir os finally sem mudar os except já corretos; preservar perda de posse e erros aninhados.
+- [x] Versionar testes/evidência sanitizada dos seis candidatos: operação real de thread e SQLite, carrier de cleanup, supervisor e os dois except de ownership. Preservar as classificações como propostas até revisão final.
+- [x] GREEN: `uv run pytest -q tests/test_interaction_turn_ownership.py tests/test_cancellation_contracts.py`; esperado: zero falhas.
+- [x] Commit: `fix(runtime): preserva cancelamento durante liberação de leases`.
 - [ ] Rodar `scripts/ci.sh` completo com pin de Codex por SHA; revisar resultados/skips e manter logs vinculados ao SHA final.
 - [ ] Revisão independente da branch, com execução focada declarada e validação integrada pelo Root. Corrigir achados relevantes por RED→GREEN.
 - [ ] Publicar branch/PR concretos e conferir CI/Sonar do SHA efetivo. Apresentar resultado antes da decisão de merge; não reaproveitar autorização do PR #126.

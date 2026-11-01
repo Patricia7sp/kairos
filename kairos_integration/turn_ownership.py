@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -15,6 +16,12 @@ from pathlib import Path
 from typing import Protocol, TypeVar
 from uuid import uuid4
 
+from kairos_providers._async_cleanup import (
+    PersistentCleanupOutcome,
+    cancel_owned_task,
+    complete_cleanup,
+    run_persistent_cleanup,
+)
 from kairos_state.writes import is_busy_error
 
 logger = logging.getLogger(__name__)
@@ -66,6 +73,30 @@ class LeaseRefreshOutcome:
 
 class TurnLeaseLostError(RuntimeError):
     """O turno perdeu ownership durável e não pode continuar persistindo."""
+
+
+def _raise_release_outcome(
+    outcome: PersistentCleanupOutcome, terminal: BaseException | None
+) -> None:
+    if isinstance(terminal, (TurnLeaseLostError, GeneratorExit)):
+        if outcome.error is not None:
+            logger.warning(
+                "falha na limpeza de um turno já encerrado",
+                extra={
+                    "event": "turn.cleanup_failed",
+                    "error_type": type(outcome.error).__name__,
+                },
+            )
+        return
+    if outcome.error is not None:
+        cancellation = outcome.cancellation
+        if cancellation is None and isinstance(terminal, asyncio.CancelledError):
+            cancellation = terminal
+        if cancellation is not None:
+            raise outcome.error from cancellation
+        raise outcome.error
+    if outcome.cancellation is not None:
+        raise outcome.cancellation
 
 
 class AsyncTurnLeaseBackend(Protocol):
@@ -329,20 +360,28 @@ class SessionTurnOwnership:
             finally:
                 self._lease_loss.reset(loss_token)
         finally:
-            if heartbeat is not None:
-                heartbeat.cancel()
-                with suppress(asyncio.CancelledError):
-                    await heartbeat
-            try:
-                if durable_acquired:
-                    await self._release_durable(conversation_id, holder)
-            finally:
-                if local_acquired:
-                    entry.lock.release()
-                async with self._entries_guard:
-                    entry.users -= 1
-                    if entry.users == 0 and self._entries.get(conversation_id) is entry:
-                        del self._entries[conversation_id]
+            terminal = sys.exception()
+
+            async def release_owned_turn() -> None:
+                try:
+                    if heartbeat is not None:
+                        await cancel_owned_task(heartbeat)
+                finally:
+                    try:
+                        if durable_acquired:
+                            await self._release_durable(conversation_id, holder)
+                    finally:
+                        if local_acquired:
+                            entry.lock.release()
+                        async with self._entries_guard:
+                            entry.users -= 1
+                            if entry.users == 0 and self._entries.get(conversation_id) is entry:
+                                del self._entries[conversation_id]
+
+            outcome = await run_persistent_cleanup(
+                release_owned_turn, task_name="kairos-turn-ownership-release"
+            )
+            _raise_release_outcome(outcome, terminal)
 
     async def _acquire_durable(self, conversation_id: str, source: str, holder: str) -> float:
         while True:
@@ -466,9 +505,9 @@ class SessionTurnOwnership:
                 )
             raise
         finally:
-            deadline.cancel()
-            with suppress(asyncio.CancelledError):
-                await deadline
+            await complete_cleanup(
+                lambda: cancel_owned_task(deadline), task_name="kairos-turn-deadline-close"
+            )
 
     async def _sleep_until(self, deadline: float) -> None:
         while (remaining := deadline - self._clock()) > 0:
