@@ -15,12 +15,125 @@ from kairos_runtime.errors import RuntimeErrorInfo
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_app_server.py"
 
 
+class ClosingWriter:
+    """Transporte controlado: o RPC real decide quando fechar e aguardar."""
+
+    def __init__(self, *, blocked: bool = False, failure: Exception | None = None):
+        self.closed = False
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        if not blocked:
+            self.release.set()
+        self.failure = failure
+        self.attempts = 0
+
+    def write(self, data):
+        pass
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        self.attempts += 1
+        self.entered.set()
+        await self.release.wait()
+        if self.failure is not None:
+            raise self.failure
+
+
 def async_test(function: Callable[..., Any]) -> Callable[..., None]:
     @functools.wraps(function)
     def run(*args: Any, **kwargs: Any) -> None:
         asyncio.run(function(*args, **kwargs))
 
     return run
+
+
+@async_test
+async def test_close_preserves_caller_cancelled_when_reader_finishes():
+    writer = ClosingWriter()
+    rpc = CodexRpc(asyncio.StreamReader(), writer, generation="close-test")
+    await rpc.start()
+    closer = None
+    rpc._reader_task.add_done_callback(lambda completed: closer.cancel())
+    closer = asyncio.create_task(rpc.aclose())
+    with pytest.raises(asyncio.CancelledError):
+        await closer
+    assert writer.closed
+    assert rpc._reader_task.done()
+
+
+@async_test
+async def test_close_waits_for_blocked_drain_and_shares_concurrent_attempt():
+    writer = ClosingWriter(blocked=True)
+    rpc = CodexRpc(asyncio.StreamReader(), writer, generation="close-test")
+    await rpc.start()
+    first = asyncio.create_task(rpc.aclose())
+    second = None
+    try:
+        await writer.entered.wait()
+        second = asyncio.create_task(rpc.aclose())
+        first.cancel()
+        await asyncio.sleep(0)
+        first.cancel()
+        await asyncio.sleep(0)
+        assert not first.done(), "cancelamento deve aguardar o dreno sem teto global"
+        assert not second.done()
+        writer.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        await second
+        await rpc.aclose()
+        assert writer.closed
+        assert writer.attempts == 1
+    finally:
+        writer.release.set()
+        await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
+
+
+@async_test
+async def test_close_failure_keeps_cancellation_cause_and_can_retry():
+    failure = RuntimeError("synthetic close failure")
+    writer = ClosingWriter(blocked=True, failure=failure)
+    rpc = CodexRpc(asyncio.StreamReader(), writer, generation="close-test")
+    await rpc.start()
+    closer = asyncio.create_task(rpc.aclose())
+    try:
+        await writer.entered.wait()
+        closer.cancel()
+        await asyncio.sleep(0)
+        writer.release.set()
+        with pytest.raises(RuntimeError) as caught:
+            await closer
+        assert caught.value is failure
+        assert isinstance(caught.value.__cause__, asyncio.CancelledError)
+        writer.failure = None
+        await rpc.aclose()
+        await rpc.aclose()
+        assert writer.attempts == 2
+    finally:
+        writer.release.set()
+        await asyncio.gather(closer, return_exceptions=True)
+
+
+@async_test
+async def test_close_finishes_writer_after_unexpected_reader_failure():
+    writer = ClosingWriter()
+    rpc = CodexRpc(asyncio.StreamReader(), writer, generation="close-test")
+    failure = RuntimeError("synthetic reader failure")
+
+    async def failed_reader():
+        raise failure
+
+    rpc._reader_task = asyncio.create_task(failed_reader())
+    await asyncio.sleep(0)
+    with pytest.raises(RuntimeError) as caught:
+        await rpc.aclose()
+    assert caught.value is failure
+    assert writer.closed
 
 
 async def rpc_process(mode: str = "rpc") -> tuple[asyncio.subprocess.Process, CodexRpc]:

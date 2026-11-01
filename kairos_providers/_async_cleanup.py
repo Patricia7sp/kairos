@@ -17,6 +17,8 @@ from typing import Any
 __all__ = [
     "AsyncCleanupCoordinator",
     "PersistentCleanupOutcome",
+    "cancel_owned_task",
+    "complete_cleanup",
     "run_persistent_cleanup",
 ]
 
@@ -114,6 +116,25 @@ async def run_persistent_cleanup(
     except BaseException as exc:  # noqa: BLE001 - cancel externo também é cleanup failure
         error = exc
     return PersistentCleanupOutcome(error=error, cancellation=cancellation)
+
+
+async def complete_cleanup(cleanup: Callable[[], Awaitable[None]], *, task_name: str) -> None:
+    """Barreira sem teto global; falha real conserva o cancelamento como causa."""
+    outcome = await run_persistent_cleanup(cleanup, task_name=task_name)
+    if outcome.error is not None:
+        if outcome.cancellation is not None:
+            raise outcome.error from outcome.cancellation
+        raise outcome.error
+    if outcome.cancellation is not None:
+        raise outcome.cancellation
+
+
+async def cancel_owned_task(task: asyncio.Task[Any]) -> None:
+    """Consome o cancelamento solicitado ao filho, sem suprimir o do waiter."""
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    if not task.cancelled():
+        task.result()
 
 
 @dataclass(slots=True)

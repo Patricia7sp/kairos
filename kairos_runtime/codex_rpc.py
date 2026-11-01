@@ -7,6 +7,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from kairos_providers._async_cleanup import (
+    AsyncCleanupCoordinator,
+    cancel_owned_task,
+    complete_cleanup,
+)
+
 from .errors import RuntimeErrorInfo
 
 __all__ = ["CodexAccountSubscription", "CodexRpc", "CodexSubscription"]
@@ -75,6 +81,7 @@ class CodexRpc:
         self._next_id = 1
         self._reader_task: asyncio.Task[None] | None = None
         self._closed_error: RuntimeErrorInfo | None = None
+        self._close = AsyncCleanupCoordinator(task_name="codex-rpc-close")
 
     async def start(self) -> None:
         if self._reader_task is None:
@@ -147,20 +154,41 @@ class CodexRpc:
 
     async def aclose(self) -> None:
         self._fail(_transport())
+        caller = asyncio.current_task()
+        await complete_cleanup(
+            lambda: self._close.run(lambda: self._close_once(caller)),
+            task_name="codex-rpc-close-barrier",
+        )
+
+    async def _close_once(self, caller: asyncio.Task[Any] | None) -> None:
+        errors: list[BaseException] = []
         reader_task = self._reader_task
-        if reader_task is not None and reader_task is not asyncio.current_task():
-            reader_task.cancel()
+        if reader_task is not None and reader_task is not caller:
             try:
-                await reader_task
-            except asyncio.CancelledError:
-                pass
+                await cancel_owned_task(reader_task)
+            except BaseException as exc:  # noqa: BLE001 - tenta fechar os demais recursos
+                errors.append(exc)
         if self._background_tasks:
-            await asyncio.gather(*tuple(self._background_tasks))
-        self._writer.close()
+            tasks = tuple(self._background_tasks)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for task in tasks:
+                try:
+                    task.result()
+                except BaseException as exc:  # noqa: BLE001 - falhas são propagadas após fechar
+                    errors.append(exc)
         try:
-            await self._writer.wait_closed()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+            self._writer.close()
+        except BaseException as exc:  # noqa: BLE001 - retém a falha para retry
+            errors.append(exc)
+        else:
+            try:
+                await self._writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except BaseException as exc:  # noqa: BLE001 - retém a falha para retry
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
     async def _write(self, message: dict[str, Any]) -> None:
         encoded = json.dumps(message, separators=(",", ":")).encode("utf-8") + b"\n"

@@ -1,6 +1,7 @@
 # Cancelamento externo durante limpeza assíncrona
 
-**Estado:** proposta para aprovação; nenhuma correção de produção aplicada.
+**Estado:** aprovado para implementação em 01/11/2026, com as quatro
+ressalvas da revisão humana incorporadas ao aceite abaixo.
 **Base examinada:** `a2987ccbebe94bfed0049024ee0d4fdb067653b5`.
 **Escopo solicitado:** as 11 ocorrências abertas de `python:S7497` na main.
 
@@ -88,6 +89,21 @@ completa: encerrar a primeira tarefa não pode interromper o fechamento do
 writer, a liberação de leases ou a limpeza do serviço. A propagação ocorre
 depois dessa etapa, usando o resultado explícito já adotado pelo projeto.
 
+`AsyncCleanupCoordinator.run` sozinho não é essa barreira: um waiter
+cancelado retorna imediatamente enquanto a tentativa compartilhada segue.
+Nos `aclose` com serialização, compor `run_persistent_cleanup` por fora de
+`coordinator.run`. O coordinator compartilha a tentativa e permite retry;
+a barreira externa espera o resultado e só então propaga o cancelamento.
+Preservar a semântica atual do coordinator para seus outros consumidores.
+
+O dreno **não tem teto global**. Conservam-se os limites locais existentes,
+como `IO_TIMEOUT` do relay; `CodexRpc.writer.wait_closed` continua sem
+timeout próprio. Se um recurso nunca terminar, `aclose` e seu chamador
+cancelado podem esperar indefinidamente. Essa é uma limitação explícita,
+preferida neste lote a abandonar recursos ou inventar sucesso. Um teste
+controlado deve demonstrar a retenção e a conclusão após liberar o recurso.
+Não se promete recuperação automática de um transporte permanentemente preso.
+
 Alternativas examinadas:
 
 - Relançar todo `CancelledError` nas esperas de filhos quebraria fechamentos
@@ -96,7 +112,7 @@ Alternativas examinadas:
   consumidores e confundiria pedidos anteriores com cancelamentos novos.
 - A coordenação já existente conserva a semântica aprovada de limpeza e
   oferece um ponto comum para testar cancelamento repetido. É a proposta do
-  Root, ainda sujeita à aprovação deste desenho.
+  Root, aprovada com os critérios adicionais registrados neste documento.
 
 ## Alterações delimitadas
 
@@ -145,6 +161,9 @@ em logs. D-PLUG.6 permanece vigente.
    contra a implementação atual antes de alterar produção.
 2. Exercitar cancelamento externo simples/repetido, filho já terminado,
    fechamento normal, erro real de limpeza e cancelamento durante o dreno.
+   Incluir explicitamente close repetido e concorrente, tentativa de retry
+   após falha, compartilhamento de uma tentativa e retenção do chamador
+   cancelado enquanto o dreno bloqueia, com liberação controlada posterior.
 3. Verificar efeitos: tarefas terminadas, writers fechados, nenhuma entrega
    Telegram após cancelamento e leases liberados na ordem correta, sem
    sobreposição do sucessor.
@@ -155,11 +174,18 @@ em logs. D-PLUG.6 permanece vigente.
 5. Rodar a suíte integrada pertinente e `scripts/ci.sh` completo, com Python
    3.11 e Codex 0.154.0 conferido por SHA-256, builds e integrações Docker.
    `runtime_live` e exportação Sonar local continuam desabilitados.
-6. Obter revisão independente e conferir CI/Sonar do SHA publicado. Só
+6. Obter revisão independente final e conferir CI/Sonar do SHA publicado. Só
    registrar os seis falsos positivos depois de sua revisão específica;
    defeitos reais precisam de correção e nova análise, sem exclusão de regra.
 
-Execução proposta: Root sequencial, com revisão independente ao final.
+As reproduções e os seis contratos candidatos a falso positivo devem ser
+cobertos por testes commitados, com referências verificáveis em um relatório
+sanitizado em `docs/superpowers/reports/`. `.superpowers/` é material local
+auxiliar, não evidência disponível no PR. A revisão estática do desenho foi
+preliminar: não substitui a revisão da implementação nem qualquer validação.
+
+Execução aprovada: Root sequencial, com revisão independente ao final;
+RPC, relay, Web e Telegram primeiro, ownership por último.
 O implementador decide nomes privados, pequenos desdobramentos de funções e
 organização dos testes, preservando as interfaces públicas e os contratos
 acima. Não ampliar para todos os outros `except` do projeto, rever timeouts,
@@ -171,5 +197,6 @@ reais.
 Este documento registra a proposta de implementação do lote S7497. A
 autorização de merge/deploy do PR #126 já foi executada e não é tratada como
 aprovação automática de uma nova entrega de código.
-Após aprovação deste desenho, preparar o plano, implementar e validar a
-correção e apresentar a branch/PR concretos antes da decisão de integração.
+Preparar o plano, implementar e validar a correção e apresentar a branch/PR
+concretos antes da decisão de integração. A aprovação com ressalvas autoriza
+essa execução, sem uma nova rodada de aprovação de plano.
