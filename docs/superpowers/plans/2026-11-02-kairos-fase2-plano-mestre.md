@@ -12,6 +12,8 @@
 
 Estado: recomendações documentais incorporadas em 02/11/2026; **E4 — Prioridade Alta**, conforme decisão da usuária. A execução desta rodada é documental. Hotfix, I1 e demais entregas precisam de autorização de implementação; instalar dependências, criar agendas, executar testes ativos, publicar ou compartilhar não decorre de aprovar este mapa. As autorizações da #129/#130 pertencem àquela entrega.
 
+Retomada após H0: a usuária autorizou seguir os próximos passos depois do merge/deploy da #131 (`c6a083f`). A preparação E0 está registrada no [baseline por SHA](../reports/2026-11-02-fase2-baseline.md), na [matriz de plataforma e protocolo](../reports/2026-11-02-fase2-plataforma.md) e no [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md). E0.1/E0.4 passaram por revisão independente documental e aguardam revisão da usuária; acesso/medições do Mac e aceite do gate E0 continuam pendentes. Isso não habilita I1/E4 ou as extensões.
+
 ## Escopo e sequência prioritária
 
 **Fase 2 mínima: E0 + E1 + E2 de leitura + E4. E4 tem Prioridade Alta.** A ordem de preparação é H0 separado → E0 → I1 reordenado → demais contratos/integrações de E1 → E4; E2 de leitura pode avançar em paralelo com E4 assim que suas fontes estiverem disponíveis. E4 não espera E2 visual nem E3. H0 é antecipável por ser correção limitada de defeitos existentes, sem alterar o gate do destino.
@@ -122,10 +124,12 @@ Artefatos usam referência vinculada à tarefa/projeto, tamanho/tipo/path verifi
 
 Files: kairos_security/checks/secrets.py; tests/test_security_audit.py e testes sintéticos focados de redaction. Reutiliza a API check_hardcoded_secrets(code_root: Path) -> list[Finding] e os formatadores atuais; nenhuma dependência nova pressuposta.
 
-- [ ] RED com fixtures temporárias: .env e .env.* ignorados, chaves OpenAI sintéticas não detectadas e fragmento de segredo em Finding.evidence/saídas. Fixtures não usam nomes/marcadores que façam o detector pular a linha antes do caminho sob teste.
-- [ ] Corrigir somente seleção por nome, regex OpenAI e construção de evidence sanitizada. Não criar captura de novos alvos, contrato E1.1 nem autoridade/exceções de E1.4.
-- [ ] GREEN: detector real encontra os casos sintéticos; evidence não contém fragmentos brutos da credencial nem trechos da linha. Verificar serialização JSON e resumo CLI pelos formatadores reais.
-- [ ] Executar regressões pertinentes, revisão independente e CI do SHA da entrega; registrar limites e rollback. H0 não afirma corrigir toda a captura/leitura/travessia do scanner nem a política de aprovação.
+- [x] RED com fixtures temporárias: .env e .env.* ignorados, chaves OpenAI sintéticas não detectadas e fragmento de segredo em Finding.evidence/saídas. Fixtures não usam nomes/marcadores que façam o detector pular a linha antes do caminho sob teste.
+- [x] Corrigir somente seleção por nome, regex OpenAI e construção de evidence sanitizada. Não criar captura de novos alvos, contrato E1.1 nem autoridade/exceções de E1.4.
+- [x] GREEN: detector real encontra os casos sintéticos; evidence não contém fragmentos brutos da credencial nem trechos da linha. Verificar serialização JSON e resumo CLI pelos formatadores reais.
+- [x] Executar regressões pertinentes, revisão independente e CI do SHA da entrega; registrar limites e rollback. H0 não afirma corrigir toda a captura/leitura/travessia do scanner nem a política de aprovação.
+
+Fechado pela #131, integrada por squash em `c6a083f`, com CI/Sonar/deploy e verificação do serviço. Evidências, falhas ambientais corrigidas e limite de cobertura constam do [plano H0](2026-11-02-h0-segredos.md) e do [baseline E0](../reports/2026-11-02-fase2-baseline.md). A omissão foi aplicada também aos dois produtores SAST, preservando arquivo/linha e sem criar autoridade nova.
 
 Verificação proposta: uv run pytest -q tests/test_security_audit.py tests/test_security_redaction.py; Ruff; scripts/ci.sh e CI pertinentes antes de merge. Commit: fix(security): detecta env e sanitiza evidencia de segredos. Ponto de parada: entregar para revisão, sem habilitar scan de novos alvos. Autorização da entrega é separada da edição documental.
 
@@ -135,10 +139,10 @@ Verificação proposta: uv run pytest -q tests/test_security_audit.py tests/test
 
 Files: docs/decisoes.md; novo docs/superpowers/reports/<data>-fase2-baseline.md. Consultar os módulos do inventário da SPEC e seus testes reais.
 
-- [ ] Registrar SHA, diff desde 8902010, mudanças posteriores relevantes, ambiente, dependências/lock e evidências reutilizáveis.
-- [ ] Para cada capacidade, distinguir demonstrada, parcial, ausente e indisponível; apontar módulo, contrato, teste e lacuna.
-- [ ] Preservar a evidência da #129 e as melhorias já integradas de arquivos, skills e cancelamento; não reimplementar essas correções.
-- [ ] Conferir referências e estado do checkout; revisão do relatório. Commit documental proposto: docs(fase2): revalida baseline e capacidades.
+- [x] Registrar SHA, diff desde 8902010, mudanças posteriores relevantes, ambiente, dependências/lock e evidências reutilizáveis.
+- [x] Para cada capacidade, distinguir demonstrada, parcial, ausente e indisponível; apontar módulo, contrato, teste e lacuna.
+- [x] Preservar a evidência da #129 e as melhorias já integradas de arquivos, skills e cancelamento; não reimplementar essas correções.
+- [x] Conferir referências e estado do checkout; revisão do relatório. Commit documental proposto: docs(fase2): revalida baseline e capacidades.
 
 Aceite: inventário completo e reproduzível, sem converter existência de arquivo ou nome em prova de capacidade.
 
@@ -174,10 +178,12 @@ Verificação futura: uv run pytest -q tests/test_phase2_benchmark.py, seguida d
 
 Files: novo docs/superpowers/specs/<data>-fase2-threat-model.md, artefato versionado vinculado à revisão de arquitetura e matriz de testes.
 
-- [ ] Inventariar ativos: credenciais, estado/journal, snapshots/código, políticas/aprovações e artefatos. Desenhar fluxos e fronteiras UI/API, núcleo/LLM/ferramentas, pai/filho, filesystem/worker, estado e egress.
-- [ ] Declarar atacantes/capacidades: cliente não autenticado, página/resultado/filho malicioso, arquivo mutável e dependência comprometida; explicitar premissas sobre host/mesmo UID e riscos residuais.
-- [ ] Classificar dados públicos, internos por projeto, pessoais/sensíveis e segredos/credenciais; definir destinos, ACL, sanitização e retenção. Em conflito usar a classe mais restritiva. Segredos reais permanecem no serviço local protegido existente.
-- [ ] Mapear ameaça → controle → teste real → responsável → lacuna. Revisão do design antes de E1.4a; atualizar/revisar antes de E1.4b, E4 e S. Documento não é atestado de eficácia nem autorização de coleta.
+- [x] Inventariar ativos: credenciais, estado/journal, snapshots/código, políticas/aprovações e artefatos. Desenhar fluxos e fronteiras UI/API, núcleo/LLM/ferramentas, pai/filho, filesystem/worker, estado e egress.
+- [x] Declarar atacantes/capacidades: cliente não autenticado, página/resultado/filho malicioso, arquivo mutável e dependência comprometida; explicitar premissas sobre host/mesmo UID e riscos residuais.
+- [x] Classificar dados públicos, internos por projeto, pessoais/sensíveis e segredos/credenciais; definir destinos, ACL, sanitização e retenção. Em conflito usar a classe mais restritiva. Segredos reais permanecem no serviço local protegido existente.
+- [x] Mapear ameaça → controle → teste real → responsável → lacuna. Revisão do design antes de E1.4a; atualizar/revisar antes de E1.4b, E4 e S. Documento não é atestado de eficácia nem autorização de coleta.
+
+Artefato E0.4 revisado independentemente e pronto para revisão da usuária; E0.2/E0.3 e o aceite do gate E0 permanecem pendentes. Não interpretar os checkboxes documentais como validação técnica do destino ou habilitação de I1.
 
 Gate E0: baseline, capacidades/medições do destino e threat model registrados; limites aceitos ou explicitamente revisados antes de habilitar background/voz. O relatório de E0.4 é pré-requisito do design de autoridade; CI Linux não aprova Mac.
 
