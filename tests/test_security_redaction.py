@@ -67,6 +67,19 @@ class SecretDetectionTests(unittest.TestCase):
                 findings = self._scan("settings.py", "TOKEN=" + key)
                 self.assertFalse(any("OpenAI" in f.title for f in findings))
 
+    def test_detects_scoped_openai_keys_with_long_tails_and_nonword_endings(self):
+        for prefix, size in (("proj", 74), ("svcacct", 74), ("admin", 58)):
+            for extra in (0, 1, 16):
+                for ending in ("Z", "-", "_"):
+                    for delimiter in ("", '"'):
+                        with self.subTest(
+                            prefix=prefix, extra=extra, ending=ending, delimiter=delimiter
+                        ):
+                            key = f"sk-{prefix}-" + "A" * size + "T3BlbkFJ"
+                            key += "B" * (size + extra - 1) + ending
+                            findings = self._scan("settings.py", "TOKEN=" + key + delimiter)
+                            self.assertTrue(any("OpenAI" in f.title for f in findings))
+
     def test_preserves_cofre_and_ignored_directory_exclusions(self):
         secret = "sk-ant-" + "Q7w_" * 12
         for filename in ("auth.json", ".git/.env", ".venv/.env.local", "node_modules/.env"):
@@ -108,6 +121,7 @@ class SecretDetectionTests(unittest.TestCase):
                     self.assertNotIn(secret[-16:], output)
 
     def test_evidence_is_independent_of_all_secrets_and_context_on_same_line(self):
+        """Uma ocorrência por padrão e linha, mesmo com dois segredos do mesmo tipo."""
         first = self._scan("settings.py", "PRIVATE_A=sk-ant-" + "Q7w_" * 12)
         second = self._scan(
             "settings.py", "PRIVATE_B=sk-ant-" + "R9s_" * 12 + "; OTHER=sk-ant-" + "M6n_" * 12
@@ -115,6 +129,60 @@ class SecretDetectionTests(unittest.TestCase):
         self.assertTrue(first)
         self.assertTrue(second)
         self.assertEqual(first, second)
+
+    def test_full_audit_and_cli_with_sast_do_not_republish_secret_line(self):
+        from kairos_cli.handlers import cmd_security
+        from kairos_security import run_full_audit
+
+        secret = "sk-ant-" + "Q7w_" * 12
+        private_context = "PRIVATE_SAST_CONTEXT"
+        content = f'API_KEY = "{secret}"\n'
+        content += f"subprocess.run(cmd, shell=True)  # {secret} {private_context}\n"
+        content += f"try:\n    go()\nexcept Exception:  # {secret} {private_context}\n    pass\n"
+        (self.root / "settings.py").write_text(content, encoding="utf-8")
+
+        report = run_full_audit(self.root, source_root=self.root)
+        finding_ids = {finding.id for finding in report.findings}
+        expected_lines = {"SEC-SRC-002": 1, "SEC-SRC-004": 2, "SEC-SRC-011": 5}
+        self.assertTrue({"SEC-SECRET-001", *expected_lines} <= finding_ids)
+        for finding in report.findings:
+            if finding.id in expected_lines:
+                self.assertEqual(finding.line_number, expected_lines[finding.id])
+                self.assertEqual(finding.file_path, "settings.py")
+
+        outputs = {
+            "json": format_json_report(report),
+            "texto": format_cli_summary(report),
+            "dataclass": json.dumps([dataclasses.asdict(f) for f in report.findings]),
+            "repr": repr(report.findings),
+        }
+        for as_json in (True, False):
+            args = argparse.Namespace(
+                target=str(self.root),
+                source=str(self.root),
+                no_source=False,
+                json=as_json,
+                fail_on="high",
+            )
+            rendered = io.StringIO()
+            with redirect_stdout(rendered):
+                status = cmd_security(args)
+            self.assertEqual(status, 1)
+            output = rendered.getvalue()
+            if as_json:
+                cli_ids = {f["id"] for f in json.loads(output)["findings"]}
+                self.assertTrue(expected_lines.keys() <= cli_ids)
+            else:
+                for finding_id in expected_lines:
+                    self.assertIn(finding_id, output)
+            outputs[f"cli_json={as_json}"] = output
+
+        for channel, output in outputs.items():
+            with self.subTest(channel=channel):
+                self.assertNotIn(secret, output)
+                self.assertNotIn(secret[:16], output)
+                self.assertNotIn(secret[-16:], output)
+                self.assertNotIn(private_context, output)
 
     def test_cli_audits_only_synthetic_target_and_returns_redacted_findings(self):
         from kairos_cli.handlers import cmd_security

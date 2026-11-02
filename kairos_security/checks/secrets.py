@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from kairos_security.checks import OMITTED_LINE_EVIDENCE
 from kairos_security.models import Category, Finding, Severity
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern, Severity], ...] = (
@@ -14,7 +15,7 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern, Severity], ...] = (
             r"\b(?:sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}"
             r"|sk-(?:proj|svcacct|admin)-"
             r"(?:[a-zA-Z0-9_-]{74}|[a-zA-Z0-9_-]{58})T3BlbkFJ"
-            r"(?:[a-zA-Z0-9_-]{74}|[a-zA-Z0-9_-]{58}))\b"
+            r"[a-zA-Z0-9_-]{58,})(?![a-zA-Z0-9_-])"
         ),
         Severity.CRITICAL,
     ),
@@ -65,7 +66,7 @@ def check_hardcoded_secrets(code_root: Path) -> list[Finding]:
                                 file_path=str(path),
                                 line_number=line_idx,
                                 remediation="Mova a chave para variáveis de ambiente ou utilize `kairos auth`.",
-                                evidence="Conteúdo da linha omitido por conter segredo.",
+                                evidence=OMITTED_LINE_EVIDENCE,
                             )
                         )
         except Exception:  # noqa: BLE001, S112
