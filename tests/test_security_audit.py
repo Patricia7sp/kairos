@@ -68,7 +68,8 @@ class SecurityAuditTests(unittest.TestCase):
         self.assertEqual(report.counts_by_severity["high"], 1)
 
     def test_formatters(self):
-        report = run_full_audit(Path.cwd())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = run_full_audit(Path(tmpdir), scan_source=False)
         cli_out = format_cli_summary(report)
         self.assertIn("KAIROS SECURITY AUDIT REPORT", cli_out)
         self.assertIn("Security Score:", cli_out)
@@ -179,13 +180,18 @@ class SourceRootDiscoveryTests(unittest.TestCase):
         self.assertTrue((root / "pyproject.toml").is_file())
 
     def test_audit_reports_the_source_root_it_used(self):
-        report = run_full_audit(Path.cwd())
-        self.assertIsNotNone(report.source_root)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source"
+            source.mkdir()
+            report = run_full_audit(root, source_root=source)
+            self.assertEqual(str(source), report.source_root)
         self.assertIn("Código-fonte:", format_cli_summary(report))
         self.assertIn('"source_root":', format_json_report(report))
 
     def test_no_source_flag_skips_the_code_scan(self):
-        report = run_full_audit(Path.cwd(), scan_source=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = run_full_audit(Path(tmpdir), scan_source=False)
         self.assertIsNone(report.source_root)
         self.assertEqual([], [f for f in report.findings if f.category == Category.SOURCE_CODE])
 
