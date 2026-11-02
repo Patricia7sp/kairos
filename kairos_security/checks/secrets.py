@@ -5,12 +5,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from kairos_security.checks import OMITTED_LINE_EVIDENCE
 from kairos_security.models import Category, Finding, Severity
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern, Severity], ...] = (
     (
         "OpenAI API Key",
-        re.compile(r"sk-[a-zA-Z0-9]{20,T3BlbkFJ[a-zA-Z0-9]{20,}"),
+        re.compile(
+            r"\b(?:sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}"
+            r"|sk-(?:proj|svcacct|admin)-"
+            r"(?:[a-zA-Z0-9_-]{74}|[a-zA-Z0-9_-]{58})T3BlbkFJ"
+            r"[a-zA-Z0-9_-]{58,})(?![a-zA-Z0-9_-])"
+        ),
         Severity.CRITICAL,
     ),
     ("Anthropic API Key", re.compile(r"sk-ant-[a-zA-Z0-9_-]{30,}"), Severity.CRITICAL),
@@ -26,14 +32,12 @@ def check_hardcoded_secrets(code_root: Path) -> list[Finding]:
     for path in code_root.rglob("*"):
         if any(ignored in path.parts for ignored in ignore_dirs):
             continue
-        if not path.is_file() or path.suffix not in (
-            ".py",
-            ".json",
-            ".yaml",
-            ".yml",
-            ".ts",
-            ".js",
-            ".env",
+        if not path.is_file():
+            continue
+        if (
+            path.name != ".env"
+            and not path.name.startswith(".env.")
+            and path.suffix not in (".py", ".json", ".yaml", ".yml", ".ts", ".js", ".env")
         ):
             continue
         if path.name == "auth.json":
@@ -62,7 +66,7 @@ def check_hardcoded_secrets(code_root: Path) -> list[Finding]:
                                 file_path=str(path),
                                 line_number=line_idx,
                                 remediation="Mova a chave para variáveis de ambiente ou utilize `kairos auth`.",
-                                evidence=line[:50] + "...",
+                                evidence=OMITTED_LINE_EVIDENCE,
                             )
                         )
         except Exception:  # noqa: BLE001, S112

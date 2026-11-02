@@ -1,0 +1,209 @@
+"""Regressões do detector real com segredos exclusivamente sintéticos."""
+
+import argparse
+import dataclasses
+import io
+import json
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+
+from kairos_security import SecurityReport, Severity, format_cli_summary, format_json_report
+from kairos_security.checks.secrets import check_hardcoded_secrets
+
+
+class SecretDetectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="kairos-secrets-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+
+    def _scan(self, filename, content):
+        path = self.root / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return check_hardcoded_secrets(self.root)
+
+    def test_detects_env_names_without_relying_on_suffix(self):
+        secret = "sk-ant-" + "Q7w_" * 12
+        for filename in (".env", ".env.local", ".env.production", ".env.production.local"):
+            with self.subTest(filename=filename):
+                findings = self._scan(filename, "TOKEN=" + secret)
+                self.assertTrue(any(f.file_path == str(self.root / filename) for f in findings))
+                (self.root / filename).unlink()
+
+    def test_preserves_detection_for_supported_extensions(self):
+        secret = "sk-ant-" + "Q7w_" * 12
+        for filename in ("settings.py", "settings.json", "service.env"):
+            with self.subTest(filename=filename):
+                findings = self._scan(filename, "TOKEN=" + secret)
+                self.assertTrue(any(f.file_path == str(self.root / filename) for f in findings))
+                (self.root / filename).unlink()
+
+    def test_detects_legacy_and_scoped_openai_formats(self):
+        keys = (
+            "sk-" + "A7" * 10 + "T3BlbkFJ" + "B9" * 10,
+            "sk-proj-" + "Q7w_" * 18 + "A2" + "T3BlbkFJ" + "R9s-" * 18 + "B3",
+            "sk-svcacct-" + "Q7w_" * 18 + "A2" + "T3BlbkFJ" + "R9s-" * 18 + "B3",
+            "sk-admin-" + "Q7w_" * 14 + "A2" + "T3BlbkFJ" + "R9s-" * 14 + "B3",
+        )
+        for key in keys:
+            with self.subTest(prefix=key.split("-")[1] if key.count("-") > 1 else "legacy"):
+                findings = self._scan("settings.py", "\nTOKEN=" + key + "\n")
+                self.assertTrue(any("OpenAI" in f.title for f in findings))
+                self.assertTrue(all(f.severity == Severity.CRITICAL for f in findings))
+                self.assertTrue(all(f.line_number == 2 for f in findings))
+
+    def test_does_not_label_anthropic_or_malformed_tokens_as_openai(self):
+        keys = (
+            "sk-ant-" + "Q7w_" * 12,
+            "sk-" + "A7" * 24,
+            "sk-proj-short",
+            "sk-" + "A7" * 10 + "T3BlbkFJ" + "B9",
+        )
+        for key in keys:
+            with self.subTest(prefix=key[:12]):
+                findings = self._scan("settings.py", "TOKEN=" + key)
+                self.assertFalse(any("OpenAI" in f.title for f in findings))
+
+    def test_detects_scoped_openai_keys_with_long_tails_and_nonword_endings(self):
+        for prefix, size in (("proj", 74), ("svcacct", 74), ("admin", 58)):
+            for extra in (0, 1, 16):
+                for ending in ("Z", "-", "_"):
+                    for delimiter in ("", '"'):
+                        with self.subTest(
+                            prefix=prefix, extra=extra, ending=ending, delimiter=delimiter
+                        ):
+                            key = f"sk-{prefix}-" + "A" * size + "T3BlbkFJ"
+                            key += "B" * (size + extra - 1) + ending
+                            findings = self._scan("settings.py", "TOKEN=" + key + delimiter)
+                            self.assertTrue(any("OpenAI" in f.title for f in findings))
+
+    def test_preserves_cofre_and_ignored_directory_exclusions(self):
+        secret = "sk-ant-" + "Q7w_" * 12
+        for filename in ("auth.json", ".git/.env", ".venv/.env.local", "node_modules/.env"):
+            with self.subTest(filename=filename):
+                findings = self._scan(filename, "TOKEN=" + secret)
+                self.assertFalse(any(f.file_path == str(self.root / filename) for f in findings))
+
+    def test_does_not_expand_to_unrelated_dotfiles(self):
+        secret = "sk-ant-" + "Q7w_" * 12
+        findings = self._scan(".envrc", "TOKEN=" + secret)
+        self.assertFalse(findings)
+
+    def test_evidence_and_serialized_outputs_omit_secret_and_line_context(self):
+        secrets = (
+            "sk-" + "A7" * 10 + "T3BlbkFJ" + "B9" * 10,
+            "sk-proj-" + "Q7w_" * 18 + "A2" + "T3BlbkFJ" + "R9s-" * 18 + "B3",
+            "sk-ant-" + "Q7w_" * 12,
+            "AIzaSy" + "A7q_" * 8 + "B",
+            "Bearer " + "B9r_" * 10,
+        )
+        for secret in secrets:
+            with self.subTest(prefix=secret[:12]):
+                context = "PRIVATE_LINE_CONTEXT"
+                findings = self._scan("settings.py", context + "=" + secret)
+                self.assertTrue(findings)
+                report = SecurityReport(target=str(self.root), findings=findings)
+                outputs = (
+                    format_json_report(report),
+                    format_cli_summary(report),
+                    json.dumps([dataclasses.asdict(f) for f in findings]),
+                    repr(findings),
+                )
+                for finding in findings:
+                    self.assertTrue(finding.evidence)
+                for output in outputs:
+                    self.assertNotIn(context, output)
+                    self.assertNotIn(secret, output)
+                    self.assertNotIn(secret[:16], output)
+                    self.assertNotIn(secret[-16:], output)
+
+    def test_evidence_is_independent_of_all_secrets_and_context_on_same_line(self):
+        """Uma ocorrência por padrão e linha, mesmo com dois segredos do mesmo tipo."""
+        first = self._scan("settings.py", "PRIVATE_A=sk-ant-" + "Q7w_" * 12)
+        second = self._scan(
+            "settings.py", "PRIVATE_B=sk-ant-" + "R9s_" * 12 + "; OTHER=sk-ant-" + "M6n_" * 12
+        )
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertEqual(first, second)
+
+    def test_full_audit_and_cli_with_sast_do_not_republish_secret_line(self):
+        from kairos_cli.handlers import cmd_security
+        from kairos_security import run_full_audit
+
+        secret = "sk-ant-" + "Q7w_" * 12
+        private_context = "PRIVATE_SAST_CONTEXT"
+        content = f'API_KEY = "{secret}"\n'
+        content += f"subprocess.run(cmd, shell=True)  # {secret} {private_context}\n"
+        content += f"try:\n    go()\nexcept Exception:  # {secret} {private_context}\n    pass\n"
+        (self.root / "settings.py").write_text(content, encoding="utf-8")
+
+        report = run_full_audit(self.root, source_root=self.root)
+        finding_ids = {finding.id for finding in report.findings}
+        expected_lines = {"SEC-SRC-002": 1, "SEC-SRC-004": 2, "SEC-SRC-011": 5}
+        self.assertTrue({"SEC-SECRET-001", *expected_lines} <= finding_ids)
+        for finding in report.findings:
+            if finding.id in expected_lines:
+                self.assertEqual(finding.line_number, expected_lines[finding.id])
+                self.assertEqual(finding.file_path, "settings.py")
+
+        outputs = {
+            "json": format_json_report(report),
+            "texto": format_cli_summary(report),
+            "dataclass": json.dumps([dataclasses.asdict(f) for f in report.findings]),
+            "repr": repr(report.findings),
+        }
+        for as_json in (True, False):
+            args = argparse.Namespace(
+                target=str(self.root),
+                source=str(self.root),
+                no_source=False,
+                json=as_json,
+                fail_on="high",
+            )
+            rendered = io.StringIO()
+            with redirect_stdout(rendered):
+                status = cmd_security(args)
+            self.assertEqual(status, 1)
+            output = rendered.getvalue()
+            if as_json:
+                cli_ids = {f["id"] for f in json.loads(output)["findings"]}
+                self.assertTrue(expected_lines.keys() <= cli_ids)
+            else:
+                for finding_id in expected_lines:
+                    self.assertIn(finding_id, output)
+            outputs[f"cli_json={as_json}"] = output
+
+        for channel, output in outputs.items():
+            with self.subTest(channel=channel):
+                self.assertNotIn(secret, output)
+                self.assertNotIn(secret[:16], output)
+                self.assertNotIn(secret[-16:], output)
+                self.assertNotIn(private_context, output)
+
+    def test_cli_audits_only_synthetic_target_and_returns_redacted_findings(self):
+        from kairos_cli.handlers import cmd_security
+
+        secret = "sk-ant-" + "Q7w_" * 12
+        (self.root / ".env").write_text("PRIVATE_CLI_CONTEXT=" + secret, encoding="utf-8")
+        for as_json in (True, False):
+            with self.subTest(as_json=as_json):
+                args = argparse.Namespace(
+                    target=str(self.root), source=None, no_source=True, json=as_json, fail_on="high"
+                )
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    status = cmd_security(args)
+                rendered = output.getvalue()
+                self.assertNotEqual(status, 0)
+                self.assertNotIn(secret, rendered)
+                self.assertNotIn(secret[:16], rendered)
+                self.assertNotIn("PRIVATE_CLI_CONTEXT", rendered)
+                if as_json:
+                    findings = json.loads(rendered)["findings"]
+                    self.assertTrue(any(f["id"] == "SEC-SECRET-001" for f in findings))
+                else:
+                    self.assertIn("SEC-SECRET-001", rendered)

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairos_security.checks import OMITTED_LINE_EVIDENCE
 from kairos_security.models import Category, Finding, Severity
 
 # Diretórios que nunca são código-fonte auditável deste projeto.
@@ -297,7 +298,7 @@ def scan_source_tree(source_root: Path) -> list[Finding]:
                         file_path=shown,
                         line_number=idx,
                         remediation="Registre com `logger.warning` antes de degradar.",
-                        evidence=line.strip()[:120],
+                        evidence=OMITTED_LINE_EVIDENCE,
                     )
                 )
 
@@ -317,7 +318,7 @@ def scan_source_tree(source_root: Path) -> list[Finding]:
                             file_path=shown,
                             line_number=idx,
                             remediation=rule.remediation,
-                            evidence=line.strip()[:120],
+                            evidence=OMITTED_LINE_EVIDENCE,
                         )
                     )
 
