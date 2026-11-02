@@ -253,9 +253,10 @@ async def test_active_recovery_adopts_fenced_lease_and_streams_without_resend(tm
         await next_service.aclose()
 
 
+@pytest.mark.parametrize("store_delay", [0, 0.03], ids=["immediate", "delayed-store"])
 @async_test
 async def test_active_inspection_then_terminal_attachment_snapshot_finalizes_without_notification(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, store_delay
 ):
     service, store, _runtime = await setup_service(tmp_path)
     turn = await service.submit("s1", "hello", "key")
@@ -263,6 +264,24 @@ async def test_active_inspection_then_terminal_attachment_snapshot_finalizes_wit
         if event.kind == "turn_start":
             break
     await service.aclose()
+    before = await store.get_turn(turn)
+    subscriber_caught_up = asyncio.Event()
+    call = store._call
+    events_after = store.events_after
+
+    async def delayed_call(operation):
+        # Exercita agendamento lento mantendo a operação SQLite real.
+        await asyncio.sleep(store_delay)
+        return await call(operation)
+
+    async def observed_events_after(session_id, cursor):
+        events = await events_after(session_id, cursor)
+        if cursor is not None and not events:
+            subscriber_caught_up.set()
+        return events
+
+    monkeypatch.setattr(store, "_call", delayed_call)
+    monkeypatch.setattr(store, "events_after", observed_events_after)
     recovered = FakeRuntime()
     recovered.generation = "process-2"
     recovered.snapshot = RuntimeObservation("active", "external-1", (), ())
@@ -275,6 +294,7 @@ async def test_active_inspection_then_terminal_attachment_snapshot_finalizes_wit
 
     async def completed_attach(session, turn_id, external_turn_id):
         assert external_turn_id == "external-1"
+        await subscriber_caught_up.wait()
         await recovered.events.put(
             {"kind": "text", "payload": {"itemId": "i1", "delta": "completed"}}
         )
@@ -291,14 +311,19 @@ async def test_active_inspection_then_terminal_attachment_snapshot_finalizes_wit
         inactivity_confirmed=lambda generation: generation == "process-1",
     )
     try:
-        await next_service.recover()
-        async with asyncio.timeout(0.3):
+        # Watchdog de travamento; recuperação envolve várias operações de I/O.
+        async with asyncio.timeout(3):
+            await next_service.recover()
             async for event in next_service.subscribe("s1"):
                 if event.kind == "turn_end" and event.payload["state"] == "completed":
                     assert event.payload["content"] == "completed while attaching"
                     break
             await asyncio.gather(*tuple(next_service._tasks.values()))
-        assert (await store.get_turn(turn))["inactive_confirmed_at"] is not None
+        after = await store.get_turn(turn)
+        assert after["state"] == "completed"
+        assert after["lease_generation"] > before["lease_generation"]
+        assert after["send_state"] == "confirmed"
+        assert after["inactive_confirmed_at"] is not None
         assert (await next_service.get("s1"))["state"] == "ready"
         assert recovered.starts == []
         events = await store.events_after("s1", None)
