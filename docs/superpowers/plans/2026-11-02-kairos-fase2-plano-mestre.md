@@ -14,6 +14,8 @@ Estado: recomendações documentais incorporadas em 02/11/2026; **E4 — Priorid
 
 Retomada após H0: a usuária autorizou seguir os próximos passos depois do merge/deploy da #131 (`c6a083f`). A preparação E0 está registrada no [baseline por SHA](../reports/2026-11-02-fase2-baseline.md), na [matriz de plataforma e protocolo](../reports/2026-11-02-fase2-plataforma.md) e no [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md). E0.1/E0.4 passaram por revisão independente documental e aguardam revisão da usuária; acesso/medições do Mac e aceite do gate E0 continuam pendentes. Isso não habilita I1/E4 ou as extensões.
 
+Atualização de 03/11/2026: a usuária enviou a identificação inicial do Mac por coleta local (macOS `26.7.2`, Intel x86_64, 16 GiB, Docker CLI `28.1.1`, contexto `desktop-linux`). As consultas ao daemon falharam; os campos vazios/zero não são capacidades observadas. Versão do aplicativo Desktop, Engine/VM, controles e medições seguem pendentes na matriz. O gate E0 permanece aberto.
+
 ## Escopo e sequência prioritária
 
 **Fase 2 mínima: E0 + E1 + E2 de leitura + E4. E4 tem Prioridade Alta.** A ordem de preparação é H0 separado → E0 → I1 reordenado → demais contratos/integrações de E1 → E4; E2 de leitura pode avançar em paralelo com E4 assim que suas fontes estiverem disponíveis. E4 não espera E2 visual nem E3. H0 é antecipável por ser correção limitada de defeitos existentes, sem alterar o gate do destino.

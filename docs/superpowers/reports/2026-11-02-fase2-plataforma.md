@@ -2,7 +2,25 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: gate do destino pendente.** Mac Intel com 16 GB é o destino informado no plano, não hardware observado nesta sessão. A forma de acesso foi solicitada à usuária; nenhuma conexão remota foi presumida.
+**Resultado atual: gate do destino pendente.** A identificação inicial do Mac foi recebida por coleta manual em 03/11/2026. O daemon Docker não estava acessível nessa coleta; isolamento e medições continuam pendentes. Nenhuma conexão remota foi utilizada.
+
+## Coleta manual recebida do Mac em 03/11/2026
+
+Origem: comandos de leitura executados pela usuária no Terminal do Mac, com resultados enviados nesta conversa. Não é execução remota nem atestação independente do hardware. Horário informado por `date -u`: `2026-11-03T01:26:32Z`.
+
+| Campo | Resultado informado | Interpretação |
+| --- | --- | --- |
+| macOS (`sw_vers -productVersion`) | `26.7.2` | Identificação inicial; compatibilidade do produto ainda não testada. |
+| Arquitetura (`uname -m`) | `x86_64` | Compatível com o destino Intel previsto no plano. |
+| CPU | `Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz` | Modelo informado; quantidade de CPUs alocadas ao Docker ainda desconhecida. |
+| Memória física (`hw.memsize`) | `17179869184` bytes, 16 GiB | Corresponde à capacidade de RAM prevista; não indica orçamento disponível para a VM. |
+| Contexto Docker | `desktop-linux` | Nome do contexto selecionado; não prova que a VM/engine esteja funcionando. |
+| Docker CLI | `28.1.1` | Versão do cliente; não é versão observada do Engine nem do aplicativo Docker Desktop. |
+| Docker Server / info | `Cannot connect to the Docker daemon` no socket do usuário `$HOME/.docker/run/docker.sock` | Daemon inacessível nessa tentativa; não atribuir causa definitiva sem verificar o aplicativo. |
+
+Os campos vazios, `cpus: 0`, `memory_bytes: 0` e `security_options: null` foram impressos junto da falha de conexão. São dados inválidos para a matriz de capacidades, não recursos reais do daemon. Os códigos numéricos de saída de cada comando não foram enviados; há erro explícito nas duas consultas ao servidor.
+
+Pendências desta coleta: versão do aplicativo Docker Desktop, Engine/kernel da VM, CPU/RAM/swap/disco configurados e controles efetivamente observados. O próximo passo é iniciar/verificar o aplicativo Docker Desktop no Mac e repetir as consultas quando o Engine estiver pronto. Essa ação de inicialização é distinta dos comandos de leitura; não envolve instalação ou alteração de política nesta orientação.
 
 ## Observações Linux de desenvolvimento
 
@@ -26,8 +44,8 @@ Os valores de memória descrevem o ambiente visível e o daemon. Não provam RAM
 | Linux / aplicação e regressões | CI por SHA, integração de imagem, filesystem e smoke; ver [baseline](2026-11-02-fase2-baseline.md) | Demonstrado no escopo desses testes; não encerra plataforma destino. |
 | Linux / worker externo offline | Testes reais de sessões Docker com opt-in e atestação no caminho do worker | Demonstrado para os cenários executados; não equivale a qualquer perfil de scanner ou egress. |
 | Linux / sandbox interna opt-in | Código e testes condicionais existentes; opt-in interno não executado nesta retomada | Não aprovado por estes resultados. |
-| macOS nativo / filesystem e host | Nenhuma coleta no destino | Indisponível como evidência; não aprovar suporte nativo. |
-| Docker Desktop no Mac / backend Linux | Nenhuma versão, configuração ou inspeção real coletada | Pendente. A existência de VM Linux não prova as propriedades exigidas. |
+| macOS nativo / filesystem e host | Identificação manual de macOS/Intel/RAM recebida; primitivas e runtime não executados | Evidência inicial parcial; suporte nativo não aprovado. |
+| Docker Desktop no Mac / backend Linux | Contexto e CLI identificados; conexão ao daemon falhou; versão do Desktop e configuração não fornecidas | Daemon indisponível nessa coleta. Recursos, isolamento e compatibilidade permanecem pendentes. |
 | Perfis futuros de scanner/delegação | Contratos ainda dependem de E1/E4 | Não habilitados. |
 | Executor Linux separado | Há ambiente de desenvolvimento observado, mas nenhuma decisão de substituir o destino do plano | Não adotado como alternativa ao Mac. |
 

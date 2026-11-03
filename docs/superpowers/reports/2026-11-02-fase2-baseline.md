@@ -74,13 +74,13 @@ Classificação: **demonstrada** significa comportamento delimitado exercitado n
 | Voz integrada — ausente no escopo inspecionado | Referências a modelos de transcrição em adapters não formam pipeline STT/TTS da sessão | Nenhum aceite VOZ-01–VOZ-07 foi demonstrado | E3 opcional; não bloqueia E4 e não justifica escolher provider agora. |
 | Detecção de intrusão — ausente no contrato pretendido | Journals/monitores genéricos fornecem insumos, não detector de ataques | Não há evidência de detector operacional com regras/correlação cobrindo a SPEC | E1 deve declarar cobertura; Trilha S é autorização posterior, não pentest implícito. |
 | Compartilhamento — parcial, operador único | [token de sessão e tickets](../../../kairos_web/server.py); peer/arquivos privados no runtime | [SessionTokenTests](../../../tests/test_web.py), [segurança runtime](../../../tests/test_runtime_security.py) | Não demonstra identidade multiusuário e ACL por recurso/projeto; E6 ou instâncias separadas por decisão própria. |
-| Mac/E0.2 e benchmark/E0.3 — indisponíveis nesta coleta | [Matriz e protocolo](2026-11-02-fase2-plataforma.md) | Nenhuma execução no Mac nem amostra autenticada/renderizada | Acesso ao destino e fechamento do protocolo de medição pendentes; E0 não está concluído. |
+| Mac/E0.2 — evidência inicial parcial; benchmark/E0.3 pendente | [Matriz e protocolo](2026-11-02-fase2-plataforma.md), atualizados com coleta manual da usuária em 03/11 | Identificação de macOS/Intel/16 GiB e CLI; consultas ao daemon falharam; nenhuma amostra autenticada/renderizada | Engine/Desktop, controles e medições pendentes; E0 não está concluído. |
 
 O inventário é delimitado aos módulos/consumidores citados e ao delta por SHA. Uma busca por nomes conceituais não é prova isolada de ausência: a classificação considera os serviços e caminhos de execução existentes; se surgir implementação equivalente, ela precisa de vínculo e teste antes de mudar a classe.
 
 ## Lacunas que delimitam a próxima implementação
 
-1. E0.2/E0.3 dependem de evidência do destino. O Linux observado não substitui o Mac especificado.
+1. E0.2/E0.3 dependem de evidência do destino. A coleta manual de 03/11 identifica o Mac, mas não alcança o daemon Docker; o Linux observado não substitui os controles e medições ainda pendentes no destino.
 2. O [modelo de ameaças E0.4](../specs/2026-11-02-fase2-threat-model.md) separa proteção atual de controle exigido. Sua revisão é pré-requisito de E1.4a; não implementa autorização.
 3. `SO_PEERCRED` ausente faz `_check_peer` retornar sem executar a verificação do UID. Isso deve constar do design de portabilidade; permissões do socket não são evidência suficiente de uma verificação equivalente.
 4. `sanitize_payload` usa allowlists estruturais, mas preserva conteúdo textual/JSON permitido. H0 não transforma esse mecanismo num removedor global de segredos.
@@ -90,7 +90,7 @@ O inventário é delimitado aos módulos/consumidores citados e ao delta por SHA
 
 - E0.1: relatório elaborado e revisado independentemente; pronto para revisão da usuária.
 - E0.4: modelo elaborado e revisado como design; pronto para revisão da usuária, sem autorização de coleta nem atestado de eficácia.
-- E0.2/E0.3: pendentes de acesso ao destino, protocolo de medição e execução real.
+- E0.2: identificação manual do Mac recebida em 03/11; Engine/Desktop e validação dos controles pendentes. E0.3: protocolo de medição e execução real pendentes.
 - Gate E0 e habilitação de I1: **pendentes**. E4 mantém Prioridade Alta depois de suas dependências; E3 continua opcional.
 
 Revisão documental independente em 02/11/2026: GPT-6 Luna/high, contexto isolado e somente leitura; sem achados Critical/Important/Minor materiais nem pergunta nova necessária. Conferiu os quatro documentos e afirmações relevantes contra o código/contratos citados, sem executar testes ou atestar o destino. O aceite do gate E0 não foi concedido por essa revisão.
