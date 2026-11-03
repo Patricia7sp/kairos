@@ -2,7 +2,7 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: gate do destino pendente.** A identificação inicial do Mac foi recebida por coleta manual em 03/11/2026. O daemon Docker não estava acessível nessa coleta; isolamento e medições continuam pendentes. Nenhuma conexão remota foi utilizada.
+**Resultado atual: gate do destino pendente.** A identificação inicial e uma segunda consulta bem-sucedida ao Docker foram recebidas por coleta manual em 03/11/2026. Engine e recursos da VM estão identificados; os controles exigidos pelo worker e as medições continuam pendentes. Nenhuma conexão remota foi utilizada.
 
 ## Coleta manual recebida do Mac em 03/11/2026
 
@@ -21,6 +21,22 @@ Origem: comandos de leitura executados pela usuária no Terminal do Mac, com res
 Os campos vazios, `cpus: 0`, `memory_bytes: 0` e `security_options: null` foram impressos junto da falha de conexão. São dados inválidos para a matriz de capacidades, não recursos reais do daemon. Os códigos numéricos de saída de cada comando não foram enviados; há erro explícito nas duas consultas ao servidor.
 
 Pendências desta coleta: versão do aplicativo Docker Desktop, Engine/kernel da VM, CPU/RAM/swap/disco configurados e controles efetivamente observados. O próximo passo é iniciar/verificar o aplicativo Docker Desktop no Mac e repetir as consultas quando o Engine estiver pronto. Essa ação de inicialização é distinta dos comandos de leitura; não envolve instalação ou alteração de política nesta orientação.
+
+### Segunda consulta: daemon acessível
+
+A usuária enviou depois a saída de `docker version` e do `docker info` filtrado, sem novo timestamp nem códigos numéricos de saída. Esta observação posterior resolve a indisponibilidade inicial, preservada acima como histórico; não houve criação ou inspeção de worker.
+
+| Campo | Resultado informado |
+| --- | --- |
+| Docker Desktop | `4.41.2 (191736)` |
+| Cliente / Engine | `28.1.1` / `28.1.1`, API `1.49`; cliente darwin/amd64, servidor linux/amd64 |
+| VM Linux | Docker Desktop, kernel `6.10.14-linuxkit`, x86_64 |
+| Recursos declarados pelo daemon | 12 CPUs lógicas; `8219107328` bytes de memória, aproximadamente 7,65 GiB; cgroup v2 |
+| SecurityOptions | `name=seccomp,profile=unconfined`; `name=cgroupns`; AppArmor não listado |
+
+As 12 CPUs são CPUs lógicas expostas à VM, não contagem de núcleos físicos. A memória declarada pelo daemon não equivale à RAM física de 16 GiB nem comprova o valor configurado no painel. Ainda faltam os limites configurados de CPU/RAM/swap/disco e as medições sob carga.
+
+Há uma lacuna concreta de isolamento a resolver: o daemon não declara AppArmor e informa seccomp com perfil `unconfined`. O [contrato atual do worker](../../../kairos_runtime/experimental/worker_policy.py) exige `AppArmorProfile` igual a `docker-default` ou `kairos-worker-runtime`, conforme o modo; no modo sandbox também exige o perfil seccomp explícito. A saída administrativa não atesta nenhum container, não prova ausência de suporte a um perfil seccomp explícito e não autoriza afirmar equivalência. O perfil worker permanece não aprovado neste backend até teste real e eventual design equivalente revisado. Não remover essas exigências para aceitar o destino. Referências: [AppArmor no Docker](https://docs.docker.com/engine/security/apparmor/) e [seccomp no Docker](https://docs.docker.com/engine/security/seccomp/).
 
 ## Observações Linux de desenvolvimento
 
@@ -45,7 +61,7 @@ Os valores de memória descrevem o ambiente visível e o daemon. Não provam RAM
 | Linux / worker externo offline | Testes reais de sessões Docker com opt-in e atestação no caminho do worker | Demonstrado para os cenários executados; não equivale a qualquer perfil de scanner ou egress. |
 | Linux / sandbox interna opt-in | Código e testes condicionais existentes; opt-in interno não executado nesta retomada | Não aprovado por estes resultados. |
 | macOS nativo / filesystem e host | Identificação manual de macOS/Intel/RAM recebida; primitivas e runtime não executados | Evidência inicial parcial; suporte nativo não aprovado. |
-| Docker Desktop no Mac / backend Linux | Contexto e CLI identificados; conexão ao daemon falhou; versão do Desktop e configuração não fornecidas | Daemon indisponível nessa coleta. Recursos, isolamento e compatibilidade permanecem pendentes. |
+| Docker Desktop no Mac / backend Linux | Segunda consulta identifica Desktop 4.41.2, Engine 28.1.1, LinuxKit, 12 CPUs e cerca de 7,65 GiB; AppArmor não listado, seccomp declarado unconfined | Daemon acessível; lacuna em relação ao contrato do worker. Isolamento real, configuração e compatibilidade permanecem pendentes. |
 | Perfis futuros de scanner/delegação | Contratos ainda dependem de E1/E4 | Não habilitados. |
 | Executor Linux separado | Há ambiente de desenvolvimento observado, mas nenhuma decisão de substituir o destino do plano | Não adotado como alternativa ao Mac. |
 
