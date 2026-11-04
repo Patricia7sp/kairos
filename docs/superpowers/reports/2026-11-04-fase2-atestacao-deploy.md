@@ -43,9 +43,19 @@ SHA256 do manifesto esperado e dos dois manifestos observados: `9da24d53220ae747
 
 - Docker publica `9119/tcp` de Kairos somente em `100.87.25.101:9119`. O broker não publica essa porta no host.
 - Tailscale local: BackendState Running, Self online; IP de tailnet coincide com o bind. Consulta de Serve indica HTTPS na porta 443, rota `/` encaminhada para `http://127.0.0.1:8090`, Funnel false. Essa configuração não aponta para a porta 9119 do Kairos e não demonstra TLS no seu acesso.
-- O endereço HTTP usado nas sondas do servidor é `http://100.87.25.101:9119`. A URL realmente aberta no navegador do Mac foi solicitada e continua pendente; outro proxy/caminho não foi descartado. Não alterar Serve para atender Kairos como consequência da coleta.
+- A usuária confirmou a URL efetiva: `http://100.87.25.101:9119/models#/registros`. O acesso escolhido usa HTTP direto na porta 9119, sem TLS de aplicação nesse caminho. O fragmento `#/registros` fica no navegador; o servidor recebe `/models`. Não alterar Serve para atender Kairos como consequência da coleta.
 
-Tailscale documenta criptografia entre nós e distingue essa camada do HTTPS reconhecido pelo navegador ([HTTPS no tailnet](https://tailscale.com/docs/how-to/set-up-https-certificates)). Isso não comprova qual caminho o Mac usa, ACL efetiva, sessão segura no navegador ou equivalência de HTTP e HTTPS. A rota TLS/terminação do acesso escolhido precisa ser identificada e validada no caminho real.
+Tailscale documenta criptografia entre nós e distingue essa camada do HTTPS reconhecido pelo navegador ([HTTPS no tailnet](https://tailscale.com/docs/how-to/set-up-https-certificates)). A URL esclarece o caminho, mas não comprova ACL efetiva, sessão segura no navegador ou equivalência de HTTP e HTTPS. Não há terminador TLS do Kairos identificado nesse acesso; validar e aceitar explicitamente o transporte efetivo, sem chamá-lo de HTTPS.
+
+GET público de `/models`: HTTP 200, `text/html; charset=utf-8`, HTML carrega `/ui/js/app.js`, SHA256 `5c4aab6a0c703407b9df3f447e4149a23c37bfdc9ffdeba7122980cb7c19f216`. O [shell servido](../../../kairos_web/ui/js/app.js) usa hash e inclui a rota `registros`; não é necessário confundir esse caminho com um frontend React diferente. Isso identifica o frontend, não prova renderização autenticada no Mac.
+
+## Imagem worker efetiva da stack
+
+O container mantenedor `kairos-runtime-worker-image` referencia o ID imutável `sha256:05096dbc7992f32719b7f8d97c8d122853a83c631e52c0a6947f82ddfbdb2f0a`, diferente da imagem de teste construída anteriormente. Inspeção: running, usuário `10000:10000`, AppArmor `docker-default`, rede `none`, rootfs somente leitura. `codex --version` retornou `codex-cli 0.154.0`, exit 0, com aviso de que CODEX_HOME não existe no mantenedor; isso não foi tratado como inicialização de sessão bem-sucedida.
+
+O teste existente `test_real_codex_executes_with_standard_docker_isolation` foi repetido usando esse ID como entrada da imagem, via plugin de coleta pytest que substitui apenas a constante IMAGE do módulo, sem modificar o teste nem simular Docker/isolamento: **1 passed em 2,01 s**, exit 0. Opt-ins: external=1, runtime_sandbox=0, worker_sandbox=0. O worker criado pelo teste foi descartável, com fixture sintética; nenhum token/provider/modelo pago foi usado. Listagem do label prototype vazia após o teste; Kairos e broker healthy.
+
+Isso vincula o cenário padrão de isolamento à imagem efetivamente mantida pela stack, além do ensaio da imagem recém-construída. Não atesta o perfil sandbox interno, todos os consumidores/configurações de produção ou procedência integral do build.
 
 ## Sondas sem autenticação
 
@@ -56,12 +66,57 @@ GETs no endereço HTTP acima, sem cookies ou tokens; somente status, headers sel
 | `/api/auth/me` | HTTP 200, authenticated false, auth_required true; nenhum Set-Cookie |
 | `/api/config` | HTTP 401, nenhum Set-Cookie |
 | `/api/health` com Origin `https://origin-invalid.example` | HTTP 200, sem Access-Control-Allow-Origin e sem Set-Cookie |
+| WebSockets existentes `/ws/chat`, `/ws/runtime`, `/api/events`, sem credenciais e Origin do próprio Kairos | Handshake recusado com HTTP 403 nos três caminhos |
 
-São verificações pontuais de negação e headers. Ausência de ACAO em health não comprova defesa CSRF/origem de todas as rotas, validação de WebSocket ou sessão autenticada. Login/logout/revogação, reconexão e renderização no Mac não foram exercitados nesta coleta. Não usar CORS como substituto de autenticação/autorização.
+São verificações pontuais de negação e headers. Ausência de ACAO em health não comprova defesa CSRF/origem de todas as rotas; a recusa de WebSocket sem credenciais não comprova sessão válida, origem cruzada autenticada ou reconexão. Uma consulta inicial ao caminho inexistente `/api/runtime/events` também retornou 403 e foi excluída dessa evidência; o endpoint runtime real `/ws/runtime` foi consultado depois. Login/logout/revogação, reconexão e renderização no Mac não foram exercitados nesta coleta. Não usar CORS como substituto de autenticação/autorização.
+
+Foi solicitada uma sonda autenticada com token protegido somente em memória. A revisão automática de aprovação rejeitou o acesso ao segredo por ausência de autorização explícita para lê-lo e usá-lo fora do fluxo normal; a ação não foi executada. Foi oferecida a alternativa de usar a sessão já aberta no navegador. Autenticação e métricas continuam sem resultado até execução por um método autorizado; não reclassificar GETs públicos como teste autenticado.
+
+### Alternativa de coleta no navegador já autenticado
+
+Este bloco pode ser executado pela usuária no Console das ferramentas de desenvolvedor da página aberta no Mac. Faz somente GET de `/api/auth/me` usando o cookie da própria sessão pelo mecanismo normal do navegador. Não lê cookies, storage ou token e não exporta registros privados. Imprime apenas os campos de diagnóstico selecionados; serve como pré-verificação, não como benchmark E0.3.
+
+```javascript
+(async () => {
+  const result = { scope: "e0_browser_preflight", benchmark_executed: false };
+  if (location.origin !== "http://100.87.25.101:9119") {
+    console.log(JSON.stringify({ ...result, state: "error", error: "unexpected_origin" }));
+    return;
+  }
+  Object.assign(result, {
+    protocol: location.protocol,
+    secure_context: globalThis.isSecureContext,
+    user_agent: navigator.userAgent,
+    registros_route: location.hash === "#/registros",
+    logs_view_present: Boolean(document.querySelector("[data-logs-content]")),
+  });
+  try {
+    const response = await fetch("/api/auth/me", {
+      credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000),
+    });
+    result.auth_http_status = response.status;
+    if (!response.ok) {
+      result.state = "error";
+      result.error = "auth_probe_http_error";
+    } else {
+      const auth = await response.json();
+      result.authenticated = auth.authenticated === true;
+      result.auth_required = auth.auth_required === true;
+      result.state = result.authenticated && result.auth_required ? "ready" : "unavailable";
+    }
+  } catch (error) {
+    result.state = "error";
+    result.error = error.name || "probe_failed";
+  }
+  console.log(JSON.stringify(result, null, 2));
+})();
+```
+
+Mesmo com state ready, faltam os controles/ACK persistidos, correlação de evento e amostras renderizadas dos cenários E0.3. Não derivar `controle_local_ms` de GET de autenticação ou de simples atualização de registros. A tela Registros faz leitura via `/api/logs`; não é por si só um controle de aceitação persistido.
 
 ## Pendências do E0
 
 - Vínculo verificável do build/receita/dependências com o artefato promovido e os perfis de produção exigidos.
-- URL efetiva do navegador, transporte/terminação, sessão/origem/reconexão no acesso real, sem expor tokens.
+- URL efetiva identificada; falta validar/aceitar o transporte HTTP sobre tailnet e a sessão/origem/reconexão no acesso real, sem expor tokens.
 - E0.3: amostras autenticadas e renderizadas; metadados junto de `controle_local_ms` devem explicitar navegador–servidor e inclusão de rede. Não produzir percentis a partir destas sondas HTTP ou dos tempos de testes.
 - Aceite dos limites e rito do timebox em 09/11: aceite formal, extensão justificada com nova data ou recusa; vencimento não aprova.
