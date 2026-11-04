@@ -108,6 +108,8 @@ Registrar separadamente a versão do aplicativo Docker Desktop e os limites de C
 
 Essa coleta não instala nada e não comprova isolamento. A etapa seguinte exige o artefato/lock identificados, fixtures sintéticas e criação/atestação de workers conforme o modelo escolhido. O plano detalhado e o design de qualquer adaptação são fechados após conhecer o destino; não há comando autorizado aqui para desativar AppArmor, tornar o container privilegiado ou montar o home.
 
+Retomada autorizada em 04/11: o [protocolo do worker](2026-11-04-fase2-protocolo-worker.md) fixa o artefato, o endpoint real do launcher (`unix:///var/run/docker.sock`), a preparação e um teste existente com fixture sintética. A consulta anterior por contexto não demonstra esse endpoint. Execução no Mac aguarda identificação do checkout local e coleta dos resultados; nenhuma equivalência ou aprovação é inferida do ensaio Linux.
+
 ## Protocolo E0.3 a fechar antes de implementar o coletor
 
 O [plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md) propõe `ControlSample`, `BenchmarkSummary` e `summarize_samples`; nenhum desses tipos é anunciado como implementado nesta entrega. Não foram criados `scripts/benchmark_phase2.py` nem testes fictícios que apenas passem com valores constantes.
