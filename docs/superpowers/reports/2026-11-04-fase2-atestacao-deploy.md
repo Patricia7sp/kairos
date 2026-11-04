@@ -1,6 +1,6 @@
 # E0.2 — evidência parcial de procedência e transporte do deploy
 
-Coleta de leitura em 04/11/2026, após revisão do PR #132 no SHA `7b6346d`. Complementa a [matriz E0](2026-11-02-fase2-plataforma.md). Nenhum rebuild, redeploy, login, modificação de listener ou alteração de credenciais foi realizado. O gate E0 continua pendente.
+Coletas em 04/11/2026, após revisão do PR #132 no SHA `7b6346d`. Complementam a [matriz E0](2026-11-02-fase2-plataforma.md). As primeiras sondas foram sem sessão; após autorização explícita da usuária foram feitos login de teste, consultas de leitura e testes de tickets WebSocket. Nenhum redeploy, logout global, modificação de listener ou alteração de credenciais foi realizado. O gate E0 continua pendente.
 
 ## CI do SHA revisado
 
@@ -39,6 +39,33 @@ SHA256 do manifesto esperado e dos dois manifestos observados: `9da24d53220ae747
 
 **Limite da evidência:** correspondência dos arquivos esperados de aplicação, ampliando os três arquivos do H0 já comparados. Não detecta arquivos adicionais, não verifica dependências instaladas, bibliotecas/binaries gerados, camadas/base, flags/ambiente de build ou cadeia de promoção. Não é atestação integral da imagem nem prova criptográfica de procedência do build. O Dockerfile consultado instala com pip editável e não copia `uv.lock`; não inferir instalação frozen pelo lock do repositório. Fechar o vínculo integral requer evidência de build/artefato promovido, além de labels declarativas; não reclassificar a lacuna como resolvida por esses hashes.
 
+### Checkout operacional e deriva de dependências confirmada
+
+Os labels Compose de ambos os containers indicam projeto `kairos`, diretório `/etc/komodo/stacks/kairos` e `compose.yaml` nesse diretório. A consulta de HEAD desse checkout retornou `c6a083f51e12aaddeac8720185ecc55a27d010de`. O Git recusou inicialmente a propriedade diferente; o HEAD foi consultado com exceção de safe.directory apenas nesse comando de leitura, sem alterar a configuração global nem arquivos. Isso adiciona vínculo operacional com o checkout, sem atestar retrospectivamente o build.
+
+Comparação de `importlib.metadata.distributions()` dos containers com `uv.lock`, normalizando nomes de distribuição: **16 versões divergentes em cada container**, além de `opentelemetry-api` e `tzdata` fora do lock. Pip e setuptools foram identificados separadamente como ferramentas do ambiente. Nomes com ponto, hífen e underscore foram normalizados; não tratar jaraco/backports como ausentes apenas pela grafia.
+
+| Distribuição | Instalada em app/broker | Lock |
+| --- | --- | --- |
+| anyio | 4.16.0 | 4.14.2 |
+| certifi | 2026.10.23 | 2026.7.22 |
+| click | 8.5.0 | 8.4.2 |
+| cryptography | 50.0.2 | 50.0.0 |
+| fastapi | 0.162.0 | 0.141.1 |
+| idna | 3.20 | 3.19 |
+| importlib-metadata | 10.1.0 | 9.0.0 |
+| more-itertools | 11.2.1 | 11.1.0 |
+| pycparser | 3.12 | 3.0 |
+| pydantic | 2.14.2 | 2.13.4 |
+| pydantic-core | 2.50.2 | 2.46.4 |
+| python-dateutil | 4.0.0 | 2.9.0.post0 |
+| starlette | 1.10.0 | 1.6.0 |
+| uvicorn | 0.54.0 | 0.52.4 |
+| websockets | 17.4 | 17.0.1 |
+| zipp | 4.1.2 | 4.1.0 |
+
+É divergência demonstrada do ambiente testado, não prova de vulnerabilidade específica dessas versões. A causa observada é o build por pip fora do lock, que também estava excluído do contexto por `.dockerignore`. A correção está no [PR #133](https://github.com/Patricia7sp/kairos/pull/133), branch separada `fix/build-dependencias-lock`: contexto inclui lock, uv oficial fixado por digest, sync --locked sem extras dev; sem alterar a produção. O teste de regressão real falhou na imagem implantada e passou nas novas imagens isoladas da aplicação/broker. Um contexto sintético com projeto/lock divergentes foi recusado; uv ficou ausente da imagem final. A lacuna de transitivos dev apontada na revisão foi reproduzida com imagem mutante e corrigida no teste. CI integral e promoção da correção ainda precisam concluir; este PR continua somente documental.
+
 ## Transporte observado no servidor
 
 - Docker publica `9119/tcp` de Kairos somente em `100.87.25.101:9119`. O broker não publica essa porta no host.
@@ -70,7 +97,20 @@ GETs no endereço HTTP acima, sem cookies ou tokens; somente status, headers sel
 
 São verificações pontuais de negação e headers. Ausência de ACAO em health não comprova defesa CSRF/origem de todas as rotas; a recusa de WebSocket sem credenciais não comprova sessão válida, origem cruzada autenticada ou reconexão. Uma consulta inicial ao caminho inexistente `/api/runtime/events` também retornou 403 e foi excluída dessa evidência; o endpoint runtime real `/ws/runtime` foi consultado depois. Login/logout/revogação, reconexão e renderização no Mac não foram exercitados nesta coleta. Não usar CORS como substituto de autenticação/autorização.
 
-Foi solicitada uma sonda autenticada com token protegido somente em memória. A revisão automática de aprovação rejeitou o acesso ao segredo por ausência de autorização explícita para lê-lo e usá-lo fora do fluxo normal; a ação não foi executada. Foi oferecida a alternativa de usar a sessão já aberta no navegador. Autenticação e métricas continuam sem resultado até execução por um método autorizado; não reclassificar GETs públicos como teste autenticado.
+Foi solicitada uma sonda autenticada com token protegido somente em memória. A revisão automática rejeitou inicialmente o acesso ao segredo por ausência de autorização explícita; aquela ação não foi executada. A usuária autorizou depois expressamente a leitura e o uso para os testes. Com essa autorização, o token foi usado somente em memória, sem saída, arquivo, variável de ambiente ou exportação de registros privados.
+
+| Sonda autorizada | Resultado observado |
+| --- | --- |
+| Login de teste pelo endereço HTTP confirmado | HTTP 200, authenticated true |
+| Cookie de sessão emitido | HttpOnly true, SameSite lax, Secure false |
+| `/api/auth/me` com cookie da sessão de teste | HTTP 200, authenticated true, auth_required true |
+| `/api/runtime/status` | HTTP 200, enabled true, state ready; caminhos de projetos não exportados |
+| `/api/logs?limit=1` | HTTP 200, state ready, um evento; conteúdo não exportado |
+| Ticket novo de `/api/auth/ws-ticket` em `/ws/chat` | Ping/pong passou, sem mensagem de modelo |
+| Reutilização do ticket já consumido | Handshake HTTP 403 |
+| Reconexão com segundo ticket novo | Ping/pong passou |
+
+CookieJar e credenciais em memória foram descartados ao terminar. Não foi chamado logout, pois essa rota revoga tickets pendentes globalmente. O resultado valida esse fluxo no servidor contra a URL real, não a sessão existente do Mac, os fluxos completos de runtime/replay, logout/revogação global ou renderização. Os tempos de execução dessas sondas não são amostras do benchmark E0.3. `Secure=false` é observação do acesso HTTP, não aprovação de equivalência com HTTPS.
 
 ### Alternativa de coleta no navegador já autenticado
 
@@ -116,7 +156,7 @@ Mesmo com state ready, faltam os controles/ACK persistidos, correlação de even
 
 ## Pendências do E0
 
-- Vínculo verificável do build/receita/dependências com o artefato promovido e os perfis de produção exigidos.
-- URL efetiva identificada; falta validar/aceitar o transporte HTTP sobre tailnet e a sessão/origem/reconexão no acesso real, sem expor tokens.
+- Corrigir e promover o build que não consumia o lock; verificar novamente dependências/artefato e perfis de produção exigidos no deploy final.
+- URL, login de teste e ciclo de tickets identificados/validados no servidor; faltam aceite do transporte HTTP sobre tailnet e evidência de sessão/origem/reconexão da interface no navegador do Mac, sem expor tokens.
 - E0.3: amostras autenticadas e renderizadas; metadados junto de `controle_local_ms` devem explicitar navegador–servidor e inclusão de rede. Não produzir percentis a partir destas sondas HTTP ou dos tempos de testes.
 - Aceite dos limites e rito do timebox em 09/11: aceite formal, extensão justificada com nova data ou recusa; vencimento não aprova.

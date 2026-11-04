@@ -57,6 +57,8 @@ A coleta de cobertura tem limitação explícita: o job unitário da main agrego
 
 Atualização E0 de 04/11 após revisão de `7b6346d`: CI desse SHA concluído verde. A [evidência parcial do deploy](2026-11-04-fase2-atestacao-deploy.md) amplia a comparação para 1.519 arquivos esperados nos dois containers, todos iguais ao produto `c6a083f`, mantendo explícita a falta de procedência integral do build/dependências. Transporte e sessão autenticada do navegador continuam pendentes; o Serve HTTPS observado aponta para outro upstream.
 
+Retomada após autorização explícita de leitura/uso do token: login de teste, consultas autenticadas e ciclo de tickets WebSocket passaram no servidor, sem logout global, mensagens ao modelo ou exportação de segredos. A sessão existente e a medição no navegador do Mac continuam pendentes. A inspeção das distribuições instaladas confirmou 16 versões divergentes do lock e duas distribuições adicionais; o [PR #133](https://github.com/Patricia7sp/kairos/pull/133) prepara a correção, com produção ainda inalterada. O teste de isolamento padrão também passou com o ID imutável da imagem worker mantida pela stack; não equivale ao perfil sandbox interno ou ao benchmark E0.3.
+
 ## Inventário de capacidades
 
 Classificação: **demonstrada** significa comportamento delimitado exercitado nas evidências vinculadas; **parcial** indica controles reais com lacunas para a fase 2; **ausente** indica que o contrato pretendido não foi localizado no escopo inspecionado; **indisponível** indica ausência de acesso/capacidade comprovada no destino. Nenhuma classe significa certificação de segurança.
