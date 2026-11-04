@@ -74,7 +74,7 @@ Classificação: **demonstrada** significa comportamento delimitado exercitado n
 | Voz integrada — ausente no escopo inspecionado | Referências a modelos de transcrição em adapters não formam pipeline STT/TTS da sessão | Nenhum aceite VOZ-01–VOZ-07 foi demonstrado | E3 opcional; não bloqueia E4 e não justifica escolher provider agora. |
 | Detecção de intrusão — ausente no contrato pretendido | Journals/monitores genéricos fornecem insumos, não detector de ataques | Não há evidência de detector operacional com regras/correlação cobrindo a SPEC | E1 deve declarar cobertura; Trilha S é autorização posterior, não pentest implícito. |
 | Compartilhamento — parcial, operador único | [token de sessão e tickets](../../../kairos_web/server.py); peer/arquivos privados no runtime | [SessionTokenTests](../../../tests/test_web.py), [segurança runtime](../../../tests/test_runtime_security.py) | Não demonstra identidade multiusuário e ACL por recurso/projeto; E6 ou instâncias separadas por decisão própria. |
-| Mac/E0.2 — evidência parcial; benchmark/E0.3 pendente | [Matriz e protocolo](2026-11-02-fase2-plataforma.md), atualizados com duas coletas manuais da usuária em 03/11 | Mac Intel/16 GiB; segunda consulta alcança Desktop 4.41.2/Engine 28.1.1, VM com 12 CPUs e cerca de 7,65 GiB; nenhuma amostra autenticada/renderizada | AppArmor não declarado e seccomp unconfined; contrato do worker, configuração e medições pendentes; E0 não está concluído. |
+| Mac/E0.2 — evidência parcial; benchmark/E0.3 pendente | [Matriz e protocolo](2026-11-02-fase2-plataforma.md), atualizados com coletas manuais em 03/11 e limites do painel recebidos em 04/11 | Mac Intel/16 GiB; Desktop 4.41.2/Engine 28.1.1, VM com 12 CPUs e cerca de 7,65 GiB; painel: 12 CPUs, 7.9 GB RAM, 1 GB swap e teto de disco 1 TB; nenhuma amostra autenticada/renderizada | AppArmor não declarado e seccomp unconfined; contrato do worker e medições pendentes; E0 não está concluído. |
 
 O inventário é delimitado aos módulos/consumidores citados e ao delta por SHA. Uma busca por nomes conceituais não é prova isolada de ausência: a classificação considera os serviços e caminhos de execução existentes; se surgir implementação equivalente, ela precisa de vínculo e teste antes de mudar a classe.
 
@@ -90,7 +90,7 @@ O inventário é delimitado aos módulos/consumidores citados e ao delta por SHA
 
 - E0.1: relatório elaborado e revisado independentemente; pronto para revisão da usuária.
 - E0.4: modelo elaborado e revisado como design; pronto para revisão da usuária, sem autorização de coleta nem atestado de eficácia.
-- E0.2: Mac e Engine/Desktop identificados manualmente em 03/11; configuração e validação dos controles pendentes, com lacuna de isolamento registrada. E0.3: protocolo de medição e execução real pendentes.
+- E0.2: Mac e Engine/Desktop identificados manualmente em 03/11, limites do painel recebidos em 04/11; validação dos controles pendente, com lacuna de isolamento registrada. E0.3: protocolo de medição e execução real pendentes.
 - Gate E0 e habilitação de I1: **pendentes**. E4 mantém Prioridade Alta depois de suas dependências; E3 continua opcional.
 
 Revisão documental independente em 02/11/2026: GPT-6 Luna/high, contexto isolado e somente leitura; sem achados Critical/Important/Minor materiais nem pergunta nova necessária. Conferiu os quatro documentos e afirmações relevantes contra o código/contratos citados, sem executar testes ou atestar o destino. O aceite do gate E0 não foi concedido por essa revisão.

@@ -2,7 +2,7 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: gate do destino pendente.** A identificação inicial e uma segunda consulta bem-sucedida ao Docker foram recebidas por coleta manual em 03/11/2026. Engine e recursos da VM estão identificados; os controles exigidos pelo worker e as medições continuam pendentes. Nenhuma conexão remota foi utilizada.
+**Resultado atual: gate do destino pendente.** A identificação inicial e uma segunda consulta bem-sucedida ao Docker foram recebidas por coleta manual em 03/11/2026; os limites do painel foram informados em 04/11. Engine, recursos da VM e configuração declarada estão identificados; os controles exigidos pelo worker e as medições continuam pendentes. Nenhuma conexão remota foi utilizada.
 
 ## Coleta manual recebida do Mac em 03/11/2026
 
@@ -34,9 +34,22 @@ A usuária enviou depois a saída de `docker version` e do `docker info` filtrad
 | Recursos declarados pelo daemon | 12 CPUs lógicas; `8219107328` bytes de memória, aproximadamente 7,65 GiB; cgroup v2 |
 | SecurityOptions | `name=seccomp,profile=unconfined`; `name=cgroupns`; AppArmor não listado |
 
-As 12 CPUs são CPUs lógicas expostas à VM, não contagem de núcleos físicos. A memória declarada pelo daemon não equivale à RAM física de 16 GiB nem comprova o valor configurado no painel. Ainda faltam os limites configurados de CPU/RAM/swap/disco e as medições sob carga.
+As 12 CPUs são CPUs lógicas expostas à VM, não contagem de núcleos físicos. A memória declarada pelo daemon não equivale à RAM física de 16 GiB nem comprova o valor configurado no painel. Os limites do painel foram fornecidos posteriormente, no registro abaixo; medições sob carga continuam pendentes.
 
 Há uma lacuna concreta de isolamento a resolver: o daemon não declara AppArmor e informa seccomp com perfil `unconfined`. O [contrato atual do worker](../../../kairos_runtime/experimental/worker_policy.py) exige `AppArmorProfile` igual a `docker-default` ou `kairos-worker-runtime`, conforme o modo; no modo sandbox também exige o perfil seccomp explícito. A saída administrativa não atesta nenhum container, não prova ausência de suporte a um perfil seccomp explícito e não autoriza afirmar equivalência. O perfil worker permanece não aprovado neste backend até teste real e eventual design equivalente revisado. Não remover essas exigências para aceitar o destino. Referências: [AppArmor no Docker](https://docs.docker.com/engine/security/apparmor/) e [seccomp no Docker](https://docs.docker.com/engine/security/seccomp/).
+
+### Limites do painel recebidos em 04/11/2026
+
+A usuária transcreveu os valores de Resources/Advanced do Docker Desktop. Data do recebimento nesta sessão; não foi enviado timestamp próprio da consulta. As unidades abaixo preservam os rótulos do aplicativo, sem pressupor conversão decimal/binária.
+
+| Configuração | Valor informado |
+| --- | --- |
+| CPU limit | 12 |
+| Memory limit | 7.9 GB |
+| Swap | 1 GB |
+| Disk usage limit | 1 TB |
+
+Isso completa a identificação administrativa dos quatro limites solicitados. O limite de disco é um teto para o Engine, incluindo overheads, não espaço livre, consumo atual ou reserva física garantida. Memória do painel, memória exposta pelo daemon e consumo sob carga são observações distintas; não atribuir a diferença a uma causa não medida. Não foi solicitada alteração desses valores. Continuam pendentes atestação real do worker, resolução da lacuna de isolamento e medições E0.3.
 
 ## Observações Linux de desenvolvimento
 
@@ -61,7 +74,7 @@ Os valores de memória descrevem o ambiente visível e o daemon. Não provam RAM
 | Linux / worker externo offline | Testes reais de sessões Docker com opt-in e atestação no caminho do worker | Demonstrado para os cenários executados; não equivale a qualquer perfil de scanner ou egress. |
 | Linux / sandbox interna opt-in | Código e testes condicionais existentes; opt-in interno não executado nesta retomada | Não aprovado por estes resultados. |
 | macOS nativo / filesystem e host | Identificação manual de macOS/Intel/RAM recebida; primitivas e runtime não executados | Evidência inicial parcial; suporte nativo não aprovado. |
-| Docker Desktop no Mac / backend Linux | Segunda consulta identifica Desktop 4.41.2, Engine 28.1.1, LinuxKit, 12 CPUs e cerca de 7,65 GiB; AppArmor não listado, seccomp declarado unconfined | Daemon acessível; lacuna em relação ao contrato do worker. Isolamento real, configuração e compatibilidade permanecem pendentes. |
+| Docker Desktop no Mac / backend Linux | Desktop 4.41.2, Engine 28.1.1, LinuxKit, daemon com 12 CPUs e cerca de 7,65 GiB; painel: 12 CPUs, 7.9 GB RAM, 1 GB swap, disco até 1 TB; AppArmor não listado, seccomp declarado unconfined | Daemon acessível e limites informados; lacuna em relação ao contrato do worker. Isolamento real e compatibilidade permanecem pendentes. |
 | Perfis futuros de scanner/delegação | Contratos ainda dependem de E1/E4 | Não habilitados. |
 | Executor Linux separado | Há ambiente de desenvolvimento observado, mas nenhuma decisão de substituir o destino do plano | Não adotado como alternativa ao Mac. |
 

@@ -18,6 +18,8 @@ Atualização de 03/11/2026: a usuária enviou a identificação inicial do Mac 
 
 Segunda coleta de 03/11/2026: daemon agora acessível, Docker Desktop `4.41.2 (191736)`, Engine `28.1.1`, kernel `6.10.14-linuxkit`, 12 CPUs lógicas e `8219107328` bytes de memória declarados pela VM (cerca de 7,65 GiB). SecurityOptions informa seccomp `unconfined` e cgroupns, sem AppArmor listado. A matriz registra a lacuna frente ao contrato atual de WorkerPolicy; configuração, atestação real do worker e E0.3 continuam pendentes. Esta coleta não encerra o gate nem altera a política de segurança.
 
+Atualização de 04/11/2026: a usuária transcreveu os limites do painel Docker Desktop: 12 CPUs, `7.9 GB` de memória, `1 GB` de swap e `1 TB` de limite de disco (unidades do aplicativo). A identificação administrativa desses limites está completa; o teto de disco não informa espaço livre. Atestação real do worker, lacuna de isolamento e medições E0.3 continuam pendentes.
+
 ## Escopo e sequência prioritária
 
 **Fase 2 mínima: E0 + E1 + E2 de leitura + E4. E4 tem Prioridade Alta.** A ordem de preparação é H0 separado → E0 → I1 reordenado → demais contratos/integrações de E1 → E4; E2 de leitura pode avançar em paralelo com E4 assim que suas fontes estiverem disponíveis. E4 não espera E2 visual nem E3. H0 é antecipável por ser correção limitada de defeitos existentes, sem alterar o gate do destino.
