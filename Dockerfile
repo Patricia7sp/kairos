@@ -11,6 +11,8 @@
 #   Quando o main program termina, /init inicia o stage 3 de shutdown e o
 #   container sai COM O CÓDIGO DE SAÍDA DO PROGRAMA.
 
+FROM ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 AS uv-tool
+
 FROM python:3.11-slim-bookworm AS base
 
 ARG S6_OVERLAY_VERSION=3.2.0.2
@@ -70,7 +72,7 @@ RUN useradd -l -u ${KAIROS_UID} -m -d /opt/data kairos
 
 # --- aplicação ---------------------------------------------------------------
 WORKDIR /opt/kairos
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 # A imagem copia os pacotes e instala em modo editável. O wheel usa descoberta
 # `kairos*`, incluindo subpacotes de adapters e credenciais.
 COPY kairos_state/ ./kairos_state/
@@ -100,8 +102,8 @@ COPY skills/ ./skills/
 COPY locales/ ./locales/
 COPY native/ ./native/
 
-RUN python -m venv /opt/kairos/.venv \
-    && /opt/kairos/.venv/bin/pip install --no-cache-dir -e .
+RUN --mount=from=uv-tool,source=/uv,target=/usr/local/bin/uv \
+    uv sync --locked --no-dev --no-cache --python /usr/local/bin/python3.11 --no-managed-python
 
 # Extensão CJK: opcional por desenho, mas na imagem o gcc existe, então vale
 # compilá-la. Falha aqui não derruba o build — a busca degrada.

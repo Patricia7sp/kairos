@@ -568,6 +568,57 @@ class RealImageTests(unittest.TestCase):
 
     # -- estrutura ---------------------------------------------------------
 
+    def test_dependencias_instaladas_respeitam_o_lock_sem_extras_dev(self):
+        """Resolver por pip fora do lock não pode mudar o runtime da imagem."""
+
+        def normalize(name):
+            return re.sub(r"[-_.]+", "-", name).lower()
+
+        locked = {}
+        for package in tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))["package"]:
+            locked.setdefault(normalize(package["name"]), set()).add(package["version"])
+        probe = (
+            "import importlib.metadata,json; "
+            "print(json.dumps([(d.metadata['Name'],d.version) "
+            "for d in importlib.metadata.distributions()]))"
+        )
+        result = self.run_in("-I", "-c", probe, entrypoint="/opt/kairos/.venv/bin/python")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = {normalize(name): version for name, version in json.loads(result.stdout)}
+        config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        for requirement in config["project"]["dependencies"]:
+            name = normalize(re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", requirement).group())
+            self.assertIn(name, installed, f"requisito de runtime ausente: {name}")
+        checked = {
+            name: version
+            for name, version in installed.items()
+            if name not in {"pip", "setuptools"}
+        }
+        self.assertTrue(checked, "imagem sem distribuições de runtime")
+        divergent = {
+            name: version
+            for name, version in checked.items()
+            if version not in locked.get(name, set())
+        }
+        self.assertFalse(divergent, f"distribuições fora de uv.lock: {divergent}")
+        graph = {}
+        for package in tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))["package"]:
+            graph.setdefault(normalize(package["name"]), set()).update(
+                normalize(dependency["name"]) for dependency in package.get("dependencies", [])
+            )
+        # A união dos ramos de plataforma evita depender do SO do host Docker.
+        # Extras opcionais não ampliam o grafo default permitido no runtime.
+        runtime = set()
+        pending = [normalize(config["project"]["name"])]
+        while pending:
+            name = pending.pop()
+            if name not in runtime:
+                runtime.add(name)
+                pending.extend(graph.get(name, set()) - runtime)
+        self.assertLessEqual(
+            set(checked), runtime, f"pacotes fora do grafo runtime: {set(checked) - runtime}"
+        )
+
     def test_learn_creation_confirmation_and_rollback_in_real_image(self):
         from pathlib import Path
 
