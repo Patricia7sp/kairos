@@ -1,4 +1,4 @@
-# E0.2 — protocolo de verificação do worker no Mac
+# E0.2 — protocolo de verificação do worker no executor Linux
 
 Complementa a [matriz do destino](2026-11-02-fase2-plataforma.md). Objetivo: verificar o endpoint usado pelo launcher e executar um teste existente com fixture sintética, preservando recusas. Não altera política, não implementa adaptação e não encerra E0.3.
 
@@ -6,9 +6,9 @@ Complementa a [matriz do destino](2026-11-02-fase2-plataforma.md). Objetivo: ver
 
 Usar checkout isolado e limpo de `33d95d38ebf3500404e74ac1d19a22a21581eb2c`, sem descartar mudanças de outro checkout. Os inputs de produto, lock e teste desse SHA são idênticos à base `c6a083f`; os commits intermediários alteram somente documentação. Registrar qualquer outro SHA como outro ensaio. Os blocos que usam o repositório pressupõem o diretório raiz desse checkout.
 
-Esclarecimento posterior da usuária: não usa o Kairos clonado no Mac. A aplicação deste protocolo de worker no Mac depende de confirmar se ele será executor ou apenas cliente da interface. Um checkout local é pré-requisito do ensaio proposto, não do acesso pelo navegador. Não instalar ou clonar como consequência automática desta coleta. Até essa confirmação, as etapas 2 e 3 no Mac aguardam definição do papel da máquina; o gate vigente não é encerrado nem redirecionado silenciosamente.
+Decisão posterior da usuária em 04/11: Mac como cliente pelo navegador, sem clone; Kairos e workers no servidor Linux existente. Aplicar as etapas 2 e 3 no executor Linux. O nome de arquivo é preservado para manter os links do protocolo inicial; nenhuma preparação local no Mac é requisito do uso escolhido. A consulta Mac abaixo permanece apenas histórica, e E0.3 precisa de medição real no navegador.
 
-São necessários Git, uv, Python 3.11 e Docker Desktop funcionando. Preparar o ambiente e construir a imagem instala dependências de desenvolvimento no checkout e baixa os artefatos do Dockerfile; essas etapas não são somente leitura. Não iniciar o teste se alguma preparação falhar. Não executar contra projeto pessoal: o teste cria seu próprio diretório temporário sintético.
+São necessários Git, uv, Python 3.11 e Docker Engine acessível no servidor Linux. Preparar o ambiente e construir a imagem instala dependências de desenvolvimento no checkout e baixa os artefatos do Dockerfile; essas etapas não são somente leitura. Não iniciar o teste se alguma preparação falhar. Não executar contra projeto pessoal: o teste cria seu próprio diretório temporário sintético.
 
 ## 1. Identidade e endpoint — leitura
 
@@ -27,11 +27,11 @@ printf 'exit_capacidades=%s\n' "$?"
 
 Se o SHA divergir, o checkout estiver sujo ou o endpoint falhar, parar antes de build/worker. Registrar a divergência; não criar symlink de socket, mudar permissões ou trocar endpoint no produto como correção implícita. A ausência de AppArmor nas capacidades já é lacuna; o ensaio seguinte, se executado, é diagnóstico de aceitação/recusa, não autorização de uso.
 
-### Resultado manual recebido em 04/11
+### Histórico do endpoint Mac recebido em 04/11
 
 A usuária enviou `engine=28.1.1` e `exit_endpoint=0` para a consulta explícita a `unix:///var/run/docker.sock`. O endpoint respondeu; não foi enviado timestamp próprio da consulta. Isso resolve a dúvida de acesso por esse endereço, mas não atesta imagem, AppArmor, seccomp ou execução de worker no Mac.
 
-## 2. Preparação — após o endpoint responder e o Mac ser confirmado como executor
+## 2. Preparação no executor Linux — após o endpoint responder
 
 ```bash
 uv sync --frozen --extra dev --python 3.11
@@ -66,11 +66,11 @@ Registrar o resumo do teste e erro sanitizado, os códigos, ID da imagem e a dif
 ## Critérios de interpretação
 
 - Falha de endpoint, imagem ou dependência: preparação indisponível; o isolamento não foi exercitado.
-- Recusa por AppArmor/Seccomp/WorkerPolicy: perfil incompatível ou divergente no destino. Preservar o erro e manter o perfil indisponível; falha do teste não vira sucesso de compatibilidade.
+- Recusa por AppArmor/Seccomp/WorkerPolicy: perfil incompatível ou divergente no executor. Preservar o erro e manter o perfil indisponível; falha do teste não vira sucesso de compatibilidade.
 - Skip/deseleção, zero testes ou timeout externo: evidência insuficiente. Não registrar aprovação.
 - Teste passou, sem novos resíduos: evidência apenas desse cenário no SHA/daemon/imagem registrados. Ainda faltam os demais cenários de cancelamento/recuperação, filesystem e E0.3.
 
-Não habilitar `KAIROS_RUNTIME_SANDBOX_TEST=1` neste ensaio: o perfil sandbox interno exige provisionamento e design próprios. A ausência de equivalência comprovada requer decisão revisada sobre adaptação ou backend autorizado; este protocolo não escolhe infraestrutura alternativa.
+Não habilitar `KAIROS_RUNTIME_SANDBOX_TEST=1` neste ensaio: o perfil sandbox interno exige provisionamento e design próprios. O servidor Linux existente foi confirmado pela usuária; este protocolo não provisiona infraestrutura adicional nem substitui a validação do caminho real de produção.
 
 ## Ensaio do procedimento no Linux — 04/11/2026
 
@@ -80,4 +80,6 @@ Verificação de encerramento registrada às `2026-11-04T00:24:08Z`. Produto do 
 - Teste real do bloco 3, com os mesmos três opt-ins e nó exato: 1 passed em 1,85 s, exit 0. Usado o Python 3.11.16 do venv de desenvolvimento já preparado; confirmado o import de `docker_worker.py` deste checkout. O bootstrap uv não foi repetido nesse venv.
 - Listagem dos workers com label `io.kairos.external-sandbox=prototype` vazia antes e depois, ambas com exit 0; nenhum worker residual observado.
 
-Esses resultados validam os caminhos testados no Linux. Não são execução no Mac, teste de todos os cenários de isolamento, benchmark E0.3 ou aprovação de portabilidade. O caminho de recusa no Docker Desktop continua sem resultado real até o ensaio no destino.
+Esses resultados validam os caminhos testados no Linux. Não são teste de todos os cenários de isolamento, benchmark E0.3 ou aprovação de portabilidade. O Docker Desktop no Mac não é o executor escolhido e não precisa de ensaio para o acesso pelo navegador.
+
+Após a definição da topologia, o conjunto de cinco arquivos descrito na matriz (worker, sessões Docker e filesystem) foi executado com o mesmo produto e imagem, checkout documental `0d40428`: 68 passed, 1 skipped, 27 subtests passed em 50,76 s, exit 0. O skip é do perfil sandbox interno. Consultas ao mesmo daemon mostram Kairos e broker healthy; isso não atesta toda a imagem implantada. Permanecem os limites e pendências de E0.3 descritos na matriz.

@@ -2,9 +2,9 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: gate do destino pendente.** A identificação inicial e uma segunda consulta bem-sucedida ao Docker foram recebidas por coleta manual em 03/11/2026; os limites do painel foram informados em 04/11. Engine, recursos da VM e configuração declarada estão identificados; os controles exigidos pelo worker e as medições continuam pendentes. Nenhuma conexão remota foi utilizada.
+**Resultado atual: gate do destino pendente; topologia confirmada.** Em 04/11 a usuária definiu uso inicial pelo navegador no Mac, com Kairos no servidor Linux existente. E0.2 valida o executor Linux; E0.3 mede também o caminho navegador–servidor. A coleta do Docker Desktop abaixo fica como histórico, sem bloquear esse uso. Não é necessário instalar ou clonar Kairos no Mac. Execução local no Mac seria outra decisão.
 
-## Coleta manual recebida do Mac em 03/11/2026
+## Histórico — coleta manual do Mac em 03/11/2026
 
 Origem: comandos de leitura executados pela usuária no Terminal do Mac, com resultados enviados nesta conversa. Não é execução remota nem atestação independente do hardware. Horário informado por `date -u`: `2026-11-03T01:26:32Z`.
 
@@ -36,7 +36,7 @@ A usuária enviou depois a saída de `docker version` e do `docker info` filtrad
 
 As 12 CPUs são CPUs lógicas expostas à VM, não contagem de núcleos físicos. A memória declarada pelo daemon não equivale à RAM física de 16 GiB nem comprova o valor configurado no painel. Os limites do painel foram fornecidos posteriormente, no registro abaixo; medições sob carga continuam pendentes.
 
-Há uma lacuna concreta de isolamento a resolver: o daemon não declara AppArmor e informa seccomp com perfil `unconfined`. O [contrato atual do worker](../../../kairos_runtime/experimental/worker_policy.py) exige `AppArmorProfile` igual a `docker-default` ou `kairos-worker-runtime`, conforme o modo; no modo sandbox também exige o perfil seccomp explícito. A saída administrativa não atesta nenhum container, não prova ausência de suporte a um perfil seccomp explícito e não autoriza afirmar equivalência. O perfil worker permanece não aprovado neste backend até teste real e eventual design equivalente revisado. Não remover essas exigências para aceitar o destino. Referências: [AppArmor no Docker](https://docs.docker.com/engine/security/apparmor/) e [seccomp no Docker](https://docs.docker.com/engine/security/seccomp/).
+Para uma eventual execução local no Mac, há lacuna de isolamento: o daemon não declara AppArmor e informa seccomp com perfil `unconfined`. O [contrato atual do worker](../../../kairos_runtime/experimental/worker_policy.py) exige `AppArmorProfile` igual a `docker-default` ou `kairos-worker-runtime`, conforme o modo; no modo sandbox também exige o perfil seccomp explícito. A saída administrativa não atesta nenhum container nem prova ausência de suporte a um perfil seccomp explícito. Worker no Docker Desktop permanece não aprovado, fora do uso inicial confirmado; isso não bloqueia o cliente pelo navegador. Referências: [AppArmor no Docker](https://docs.docker.com/engine/security/apparmor/) e [seccomp no Docker](https://docs.docker.com/engine/security/seccomp/).
 
 ### Limites do painel recebidos em 04/11/2026
 
@@ -51,7 +51,7 @@ A usuária transcreveu os valores de Resources/Advanced do Docker Desktop. Data 
 
 Isso completa a identificação administrativa dos quatro limites solicitados. O limite de disco é um teto para o Engine, incluindo overheads, não espaço livre, consumo atual ou reserva física garantida. Memória do painel, memória exposta pelo daemon e consumo sob carga são observações distintas; não atribuir a diferença a uma causa não medida. Não foi solicitada alteração desses valores. Continuam pendentes atestação real do worker, resolução da lacuna de isolamento e medições E0.3.
 
-## Observações Linux de desenvolvimento
+## Observações Linux e vínculo com o executor
 
 Coleta administrativa de leitura, sem criar worker, abrir cofre, percorrer dados pessoais ou alterar a stack:
 
@@ -66,17 +66,26 @@ Coleta administrativa de leitura, sem criar worker, abrir cofre, percorrer dados
 
 Os valores de memória descrevem o ambiente visível e o daemon. Não provam RAM física do Mac, limites da VM do Docker Desktop nem consumo do Kairos. `docker info` declara capacidades gerais; não substitui `WorkerPolicy.validate` sobre cada worker efetivamente criado.
 
+Em 04/11, a consulta ao daemon local `unix:///var/run/docker.sock` confirmou novamente 4 CPUs, `7722434560` bytes, cgroup v2, Ubuntu 26.04, kernel `7.0.0-38-generic`, AppArmor e seccomp builtin declarados. Nesse mesmo daemon, `kairos` (`kairos:local`) e `kairos-runtime-broker` (`kairos:runtime-broker`) estavam healthy. O ensaio usa imagem de teste separada e fixtures sintéticas, sem mudar a stack de produção. Isso vincula o ensaio ao daemon que hospeda os serviços; não prova por si só identidade completa da imagem implantada ou todos os perfis de produção.
+
+Rodada Linux de 04/11, produto idêntico a `c6a083f` no checkout documental `0d40428`: `KAIROS_EXTERNAL_SANDBOX_TEST=1 KAIROS_RUNTIME_SANDBOX_TEST=0 KAIROS_WORKER_SANDBOX=0 python -m pytest -q tests/test_external_sandbox_integration.py tests/test_docker_session_worker.py tests/test_docker_sessions_integration.py tests/test_tree_io.py tests/test_security_file_boundaries.py` → **68 passed, 1 skipped, 27 subtests passed**, exit 0, 50,76 s. O skip é do perfil sandbox interno que exige AppArmor/seccomp provisionados próprios. Resultado delimitado aos testes executados; ainda não é benchmark E0.3 nem atestação integral do deploy.
+
+Após essa rodada: nenhum container com label `io.kairos.external-sandbox=prototype` residual; Kairos e broker running/healthy; `/api/health` respondeu `status: ok`, `ui_present: true`. IDs implantados observados: Kairos `sha256:cea250e02c30c4416f9a56c8f6db8d26fe0c5d80413835b5552e7e6f2917bb65`, broker `sha256:e96a421fbe833e598301650fa0c7d270e4bb016fabc18bb1aa288e76bf7123f4`. IDs não substituem vínculo com SHA/receita de build.
+
+Leitura pontual de `docker stats --no-stream`, sem garantia de ociosidade: Kairos CPU 0,28%, memória 109,2 MiB / limite visível 7,192 GiB, 15 PIDs; broker CPU 100,80%, memória 115,2 MiB / limite 2 GiB, 15 PIDs. São valores observados uma vez, não pico, baseline ocioso ou estimativa de capacidade. O uso de CPU do broker e sua relação com a carga precisam de série/cenário no E0.3; não inferir causa, falha ou aprovação de responsividade dessa amostra.
+
 ## Matriz por backend e perfil
 
 | Backend / perfil | Evidência disponível | Situação no E0 |
 | --- | --- | --- |
-| Linux / aplicação e regressões | CI por SHA, integração de imagem, filesystem e smoke; ver [baseline](2026-11-02-fase2-baseline.md) | Demonstrado no escopo desses testes; não encerra plataforma destino. |
+| Linux / aplicação e regressões | CI por SHA, integração de imagem, filesystem e smoke; ver [baseline](2026-11-02-fase2-baseline.md) | Executor escolhido pela usuária; evidência delimitada, sem aceite automático de E0. |
 | Linux / worker externo offline | Testes reais de sessões Docker com opt-in e atestação no caminho do worker | Demonstrado para os cenários executados; não equivale a qualquer perfil de scanner ou egress. |
 | Linux / sandbox interna opt-in | Código e testes condicionais existentes; opt-in interno não executado nesta retomada | Não aprovado por estes resultados. |
-| macOS nativo / filesystem e host | Identificação manual de macOS/Intel/RAM recebida; primitivas e runtime não executados | Evidência inicial parcial; suporte nativo não aprovado. |
-| Docker Desktop no Mac / backend Linux | Desktop 4.41.2, Engine 28.1.1, LinuxKit, daemon com 12 CPUs e cerca de 7,65 GiB; painel: 12 CPUs, 7.9 GB RAM, 1 GB swap, disco até 1 TB; AppArmor não listado, seccomp declarado unconfined | Daemon acessível e limites informados; lacuna em relação ao contrato do worker. Isolamento real e compatibilidade permanecem pendentes. |
+| Mac / navegador cliente | Intel/16 GiB e macOS informados; acesso pelo navegador confirmado, sem checkout | Cliente escolhido; versão do navegador, cenários UI/reconexão e medições do caminho navegador–servidor pendentes. |
+| macOS nativo / filesystem e host | Primitivas e runtime não executados | Fora do uso inicial confirmado; suporte nativo não aprovado. |
+| Docker Desktop no Mac / backend Linux | Coleta histórica de Desktop/Engine e limites; AppArmor não listado, seccomp unconfined | Fora do uso inicial; worker local não aprovado, sem impedir acesso web. |
 | Perfis futuros de scanner/delegação | Contratos ainda dependem de E1/E4 | Não habilitados. |
-| Executor Linux separado | Há ambiente de desenvolvimento observado, mas nenhuma decisão de substituir o destino do plano | Não adotado como alternativa ao Mac. |
+| Servidor Linux existente | Escolha explicitada pela usuária em 04/11; mesmo daemon hospeda Kairos/broker e os ensaios sintéticos | Destino de execução adotado; nenhuma nova infraestrutura foi escolhida. |
 
 ## Incompatibilidades e controles a testar
 
@@ -91,9 +100,9 @@ Os valores de memória descrevem o ambiente visível e o daemon. Não provam RAM
 
 Os testes mencionados são um catálogo de aceite, não uma execução Mac já realizada. Se algum caminho Linux não tiver equivalente, o design deve manter o perfil unavailable até decisão/revisão, sem fallback para o shell do Mac.
 
-## Coleta inicial no Mac — somente leitura
+## Histórico — protocolo inicial de coleta no Mac, superado para execução local
 
-Executar apenas no Mac autorizado, registrar horário e código de saída de cada comando. Não enviar configurações, ambientes completos, serial/UUID, credenciais, cabeçalhos ou conteúdo do cofre.
+O bloco abaixo documenta a coleta já solicitada antes de esclarecer a topologia. Não é uma nova etapa do gate atual. O protocolo original limitava a coleta ao Mac autorizado, com horário e código de saída, sem enviar configurações, ambientes completos, serial/UUID, credenciais ou conteúdo do cofre.
 
 ```bash
 sw_vers -productVersion
@@ -104,17 +113,18 @@ docker version --format '{{json .Client.Version}} {{json .Server.Version}}'
 docker info --format '{"os":{{json .OperatingSystem}},"kernel":{{json .KernelVersion}},"architecture":{{json .Architecture}},"cpus":{{.NCPU}},"memory_bytes":{{.MemTotal}},"cgroup_version":{{json .CgroupVersion}},"security_options":{{json .SecurityOptions}}}'
 ```
 
-Registrar separadamente a versão do aplicativo Docker Desktop e os limites de CPU/RAM/swap/disco configurados. Client/Server.Version acima são versões de Engine/cliente, não substituem a versão do Desktop. Erro/ausência de Docker deve aparecer como indisponibilidade, nunca como resultado vazio aprovado.
+Na coleta histórica, versão do Desktop e limites foram registrados separadamente. Client/Server.Version são versões de Engine/cliente. Erro/ausência de Docker não é resultado vazio aprovado para eventual execução local; não constitui bloqueio do cliente pelo navegador.
 
-Essa coleta não instala nada e não comprova isolamento. A etapa seguinte exige o artefato/lock identificados, fixtures sintéticas e criação/atestação de workers conforme o modelo escolhido. O plano detalhado e o design de qualquer adaptação são fechados após conhecer o destino; não há comando autorizado aqui para desativar AppArmor, tornar o container privilegiado ou montar o home.
+Essa coleta não comprovou isolamento. A criação/atestação de workers foi direcionada ao servidor Linux confirmado, com artefato/lock identificados e fixtures sintéticas. Não há instrução para preparar workers no Mac, desativar AppArmor, tornar container privilegiado ou montar o home.
 
-Retomada autorizada em 04/11: o [protocolo do worker](2026-11-04-fase2-protocolo-worker.md) fixa o artefato, o endpoint real do launcher (`unix:///var/run/docker.sock`), a preparação e um teste existente com fixture sintética. A usuária confirmou depois `engine=28.1.1`, `exit_endpoint=0` nesse endpoint e esclareceu que não usa o Kairos clonado no Mac. Antes de preparar ou executar workers nele, confirmar se o Mac será executor ou apenas cliente da interface; essa decisão continua pendente. Não exigir clone para acesso pelo navegador. Nenhuma equivalência ou aprovação é inferida do ensaio Linux, e o gate vigente não é encerrado ou redirecionado sem decisão explícita.
+Retomada autorizada em 04/11: o [protocolo do worker](2026-11-04-fase2-protocolo-worker.md) fixa artefato, endpoint, preparação e teste sintético existente. O endpoint do Mac respondeu `engine=28.1.1`, `exit_endpoint=0`, como registro histórico. A usuária definiu depois Mac como cliente pelo navegador e servidor Linux como executor; a preparação local no Mac foi retirada do uso inicial. Os critérios de segurança continuam aplicados ao executor real e o gate E0 permanece aberto.
 
 ## Protocolo E0.3 a fechar antes de implementar o coletor
 
 O [plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md) propõe `ControlSample`, `BenchmarkSummary` e `summarize_samples`; nenhum desses tipos é anunciado como implementado nesta entrega. Não foram criados `scripts/benchmark_phase2.py` nem testes fictícios que apenas passem com valores constantes.
 
 - `controle_local_ms`: relógio monotônico do cliente, do envio autenticado ao ACK emitido após validar e persistir aceitação/negação; não esperar o efeito nem subtrair inferência estimada.
+- Na topologia confirmada, o cliente é o navegador no Mac e o ACK vem do servidor Linux: incluir a latência real de rede. O nome documental não significa loopback. Identificar navegador/versão, transporte e cenário; não inferir renderização no Mac de um teste executado no servidor.
 - `evento_painel_ms`: evento persistido até renderização efetiva, com `event_id` e protocolo de alinhamento de relógios documentado. Ausência de medição do browser é lacuna, não zero.
 - Cenários: ocioso, conversa/painel, auditoria sintética representativa, execução isolada e recuperação. O desenho do coletor precisa identificar o endpoint/ACK persistido e a projeção realmente servida antes de produzir números.
 - Pelo menos 30 controles por cenário durante a auditoria; nearest-rank `ceil(0,95 × n)`, máximo e amostras brutas sanitizadas. Com n=30, p95 é a 29ª observação ordenada.
@@ -128,6 +138,6 @@ Não houve benchmark autenticado/renderizado nesta coleta e não há aprovação
 
 Registro de acompanhamento da proposta de cinco dias úteis: início `2026-11-02T23:30:35Z`; referência de prazo `2026-11-09T23:30:35Z`, contando segunda–sexta em UTC, sem calendário adicional de feriados. Isso não cria agendamento ou monitor automático.
 
-Até o prazo, entregar a matriz e as lacunas e obter uma decisão sobre acesso ao Mac, adaptação equivalente ou disponibilização explícita de outro backend. Expirar o prazo não aprova capacidade nem permite escolher infraestrutura silenciosamente.
+Até o prazo, entregar a matriz executor/cliente e as lacunas. A decisão de topologia foi fornecida em 04/11: servidor Linux existente e cliente web no Mac. Não foi autorizada infraestrutura adicional. Expirar o prazo não aprova capacidade; persistem as verificações do executor e medições reais no cliente.
 
 Saída exigida: SHA/configuração/ferramentas, método/cenário, resultados reais por controle e medições; revisão do [threat model](../specs/2026-11-02-fase2-threat-model.md) e aceite dos limites. Sem isso, E0 permanece pendente e os perfis de I1 dependentes não são habilitados.

@@ -12,13 +12,15 @@
 
 Estado: recomendações documentais incorporadas em 02/11/2026; **E4 — Prioridade Alta**, conforme decisão da usuária. A execução desta rodada é documental. Hotfix, I1 e demais entregas precisam de autorização de implementação; instalar dependências, criar agendas, executar testes ativos, publicar ou compartilhar não decorre de aprovar este mapa. As autorizações da #129/#130 pertencem àquela entrega.
 
-Retomada após H0: a usuária autorizou seguir os próximos passos depois do merge/deploy da #131 (`c6a083f`). A preparação E0 está registrada no [baseline por SHA](../reports/2026-11-02-fase2-baseline.md), na [matriz de plataforma e protocolo](../reports/2026-11-02-fase2-plataforma.md) e no [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md). E0.1/E0.4 passaram por revisão independente documental e aguardam revisão da usuária; acesso/medições do Mac e aceite do gate E0 continuam pendentes. Isso não habilita I1/E4 ou as extensões.
+Retomada após H0: a usuária autorizou seguir os próximos passos depois do merge/deploy da #131 (`c6a083f`). A preparação E0 está registrada no [baseline por SHA](../reports/2026-11-02-fase2-baseline.md), na [matriz de plataforma e protocolo](../reports/2026-11-02-fase2-plataforma.md) e no [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md). E0.1/E0.4 passaram por revisão independente documental; a revisão editorial da usuária não encerrou E0. Conforme a topologia confirmada em 04/11, continuam pendentes as verificações completas do executor Linux, medições do navegador no Mac e aceite do gate E0. Isso não habilita I1/E4 ou as extensões.
 
 Atualização de 03/11/2026: a usuária enviou a identificação inicial do Mac por coleta local (macOS `26.7.2`, Intel x86_64, 16 GiB, Docker CLI `28.1.1`, contexto `desktop-linux`). As consultas ao daemon falharam; os campos vazios/zero não são capacidades observadas. Versão do aplicativo Desktop, Engine/VM, controles e medições seguem pendentes na matriz. O gate E0 permanece aberto.
 
 Segunda coleta de 03/11/2026: daemon agora acessível, Docker Desktop `4.41.2 (191736)`, Engine `28.1.1`, kernel `6.10.14-linuxkit`, 12 CPUs lógicas e `8219107328` bytes de memória declarados pela VM (cerca de 7,65 GiB). SecurityOptions informa seccomp `unconfined` e cgroupns, sem AppArmor listado. A matriz registra a lacuna frente ao contrato atual de WorkerPolicy; configuração, atestação real do worker e E0.3 continuam pendentes. Esta coleta não encerra o gate nem altera a política de segurança.
 
 Atualização de 04/11/2026: a usuária transcreveu os limites do painel Docker Desktop: 12 CPUs, `7.9 GB` de memória, `1 GB` de swap e `1 TB` de limite de disco (unidades do aplicativo). A identificação administrativa desses limites está completa; o teto de disco não informa espaço livre. Atestação real do worker, lacuna de isolamento e medições E0.3 continuam pendentes.
+
+Decisão de topologia em 04/11/2026: a usuária confirmou uso inicial pelo navegador no Mac, com Kairos executando no servidor Linux existente. Essa decisão substitui a hipótese de Mac executor dos registros anteriores. A lacuna AppArmor do Docker Desktop fica histórica e fora do aceite inicial; E0 passa a validar o executor Linux e o caminho de interface/autenticação/latência no navegador, sem instalação local ou aprovação automática do gate.
 
 ## Escopo e sequência prioritária
 
@@ -29,7 +31,7 @@ E2 de leitura cobre E2.1 e a parte de projeção/reconexão/acessibilidade de E2
 | Entrega | Prioridade/posição | Dependências e limite |
 | --- | --- | --- |
 | H0 | P0, entrega separada antes de I1 | Autorização limitada; independente do Mac; não entrega E1.1/E1.4 |
-| E0/E1 | Base necessária para delegação segura | Gate Mac e threat model; I1 dividido conforme o fim deste plano |
+| E0/E1 | Base necessária para delegação segura | Executor Linux + cliente web no Mac e threat model; I1 dividido conforme o fim deste plano |
 | E4 | **Prioridade Alta** | E0/E1 e nota TaskService; não depende de voz nem de UI nova |
 | E2 de leitura | Paralela quando houver fontes | Consultas/projeções autenticadas; sem controles mutáveis novos |
 | E3 | Opcional/adiável, após a prioridade de E4 | Autorização, decisão local/nuvem e benchmark próprios |
@@ -37,9 +39,9 @@ E2 de leitura cobre E2.1 e a parte de projeção/reconexão/acessibilidade de E2
 
 ## Restrições globais
 
-- Alvo informado: Mac Intel com 16 GB de RAM. Não pressupor Apple Silicon, GPU ou servidor Linux disponível.
+- Topologia confirmada em 04/11: Mac Intel/16 GB como cliente pelo navegador; Kairos e workers no servidor Linux existente. Não exigir clone, Docker ou adaptação nativa no Mac para esse uso.
 - Um núcleo, sessão e serviço de interação compartilhados; nenhuma autoridade no frontend ou em texto produzido pelo modelo.
-- Defaults propostos da SPEC: uma execução pesada; pai e um nível de filhos; workers existentes de 512 MiB; perfil de scanner separado até 1 GiB se necessário; orçamento Docker Desktop inicial de 3–4 GiB a medir.
+- Defaults propostos da SPEC: uma execução pesada; pai e um nível de filhos; workers existentes de 512 MiB; perfil de scanner separado até 1 GiB se necessário; orçamento total do servidor a medir junto aos serviços residentes, sem transpor os limites do Docker Desktop do cliente.
 - Voz inicial: pressionar para falar; transcrição editável; captura proposta até 60 segundos; áudio sem retenção por padrão; nenhuma troca silenciosa de local para nuvem.
 - Retenção sanitizada proposta de 30 dias, limitada por teto de armazenamento, alerta antes do descarte e preservação explícita de incidente.
 - Smoke de E0: pelo menos 30 controles por cenário durante auditoria representativa; p95 empírico de controle_local_ms até 2 s e evento_painel_ms até 3 s, definidos em E0.3. Publicar amostras e máximo; esse volume não estabelece cauda de produção nem SLA. Nenhum OOM do núcleo ou processo órfão.
@@ -154,17 +156,17 @@ Aceite: inventário completo e reproduzível, sem converter existência de arqui
 
 ### E0.2 Gate de plataforma e isolamento
 
-Files: kairos_filesystem/tree.py e descriptors.py; kairos_runtime/experimental/worker_policy.py; Dockerfiles; novo relatório de capacidades do Mac. Nenhuma alteração de política é pressuposta.
+Files: kairos_filesystem/tree.py e descriptors.py; kairos_runtime/experimental/worker_policy.py; Dockerfiles; relatório de capacidades do executor Linux e do cliente web no Mac. Nenhuma alteração de política é pressuposta.
 
-- [ ] Registrar macOS, Intel/RAM, Docker Desktop/engine/kernel da VM e versões do artefato autorizado.
+- [ ] Registrar SHA/imagem/configuração do servidor Linux executor e recursos reais; registrar navegador/macOS do cliente para o benchmark. A coleta do Docker Desktop do Mac é histórica, não requisito atual.
 - [ ] Inspecionar e testar usuário, rede, mounts, capacidades, recursos, encerramento, filesystem e a política efetivamente aplicada.
-- [ ] Incluir o uso atual de /proc/self/fdinfo e O_PATH no inventário de incompatibilidades nativas. Definir por decisão revisada se o backend roda na VM Linux existente do Docker Desktop ou se exige adaptação nativa equivalente.
+- [ ] Verificar /proc/self/fdinfo e O_PATH no filesystem do executor Linux. Decisão da usuária: backend no servidor existente; equivalência nativa Mac não é requisito deste uso pelo navegador.
 - [ ] Caso seja necessária adaptação, produzir design e testes reais do destino antes de implementá-la. Capacidade não comprovada resulta em unavailable; não remover verificação nem usar shell do Mac.
-- [ ] Registrar alternativa de executor Linux separado somente se a usuária decidir disponibilizá-lo.
+- [x] Registrar a decisão explícita de usar o servidor Linux existente com o Mac como cliente; isso define a topologia e não comprova os controles do executor.
 
-Aceite: matriz por backend/perfil de capacidades observadas, recusas e unavailable, com SHA, ferramentas, configuração, cenário e evidência. CI/sondas Linux valem para desenvolvimento e regressão naquele backend; não encerram o gate Mac. Falta de acesso/capacidade no Mac mantém o gate pendente e os perfis dependentes unavailable.
+Aceite: matriz por backend/perfil de capacidades observadas, recusas e unavailable, com SHA, ferramentas, configuração, cenário e evidência. CI/sondas Linux valem no escopo exercitado; validar o executor efetivo e o caminho navegador–servidor. Falta de capacidade no executor mantém o perfil dependente unavailable; falta de medição real do cliente mantém E0.3 pendente.
 
-Timebox proposto: cinco dias úteis desde a abertura de E0.2, registrando início e data-limite. Entregar até esse prazo a matriz Linux/Mac e as lacunas; pedir decisão concreta sobre acesso ao Mac, adaptação equivalente ou disponibilização de backend alternativo. Vencimento não aprova capacidade, não escolhe servidor Linux nem autoriza execução/background no destino. H0 pode avançar sob sua autorização limitada.
+Timebox proposto: cinco dias úteis desde a abertura de E0.2, registrando início e data-limite. Entregar até esse prazo a matriz executor/cliente e as lacunas. A escolha do servidor Linux existente foi explicitada pela usuária em 04/11; eventual infraestrutura adicional exige outra decisão. Vencimento não aprova capacidade nem autoriza background no destino. H0 pode avançar sob sua autorização limitada.
 
 ### E0.3 Benchmark e limites iniciais
 
@@ -172,13 +174,13 @@ Files propostos: scripts/benchmark_phase2.py; tests/test_phase2_benchmark.py; re
 
 Interface proposta: summarize_samples(samples: Sequence[ControlSample]) -> BenchmarkSummary, com contagem, percentil e lacunas. Coletor por plataforma declara métricas indisponíveis.
 
-- [ ] Definir ControlSample com cenário/caminho, correlation_id, envio/ACK monotônicos no cliente, evento persistido/renderização, estado e lacunas. controle_local_ms mede envio autenticado → ACK após validação/persistência da aceitação/negação; não espera o efeito. Medir sem inferência/serviço externo no caminho, sem subtração estimada. evento_painel_ms mede persistência → renderização por event_id; documentar alinhamento de relógios ou protocolo equivalente.
+- [ ] Definir ControlSample com cenário/caminho, correlation_id, envio/ACK monotônicos no cliente, evento persistido/renderização, estado e lacunas. controle_local_ms mede envio autenticado no navegador → ACK no servidor após validação/persistência da aceitação/negação, incluindo rede; não espera o efeito. Medir sem inferência/serviço externo no caminho, sem subtração estimada. evento_painel_ms mede persistência → renderização por event_id; documentar alinhamento de relógios ou protocolo equivalente.
 - [ ] Testar p95 empírico nearest rank (ceil(0,95 × n)), máximo, amostras insuficientes, erro/timeout e correlação ausente. Preservar falhas no resultado; não descartá-las para melhorar o percentil.
 - [ ] Medir ocioso, conversa/painel, auditoria representativa autorizada, execução isolada e recuperação. Voz é medida quando existir em E3.
 - [ ] Usar pelo menos 30 controles por cenário durante a auditoria; registrar amostras, RAM/swap do host/VM/serviços, latência, OOM e órfãos. Rotular como smoke threshold: com 30 amostras p95 é a 29ª observação ordenada; não alegar SLA/cauda de produção sem plano amostral próprio.
 - [ ] Aceitar os limites da SPEC ou registrar revisão explícita. Se falhar, serializar/reduzir perfil; não enfraquecer isolamento nem usar nuvem silenciosamente.
 
-Verificação futura: uv run pytest -q tests/test_phase2_benchmark.py, seguida de benchmark no Mac autorizado. Commit proposto: feat(operacao): mede limites da segunda fase.
+Verificação futura: uv run pytest -q tests/test_phase2_benchmark.py, seguida de benchmark autenticado pelo navegador no Mac contra o servidor Linux autorizado, incluindo latência de rede. Commit proposto: feat(operacao): mede limites da segunda fase.
 
 ### E0.4 Threat model e classificação de dados
 
@@ -191,7 +193,7 @@ Files: novo docs/superpowers/specs/<data>-fase2-threat-model.md, artefato versio
 
 Artefato E0.4 revisado independentemente e pronto para revisão da usuária; E0.2/E0.3 e o aceite do gate E0 permanecem pendentes. Não interpretar os checkboxes documentais como validação técnica do destino ou habilitação de I1.
 
-Gate E0: baseline, capacidades/medições do destino e threat model registrados; limites aceitos ou explicitamente revisados antes de habilitar background/voz. O relatório de E0.4 é pré-requisito do design de autoridade; CI Linux não aprova Mac.
+Gate E0: baseline, capacidades/medições do destino e threat model registrados; limites aceitos ou explicitamente revisados antes de habilitar background/voz. O relatório de E0.4 é pré-requisito do design de autoridade; testes do executor não substituem medições reais da interface no navegador.
 
 ## E1 Tornar segurança confiável
 
@@ -558,7 +560,7 @@ Revisão editorial desta versão: [relatório v0.2](../reports/2026-11-02-kairos
 | Threat model/classificação próprios | E0.4 antes de E1.4a; atualizar para E1.4b/E4/S |
 | Estatística e métrica de E0.3 | Smoke de 30 controles por cenário; ACK/persistência/renderização definidos |
 | Consumidores de passed/security_score | Inventário e compatibilidade/exit code antes de E1.1 |
-| Saída do gate Mac | E0.2: evidência Linux limitada, unavailable, timebox e decisão explícita |
+| Gate do executor e cliente | E0.2: servidor Linux confirmado, evidência delimitada e unavailable onde faltar controle; E0.3 inclui o navegador no Mac |
 | Filesystem, aprovações, cobertura, limites, retenção | Contratos, E0.2, E1.2/E1.4b/E1.6/E4.3 |
 | Revisão editorial versus aceite técnico | Seção de verificação e relatório histórico anotado |
 
@@ -584,8 +586,8 @@ Escopo para autorização de implementação: **E0 → E1.4a → E1.1 sem exceç
 
 H0 tem entrega/autorização limitada própria, pode anteceder E0/I1 e não aguarda Mac. Sua conclusão não aprova E1.1, a captura de E1.2, a autoridade de E1.4 nem execução/background no destino.
 
-Entregáveis I1: baseline; matriz/timebox e medições do Mac; threat model/classificação; fronteira Principal/AuthorizedTarget; inventário dos consumidores e contrato do auditor sem exceções; snapshot/redaction integrados ao H0; fluxo autenticado de exceções/aprovações de E1.4b; regressões, revisão independente, CI e rollback pertinentes. Entregas intermediárias podem ser revisadas com as exceções desabilitadas. I1 não conclui E1: runtime_config/advisories, persistência, eventos e cron seguem E1.3 e E1.5–E1.7.
+Entregáveis I1: baseline; matriz/timebox do servidor executor e medições do caminho navegador–servidor; threat model/classificação; fronteira Principal/AuthorizedTarget; inventário dos consumidores e contrato do auditor sem exceções; snapshot/redaction integrados ao H0; fluxo autenticado de exceções/aprovações de E1.4b; regressões, revisão independente, CI e rollback pertinentes. Entregas intermediárias podem ser revisadas com as exceções desabilitadas. I1 não conclui E1: runtime_config/advisories, persistência, eventos e cron seguem E1.3 e E1.5–E1.7.
 
-Pontos de parada: Mac sem evidência mantém E0 pendente; cumprir o timebox com matriz/lacunas e solicitar decisão concreta, sem aprovar por Linux ou adotar backend alternativo sozinho. Sem Principal/alvo/leitura autorizados, E1.1/E1.2 não iniciam. Sem aprovação autenticada de exceção, alto/crítico permanece fail e E1.4b não habilita exceções. No fechamento de cada entrega, apresentar evidências para revisão antes de habilitação/publicação.
+Pontos de parada: falta de evidência do executor Linux ou do caminho navegador–servidor mantém o gate pertinente pendente; cumprir o timebox com matriz/lacunas, sem inferir eficácia apenas do CI ou adotar outra infraestrutura sozinho. Sem Principal/alvo/leitura autorizados, E1.1/E1.2 não iniciam. Sem aprovação autenticada de exceção, alto/crítico permanece fail e E1.4b não habilita exceções. No fechamento de cada entrega, apresentar evidências para revisão antes de habilitação/publicação.
 
 I1 não inclui agenda habilitada, nova UI/conversa visual, delegação, voz, E5, Trilha S ou piloto. E4 continua em Prioridade Alta no mapa da fase mínima e recebe entrega/autorização própria após as dependências. Aprovar a direção, editar documentos ou aprovar I1 não implementa E0–E6 em bloco.

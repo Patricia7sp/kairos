@@ -14,11 +14,13 @@ Fora do aceite deste documento: resistência a administrador do host/daemon comp
 
 ## Ativos e limites de confiança
 
+Topologia confirmada pela usuária em 04/11/2026: navegador no Mac como cliente; núcleo, estado, credenciais e workers no servidor Linux existente. A fronteira cliente/API atravessa a rede: validar autenticação, origem, transporte protegido/TLS, reconexão e revogação no acesso efetivo. A decisão não autoriza abrir portas ou expor serviços adicionais. AppArmor e peer credentials aplicam-se ao executor Linux, não ao navegador; portabilidade nativa e Docker Desktop no Mac ficam fora do uso inicial.
+
 | Ativo | Proteção/representação atual | Fronteira e lacuna |
 | --- | --- | --- |
 | Credenciais, tokens, passphrase, referências | [CredentialService](../../../kairos_security/credentials/service.py), cofre/keyring e [CredentialSecret](../../../kairos_security/credentials/contracts.py) | O adaptador autorizado resolve o segredo; metadado/mascaramento não tornam o valor público. Backend/host continuam confiáveis. |
 | Estado e journals | SQLite de sessões/runtime/skills, journal operacional privado | Persistência e ACL de operador não equivalem a segregação multiusuário/projeto. Texto permitido ainda pode conter dados sensíveis. |
-| Código, snapshots e árvore de projeto | [captura por descritor](../../../kairos_filesystem/tree.py), identidade/inventário e limites | Origem pode mudar durante leitura; Mac nativo ainda não demonstrado. Snapshot de projeto não autoriza lê-lo. |
+| Código, snapshots e árvore de projeto | [captura por descritor](../../../kairos_filesystem/tree.py), identidade/inventário e limites | Origem no executor pode mudar durante leitura. Cliente web não concede acesso ao filesystem local do Mac; transferência/captura exigem contrato próprio. Snapshot de projeto não autoriza lê-lo. |
 | Políticas e aprovações | Workspace, allowlists, identidade de diretório, aprovações do chat/runtime | Vínculo comum com Principal/ação/digest/expiração/revogação ainda é E1.4a/b. |
 | Artefatos e relatórios | Findings/JSON, documentos, backups e versões de skills | Artefato pode conter código/dado privado; falta contrato comum de referência, ACL, tamanho e retenção por tarefa/projeto. |
 | Memória e skills | Experiências candidatas/ativas, memória curada, proveniência e publicação | Conteúdo não ganha autoridade por ser recuperado; escopo na recuperação/procedência ampliada ainda é E5. |
@@ -27,8 +29,8 @@ Fluxo conceitual; linhas tracejadas são contratos futuros, não componentes imp
 
 ```mermaid
 flowchart LR
-    O[Operadora] --> UI[CLI / Web]
-    UI --> A[Autenticação e transportes]
+    O[Operadora] --> UI[Navegador no Mac / outros clientes]
+    UI --> A[Autenticação e transportes no servidor Linux]
     A --> C[InteractionService / núcleo]
     C --> P[Política atual / workspace]
     P --> F[Ferramentas e filesystem]
@@ -77,7 +79,7 @@ Responsável indica o componente/entrega que deve responder pelo contrato, não 
 
 | ID / ameaça | Controle atual e evidência delimitada | Lacuna / controle exigido | Responsável / gate |
 | --- | --- | --- | --- |
-| T01 Cliente não autenticado ou acesso cruzado | Token de sessão, cookies/tickets e [SessionTokenTests](../../../tests/test_web.py); peer por UID onde há SO_PEERCRED | Principal do backend e ACL por recurso/projeto, inclusive relatório e aprovação. Sem SO_PEERCRED a checagem atual retorna sem verificar UID; equivalência no Mac não demonstrada. | E0.2 + E1.4a; E6 para multiusuário. |
+| T01 Cliente não autenticado ou acesso cruzado | Token de sessão, cookies/tickets e [SessionTokenTests](../../../tests/test_web.py); peer por UID no socket runtime Linux onde há SO_PEERCRED | Principal do backend e ACL por recurso/projeto, inclusive relatório e aprovação; validar transporte/origem/sessão remota. Sem SO_PEERCRED a checagem atual retorna sem verificar UID: lacuna para eventual portabilidade, não mecanismo de autenticação do navegador Mac. | E0.2 + E1.4a; E6 para multiusuário. |
 | T02 Prompt/resultado vira permissão | [workspace](../../../kairos_tools/workspace.py), [policy](../../../kairos_tools/policy.py) e [test_workspace_tools](../../../tests/test_workspace_tools.py) recusam handlers/escapes no escopo restrito | Autoridade não pode vir de JSON/texto do modelo; revalidar ação, destino, parâmetros e política imediatamente antes do efeito. | E1.4a/b; atualizar antes de E4. |
 | T03 Filho amplia autoridade, cria recursão ou outro executor | Listas de política e wire reconhecem delegação; isso não demonstra AG-01–AG-09 | Interseção de grants, um nível inicial, admissão canônica, limites e cancelamento durável; TaskRecord somente projeção, sem fila/terminalidade concorrente. | Nota TaskService + E4; não habilitado por esta revisão. |
 | T04 TOCTOU, symlink/hardlink, mount ou filesystem divergente | [TreeIOTests](../../../tests/test_tree_io.py), [fronteiras](../../../tests/test_security_file_boundaries.py), validação por descritor/identidade e testes de imagem | AuthorizedTarget antes de captura; comprovar capacidades no backend do destino e recusar ausência. Não substituir por normalização de path. | E0.2 + E1.2/1.4a. |
@@ -100,7 +102,7 @@ Antes de TaskService/TaskRecord/migrações, a nota própria fixa referências p
 
 ## Aceite e limites da revisão
 
-Revisão independente deste artefato deve conferir: distinção atual/proposto; cobertura de ativos/fronteiras; ameaças com teste/responsável/lacuna; dados e destinos; controles Mac não presumidos; preservação dos mecanismos existentes. Revisar novamente antes de E1.4b, E4 e Trilha S.
+Revisão independente deste artefato deve conferir: distinção atual/proposto; cobertura de ativos/fronteiras; ameaças com teste/responsável/lacuna; dados e destinos; separação servidor Linux/cliente Mac sem presumir controles; preservação dos mecanismos existentes. Revisar novamente antes de E1.4b, E4 e Trilha S.
 
 Revisão documental executada em 02/11/2026 por GPT-6 Luna/high, com contexto isolado, somente leitura e conferência das afirmações relevantes no código: nenhum achado material ou pergunta nova para este escopo. Não executou teste de eficácia nem concedeu aceite E0. O registro está no [baseline](../reports/2026-11-02-fase2-baseline.md).
 
