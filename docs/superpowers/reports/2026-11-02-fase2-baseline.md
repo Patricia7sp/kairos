@@ -55,6 +55,8 @@ As evidências abaixo são do produto, anteriores a estes novos documentos. A in
 
 A coleta de cobertura tem limitação explícita: o job unitário da main agregou 105 arquivos, descartou 192 duplicatas e relatou seis fragmentos inválidos; o XML foi gerado. No ensaio local do H0 foram dez. Exit 0 de combine não significa ausência desses erros nem completude dos filhos. Não usar esse resultado para certificar cobertura global.
 
+Atualização E0 de 04/11 após revisão de `7b6346d`: CI desse SHA concluído verde. A [evidência parcial do deploy](2026-11-04-fase2-atestacao-deploy.md) amplia a comparação para 1.519 arquivos esperados nos dois containers, todos iguais ao produto `c6a083f`, mantendo explícita a falta de procedência integral do build/dependências. Transporte e sessão autenticada do navegador continuam pendentes; o Serve HTTPS observado aponta para outro upstream.
+
 ## Inventário de capacidades
 
 Classificação: **demonstrada** significa comportamento delimitado exercitado nas evidências vinculadas; **parcial** indica controles reais com lacunas para a fase 2; **ausente** indica que o contrato pretendido não foi localizado no escopo inspecionado; **indisponível** indica ausência de acesso/capacidade comprovada no destino. Nenhuma classe significa certificação de segurança.

@@ -72,6 +72,8 @@ Rodada Linux de 04/11, produto idêntico a `c6a083f` no checkout documental `0d4
 
 Após essa rodada: nenhum container com label `io.kairos.external-sandbox=prototype` residual; Kairos e broker running/healthy; `/api/health` respondeu `status: ok`, `ui_present: true`. IDs implantados observados: Kairos `sha256:cea250e02c30c4416f9a56c8f6db8d26fe0c5d80413835b5552e7e6f2917bb65`, broker `sha256:e96a421fbe833e598301650fa0c7d270e4bb016fabc18bb1aa288e76bf7123f4`. IDs não substituem vínculo com SHA/receita de build.
 
+A [coleta posterior de procedência/transporte](2026-11-04-fase2-atestacao-deploy.md) encontrou os 1.519 arquivos de aplicação esperados de `c6a083f` iguais nos dois containers, sem comprovar dependências/camadas ou procedência integral. O Serve HTTPS local aponta para 8090, não para 9119; a URL usada pelo navegador ainda precisa ser informada. As sondas sem sessão negaram `/api/config`; não constituem validação da sessão autenticada nem benchmark.
+
 Leitura pontual de `docker stats --no-stream`, sem garantia de ociosidade: Kairos CPU 0,28%, memória 109,2 MiB / limite visível 7,192 GiB, 15 PIDs; broker CPU 100,80%, memória 115,2 MiB / limite 2 GiB, 15 PIDs. São valores observados uma vez, não pico, baseline ocioso ou estimativa de capacidade. O uso de CPU do broker e sua relação com a carga precisam de série/cenário no E0.3; não inferir causa, falha ou aprovação de responsividade dessa amostra.
 
 ## Matriz por backend e perfil
@@ -98,7 +100,7 @@ Leitura pontual de `docker stats --no-stream`, sem garantia de ociosidade: Kairo
 | Worker Docker | [WorkerPolicy](../../../kairos_runtime/experimental/worker_policy.py) exige AppArmor esperado, imagem imutável, usuário 10000, rede none, nenhum mount, rootfs RO, cap-drop e limites | Inspecionar o container real e testar recusa de divergências. Versão do Docker ou flags solicitadas não bastam. |
 | Recursos e encerramento | Worker atual: 512 MiB, 1 CPU, 128 PIDs e stop timeout; execução controla timeout/stdout/stderr | Medir e testar cancelamento/reap, OOM e limites; chamadas internas/tokens/custo não têm enforcement só porque há constantes. |
 
-Os testes mencionados são um catálogo de aceite, não uma execução Mac já realizada. Se algum caminho Linux não tiver equivalente, o design deve manter o perfil unavailable até decisão/revisão, sem fallback para o shell do Mac.
+Os testes mencionados formam o catálogo de aceite. Somente os cenários com resultado explícito nesta matriz foram executados; não há validação integral presumida do executor. Capacidade ausente mantém o perfil unavailable até decisão/revisão, sem fallback para o shell do host.
 
 ## Histórico — protocolo inicial de coleta no Mac, superado para execução local
 
@@ -125,6 +127,7 @@ O [plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md) propõe `Cont
 
 - `controle_local_ms`: relógio monotônico do cliente, do envio autenticado ao ACK emitido após validar e persistir aceitação/negação; não esperar o efeito nem subtrair inferência estimada.
 - Na topologia confirmada, o cliente é o navegador no Mac e o ACK vem do servidor Linux: incluir a latência real de rede. O nome documental não significa loopback. Identificar navegador/versão, transporte e cenário; não inferir renderização no Mac de um teste executado no servidor.
+- O futuro coletor deve carregar junto de `controle_local_ms`, nas amostras e no relatório exportado, a descrição do caminho navegador–servidor e o aviso de que inclui rede. Não depender apenas desta documentação para interpretar o nome.
 - `evento_painel_ms`: evento persistido até renderização efetiva, com `event_id` e protocolo de alinhamento de relógios documentado. Ausência de medição do browser é lacuna, não zero.
 - Cenários: ocioso, conversa/painel, auditoria sintética representativa, execução isolada e recuperação. O desenho do coletor precisa identificar o endpoint/ACK persistido e a projeção realmente servida antes de produzir números.
 - Pelo menos 30 controles por cenário durante a auditoria; nearest-rank `ceil(0,95 × n)`, máximo e amostras brutas sanitizadas. Com n=30, p95 é a 29ª observação ordenada.
@@ -139,5 +142,7 @@ Não houve benchmark autenticado/renderizado nesta coleta e não há aprovação
 Registro de acompanhamento da proposta de cinco dias úteis: início `2026-11-02T23:30:35Z`; referência de prazo `2026-11-09T23:30:35Z`, contando segunda–sexta em UTC, sem calendário adicional de feriados. Isso não cria agendamento ou monitor automático.
 
 Até o prazo, entregar a matriz executor/cliente e as lacunas. A decisão de topologia foi fornecida em 04/11: servidor Linux existente e cliente web no Mac. Não foi autorizada infraestrutura adicional. Expirar o prazo não aprova capacidade; persistem as verificações do executor e medições reais no cliente.
+
+No vencimento de 09/11, registrar decisão formal: aceite com evidências/limites, extensão com motivo e nova data, ou recusa com lacunas. Esse registro ainda está pendente; não foi criado agendamento automático. A decisão parcial de topologia não substitui esse rito.
 
 Saída exigida: SHA/configuração/ferramentas, método/cenário, resultados reais por controle e medições; revisão do [threat model](../specs/2026-11-02-fase2-threat-model.md) e aceite dos limites. Sem isso, E0 permanece pendente e os perfis de I1 dependentes não são habilitados.

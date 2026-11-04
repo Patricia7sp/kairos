@@ -371,6 +371,8 @@ Smoke threshold proposto: p95 empírico de controle_local_ms até 2 s e propaga�
 
 Na topologia confirmada, `controle_local_ms` conserva o nome documental, mas mede o caminho navegador no Mac → ACK persistido no servidor, incluindo rede; não representa chamada em loopback. Registrar cliente, servidor e transporte separadamente. `evento_painel_ms` exige renderização real no navegador, com correlação e relógios/protocolo adequados; não subtrair latência de rede estimada.
 
+O futuro coletor deve carregar essa descrição e o aviso de inclusão da rede junto do nome `controle_local_ms` nas amostras e nos relatórios exportados; um consumidor não deve precisar consultar a SPEC para interpretar a métrica.
+
 Não estimar latência de voz, capacidade de inferência local ou duração de varredura sem dados do equipamento. Execução periódica depende do servidor e do serviço estarem ativos; o navegador fechado não deve ser confundido com indisponibilidade do executor. Agendas/background continuam sujeitos aos gates de sua entrega.
 
 ## 14. Roadmap por entregas verificáveis
