@@ -64,7 +64,7 @@ Comparação de `importlib.metadata.distributions()` dos containers com `uv.lock
 | websockets | 17.4 | 17.0.1 |
 | zipp | 4.1.2 | 4.1.0 |
 
-É divergência demonstrada do ambiente testado, não prova de vulnerabilidade específica dessas versões. A causa observada é o build por pip fora do lock, que também estava excluído do contexto por `.dockerignore`. A correção está no [PR #133](https://github.com/Patricia7sp/kairos/pull/133), branch separada `fix/build-dependencias-lock`: contexto inclui lock, uv oficial fixado por digest, sync --locked sem extras dev; sem alterar a produção. O teste de regressão real falhou na imagem implantada e passou nas novas imagens isoladas da aplicação/broker. Um contexto sintético com projeto/lock divergentes foi recusado; uv ficou ausente da imagem final. A lacuna de transitivos dev apontada na revisão foi reproduzida com imagem mutante e corrigida no teste. CI integral e promoção da correção ainda precisam concluir; este PR continua somente documental.
+É divergência demonstrada do ambiente testado, não prova de vulnerabilidade específica dessas versões. A causa observada é o build por pip fora do lock, que também estava excluído do contexto por `.dockerignore`. A correção está no [PR #133](https://github.com/Patricia7sp/kairos/pull/133), branch separada `fix/build-dependencias-lock`: contexto inclui lock, uv oficial fixado por digest, sync --locked sem extras dev; sem alterar a produção. O teste de regressão real falhou na imagem implantada e passou nas novas imagens isoladas da aplicação/broker. Um contexto sintético com projeto/lock divergentes foi recusado; uv ficou ausente da imagem final. A lacuna de transitivos dev apontada na revisão foi reproduzida com imagem mutante e corrigida no teste. CI integral local concluído com exit 0; após os achados do primeiro Sonar, a receita restringe dependências de terceiros a wheels e separa o build editável local com backend temporário fixado por hashes. Regressões afetadas repetidas: 45 passed/26 subtests de Dockerfile/imagem; 26 passed/1 skipped de sessões offline; contrato do lock no broker aprovado. SHA corretivo `b93fb42`, [CI remoto e Sonar aprovados](https://github.com/Patricia7sp/kairos/actions/runs/41774274910): 4363 passed, 24 skipped, 35 deselected e 6657 subtests; promoção e revalidação do deploy continuam pendentes. Este PR continua somente documental.
 
 ## Transporte observado no servidor
 
@@ -93,6 +93,7 @@ GETs no endereço HTTP acima, sem cookies ou tokens; somente status, headers sel
 | `/api/auth/me` | HTTP 200, authenticated false, auth_required true; nenhum Set-Cookie |
 | `/api/config` | HTTP 401, nenhum Set-Cookie |
 | `/api/health` com Origin `https://origin-invalid.example` | HTTP 200, sem Access-Control-Allow-Origin e sem Set-Cookie |
+| Preflight OPTIONS de `/api/auth/ws-ticket`, Origin estrangeiro, método solicitado POST/content-type, sem credenciais | HTTP 401, sem Access-Control-Allow-Origin e sem Set-Cookie; recusa da camada de autenticação, não prova independente da validação de origem |
 | WebSockets existentes `/ws/chat`, `/ws/runtime`, `/api/events`, sem credenciais e Origin do próprio Kairos | Handshake recusado com HTTP 403 nos três caminhos |
 
 São verificações pontuais de negação e headers. Ausência de ACAO em health não comprova defesa CSRF/origem de todas as rotas; a recusa de WebSocket sem credenciais não comprova sessão válida, origem cruzada autenticada ou reconexão. Uma consulta inicial ao caminho inexistente `/api/runtime/events` também retornou 403 e foi excluída dessa evidência; o endpoint runtime real `/ws/runtime` foi consultado depois. Login/logout/revogação, reconexão e renderização no Mac não foram exercitados nesta coleta. Não usar CORS como substituto de autenticação/autorização.
@@ -152,7 +153,28 @@ Este bloco pode ser executado pela usuária no Console das ferramentas de desenv
 })();
 ```
 
-Mesmo com state ready, faltam os controles/ACK persistidos, correlação de evento e amostras renderizadas dos cenários E0.3. Não derivar `controle_local_ms` de GET de autenticação ou de simples atualização de registros. A tela Registros faz leitura via `/api/logs`; não é por si só um controle de aceitação persistido.
+Mesmo com state ready, faltam os controles/ACK persistidos, correlação de evento e amostras renderizadas dos cenários E0.3. Não derivar `controle_local_ms` de GET de autenticação ou de simples atualização de registros. A tela Registros faz leitura via `/api/logs`; não é por si só um controle de aceitação persistido. O journal dessa tela não fornece `event_id`; o runtime tem eventos identificados e outra projeção. Os controles de turno existentes podem iniciar trabalho real e a resposta de aprovação pode esperar o efeito externo. Não disparar esses caminhos como carga sintética em produção. Falta definir/testar a coleta com fixture controlada, ACK após persistência e correlação até a projeção servida, além de executar as amostras no cliente real.
+
+## Janela observada de recursos — sem carga induzida
+
+Em 04/11, oito rodadas de `docker stats --no-stream` entre `04:40:41Z` e `04:41:30Z`, com pausa de 5 s após cada comando. Não se comprovou ociosidade dos serviços; não houve carga de benchmark induzida nesta janela. Percentuais são os informados por Docker, sem normalização para o host inteiro.
+
+| Horário UTC | CPU Kairos | CPU broker |
+| --- | --- | --- |
+| 04:40:41 | 0,31% | 0,01% |
+| 04:40:48 | 0,31% | 0,01% |
+| 04:40:55 | 0,35% | 0,06% |
+| 04:41:02 | 0,18% | 72,99% |
+| 04:41:09 | 0,38% | 0,01% |
+| 04:41:16 | 0,26% | 0,07% |
+| 04:41:23 | 0,35% | 0,02% |
+| 04:41:30 | 0,28% | 0,01% |
+
+Kairos: 94,09 MiB em todas as amostras, 15 PIDs. Broker: 86,81 MiB em sete amostras e 87,39 MiB na de 04:41:02, 14 PIDs. O máximo amostrado de CPU do broker não informa pico entre leituras, duração nem causa; também não invalida a observação anterior de 100,80%.
+
+No encerramento: mesmos IDs de imagem registrados acima, ambos healthy, RestartCount 0 e State.OOMKilled false. São campos do estado dos containers atuais, não histórico completo de OOM do host. `/proc/meminfo`: MemTotal 7722434560, MemAvailable 3841167360, SwapTotal 4294963200 e SwapFree 3804438528 bytes. Filesystem que contém a stack: total 1004298338304, usado 125757366272 e livre para o usuário 836592631808 bytes; valores de fim da janela, não picos nem garantia de capacidade sob carga.
+
+Esta série amplia o registro de recursos do executor; não fornece ACK, renderização, percentis, aceitação de carga ou evidência de navegador do E0.3.
 
 ## Pendências do E0
 
