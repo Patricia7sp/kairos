@@ -108,7 +108,7 @@ Registrar separadamente a versão do aplicativo Docker Desktop e os limites de C
 
 Essa coleta não instala nada e não comprova isolamento. A etapa seguinte exige o artefato/lock identificados, fixtures sintéticas e criação/atestação de workers conforme o modelo escolhido. O plano detalhado e o design de qualquer adaptação são fechados após conhecer o destino; não há comando autorizado aqui para desativar AppArmor, tornar o container privilegiado ou montar o home.
 
-Retomada autorizada em 04/11: o [protocolo do worker](2026-11-04-fase2-protocolo-worker.md) fixa o artefato, o endpoint real do launcher (`unix:///var/run/docker.sock`), a preparação e um teste existente com fixture sintética. A consulta anterior por contexto não demonstra esse endpoint. Execução no Mac aguarda identificação do checkout local e coleta dos resultados; nenhuma equivalência ou aprovação é inferida do ensaio Linux.
+Retomada autorizada em 04/11: o [protocolo do worker](2026-11-04-fase2-protocolo-worker.md) fixa o artefato, o endpoint real do launcher (`unix:///var/run/docker.sock`), a preparação e um teste existente com fixture sintética. A usuária confirmou depois `engine=28.1.1`, `exit_endpoint=0` nesse endpoint e esclareceu que não usa o Kairos clonado no Mac. Antes de preparar ou executar workers nele, confirmar se o Mac será executor ou apenas cliente da interface; essa decisão continua pendente. Não exigir clone para acesso pelo navegador. Nenhuma equivalência ou aprovação é inferida do ensaio Linux, e o gate vigente não é encerrado ou redirecionado sem decisão explícita.
 
 ## Protocolo E0.3 a fechar antes de implementar o coletor
 

@@ -4,7 +4,9 @@ Complementa a [matriz do destino](2026-11-02-fase2-plataforma.md). Objetivo: ver
 
 ## Artefato e pré-requisitos
 
-Usar checkout isolado e limpo de `33d95d38ebf3500404e74ac1d19a22a21581eb2c`, sem descartar mudanças de outro checkout. Os inputs de produto, lock e teste desse SHA são idênticos à base `c6a083f`; os commits intermediários alteram somente documentação. Registrar qualquer outro SHA como outro ensaio. A localização do repositório no Mac ainda precisa ser informada pela usuária; os blocos abaixo pressupõem o diretório raiz desse checkout.
+Usar checkout isolado e limpo de `33d95d38ebf3500404e74ac1d19a22a21581eb2c`, sem descartar mudanças de outro checkout. Os inputs de produto, lock e teste desse SHA são idênticos à base `c6a083f`; os commits intermediários alteram somente documentação. Registrar qualquer outro SHA como outro ensaio. Os blocos que usam o repositório pressupõem o diretório raiz desse checkout.
+
+Esclarecimento posterior da usuária: não usa o Kairos clonado no Mac. A aplicação deste protocolo de worker no Mac depende de confirmar se ele será executor ou apenas cliente da interface. Um checkout local é pré-requisito do ensaio proposto, não do acesso pelo navegador. Não instalar ou clonar como consequência automática desta coleta. Até essa confirmação, as etapas 2 e 3 no Mac aguardam definição do papel da máquina; o gate vigente não é encerrado nem redirecionado silenciosamente.
 
 São necessários Git, uv, Python 3.11 e Docker Desktop funcionando. Preparar o ambiente e construir a imagem instala dependências de desenvolvimento no checkout e baixa os artefatos do Dockerfile; essas etapas não são somente leitura. Não iniciar o teste se alguma preparação falhar. Não executar contra projeto pessoal: o teste cria seu próprio diretório temporário sintético.
 
@@ -25,7 +27,11 @@ printf 'exit_capacidades=%s\n' "$?"
 
 Se o SHA divergir, o checkout estiver sujo ou o endpoint falhar, parar antes de build/worker. Registrar a divergência; não criar symlink de socket, mudar permissões ou trocar endpoint no produto como correção implícita. A ausência de AppArmor nas capacidades já é lacuna; o ensaio seguinte, se executado, é diagnóstico de aceitação/recusa, não autorização de uso.
 
-## 2. Preparação — somente após o endpoint responder
+### Resultado manual recebido em 04/11
+
+A usuária enviou `engine=28.1.1` e `exit_endpoint=0` para a consulta explícita a `unix:///var/run/docker.sock`. O endpoint respondeu; não foi enviado timestamp próprio da consulta. Isso resolve a dúvida de acesso por esse endereço, mas não atesta imagem, AppArmor, seccomp ou execução de worker no Mac.
+
+## 2. Preparação — após o endpoint responder e o Mac ser confirmado como executor
 
 ```bash
 uv sync --frozen --extra dev --python 3.11
