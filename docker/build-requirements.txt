@@ -1,0 +1,5 @@
+# Backend exclusivo do build editável local, montado temporariamente via BuildKit.
+# Hashes das wheels oficiais do PyPI; não são dependências do runtime.
+setuptools==79.0.1 --hash=sha256:e147c0549f27767ba362f9da434eab9c5dc0045d5304feb602a0af001089fc51
+wheel==0.45.1 --hash=sha256:708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c

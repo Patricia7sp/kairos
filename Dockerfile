@@ -11,7 +11,14 @@
 #   Quando o main program termina, /init inicia o stage 3 de shutdown e o
 #   container sai COM O CÓDIGO DE SAÍDA DO PROGRAMA.
 
-FROM ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 AS uv-tool
+FROM ghcr.io/astral-sh/uv@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 AS uv-tool
+
+# Ferramentas de build separadas do ambiente de execução; somente wheels com hash.
+FROM python:3.11-slim-bookworm AS python-build-tools
+COPY docker/build-requirements.txt /tmp/build-requirements.txt
+RUN --mount=from=uv-tool,source=/uv,target=/usr/local/bin/uv \
+    uv pip install --target /build-tools --no-build --no-deps --no-cache --require-hashes \
+        -r /tmp/build-requirements.txt
 
 FROM python:3.11-slim-bookworm AS base
 
@@ -102,8 +109,17 @@ COPY skills/ ./skills/
 COPY locales/ ./locales/
 COPY native/ ./native/
 
+# Dependências de terceiros não podem executar builds de distribuições fonte.
+# Só o projeto local usa o backend fixado, montado temporariamente e sem resolver deps.
 RUN --mount=from=uv-tool,source=/uv,target=/usr/local/bin/uv \
-    uv sync --locked --no-dev --no-cache --python /usr/local/bin/python3.11 --no-managed-python
+    --mount=from=python-build-tools,source=/build-tools,target=/opt/build-tools \
+    uv sync --locked --no-dev --no-install-project --no-build --no-cache \
+        --python /usr/local/bin/python3.11 --no-managed-python \
+    && PYTHONPATH=/opt/build-tools /usr/local/bin/python3.11 -c \
+        'from setuptools.build_meta import build_editable; build_editable("/tmp/kairos-editable")' \
+    && uv pip install --python /opt/kairos/.venv/bin/python --no-build --no-deps --no-cache \
+        /tmp/kairos-editable/*.whl \
+    && rm -rf /tmp/kairos-editable
 
 # Extensão CJK: opcional por desenho, mas na imagem o gcc existe, então vale
 # compilá-la. Falha aqui não derruba o build — a busca degrada.
