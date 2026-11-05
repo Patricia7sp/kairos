@@ -70,16 +70,20 @@ async function waitStage(scenario) {
   }
   throw new Error("workload_timeout");
 }
-async function pressure(signal) {
+async function pressure(signal, ready) {
   const channel = await ChatChannel.open(() => {
     byId("panel").textContent = `Conversa sintética concorrente: ${performance.now().toFixed(0)} ms`;
   });
   const sessionId = newSession();
   try {
+    await channel.plain(sessionId, "e03-synthetic:painel-início");
+    await patchSession(sessionId, "pressure");
+    ready();
     while (!signal.aborted) {
       await channel.plain(sessionId, "e03-synthetic:painel-concorrente");
       await pause(100);
     }
+    await channel.plain(sessionId, "e03-synthetic:painel-fim");
   } finally { channel.close(); }
 }
 function clientMetadata() {
@@ -123,7 +127,10 @@ async function run() {
         await waitStage(scenario);
         if (scenario === "conversa_painel") {
           loadController = new AbortController();
-          load = pressure(loadController.signal).then(() => true, () => false);
+          let markReady;
+          const ready = new Promise(resolve => { markReady = resolve; });
+          load = pressure(loadController.signal, markReady).then(() => true, () => false);
+          await Promise.race([ready, load.then(() => { throw new Error("pressure_ended_early"); })]);
         }
         for (let index = 0; index < 30 && !cancelled; index++) {
           status(`${labels[scenario]} — controle ${index + 1}/30`);
@@ -139,7 +146,7 @@ async function run() {
         cancelled = true;
       } finally {
         loadController?.abort();
-        if (load && !await load) cancelled = true;
+        if (load && !await load) { samples.push(emptyFailure(scenario, sessionId, "erro", "workload")); cancelled = true; }
         channel?.close();
       }
     }
