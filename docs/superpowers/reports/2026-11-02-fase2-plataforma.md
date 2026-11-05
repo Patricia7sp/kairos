@@ -139,6 +139,18 @@ O [plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md) propõe `Cont
 
 Não houve benchmark autenticado/renderizado nesta coleta e não há aprovação desses limiares no destino. Implementar o coletor exige um design verificável sobre os ACKs/eventos existentes; testes de estatística não substituem o cenário real.
 
+### Camada C — seeder temporário aprovado em 05/11
+
+Decisão da usuária: tentar o seeder temporário primeiro para o `controle_local_ms`. Base verificada na main: `decide_tool_approval` (`kairos_integration/interaction_service.py`) só resolve o future, sem bloquear; `deny` nunca executa a ferramenta (prova existente em `test_denied_mutator_never_executes`); timeout de 90 s recusa por fail-closed (`kairos_integration/chat_tools.py`); a rota `POST /api/chat/sessions/{id}/tool-approvals/{id}` (`kairos_web/server.py`) responde `{"status": "decided"}` e mapeia 400/403/404/409.
+
+- Gateway stub como único código novo no servidor, atrás de flag explícita e só na instância temporária: emite sequência fixa (um `tool_call` mutador sintético + `usage` + `finish`), sem credenciais de provider configuradas. O harness envia somente `deny`.
+- Driver/página: sessão sintética marcada, turno com ferramentas, aguarda `tool_approval_request` (correlação por `tool_approval_id`), registra `t_send`, POST `deny`, mede até o 200 e confirma a negação persistida (`tool_result` denied) para `t_persist`. ACK válido = `decided` + negação persistida, nunca só o 200.
+- Somente `deny`: mesmo caminho até o fork de execução; `allow` executaria a ferramenta e está fora do E0.3. A divergência do `allow` começa depois da persistência, onde a métrica termina.
+- Classes de resultado: `denied` (limpo, conta para os ≥30 por cenário), `timeout` (classe própria, nunca contado como deny), `erro` (qualquer 4xx é falha do ensaio, não da plataforma).
+- Camada R no mesmo giro: o `tool_result` negado desce pelo stream do turno; a página registra chegada no stream + mutação DOM. Usar o stream do turno, não `/api/logs` (sem `event_id`).
+- Segurança: flag só na temporária, teardown com checagem de resíduos, nunca em produção (T02/T07).
+- Condição de saída: se o stub exigir tocar o núcleo além do seam de gateway, a camada C vai para E1 e o E0.3 é declarado parcial com T+R, sem percentil improvisado.
+
 ## Timebox e saída do gate
 
 Registro de acompanhamento da proposta de cinco dias úteis: início `2026-11-02T23:30:35Z`; referência de prazo `2026-11-09T23:30:35Z`, contando segunda–sexta em UTC, sem calendário adicional de feriados. Isso não cria agendamento ou monitor automático.
