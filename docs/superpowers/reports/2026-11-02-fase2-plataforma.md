@@ -145,11 +145,14 @@ Decisão da usuária: tentar o seeder temporário primeiro para o `controle_loca
 
 - Gateway stub como único código novo no servidor, atrás de flag explícita e só na instância temporária: emite sequência fixa (um `tool_call` mutador sintético + `usage` + `finish`), sem credenciais de provider configuradas. O harness envia somente `deny`.
 - Driver/página: sessão sintética marcada, turno com ferramentas, aguarda `tool_approval_request` (correlação por `tool_approval_id`), registra `t_send`, POST `deny`, mede até o 200 e confirma a negação persistida (`tool_result` denied) para `t_persist`. ACK válido = `decided` + negação persistida, nunca só o 200.
-- Somente `deny`: mesmo caminho até o fork de execução; `allow` executaria a ferramenta e está fora do E0.3. A divergência do `allow` começa depois da persistência, onde a métrica termina.
+- Somente `deny`: mesmo caminho até o fork de execução; `allow` executaria a ferramenta e está fora do E0.3. No código atual, a bifurcação ocorre antes de `_persist_tool_result`: `allow` executa a ferramenta antes de persistir seu resultado. O ensaio mede somente a negação; não infere latência ou equivalência do ramo `allow`.
 - Classes de resultado: `denied` (limpo, conta para os ≥30 por cenário), `timeout` (classe própria, nunca contado como deny), `erro` (qualquer 4xx é falha do ensaio, não da plataforma).
 - Camada R no mesmo giro: o `tool_result` negado desce pelo stream do turno; a página registra chegada no stream + mutação DOM. Usar o stream do turno, não `/api/logs` (sem `event_id`).
 - Segurança: flag só na temporária, teardown com checagem de resíduos, nunca em produção (T02/T07).
 - Condição de saída: se o stub exigir tocar o núcleo além do seam de gateway, a camada C vai para E1 e o E0.3 é declarado parcial com T+R, sem percentil improvisado.
+
+Precisões para a implementação: `controle_local_ms` termina em `max(t_ack_http, t_persist_confirmado_cliente)`, após GET autenticado do registro canônico, e conserva os dois tempos separados. O `tool_result` carrega `tool_call_id`, não `tool_approval_id`; o driver mantém o vínculo com a aprovação e a sessão. Para R, chegada do stream→DOM é medida própria. Como o resultado só é emitido após persistir e o deny só pode persistir após seu envio, a latência persistência→DOM fica entre `t_dom - t_stream` e `t_dom - t_send_deny`, todos no relógio monotônico do mesmo navegador. Exportar o intervalo e seu limite superior explicitamente como conservador, incluindo rede, sem chamá-lo de timestamp exato do commit. Esse limite permite testar o limiar sem sincronização presumida entre relógios; correlação ou ordem incompatível resulta em lacuna, não em zero.
+
 
 ## Timebox e saída do gate
 
