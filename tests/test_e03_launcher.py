@@ -302,3 +302,260 @@ def test_server_mounts_refuse_other_sources_even_if_readonly(tmp_path):
     mounts[0]["Source"] = "/opt/production-data"
     with pytest.raises(ValueError):
         validate_mounts(mounts, root)
+
+
+def test_incomplete_pressure_report_still_cleans_owned_resources(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.e03 import launcher
+
+    run = launcher.TemporaryRun(
+        launcher.LaunchConfig("sha256:" + "1" * 64, "sha256:" + "2" * 64, tmp_path / "new")
+    )
+    run.directory.mkdir(mode=0o700)
+    info = run.directory.stat()
+    run.directory_identity = (info.st_dev, info.st_ino)
+    run.public.mkdir()
+    (run.directory / "credential").write_text("private-temporary-credential")
+    run.active = "conversa_painel"
+    run.intervals[run.active] = [{"start": 1, "end": run.deadline, "passed": True}]
+    run.container, run.network = "3" * 64, "4" * 64
+    remaining = {run.container, run.network}
+    closed = []
+    run.forward = SimpleNamespace(failures=0, rejected=0, close=lambda: closed.append(True))
+    run.kernel_attestation = {}
+
+    def daemon(*args):
+        if args[0] == "git":
+            return "a" * 40
+        if args[:2] == ("docker", "ps"):
+            return run.container if run.container in remaining else ""
+        if args[:2] == ("docker", "inspect"):
+            return json.dumps(
+                [{"Id": run.container, "Config": {"Labels": {launcher.LABEL: run.run_id}}}]
+            )
+        if args[:3] == ("docker", "network", "inspect"):
+            return json.dumps([{"Id": run.network, "Labels": {launcher.LABEL: run.run_id}}])
+        if args[:3] in (("docker", "rm", "-f"), ("docker", "network", "rm")):
+            remaining.remove(args[-1])
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(launcher, "command", daemon)
+    monkeypatch.setattr(run, "capture_resources", lambda: None)
+    monkeypatch.setattr(run, "sessions", lambda: [])
+    run.finalize_report({"schema_version": 1, "run_id": run.run_id, "client": {}, "samples": []})
+    assert run.intervals["conversa_painel"] == []
+    run.cleanup()
+    assert remaining == set()
+    assert closed == [True]
+    assert not (run.directory / "credential").exists()
+    assert not run.public.exists()
+    report = json.loads((run.directory / "report.json").read_text())
+    assert report["gate"] == "inconclusive"
+    assert report["teardown_state"] == "complete"
+    assert report["teardown_errors"] == []
+
+
+@pytest.mark.parametrize("field", ["id", "restarts", "image", "running", "oom_kill"])
+def test_resource_summary_preserves_intermediate_oom_and_lifecycle_evidence(field):
+    from copy import deepcopy
+
+    from scripts.e03.resources import summarize
+
+    first = {
+        "at": 1,
+        "containers": {
+            "kairos": {
+                "id": "1" * 64,
+                "image": "sha256:" + "2" * 64,
+                "running": True,
+                "restarts": 0,
+                "oom_killed": False,
+                "cgroup": {"state": "observed", "memory_events": {"oom_kill": 0}},
+            }
+        },
+    }
+    middle, last = deepcopy(first), deepcopy(first)
+    middle["at"], last["at"] = 2, 3
+    value = middle["containers"]["kairos"]
+    if field == "oom_kill":
+        value["cgroup"]["memory_events"][field] = 1
+    else:
+        value[field] = {
+            "id": "3" * 64,
+            "restarts": 1,
+            "image": "sha256:" + "4" * 64,
+            "running": False,
+        }[field]
+    report = summarize([first, middle, last])
+    assert report["state"] == "failed"
+    assert report["oom"] == (["kairos"] if field == "oom_kill" else [])
+    assert report["lifecycle_changes"] == ([] if field == "oom_kill" else ["kairos"])
+
+
+def test_resource_snapshot_records_observed_container_identity(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.e03 import resources
+
+    row = {
+        "Id": "1" * 64,
+        "Image": "sha256:" + "2" * 64,
+        "RestartCount": 0,
+        "State": {"Running": True, "OOMKilled": False, "Pid": 123},
+    }
+    monkeypatch.setattr(resources.shutil, "which", lambda _: "/usr/bin/docker")
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=json.dumps([row])),
+    )
+    monkeypatch.setattr(
+        resources, "cgroup", lambda _: {"state": "observed", "memory_events": {"oom_kill": 0}}
+    )
+    assert resources.snapshot(["kairos"], tmp_path)["containers"]["kairos"]["id"] == "1" * 64
+
+
+def test_resource_summary_retains_docker_oom_when_cgroup_is_unavailable():
+    from scripts.e03.resources import summarize
+
+    report = summarize(
+        [
+            {
+                "at": 1,
+                "containers": {
+                    "kairos": {
+                        "oom_killed": True,
+                        "running": False,
+                        "cgroup": {"state": "unavailable"},
+                    }
+                },
+            }
+        ]
+    )
+    assert report["state"] == "failed"
+    assert report["oom"] == ["kairos"]
+    assert report["gaps"] == ["kairos"]
+
+
+@pytest.mark.parametrize("divergence", ["missing_listener", "changed_production", "funnel"])
+def test_publication_requires_observed_listener_and_preserved_tailnet_config(
+    tmp_path, monkeypatch, divergence
+):
+    from copy import deepcopy
+
+    from scripts.e03 import launcher
+
+    run = launcher.TemporaryRun(
+        launcher.LaunchConfig("sha256:" + "1" * 64, "sha256:" + "2" * 64, tmp_path / "new")
+    )
+    run.public.mkdir(parents=True)
+    run.local_origin = "http://127.0.0.1:12345"
+    run.origin = run.local_origin
+    host = "example.tail123.ts.net"
+    before = {
+        "TCP": {"443": {"HTTPS": True}},
+        "Web": {
+            f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8090"}}},
+        },
+    }
+    current = deepcopy(before)
+
+    def tailscale(*args):
+        if args == ("tailscale", "status", "--json"):
+            return json.dumps({"Self": {"DNSName": host + "."}})
+        if args in (
+            ("tailscale", "serve", "status", "--json"),
+            ("tailscale", "funnel", "status", "--json"),
+        ):
+            return json.dumps(current)
+        if args == ("tailscale", "serve", "--bg", "--https=8443", run.local_origin):
+            if divergence != "missing_listener":
+                current["TCP"]["8443"] = {"HTTPS": True}
+                current["Web"][f"{host}:8443"] = {"Handlers": {"/": {"Proxy": run.local_origin}}}
+            if divergence == "changed_production":
+                current["Web"][f"{host}:443"]["Handlers"]["/"]["Proxy"] = run.local_origin
+            if divergence == "funnel":
+                current["AllowFunnel"] = {f"{host}:8443": True}
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(launcher, "command", tailscale)
+    with pytest.raises(ValueError, match=r"temporary_.*mismatch"):
+        run.publish()
+    assert not (run.public / "manifest.json").exists()
+
+
+@pytest.mark.parametrize(
+    "removal", ["restored", "listener_remains", "production_changed", "listener_replaced"]
+)
+def test_publication_cleanup_attests_restoration_before_reporting_success(
+    tmp_path, monkeypatch, removal
+):
+    from copy import deepcopy
+
+    from scripts.e03 import launcher
+
+    run = launcher.TemporaryRun(
+        launcher.LaunchConfig("sha256:" + "1" * 64, "sha256:" + "2" * 64, tmp_path / "new")
+    )
+    run.directory.mkdir(mode=0o700)
+    info = run.directory.stat()
+    run.directory_identity = (info.st_dev, info.st_ino)
+    run.public.mkdir()
+    (run.directory / "credential").write_text("private-temporary-credential")
+    run.local_origin = "http://127.0.0.1:12345"
+    run.origin = run.local_origin
+    run.final_report = {"gate": "inconclusive"}
+    host = "example.tail123.ts.net"
+    before = {
+        "TCP": {"443": {"HTTPS": True}},
+        "Web": {
+            f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8090"}}},
+        },
+    }
+    current = deepcopy(before)
+
+    def daemon(*args):
+        if args == ("tailscale", "status", "--json"):
+            return json.dumps({"Self": {"DNSName": host + "."}})
+        if args in (
+            ("tailscale", "serve", "status", "--json"),
+            ("tailscale", "funnel", "status", "--json"),
+        ):
+            return json.dumps(current)
+        if args == ("tailscale", "serve", "--bg", "--https=8443", run.local_origin):
+            current["TCP"]["8443"] = {"HTTPS": True}
+            current["Web"][f"{host}:8443"] = {"Handlers": {"/": {"Proxy": run.local_origin}}}
+            return ""
+        if args == ("tailscale", "serve", "--https=8443", "off"):
+            if removal != "listener_remains":
+                current["TCP"].pop("8443")
+                current["Web"].pop(f"{host}:8443")
+            if removal == "production_changed":
+                current["Web"].pop(f"{host}:443")
+            return ""
+        if args[:2] == ("docker", "ps"):
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(launcher, "command", daemon)
+    run.publish()
+    manifest = json.loads((run.public / "manifest.json").read_text())
+    assert manifest["origin"] == f"https://{host}:8443"
+    if removal == "listener_replaced":
+        current["Web"][f"{host}:8443"]["Handlers"]["/other"] = {"Proxy": "http://127.0.0.1:43210"}
+    if removal == "restored":
+        run.cleanup()
+        assert current == before
+    else:
+        with pytest.raises(RuntimeError, match="listener_cleanup_failed"):
+            run.cleanup()
+    report = json.loads((run.directory / "report.json").read_text())
+    assert report["teardown_state"] == ("complete" if removal == "restored" else "failed")
+    assert not (run.directory / "credential").exists()
+    if removal == "listener_replaced":
+        assert current["Web"][f"{host}:8443"]["Handlers"]["/other"] == {
+            "Proxy": "http://127.0.0.1:43210"
+        }

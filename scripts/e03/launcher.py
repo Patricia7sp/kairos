@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
 import http.client
 import ipaddress
@@ -260,6 +261,7 @@ class TemporaryRun:
         self.stats = []
         self.last_stats = 0
         self.tailscale_before = None
+        self.funnel_before = None
         self.served = False
         self.final_report = None
 
@@ -484,23 +486,51 @@ class TemporaryRun:
 
     def publish(self):
         self.tailscale_before = json.loads(command("tailscale", "serve", "status", "--json"))
-        if "8443" in self.tailscale_before.get("TCP", {}):
-            raise ValueError("temporary_https_port_in_use")
+        self.funnel_before = json.loads(command("tailscale", "funnel", "status", "--json"))
         tail = json.loads(command("tailscale", "status", "--json"))
         hostname = tail["Self"]["DNSName"].rstrip(".")
         if not re.fullmatch(r"[a-z0-9.-]+\.ts\.net", hostname):
             raise ValueError("tailnet_hostname_invalid")
-        command("tailscale", "serve", "--bg", "--https=8443", self.local_origin)
-        self.served = True
         self.origin = f"https://{hostname}:8443"
+        for baseline in (self.tailscale_before, self.funnel_before):
+            if (
+                "8443" in baseline.get("TCP", {})
+                or any(key.endswith(":8443") for key in baseline.get("Web", {}))
+                or baseline.get("AllowFunnel", {}).get(f"{hostname}:8443")
+            ):
+                raise ValueError("temporary_https_port_in_use")
+        # Armar cleanup antes do comando: um erro pode ocorrer após aplicar a regra.
+        self.served = True
+        command("tailscale", "serve", "--bg", "--https=8443", self.local_origin)
+        self.attest_tailnet(published=True)
         write_json(
             self.public / "manifest.json",
             {"profile": "e03-synthetic", "run_id": self.run_id, "origin": self.origin},
         )
 
+    def attest_tailnet(self, *, published):
+        target = self.origin.removeprefix("https://")
+        for service, baseline in (("serve", self.tailscale_before), ("funnel", self.funnel_before)):
+            current = json.loads(command("tailscale", service, "status", "--json"))
+            expected = copy.deepcopy(baseline)
+            if published:
+                expected.setdefault("TCP", {})["8443"] = {"HTTPS": True}
+                expected.setdefault("Web", {})[target] = {
+                    "Handlers": {"/": {"Proxy": self.local_origin}}
+                }
+            if current.get("AllowFunnel", {}).get(target):
+                raise ValueError("temporary_funnel_mismatch")
+            # O daemon pode conservar mapas vazios após remover a última regra.
+            if {key: value for key, value in current.items() if value != {}} != {
+                key: value for key, value in expected.items() if value != {}
+            }:
+                raise ValueError("temporary_tailnet_config_mismatch")
+
     def finish_workload(self, timeout=240):
         if self.active in ("ocioso", "conversa_painel"):
-            self.intervals[self.active][-1]["end"] = time.time()
+            if self.intervals[self.active]:
+                self.intervals[self.active][-1]["end"] = time.time()
+            self.active = None
         if self.workload:
             (self.directory / "stop-workload").touch(mode=0o600)
             try:
@@ -640,15 +670,13 @@ class TemporaryRun:
         if self.served:
             try:
                 current = json.loads(command("tailscale", "serve", "status", "--json"))
-                handler = (
-                    current.get("Web", {})
-                    .get(self.origin.removeprefix("https://"), {})
-                    .get("Handlers", {})
-                    .get("/", {})
-                )
-                if handler.get("Proxy") != self.local_origin:
+                listener = current.get("Web", {}).get(self.origin.removeprefix("https://"), {})
+                if current.get("TCP", {}).get("8443") != {"HTTPS": True} or listener != {
+                    "Handlers": {"/": {"Proxy": self.local_origin}}
+                }:
                     raise ValueError("temporary_listener_identity_mismatch")
                 command("tailscale", "serve", "--https=8443", "off")
+                self.attest_tailnet(published=False)
                 self.served = False
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 errors.append("listener_cleanup_failed")

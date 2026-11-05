@@ -113,6 +113,7 @@ def snapshot(containers, directory):
             continue
         row = json.loads(process.stdout)[0]
         result["containers"][name] = {
+            "id": row["Id"],
             "image": row["Image"],
             "running": row["State"]["Running"],
             "oom_killed": row["State"]["OOMKilled"],
@@ -128,29 +129,33 @@ def summarize(series):
     lifecycle = []
     if not series:
         return {"state": "unavailable", "gaps": ["no_resource_samples"], "oom": []}
+    previous = {}
     for row in series:
         for name, values in row["containers"].items():
+            if values.get("oom_killed"):
+                oom.append(name)
+            if values.get("running") is False:
+                lifecycle.append(name)
             if (
                 values.get("state") == "unavailable"
                 or values.get("cgroup", {}).get("state") != "observed"
             ):
                 gaps.append(name)
-            if values.get("oom_killed"):
-                oom.append(name)
-    first, last = series[0]["containers"], series[-1]["containers"]
-    for name in first.keys() & last.keys():
-        if (
-            first[name].get("restarts") != last[name].get("restarts")
-            or first[name].get("image") != last[name].get("image")
-            or last[name].get("running") is not True
-        ):
-            lifecycle.append(name)
-        before = first[name].get("cgroup", {}).get("memory_events", {})
-        after = last[name].get("cgroup", {}).get("memory_events", {})
-        if any(
-            after.get(key, 0) > before.get(key, 0) for key in ("oom", "oom_kill", "oom_group_kill")
-        ):
-            oom.append(name)
+                continue
+            if values.get("running") is not True:
+                lifecycle.append(name)
+            if name in previous:
+                prior = previous[name]
+                if any(values.get(key) != prior.get(key) for key in ("id", "restarts", "image")):
+                    lifecycle.append(name)
+                before = prior.get("cgroup", {}).get("memory_events", {})
+                after = values.get("cgroup", {}).get("memory_events", {})
+                if any(
+                    after.get(key, 0) > before.get(key, 0)
+                    for key in ("oom", "oom_kill", "oom_group_kill")
+                ):
+                    oom.append(name)
+            previous[name] = values
     return {
         "state": "failed" if oom or lifecycle else "incomplete" if gaps else "observed",
         "gaps": sorted(set(gaps)),
