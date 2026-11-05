@@ -1,5 +1,5 @@
 import { ControlAttempt, cleanExport } from "./collector.js";
-import { ChatChannel, jsonRequest } from "./channel.js";
+import { ChatChannel, jsonRequest, waitForReport } from "./channel.js";
 
 const scenarios = ["ocioso", "conversa_painel", "auditoria", "execucao_isolada", "recuperacao"];
 const labels = { ocioso: "Ocioso", conversa_painel: "Conversa e painel", auditoria: "Auditoria sintética",
@@ -99,15 +99,7 @@ async function submitReport() {
     await channel.plain(reportSession, `e03-synthetic:report:${JSON.stringify(raw)}`);
     await patchSession(reportSession, "report");
   } finally { channel.close(); }
-  const deadline = performance.now() + 30_000;
-  while (performance.now() < deadline) {
-    try {
-      const value = await publicArtifact("report.json");
-      if (value.run_id === manifest.run_id) return value;
-    } catch { /* o launcher ainda não publicou o artefato; o prazo continua valendo */ }
-    await pause(500);
-  }
-  throw new Error("report_not_ready");
+  return waitForReport({ runId: manifest.run_id, readReport: () => publicArtifact("report.json") });
 }
 
 async function run() {

@@ -8,6 +8,20 @@ export async function jsonRequest(path, { body, signal } = {}) {
   return { status: response.status, body: value };
 }
 
+export async function waitForReport({ runId, readReport }) {
+  const deadline = performance.now() + 300_000;
+  while (performance.now() < deadline) {
+    try {
+      const value = await readReport();
+      if (value.run_id === runId) return value;
+    } catch (error) {
+      if (error?.message !== "artifact_unavailable") throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error("report_not_ready");
+}
+
 export class ChatChannel {
   constructor(socket, onDelta) {
     this.activeSession = null;

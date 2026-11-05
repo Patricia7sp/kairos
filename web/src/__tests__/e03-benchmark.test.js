@@ -83,7 +83,45 @@ describe("ACK composto e projeção real no DOM", () => {
 });
 
 // O canal recusa frames de outro contexto em vez de transformar erro de protocolo em sucesso.
-import { ChatChannel } from "../../../scripts/e03/ui/channel.js";
+import { ChatChannel, waitForReport } from "../../../scripts/e03/ui/channel.js";
+
+it("aguarda a consolidação de uma carga que demora mais de 30 segundos", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  let ready = false, result;
+  const pending = waitForReport({ runId: "current", readReport: async () => {
+    if (!ready) throw new Error("artifact_unavailable");
+    return { run_id: "current", gate: "inconclusive" };
+  } }).then(value => { result = value; }, error => { result = error; });
+  await vi.advanceTimersByTimeAsync(45_000);
+  expect(result).toBeUndefined();
+  ready = true;
+  await vi.advanceTimersByTimeAsync(500);
+  await pending;
+  expect(result).toEqual({ run_id: "current", gate: "inconclusive" });
+});
+
+it("não aceita relatório de outra rodada e limita a espera", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  let result;
+  const pending = waitForReport({ runId: "current", readReport: async () => ({ run_id: "other" }) })
+    .then(value => { result = value; }, error => { result = error; });
+  await vi.advanceTimersByTimeAsync(900_000);
+  await pending;
+  expect(result).toBeInstanceOf(Error);
+  expect(result.message).toBe("report_not_ready");
+});
+
+it("propaga falha inesperada ao ler o relatório", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  let result;
+  const pending = waitForReport({ runId: "current", readReport: async () => {
+    throw new SyntaxError("invalid JSON");
+  } }).then(value => { result = value; }, error => { result = error; });
+  await vi.advanceTimersByTimeAsync(35_000);
+  await pending;
+  expect(result).toBeInstanceOf(SyntaxError);
+});
+
 it.each([null, { protocol: 2 }, { protocol: 1, session_id: "other", type: "turn_end" }])("recusa frame incompatível %j", async (payload) => {
   const socket = new EventTarget();
   socket.send = vi.fn(); socket.close = vi.fn();
