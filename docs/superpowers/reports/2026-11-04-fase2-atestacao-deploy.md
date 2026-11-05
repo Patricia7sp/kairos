@@ -199,6 +199,16 @@ As imagens anteriores seguem preservadas como `kairos:rollback-pr133-application
 
 **Achado de divergência de dependências encerrado no escopo observado de E0.2.** Isso exige o redeploy e as verificações acima; o merge sozinho não o encerraria. A comparação não cobre arquivos extras, hashes de todos os arquivos instalados de terceiros, camadas de base/apt ou procedência criptográfica integral do build. O gate E0/I1 permanece pendente de perfis exigidos, transporte/cliente e benchmark E0.3; não habilita outro alvo ou capacidade.
 
+## Fronteira Linux observada — 05/11/2026
+
+Após a promoção, inspeção apenas de campos selecionados confirmou no broker: UID `10000:10000`, AppArmor `docker-default`, privileged false, rootfs somente leitura, cap-drop ALL e no-new-privileges. O broker confiável mantém acesso ao socket Docker e aos mounts de projeto; esses privilégios não são atribuídos ao worker. O mantenedor da imagem worker continua no ID `sha256:05096dbc7992f32719b7f8d97c8d122853a83c631e52c0a6947f82ddfbdb2f0a`, UID 10000, rede none, rootfs somente leitura, cap-drop ALL, no-new-privileges e sem mounts. O mantenedor não é uma sessão de trabalho ativa; os ensaios reais já descritos permanecem a evidência delimitada do launcher/worker.
+
+No processo Python do broker, como UID 10000: `SO_PEERCRED` e `O_PATH` disponíveis, `/proc/self/fdinfo` acessível; `/opt/data/run` pertence a 10000:10000 e tem modo 0700; `runtime.sock` é socket de 10000:10000, modo 0600. Uma conexão de teste como UID 65534 foi recusada com PermissionError antes de enviar qualquer comando. Isso prova a recusa pelo filesystem nesse cenário, não uma tentativa que tenha atravessado até `_check_peer`.
+
+Às `03:57:39Z`, no mount de projeto somente leitura do broker, os helpers reais `open_fd` e `observed_mount_id` foram chamados com descritores O_RDONLY/O_DIRECTORY e O_PATH/O_DIRECTORY. Ambos observaram mount ID 943 e o mesmo device/inode; os descritores foram fechados. Nenhum conteúdo foi lido, árvore percorrida ou arquivo alterado. O ID é observação daquela execução, não valor fixado como contrato.
+
+A aplicação com s6 começa como root por desenho e tem volume de estado gravável; não se aplicou indevidamente o contrato de worker a esse PID 1. Nenhuma política, permissão, listener ou configuração foi alterada nessas sondas. Permanecem os limites dos demais perfis e do cliente; estas verificações não medem E0.3.
+
 ## Pendências do E0
 
 - Build corrigido, promovido e revalidado no escopo descrito acima; continuam pendentes os demais perfis/controles exigidos de E0.2. A procedência integral das camadas não foi atestada.

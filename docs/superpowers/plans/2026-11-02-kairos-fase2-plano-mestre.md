@@ -160,9 +160,10 @@ Aceite: inventário completo e reproduzível, sem converter existência de arqui
 
 Files: kairos_filesystem/tree.py e descriptors.py; kairos_runtime/experimental/worker_policy.py; Dockerfiles; relatório de capacidades do executor Linux e do cliente web no Mac. Nenhuma alteração de política é pressuposta.
 
-- [ ] Registrar SHA/imagem/configuração do servidor Linux executor e recursos reais; registrar navegador/macOS do cliente para o benchmark. A coleta do Docker Desktop do Mac é histórica, não requisito atual.
+- [x] Registrar SHA/imagem/configuração do servidor Linux executor e recursos observados; promoção e sondas de 05/11 no relatório do deploy. Isso não substitui medições sob carga.
+- [ ] Registrar navegador/macOS do cliente junto das amostras do benchmark. A coleta do Docker Desktop do Mac é histórica, não requisito atual.
 - [ ] Inspecionar e testar usuário, rede, mounts, capacidades, recursos, encerramento, filesystem e a política efetivamente aplicada.
-- [ ] Verificar /proc/self/fdinfo e O_PATH no filesystem do executor Linux. Decisão da usuária: backend no servidor existente; equivalência nativa Mac não é requisito deste uso pelo navegador.
+- [x] Verificar /proc/self/fdinfo e O_PATH no filesystem do executor Linux. Sonda de 05/11 usou os helpers reais no mount de projeto somente leitura e confirmou identidade entre descritores, sem ler conteúdo. Equivalência nativa Mac não é requisito deste uso pelo navegador.
 - [ ] Caso seja necessária adaptação, produzir design e testes reais do destino antes de implementá-la. Capacidade não comprovada resulta em unavailable; não remover verificação nem usar shell do Mac.
 - [x] Registrar a decisão explícita de usar o servidor Linux existente com o Mac como cliente; isso define a topologia e não comprova os controles do executor.
 
