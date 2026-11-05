@@ -21,7 +21,7 @@ O projeto já contém uma base operacional relevante: núcleo compartilhado, run
 
 
 - Requisito da usuária: uso pessoal primeiro; produtividade; interface apartada; voz; multiagentes; testes de segurança autorizados; evolução progressiva; futura experimentação por poucas pessoas.
-- Restrição informada: Mac Intel com 16 GB de RAM. Não assumir Apple Silicon, GPU dedicada ou servidor Linux disponível.
+- Topologia confirmada pela usuária em 04/11/2026: acesso inicial pelo navegador no Mac Intel com 16 GB de RAM; Kairos e workers executam no servidor Linux existente. O Mac não usa checkout do Kairos. Não pressupor GPU ou execução local no cliente.
 - Proposta técnica deste documento: organização modular, contratos, sequência de entregas, limites iniciais, formatos de dados e critérios de aceite. São escolhas revisáveis, não decisões anteriormente aprovadas pela usuária.
 - A autorização desta revisão cobre os documentos. Hotfix, I1, habilitação de perfis, instalação, agendas, publicação e GitHub seguem autorizações de suas entregas; a autorização da #129 foi específica daquele PR e deploy.
 
@@ -199,7 +199,7 @@ Um scanner diário não enxerga automaticamente uma tentativa de invasão entre 
 
 #### H0 — hotfix prioritário de segredos
 
-Antecipar a correção dos defeitos existentes em entrega própria, antes do I1 e sem dependência do gate Mac. Escopo limitado: seleção de .env/.env.* por nome, regex OpenAI, sanitização de evidence e fixtures sintéticas que atravessem o detector real. Preservar os mecanismos atuais de autorização; esta entrega não introduz captura de novos alvos, exceções nem o contrato de cobertura de E1.1. Não afirma corrigir toda a travessia/leitura do scanner. Critérios: RED dos defeitos, GREEN da detecção, nenhum fragmento bruto do segredo em evidence/saídas e regressões integradas pertinentes. A execução do hotfix exige autorização da entrega.
+Antecipar a correção dos defeitos existentes em entrega própria, antes do I1 e sem dependência do gate de plataforma. Escopo limitado: seleção de .env/.env.* por nome, regex OpenAI, sanitização de evidence e fixtures sintéticas que atravessem o detector real. Preservar os mecanismos atuais de autorização; esta entrega não introduz captura de novos alvos, exceções nem o contrato de cobertura de E1.1. Não afirma corrigir toda a travessia/leitura do scanner. Critérios: RED dos defeitos, GREEN da detecção, nenhum fragmento bruto do segredo em evidence/saídas e regressões integradas pertinentes. A execução do hotfix exige autorização da entrega.
 
 Antes de mudar passed/security_score em E1.1, inventariar os consumidores internos e a interface pública: CLI, formatadores/JSON, código de saída e --fail-on, Web, cron, relatórios e consumidores externos documentados. Registrar ausência de consumidor quando verificada; não presumir que todos já existam. Versionar a saída e testar compatibilidade/códigos de política versus erro operacional.
 
@@ -261,15 +261,15 @@ Aplicar escopo fora do LLM, no runner e na rede. Resolver DNS e validar IPs no m
 
 Sem mounts amplos do host, socket Docker no worker, --privileged ou chave do cofre. Artefatos passam por tamanho, tipo, path seguro e redaction antes de sair. Rede do próprio executor não deve permitir alcançar o plano de controle do Kairos.
 
-### Mac Intel e isolamento
+### Servidor Linux executor e Mac como cliente
 
-Docker Desktop usa uma VM Linux por baixo; container não significa ausência de virtualização. Há economia de composição em relação a uma VM Kali completa, mas o custo real deve ser medido.
+A decisão de 04/11 substitui a hipótese anterior de execução no Mac. Docker Desktop, AppArmor no Mac e clonagem local deixam de ser requisitos do uso inicial pelo navegador. A coleta já feita do Mac permanece histórica; ela não mede o servidor. Uma futura execução local no Mac exige decisão e gate próprios.
 
-A política revisada atesta AppArmorProfile específico; a captura de filesystem depende de /proc/self/fdinfo, O_PATH e demais operações observadas. Não está comprovado que isso funcione no Mac informado. Gate obrigatório: testar o cenário completo, nativo ou na VM Linux do Docker Desktop, incluindo filesystem, rede, usuário, capacidades, mounts, recursos e encerramento. Path.resolve ou a retirada da atestação não constituem adaptação equivalente. Falha implica perfil unavailable; não remover verificações para fazê-lo iniciar.
+A política revisada atesta AppArmorProfile específico; a captura de filesystem depende de /proc/self/fdinfo, O_PATH e demais operações observadas. Gate obrigatório: testar no servidor Linux executor o cenário completo, incluindo filesystem, rede, usuário, capacidades, mounts, recursos e encerramento, vinculando SHA, imagem e configuração. Path.resolve ou a retirada da atestação não constituem adaptação equivalente. Falha implica perfil unavailable; não remover verificações para fazê-lo iniciar.
 
-CI e sondas Linux por SHA/configuração/ambiente são evidência aceitável para desenvolvimento e regressão naquele backend; não encerram o gate Mac. Sem acesso ou capacidade comprovada no destino, execução/background que dependem desses controles ficam unavailable. Timebox proposto: cinco dias úteis a partir da abertura de E0.2, com início e data-limite registrados; nesse prazo entregar a matriz de capacidades/lacunas e uma decisão solicitada à usuária sobre acesso, adaptação equivalente ou backend alternativo. O vencimento não aprova o gate, não autoriza servidor Linux separado nem substitui a decisão. H0 continua independente desse gate.
+CI Linux e testes por SHA/configuração/ambiente são evidência delimitada; não substituem validar o executor efetivo nem o caminho navegador–servidor. Sem capacidade comprovada no executor, execução/background dependentes ficam unavailable. Mantém-se o timebox original de E0.2: cinco dias úteis desde a abertura, com início e data-limite registrados. A escolha de Linux existente foi explicitada pela usuária; não autoriza novo servidor ou mudança do perímetro. O vencimento não aprova o gate. H0 continua independente desse gate.
 
-Se o isolamento requerido não estiver disponível, manter análise local estritamente de leitura e bloquear execução de código não confiável; avaliar executor Linux separado sob nova decisão da usuária. Não há fallback silencioso para shell do Mac.
+Se o isolamento requerido não estiver disponível no servidor, bloquear execução de código não confiável e apresentar a lacuna para decisão. Não há fallback para shell do servidor ou do Mac. No Mac, validar a interface efetivamente servida, autenticação, reconexão, acessibilidade e latência até ACK/renderização.
 
 Kali Live/VM continuam alternativas externas opcionais para necessidades de hardware/kernel ou laboratórios específicos. O roadmap inicial não exige pendrive, reboot ou VM Kali dedicada.
 
@@ -342,7 +342,7 @@ Classificar dados como públicos, internos por projeto, pessoais/sensíveis e se
 - Separação entre repositório confiável, conteúdo externo e instruções aprovadas.
 - Limites de entrada/saída, concorrência, subprocessos, disco, rede, tokens e tempo, distinguindo enforcement de observação. Retenção sanitizada proposta de 30 dias tem teto de armazenamento, alerta antes de descarte e hold de incidente; informar a retenção efetiva se o teto for atingido antes.
 - Dependências e imagens reproduzíveis/pinadas; exceções e atualizações rastreáveis.
-- API local por padrão; acesso remoto é decisão separada, com TLS e revisão do perímetro.
+- API restrita ao perímetro do servidor por padrão; a usuária confirmou acesso pelo navegador no Mac. Validar autenticação, transporte protegido/TLS e perímetro do acesso existente; essa decisão não autoriza publicar a API na Internet ou abrir novas portas.
 - Kill switch para novas admissões e cancelamento de execuções controladas; trilha do acionamento. Não prometer desfazer e-mails, publicações ou efeitos externos já realizados.
 - Segurança não depende exclusivamente de detector de prompt injection: mesmo um detector que falha deve encontrar uma fronteira de execução que recusa ações fora do escopo.
 Antes de compartilhar, implementar identidade por usuário, autorização por recurso/projeto, isolamento de memória/sessão/artefato, quotas, revogação e testes de acesso cruzado. Alternativa para primeiro piloto: instâncias realmente separadas por pessoa, com estado e credenciais separados, cuja separação também precisa ser validada. Não compartilhar o token atual como solução multiusuário.
@@ -357,7 +357,7 @@ Estes são limites propostos para começar a medir, não promessa de consumo ou 
 | --- | --- | --- |
 | Execuções pesadas | Uma por vez; fila explícita | Pressão de memória e latência de uso real |
 | Workers | Manter perfil existente de 512 MiB onde funcionar; perfil de scanner separado até 1 GiB se necessário | OOM produz falha explícita; aumento não é automático |
-| Docker Desktop | Testar orçamento total inicial de 3–4 GiB, contabilizando a VM e serviços residentes | Medir RAM/swap durante cenário representativo |
+| Servidor Linux | Medir consumo do núcleo, broker e workers junto aos serviços residentes; não transpor os limites do Docker Desktop do Mac | Registrar recursos/limites reais e RAM/swap durante cenário representativo |
 | Voz | Um job de transcrição por vez; TTS sob demanda | Responsividade e concorrência com ferramentas |
 | Modelos de raciocínio | Reusar providers configurados; sem LLM local residente obrigatório | Custo, privacidade e benchmark específico |
 | Artefatos e logs | Retenção e limites globais/perfil configuráveis | Disco livre, requisitos de investigação e alertas |
@@ -369,7 +369,11 @@ Proposta de prioridade: requisições interativas e cancelamentos têm precedên
 
 Smoke threshold proposto: p95 empírico de controle_local_ms até 2 s e propagação evento_painel_ms até 3 s; nenhum OOM do núcleo ou processo órfão. Coletar pelo menos 30 controles por cenário durante auditoria representativa, publicar amostras, máximo, percentil e método (nearest rank: ceil(0,95 × n)); com n=30, p95 é a 29ª observação ordenada, próxima do máximo. Registrar RAM/swap, hardware, cenário e lacunas. Uma conclusão sobre cauda de produção exige plano de amostragem próprio e maior; não inferi-la deste smoke. E0 só encerra após registrar medições e aceitar esses limites ou uma revisão explícita antes de habilitar background/voz. Se o hardware não sustentar a meta, primeiro serializar tarefas e reduzir o perfil; não remover isolamento nem adotar nuvem silenciosamente.
 
-Não estimar latência de voz, capacidade de inferência local ou duração de varredura sem dados do equipamento. Execução periódica local depende de o computador/serviço estar ativo; disponibilidade contínua exigiria outra infraestrutura, fora da autorização atual.
+Na topologia confirmada, `controle_local_ms` conserva o nome documental, mas mede o caminho navegador no Mac → ACK persistido no servidor, incluindo rede; não representa chamada em loopback. Registrar cliente, servidor e transporte separadamente. `evento_painel_ms` exige renderização real no navegador, com correlação e relógios/protocolo adequados; não subtrair latência de rede estimada.
+
+O futuro coletor deve carregar essa descrição e o aviso de inclusão da rede junto do nome `controle_local_ms` nas amostras e nos relatórios exportados; um consumidor não deve precisar consultar a SPEC para interpretar a métrica.
+
+Não estimar latência de voz, capacidade de inferência local ou duração de varredura sem dados do equipamento. Execução periódica depende do servidor e do serviço estarem ativos; o navegador fechado não deve ser confundido com indisponibilidade do executor. Agendas/background continuam sujeitos aos gates de sua entrega.
 
 ## 14. Roadmap por entregas verificáveis
 
@@ -378,7 +382,7 @@ Este é um roteiro de capacidades e dependências. O plano operacional de implem
 | Etapa | Entrega | Dependência | Gate para avançar |
 | --- | --- | --- | --- |
 | H0 — hotfix P0 de segredos | .env/variantes, regex OpenAI e evidence sanitizada | Autorização da entrega; independente do Mac/I1 | RED/GREEN sintético e saídas sem fragmentos do segredo; não aprova cobertura global |
-| E0 — confirmar a base | Inventário, capacidades/benchmark do destino e threat model | Acesso autorizado ao destino; timebox de decisão registrado | Lacunas explícitas; Mac não aprovado por evidência Linux |
+| E0 — confirmar a base | Inventário, capacidades/benchmark do executor e threat model | Servidor Linux executor e navegador no Mac confirmados; timebox registrado | Lacunas explícitas; testes do servidor e medições do caminho navegador–servidor |
 | E1 — tornar segurança confiável | Contratos, cobertura, redaction, cron/eventos | E0; I1: E1.4a → E1.1 sem exceções → E1.2 → E1.4b | Política/cobertura distintas; exceções só após E1.4b autenticado |
 | E2 — leitura na fase mínima | Projeções autenticadas de tarefas/segurança, evidências e reconexão | Contratos/fontes de E1; sem esperar voz | Dados reais, estados degradados, isolamento de projeto e acessibilidade |
 | E4 — Prioridade Alta | Delegação, limites, cancelamento e evidência | E0/E1, nota TaskService e contratos comuns; independe de E3 | Cenário ponta a ponta, sem execução duplicada nem escalada |
@@ -451,7 +455,7 @@ Qualquer reaproveitamento futuro de código, assets, modelos ou distribuição d
 
 Não impedem a validação desta direção; impedem apenas habilitar a funcionalidade correspondente.
 
-1. Validar controles do Docker no Mac de destino e escolher backend alternativo somente se necessário.
+1. Validar os controles do executor Linux existente e o caminho de acesso pelo navegador no Mac; instalação/worker no Mac fica fora do uso inicial confirmado.
 2. Selecionar STT/TTS após benchmark e decisão de privacidade local/nuvem.
 3. Definir alvos reais, autorização e janela antes de qualquer teste ativo.
 4. Escolher identidade visual antes da implementação da nova superfície visual.
