@@ -17,6 +17,9 @@ def sample(**changes):
         persist_ms=15.0,
         stream_ms=11.0,
         dom_ms=14.0,
+        dom_mutation_ms=12.5,
+        http_status=200,
+        ack_decided=True,
         persisted_message_id=1,
         persisted_call_id="e03-" + "c" * 32,
         persisted_status="denied",
@@ -44,6 +47,7 @@ def test_nearest_rank_uses_the_full_valid_population():
             persist_ms=i + 1.5,
             stream_ms=i + 1,
             dom_ms=i + 2,
+            dom_mutation_ms=i + 1.5,
             persisted_message_id=i + 1,
             approval_id=f"{i:032x}",
             call_id="e03-" + f"{i:032x}",
@@ -148,3 +152,12 @@ def test_failed_attempt_before_approval_keeps_missing_correlation_explicit():
     assert result["samples"][0]["approval_id"] is None
     assert result["scenarios"]["ocioso"]["counts"]["timeout"] == 1
     assert result["gate"] == "inconclusive"
+
+
+def test_success_requires_http_decided_and_observed_dom_mutation():
+    result = summarize_samples([sample(http_status=200, ack_decided=True, dom_mutation_ms=12)])
+    assert result["scenarios"]["ocioso"]["clean_denies"] == 1
+    for changes in ({"http_status": 404}, {"ack_decided": False}, {"dom_mutation_ms": None}):
+        row = sample(http_status=200, ack_decided=True, dom_mutation_ms=12)
+        invalid = summarize_samples([replace(row, **changes)])
+        assert invalid["scenarios"]["ocioso"]["counts"]["erro"] == 1

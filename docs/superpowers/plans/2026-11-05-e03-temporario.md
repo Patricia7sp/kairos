@@ -44,17 +44,17 @@
 
 ### Task 2: driver no navegador e exportação
 
-**Files:** scripts/e03/ui/index.html; scripts/e03/ui/collector.js; web/src/__tests__/e03-benchmark.test.js.
+**Files:** scripts/e03/ui/index.html, collector.js, channel.js, page.js; scripts/e03/serve.py; web/src/__tests__/e03-benchmark.test.js; tests/test_e03_launcher.py (bootstrap).
 **Interfaces:** cliente da API existente /api/auth/*, /ws/chat, POST tool-approvals, GET session/messages, PATCH sessions. Coleta e exporta schema1 sanitizado com UA/protocolo/secure-context, confirmação persistida, correlação e intervalos R. Status de cenário vem de artefato sanitizado do launcher, sem novo endpoint funcional.
 
-- [ ] RED: reducer/collector recusa HTTPsem commit, call_id trocado, timeout tratado como deny, timestamps inválidos e aba oculta; exportação não inclui tokens/conteúdo arbitrário.
-- [ ] GREEN: página com login próprio, início/parada, progresso e download; somente deny; no máximo um controle pendente por conexão.
-- [ ] Verificar DOM visível e duas oportunidades de frame, preservar falhas e diferença entre DOM observado e pixel físico. Teste DOM não substitui execução no Mac.
-- [ ] Testar unidade JS e integração local real HTTP/WS, com brutas de ensaio rotuladas Linux, sem alegar Mac.
+- [x] RED: reducer/collector recusa HTTPsem commit, call_id trocado, timeout tratado como deny, timestamps inválidos e aba oculta; exportação não inclui tokens/conteúdo arbitrário.
+- [x] GREEN: página com login próprio, início/parada, progresso e download; somente deny; no máximo um controle pendente por conexão.
+- [x] Verificar DOM visível e duas oportunidades de frame, preservar falhas e diferença entre DOM observado e pixel físico. Teste DOM não substitui execução no Mac.
+- [x] Testar unidade JS e integração local real HTTP/WS, com brutas de ensaio rotuladas Linux, sem alegar Mac.
 
 ### Task 3: launcher, cargas e operação temporária
 
-**Files:** scripts/benchmark_phase2.py; scripts/e03/serve.py; scripts/e03/launcher.py; scripts/e03/workloads.py; tests/test_e03_launcher.py; protocolo operacional em docs/superpowers/reports/.
+**Files:** scripts/benchmark_phase2.py; scripts/e03/launcher.py; scripts/e03/workloads.py; tests/test_e03_launcher.py; protocolo operacional em docs/superpowers/reports/.
 **Interfaces:** launcher usa IDs imutáveis, binds RO apenas do ferramental e dados próprios/tmpfs, rede interna e publicação loopback; exposição tailnet HTTPS exclusiva com verificação de não alterar Serve existente. Artefatos privados separados dos públicos sanitizados. Cargas fixas: ocioso, conversa/painel, auditoria sintética, execução isolada e recuperação offline existente, com evidência de exposição no intervalo das amostras.
 
 - [ ] RED: validar flag/alvo/configuração, recusar credenciais herdadas e configurações de produção, teardown de identidade divergente, timeout e falha de carga.

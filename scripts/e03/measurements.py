@@ -26,6 +26,10 @@ class ControlSample:
     persisted_call_id: str | None = None
     persisted_status: str | None = None
     dom_visible: bool = True
+    dom_mutation_ms: float | None = None
+    http_status: int | None = None
+    ack_decided: bool = False
+    error_kind: str | None = None
 
 
 def _number(value):
@@ -59,10 +63,34 @@ def _validate_shape(sample):
             sample.persist_ms,
             sample.stream_ms,
             sample.dom_ms,
+            sample.dom_mutation_ms,
         )
     ):
         raise ValueError("amostra inválida")
+    _validate_protocol(sample)
     if sample.persisted_message_id is not None and type(sample.persisted_message_id) is not int:
+        raise ValueError("amostra inválida")
+
+
+def _validate_protocol(sample):
+    if type(sample.ack_decided) is not bool:
+        raise ValueError("amostra inválida")
+    if sample.http_status is not None and (
+        type(sample.http_status) is not int or not 100 <= sample.http_status <= 599
+    ):
+        raise ValueError("amostra inválida")
+    if sample.error_kind not in (
+        None,
+        "http",
+        "transport",
+        "correlation",
+        "deadline",
+        "persist",
+        "dom",
+        "clock",
+        "cancelled",
+        "workload",
+    ):
         raise ValueError("amostra inválida")
 
 
@@ -77,13 +105,14 @@ def _row(sample):
             sample.persist_ms,
             sample.stream_ms,
             sample.dom_ms,
+            sample.dom_mutation_ms,
         ]
         if not all(_number(value) for value in times):
             errors.append("missing_or_invalid_clock")
         elif not (
             sample.send_ms <= sample.ack_http_ms
             and sample.send_ms <= sample.persist_ms
-            and sample.send_ms <= sample.stream_ms <= sample.dom_ms
+            and sample.send_ms <= sample.stream_ms <= sample.dom_mutation_ms <= sample.dom_ms
         ):
             errors.append("incompatible_clock_order")
         if (
@@ -93,6 +122,8 @@ def _row(sample):
             or sample.persisted_status != "denied"
         ):
             errors.append("persistence_not_confirmed")
+        if sample.http_status != 200 or sample.ack_decided is not True:
+            errors.append("http_ack_not_confirmed")
         if sample.dom_visible is not True:
             errors.append("dom_not_visible")
     if errors:

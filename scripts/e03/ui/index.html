@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kairos — coleta temporária E0.3</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#182730;background:#f2f5f6}body{max-width:880px;margin:2rem auto;padding:0 1rem}h1{font-size:1.65rem}section{background:white;border:1px solid #ccd8dd;border-radius:10px;padding:1.2rem;margin:1rem 0}label{display:block;margin:.6rem 0}input{padding:.6rem;width:min(24rem,90%)}button{padding:.7rem 1rem;margin:.35rem;border:1px solid #345e72;border-radius:6px;background:#fff;color:#193b4b;font:inherit;cursor:pointer}button.primary{background:#193b4b;color:white}button:disabled{opacity:.45;cursor:default}#result{min-height:4rem;border:1px solid #9ab1bd;border-radius:6px;padding:1rem;position:sticky;bottom:1rem;background:#fff;z-index:1}#progress{white-space:pre-wrap}small{color:#425c69}pre{white-space:pre-wrap;word-break:break-word}#panel{min-height:2rem;max-height:5rem;overflow:auto}a{color:#174b67}
+</style>
+</head>
+<body>
+<h1>Coleta temporária E0.3</h1>
+<p>Esta instância usa somente conversas sintéticas e negações de ferramentas. A coleta inclui a rede entre este navegador e o servidor Linux.</p>
+<section id="login"><h2>Acesso temporário</h2><form id="login-form"><label for="secret">Credencial própria desta instância</label><input id="secret" type="password" autocomplete="off" required><button class="primary">Entrar</button></form><small>A credencial não entra no relatório. Use a credencial da temporária fornecida pelo operador.</small></section>
+<section><h2>Coleta</h2><p>Mantenha esta aba visível durante os cinco cenários. São pelo menos 30 negações por cenário. Prazos e falhas serão preservados no resultado.</p><button id="start" class="primary" disabled>Iniciar coleta</button><button id="stop" disabled>Parar e preservar amostras</button><button id="download" disabled>Baixar relatório</button><p id="status" role="status" aria-live="polite">Carregando a identidade da instância…</p><pre id="progress"></pre><div id="panel" aria-label="Conversa sintética concorrente"></div></section>
+<div id="result" role="status" aria-live="polite">O resultado negado aparecerá aqui durante cada controle.</div>
+<section><h2>Como interpretar</h2><p>O controle termina após a resposta de decisão e a confirmação do registro negado. O tempo de evento até o DOM é publicado como intervalo conservador, incluindo rede; não é um horário exato de commit nem um SLA.</p><p>O aceite do E0 depende da revisão das amostras, recursos, resíduos e limites. A execução desta página não concede aprovação automaticamente.</p><pre id="summary"></pre></section>
+<script type="module" src="./page.js"></script>
+</body>
+</html>
