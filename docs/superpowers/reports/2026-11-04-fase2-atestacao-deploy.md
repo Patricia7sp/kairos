@@ -1,6 +1,6 @@
 # E0.2 — evidência parcial de procedência e transporte do deploy
 
-Coletas em 04/11/2026, após revisão do PR #132 no SHA `7b6346d`. Complementam a [matriz E0](2026-11-02-fase2-plataforma.md). As primeiras sondas foram sem sessão; após autorização explícita da usuária foram feitos login de teste, consultas de leitura e testes de tickets WebSocket. Nenhum redeploy, logout global, modificação de listener ou alteração de credenciais foi realizado. O gate E0 continua pendente.
+Coletas iniciais em 04/11/2026, após revisão do PR #132 no SHA `7b6346d`. Complementam a [matriz E0](2026-11-02-fase2-plataforma.md). As primeiras sondas foram sem sessão; após autorização explícita da usuária foram feitos login de teste, consultas de leitura e testes de tickets WebSocket. Nas coletas de 04/11 não houve redeploy, logout global, modificação de listener ou alteração de credenciais. A promoção autorizada de 05/11 está registrada em seção própria abaixo. O gate E0 continua pendente.
 
 ## CI do SHA revisado
 
@@ -64,7 +64,7 @@ Comparação de `importlib.metadata.distributions()` dos containers com `uv.lock
 | websockets | 17.4 | 17.0.1 |
 | zipp | 4.1.2 | 4.1.0 |
 
-É divergência demonstrada do ambiente testado, não prova de vulnerabilidade específica dessas versões. A causa observada é o build por pip fora do lock, que também estava excluído do contexto por `.dockerignore`. A correção está no [PR #133](https://github.com/Patricia7sp/kairos/pull/133), branch separada `fix/build-dependencias-lock`: contexto inclui lock, uv oficial fixado por digest, sync --locked sem extras dev; sem alterar a produção. O teste de regressão real falhou na imagem implantada e passou nas novas imagens isoladas da aplicação/broker. Um contexto sintético com projeto/lock divergentes foi recusado; uv ficou ausente da imagem final. A lacuna de transitivos dev apontada na revisão foi reproduzida com imagem mutante e corrigida no teste. CI integral local concluído com exit 0; após os achados do primeiro Sonar, a receita restringe dependências de terceiros a wheels e separa o build editável local com backend temporário fixado por hashes. Regressões afetadas repetidas: 45 passed/26 subtests de Dockerfile/imagem; 26 passed/1 skipped de sessões offline; contrato do lock no broker aprovado. SHA corretivo `b93fb42`, [CI remoto e Sonar aprovados](https://github.com/Patricia7sp/kairos/actions/runs/41774274910): 4363 passed, 24 skipped, 35 deselected e 6657 subtests; promoção e revalidação do deploy continuam pendentes. Este PR continua somente documental.
+É divergência demonstrada do ambiente testado, não prova de vulnerabilidade específica dessas versões. A causa observada é o build por pip fora do lock, que também estava excluído do contexto por `.dockerignore`. A implementação isolada de 04/11 está no [PR #133](https://github.com/Patricia7sp/kairos/pull/133), branch separada `fix/build-dependencias-lock`: contexto inclui lock, uv oficial fixado por digest, sync --locked sem extras dev; sem alterar a produção. O teste de regressão real falhou na imagem implantada e passou nas novas imagens isoladas da aplicação/broker. Um contexto sintético com projeto/lock divergentes foi recusado; uv ficou ausente da imagem final. A lacuna de transitivos dev apontada na revisão foi reproduzida com imagem mutante e corrigida no teste. CI integral local concluído com exit 0; após os achados do primeiro Sonar, a receita restringe dependências de terceiros a wheels e separa o build editável local com backend temporário fixado por hashes. Regressões afetadas repetidas: 45 passed/26 subtests de Dockerfile/imagem; 26 passed/1 skipped de sessões offline; contrato do lock no broker aprovado. SHA corretivo `b93fb42`, [CI remoto e Sonar aprovados](https://github.com/Patricia7sp/kairos/actions/runs/41774274910): 4363 passed, 24 skipped, 35 deselected e 6657 subtests; a promoção e revalidação foram concluídas em 05/11, conforme a seção abaixo. Este PR continua somente documental.
 
 ## Transporte observado no servidor
 
@@ -176,9 +176,32 @@ No encerramento: mesmos IDs de imagem registrados acima, ambos healthy, RestartC
 
 Esta série amplia o registro de recursos do executor; não fornece ACK, renderização, percentis, aceitação de carga ou evidência de navegador do E0.3.
 
+## Promoção e revalidação do PR #133 — 05/11/2026
+
+Após aprovação explícita da usuária e revisão independente do SHA `b93fb42`, o [PR #133](https://github.com/Patricia7sp/kairos/pull/133) foi integrado por squash em `216cab2e851d9cceac52161e94a5735e39cde9d4`. A árvore `0cfcdbed117d66cd1a8bc00589c221f3981eecf0` é idêntica à aprovada; a revisão do diff `HEAD~1..HEAD` encontrou apenas os cinco arquivos previstos, sem remoções acidentais. O checkout original permaneceu intacto.
+
+[CI da main, run 41961798594](https://github.com/Patricia7sp/kairos/actions/runs/41961798594): verificações e Sonar aprovados; unitários 4363 passed, 24 skipped, 35 deselected, 6657 subtests em 552,31 s. Benchmark opt-in pulado. Deploy Komodo concluído com sucesso em `03:38:31Z`, Update `6aebfa18ce33188124951056`; o log ainda informa commit `?`. A consulta local ao checkout Compose confirmou HEAD `216cab2`, separadamente desse log. Não apresentar o campo ausente como vínculo de procedência que o Komodo não forneceu.
+
+| Serviço promovido | ID imutável observado | Estado |
+| --- | --- | --- |
+| Kairos | `sha256:2cbd64fb0d757e469564356f6205116f79ed7230eae50d40a22b1fad1496e256` | running/healthy, RestartCount 0, State.OOMKilled false |
+| Broker | `sha256:821c2ae707fb14c8990d4d961c951f8ca577b20a1c821292b25ee56532398210` | running/healthy, RestartCount 0, State.OOMKilled false |
+
+Verificação de arquivos iniciada em `03:40:28Z`, como UID 10000, Python `-I -B`, sem exportar conteúdo. Seleção de blobs de `216cab2`: prefixos `kairos_`, `skills/`, `locales/`, `native/`, `docker/`, mais `pyproject.toml`, `README.md` e agora `uv.lock`. Links simbólicos são comparados pelo texto do link, arquivos pelo SHA256, com recusa de pai resolvido fora de `/opt/kairos`. **1.521 arquivos esperados em cada container, zero ausentes e zero diferentes**. O aumento de dois em relação à coleta anterior corresponde a `uv.lock` e `docker/build-requirements.txt`. Manifesto de path→SHA256, JSON com chaves ordenadas e separadores `,`/`:`: `01ef84c2fe7a3a2a9589f18d8531ed023b0eeb36f8f5edf538ca847e65d2e3aa`.
+
+Nas duas venvs efetivamente em execução: 35 distribuições, requisitos diretos presentes, **zero versões divergentes do lock e zero pacotes fora do grafo default de runtime** (união de ramos de plataforma, sem extras). O hash de `uv.lock` nos dois containers é `1bcfd55b47e5fabb6721832d1134e2dbe92e3d0e7215b899e135962a965c27d8`. A regressão comprometida foi executada adicionalmente contra os dois IDs imutáveis, em classes herdadas que substituem somente a entrada IMAGE: **2 testes executados, 0 skips, OK em 2,073 s**. A cobertura automática comprometida do broker permanece um follow-up; essa execução adicional não altera a suíte do CI.
+
+Higiene observada nos dois containers: venv `/opt/kairos/.venv`; import editável em `/opt/kairos/kairos_cli/__init__.py`; uv ausente do PATH; backend montado e `/tmp/kairos-editable` ausentes. `pip` e `setuptools` estão **ausentes das novas venvs**. No Python global da base (`/usr/local`), fora da venv, continuam pip 24.0 e setuptools 79.0.1; não atribuir esses pacotes ao grafo de runtime. O [plano do build](../plans/2026-11-04-build-dependencias-lock.md) delimita a exclusão dessas ferramentas no teste e registra base Python sem digest como acompanhamento.
+
+Smoke pós-deploy no endereço efetivo: `/api/health` retornou `ok`. Repetidos, com o token já autorizado somente em memória: login HTTP 200; auth/me authenticated true; runtime enabled/ready; ping/pong de chat e runtime passaram; ticket consumido recusado com HTTP 403; reconexão de chat com novo ticket passou. Cookie continua HttpOnly, SameSite lax, Secure false. Sem logout global, mensagens a modelo, exportação de credenciais ou nova infraestrutura/listener. Esses resultados são de servidor e não medição de UI no Mac.
+
+As imagens anteriores seguem preservadas como `kairos:rollback-pr133-application` e `kairos:rollback-pr133-broker`, com os IDs da coleta inicial. Nenhum rollback foi necessário.
+
+**Achado de divergência de dependências encerrado no escopo observado de E0.2.** Isso exige o redeploy e as verificações acima; o merge sozinho não o encerraria. A comparação não cobre arquivos extras, hashes de todos os arquivos instalados de terceiros, camadas de base/apt ou procedência criptográfica integral do build. O gate E0/I1 permanece pendente de perfis exigidos, transporte/cliente e benchmark E0.3; não habilita outro alvo ou capacidade.
+
 ## Pendências do E0
 
-- Corrigir e promover o build que não consumia o lock; verificar novamente dependências/artefato e perfis de produção exigidos no deploy final.
+- Build corrigido, promovido e revalidado no escopo descrito acima; continuam pendentes os demais perfis/controles exigidos de E0.2. A procedência integral das camadas não foi atestada.
 - URL, login de teste e ciclo de tickets identificados/validados no servidor; faltam aceite do transporte HTTP sobre tailnet e evidência de sessão/origem/reconexão da interface no navegador do Mac, sem expor tokens.
 - E0.3: amostras autenticadas e renderizadas; metadados junto de `controle_local_ms` devem explicitar navegador–servidor e inclusão de rede. Não produzir percentis a partir destas sondas HTTP ou dos tempos de testes.
 - Aceite dos limites e rito do timebox em 09/11: aceite formal, extensão justificada com nova data ou recusa; vencimento não aprova.

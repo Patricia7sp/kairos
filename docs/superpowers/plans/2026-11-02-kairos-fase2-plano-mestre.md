@@ -22,6 +22,8 @@ Atualização de 04/11/2026: a usuária transcreveu os limites do painel Docker 
 
 Decisão de topologia em 04/11/2026: a usuária confirmou uso inicial pelo navegador no Mac, com Kairos executando no servidor Linux existente. Essa decisão substitui a hipótese de Mac executor dos registros anteriores. A lacuna AppArmor do Docker Desktop fica histórica e fora do aceite inicial; E0 passa a validar o executor Linux e o caminho de interface/autenticação/latência no navegador, sem instalação local ou aprovação automática do gate.
 
+Promoção autorizada em 05/11/2026: PR #133 integrado por squash na main `216cab2`, com CI/Sonar/deploy aprovados e revalidação dos dois containers. O achado de dependências fora do lock está encerrado no escopo observado; fontes, lock, import editável e runtime foram comparados no [relatório do deploy](../reports/2026-11-04-fase2-atestacao-deploy.md). Permanecem perfis/controles exigidos, transporte/cliente, benchmark E0.3 e aceite do gate; nenhum checkbox E0 é concluído apenas por esse merge.
+
 ## Escopo e sequência prioritária
 
 **Fase 2 mínima: E0 + E1 + E2 de leitura + E4. E4 tem Prioridade Alta.** A ordem de preparação é H0 separado → E0 → I1 reordenado → demais contratos/integrações de E1 → E4; E2 de leitura pode avançar em paralelo com E4 assim que suas fontes estiverem disponíveis. E4 não espera E2 visual nem E3. H0 é antecipável por ser correção limitada de defeitos existentes, sem alterar o gate do destino.
