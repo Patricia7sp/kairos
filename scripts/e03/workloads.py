@@ -84,10 +84,11 @@ def audit_fixture(root, seconds=0):
 
     source = root / "source"
     source.mkdir(exist_ok=True)
+    payload = (
+        Path(__file__).resolve().parents[2] / "tests/fixtures/e03/audit-source.txt"
+    ).read_text()
     for index in range(128):
-        (source / f"module_{index}.py").write_text(
-            'import subprocess\nsubprocess.run("echo synthetic", shell=True)\n'
-        )
+        (source / f"module_{index}.py").write_text(payload)
     home = root / "home"
     home.mkdir(mode=0o700, exist_ok=True)
     deadline = time.monotonic() + seconds

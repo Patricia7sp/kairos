@@ -226,6 +226,16 @@ def test_fixed_workload_error_returns_explicit_failure(tmp_path, monkeypatch, ca
     assert "private" not in json.dumps(row)
 
 
+def test_audit_workload_exercises_findings_from_inert_fixture(tmp_path):
+    from kairos_security.checks.source_code import scan_source_tree
+    from scripts.e03.workloads import audit_fixture
+
+    details = audit_fixture(tmp_path)
+    assert details["audits"] > 0
+    assert details["findings"] > 0
+    assert "SEC-SRC-004" in {finding.id for finding in scan_source_tree(tmp_path / "source")}
+
+
 def test_workload_deadline_terminates_real_owned_process_group(tmp_path, monkeypatch):
     import time
 
