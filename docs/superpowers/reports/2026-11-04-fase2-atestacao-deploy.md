@@ -215,3 +215,11 @@ A aplicação com s6 começa como root por desenho e tem volume de estado gravá
 - URL, login de teste e ciclo de tickets identificados/validados no servidor; faltam aceite do transporte HTTP sobre tailnet e evidência de sessão/origem/reconexão da interface no navegador do Mac, sem expor tokens.
 - E0.3: amostras autenticadas e renderizadas; metadados junto de `controle_local_ms` devem explicitar navegador–servidor e inclusão de rede. Não produzir percentis a partir destas sondas HTTP ou dos tempos de testes.
 - Aceite dos limites e rito do timebox em 09/11: aceite formal, extensão justificada com nova data ou recusa; vencimento não aprova.
+
+## Revalidação após merge documental #132
+
+O PR #132 foi integrado em `1da925c24614023d32994133d4019bb9d12f05ed`. A árvore do squash confere à revisão documental aprovada e o diff posterior contém somente oito documentos; não houve remoção de produto. [CI/Sonar/deploy da main](https://github.com/Patricia7sp/kairos/actions/runs/42033955336) concluíram com sucesso.
+
+Nova coleta em `2026-11-05T13:56:26Z`, após a promoção: aplicação `sha256:15287ae6f7b39d5311757c310d2a5b74f8b5adbf3885e3c1de0448a359f24a20`; broker `sha256:3ba624e7ea88116f1d1661b5aa64b8287268ae614d4de63e850ee84c0ca2d1a5`. Ambos healthy, restart_count 0, OOMKilled false; 35 distribuições por venv, nenhuma divergência do lock, distribuição fora do grafo ou dependência direta ausente. Os 1.521 arquivos esperados conferem ao SHA da main. Manifesto por caminho SHA256 `01ef84c2fe7a3a2a9589f18d8531ed023b0eeb36f8f5edf538ca847e65d2e3aa`, lock SHA256 `1bcfd55b47e5fabb6721832d1134e2dbe92e3d0e7215b899e135962a965c27d8`. Higiene de runtime e import editável confirmados; smoke pós-deploy passou. Mesmos método e limites de procedência descritos acima: isso não atesta integralmente base/apt ou origem do build por rótulo OCI.
+
+O coletor E0.3 está em branch separada e será montado exclusivamente em instância temporária. Não faz parte deste deploy nem fornece medição de navegador Mac por inferência.
