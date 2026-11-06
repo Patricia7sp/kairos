@@ -28,12 +28,41 @@ export function cleanExport(value) {
 }
 
 export const twoFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-export function visibleElement(element) {
-  if (document.visibilityState !== "visible" || !element?.isConnected) return false;
+let domDiagnostic = null;
+export const clearDomDiagnostic = () => { domDiagnostic = null; };
+export const getDomDiagnostic = () => domDiagnostic ? { ...domDiagnostic } : null;
+function recordDomDiagnostic(element, phase, reason, measuredRect, measuredStyle) {
+  const checkedPhase = ["root", "result", "exception"].includes(phase) ? phase : "unspecified";
+  try {
+    const rect = measuredRect ?? (element?.isConnected ? element.getBoundingClientRect() : null);
+    const style = measuredStyle ?? (element?.isConnected ? getComputedStyle(element) : null);
+    const finiteValue = value => Number.isFinite(value) ? value : null;
+    domDiagnostic = { reason, phase: checkedPhase,
+      visibility: ["visible", "hidden"].includes(document.visibilityState) ? document.visibilityState : "other",
+      has_focus: document.hasFocus(), connected: element?.isConnected === true,
+      viewport_width: finiteValue(innerWidth), viewport_height: finiteValue(innerHeight),
+      top: finiteValue(rect?.top), bottom: finiteValue(rect?.bottom),
+      width: finiteValue(rect?.width), height: finiteValue(rect?.height),
+      displayed: style ? style.display !== "none" : null,
+      style_visible: style ? style.visibility !== "hidden" : null,
+      opacity_nonzero: style ? Number(style.opacity) !== 0 : null,
+      at_ms: finiteValue(performance.now()) };
+  } catch {
+    domDiagnostic = { reason: "diagnostic_unavailable", phase: checkedPhase };
+  }
+}
+export function visibleElement(element, phase = "unspecified") {
+  if (document.visibilityState !== "visible" || !element?.isConnected) {
+    recordDomDiagnostic(element, phase, document.visibilityState !== "visible" ? "document_not_visible" : "detached");
+    return false;
+  }
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);
-  return rect.width > 0 && rect.height > 0 && rect.top < innerHeight && rect.bottom > 0
+  const visible = rect.width > 0 && rect.height > 0 && rect.top < innerHeight && rect.bottom > 0
     && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
+  if (!visible) recordDomDiagnostic(element, phase,
+    rect.width <= 0 || rect.height <= 0 ? "empty_box" : rect.top >= innerHeight || rect.bottom <= 0 ? "outside_viewport" : "css_hidden", rect, style);
+  return visible;
 }
 
 export class ControlAttempt {
@@ -96,11 +125,14 @@ export class ControlAttempt {
     this.row.stream_ms = this.now();
     try {
       await this.observeDom();
-    } catch { this.fail("erro", "dom"); }
+    } catch {
+      if (!this.settled) recordDomDiagnostic(this.root, "exception", "dom_exception");
+      this.fail("erro", "dom");
+    }
   }
 
   async observeDom() {
-    if (!this.visible(this.root)) { this.fail("erro", "dom"); return; }
+    if (!this.visible(this.root, "root")) { this.fail("erro", "dom"); return; }
     let element;
     await new Promise((resolve, reject) => {
       const observer = new MutationObserver(() => {
@@ -121,7 +153,11 @@ export class ControlAttempt {
     await this.frames();
     if (this.settled) return;
     if (!element.isConnected || element.dataset.approvalId !== this.row.approval_id
-        || element.dataset.callId !== this.row.call_id || !this.visible(element)) { this.fail("erro", "dom"); return; }
+        || element.dataset.callId !== this.row.call_id) {
+      recordDomDiagnostic(element, "result", "dom_correlation");
+      this.fail("erro", "dom"); return;
+    }
+    if (!this.visible(element, "result")) { this.fail("erro", "dom"); return; }
     this.row.dom_ms = this.now();
     this.row.dom_visible = true;
     this.complete();
