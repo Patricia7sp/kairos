@@ -57,9 +57,11 @@
 **Files:** scripts/benchmark_phase2.py; scripts/e03/launcher.py; scripts/e03/workloads.py; tests/test_e03_launcher.py; protocolo operacional em docs/superpowers/reports/.
 **Interfaces:** launcher usa IDs imutáveis, binds RO apenas do ferramental e dados próprios/tmpfs, rede interna e publicação loopback; exposição tailnet HTTPS exclusiva com verificação de não alterar Serve existente. Artefatos privados separados dos públicos sanitizados. Cargas fixas: ocioso, conversa/painel, auditoria sintética, execução isolada e recuperação offline existente, com evidência de exposição no intervalo das amostras.
 
-- [ ] RED: validar flag/alvo/configuração, recusar credenciais herdadas e configurações de produção, teardown de identidade divergente, timeout e falha de carga.
-- [ ] GREEN: controle Docker restrito ao launcher confiável; servidor temporário sem socket Docker, provider credentials ou dados de produção. Credencial própria criada em arquivo privado; nunca impressa.
-- [ ] Coletar CPU/RAM/swap/disco, OOM e resíduos, associando run_id/cenário/intervalo. Se carga não foi exercitada durante o cenário, resultado parcial.
+- [x] RED: validar flag/alvo/configuração, recusar credenciais herdadas e configurações de produção, teardown de identidade divergente, timeout e falha de carga.
+- [x] GREEN: controle Docker restrito ao launcher confiável; servidor temporário sem socket Docker, provider credentials ou dados de produção. Credencial própria criada em arquivo privado; nunca impressa.
+- [x] Coletar CPU/RAM/swap/disco, OOM e resíduos, associando run_id/cenário/intervalo. Se carga não foi exercitada durante o cenário, resultado parcial.
 - [ ] Smoke local, revisão independente do conjunto, checks pertinentes e documentação/PR. Publicar somente a temporária autorizada; nunca mergear/ativar flag no startup de produção.
 - [ ] Disponibilizar página para execução real no Mac; registrar falha/lacuna de cliente quando não executado, sem fabricar n ou percentis.
 - [ ] Encerrar somente os recursos próprios, conferir resíduos e remover página/dados/credencial temporários após exportação/TTL. Registrar aceite ou parcial com limites.
+
+Checkpoint da retomada: correções da revisão e integração local nos commits `d8abf86`, `88968a0` e `b83d959`. A prova Linux de `b83d959` tem 150/150 negações, relatório recebido pela página e teardown conferido. A publicação HTTPS observada, o envio da atualização ao PR #134 e a coleta no Mac continuam pendentes; a revisão automática exige autorização explícita para o push. Isso mantém Task 3 e o aceite do E0 abertos. Evidências e limites estão no relatório operacional.
