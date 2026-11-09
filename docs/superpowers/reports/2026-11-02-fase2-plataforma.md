@@ -85,7 +85,7 @@ Leitura pontual de `docker stats --no-stream`, sem garantia de ociosidade: Kairo
 | Linux / aplicação e regressões | CI por SHA, integração de imagem, filesystem e smoke; ver [baseline](2026-11-02-fase2-baseline.md) | Executor escolhido pela usuária; evidência delimitada, sem aceite automático de E0. |
 | Linux / worker externo offline | Testes reais de sessões Docker com opt-in e atestação no caminho do worker | Demonstrado para os cenários executados; não equivale a qualquer perfil de scanner ou egress. |
 | Linux / sandbox interna opt-in | Código e testes condicionais existentes; opt-in interno não executado nesta retomada | Não aprovado por estes resultados. |
-| Mac / navegador cliente | Intel/16 GiB e macOS informados; acesso pelo navegador confirmado, sem checkout | Cliente escolhido; versão do navegador, cenários UI/reconexão e medições do caminho navegador–servidor pendentes. |
+| Mac / navegador cliente | Chrome 156/MacIntel, HTTPS real; 150/150 negações sintéticas em 09/11, com persistência/DOM/cargas e teardown; ver [coleta e ressalvas](2026-11-09-e03-mac-transporte.md) | Cliente escolhido e coleta concluída; 21 exceções históricas de transporte sem classe impedem declarar transporte antigo sem erros. Aceite formal e demais cenários de UI/reconexão permanecem pendentes. |
 | macOS nativo / filesystem e host | Primitivas e runtime não executados | Fora do uso inicial confirmado; suporte nativo não aprovado. |
 | Docker Desktop no Mac / backend Linux | Coleta histórica de Desktop/Engine e limites; AppArmor não listado, seccomp unconfined | Fora do uso inicial; worker local não aprovado, sem impedir acesso web. |
 | Perfis futuros de scanner/delegação | Contratos ainda dependem de E1/E4 | Não habilitados. |

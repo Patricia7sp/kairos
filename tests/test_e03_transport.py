@@ -187,3 +187,93 @@ def test_report_requires_successful_transport_even_when_all_measurements_pass(
         assert final["gate"] == "inconclusive"
         assert final["transport"]["failures"] == 1
         assert final["teardown_state"] == "complete"
+
+
+@pytest.fixture
+def cleanup_run(tmp_path):
+    run = launcher.TemporaryRun(
+        launcher.LaunchConfig("sha256:" + "1" * 64, "sha256:" + "2" * 64, tmp_path / "run")
+    )
+    run.directory.mkdir()
+    run.public.mkdir()
+    (run.directory / "credential").write_text("synthetic-temporary-credential")
+    info = run.directory.stat()
+    run.directory_identity = (info.st_dev, info.st_ino)
+    run.final_report = {"gate": "passed"}
+    return run
+
+
+def _assert_cleanup_transport_report(run, drain_timeout):
+    report = json.loads((run.directory / "report.json").read_text())
+    assert report["gate"] == "inconclusive"
+    assert report["transport"]["state"] == "failed"
+    assert report["transport"]["failures"] == 1
+    assert report["transport"]["errors"] == [
+        {"operation": "connect", "error_kind": "ConnectionResetError", "count": 1}
+        if drain_timeout is None
+        else {"operation": "drain", "error_kind": "TimeoutError", "count": 1}
+    ]
+    assert report["teardown_state"] == ("complete" if drain_timeout is None else "failed")
+    assert report["teardown_errors"] == (
+        [] if drain_timeout is None else ["transport_cleanup_failed"]
+    )
+    assert not (run.directory / "credential").exists()
+
+
+@pytest.mark.parametrize("drain_timeout", [None, 0.01])
+def test_cleanup_waits_for_pending_connection_before_persisting_transport(
+    cleanup_run, monkeypatch, drain_timeout
+):
+    run = cleanup_run
+    connect = socket.create_connection
+    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+    cleanup_errors = []
+
+    def command(*args):
+        assert args[:2] == ("docker", "ps")
+        return ""
+
+    def blocked_connect(*args, **kwargs):
+        if args[0] == forward.target:
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test_release_deadline")
+            raise ConnectionResetError("synthetic-private-late-error")
+        return connect(*args, **kwargs)
+
+    def cleanup():
+        try:
+            run.cleanup()
+        except (OSError, RuntimeError) as error:
+            cleanup_errors.append(type(error).__name__)
+        finally:
+            closed.set()
+
+    with socket.socket() as upstream:
+        upstream.bind(("127.0.0.1", 0))
+        upstream.listen()
+        forward = launcher.LoopbackForward("127.0.0.1", upstream.getsockname()[1])
+        forward.wait_until_ready(timeout=1)
+        run.forward = forward
+        if drain_timeout is not None:
+            close = forward.close
+            forward.close = lambda: close(timeout=drain_timeout)
+        monkeypatch.setattr(launcher, "command", command)
+        monkeypatch.setattr(socket, "create_connection", blocked_connect)
+        worker = threading.Thread(target=cleanup)
+        with connect(forward.server_address, timeout=1):
+            try:
+                assert entered.wait(2)
+                worker.start()
+                forward.thread.join(timeout=2)
+                assert not forward.thread.is_alive()
+                if drain_timeout is None:
+                    assert not closed.wait(0.1), "cleanup returned with a connection still active"
+                else:
+                    assert closed.wait(2), "cleanup did not honor the drain deadline"
+            finally:
+                release.set()
+                worker.join(timeout=3)
+    assert closed.is_set()
+    assert cleanup_errors == ([] if drain_timeout is None else ["RuntimeError"])
+    _assert_cleanup_transport_report(run, drain_timeout)

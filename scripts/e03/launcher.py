@@ -220,6 +220,8 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
         self.stopping = threading.Event()
         self.context = threading.local()
         self.diagnostic_lock = threading.Lock()
+        self.drained = threading.Condition(self.diagnostic_lock)
+        self.active_connections = 0
         self.errors = Counter()
         self.startup_connection_refusals = 0
         self.ready = False
@@ -267,9 +269,14 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
                 self.rejected += 1
             self.shutdown_request(request)
             return
+        with self.drained:
+            self.active_connections += 1
         try:
             super().process_request(request, client_address)
         except BaseException:
+            with self.drained:
+                self.active_connections -= 1
+                self.drained.notify_all()
             self.slots.release()
             raise
 
@@ -278,6 +285,9 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
             super().process_request_thread(request, client_address)
         finally:
             self.slots.release()
+            with self.drained:
+                self.active_connections -= 1
+                self.drained.notify_all()
 
     def handle_error(self, request, client_address):
         error = sys.exc_info()[1]
@@ -302,11 +312,20 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
             "temporary_forward_failed", extra={"operation": operation, "error_kind": kind}
         )
 
-    def close(self):
+    def close(self, timeout=12):
         self.stopping.set()
         self.shutdown()
         self.server_close()
         self.thread.join(timeout=5)
+        with self.drained:
+            if not self.drained.wait_for(lambda: self.active_connections == 0, timeout=timeout):
+                self.failures += 1
+                self.errors[("drain", "TimeoutError")] += 1
+                logging.getLogger(__name__).error(
+                    "temporary_forward_drain_timeout",
+                    extra={"operation": "drain", "error_kind": "TimeoutError"},
+                )
+                raise TimeoutError("temporary_forward_drain_timeout")
 
 
 class TemporaryRun:
@@ -748,7 +767,10 @@ class TemporaryRun:
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 errors.append("listener_cleanup_failed")
         if self.forward:
-            self.forward.close()
+            try:
+                self.forward.close()
+            except (OSError, RuntimeError):
+                errors.append("transport_cleanup_failed")
         try:
             self.cleanup_workers(errors)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):

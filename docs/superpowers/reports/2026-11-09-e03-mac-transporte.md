@@ -35,3 +35,16 @@ Durante operação, exceções da ponte têm logging com classe allowlisted e op
 Regressões iniciais: seis casos RED (incluindo duas aprovações incorretas apesar de falha/rejeição real no contrato do relatório), depois seis GREEN. Integração inicial: 60 testes passaram; fixture de cleanup parcial atualizada para o contrato completo de diagnóstico, sem dispensar checks de daemon. Teste adicional de privacidade e verificações finais serão registrados após execução.
 
 O aceite formal do E0 continua pendente da matriz E0.2, da revisão das evidências e da decisão explícita sobre limites/lacunas. A nova coleta não habilita E1 ou prova suporte ao backend nativo macOS.
+
+
+## Revisão e barreira de encerramento
+
+Revisão independente de `43cf04d..a8ac840` em 09/11, GPT-6 Astra/high: nenhum Critical ou Minor; um Important reproduzido com conexão loopback real. `close()` aguardava apenas o listener, permitindo consolidar o relatório antes de um handler ativo registrar sua falha. Os 56 testes selecionados pelo revisor passaram, mas não cobriam essa corrida.
+
+A correção acompanha os handlers desde a admissão até sua finalização e aguarda seu dreno antes de persistir o resultado final. O prazo padrão é 12 s, superior ao timeout de 10 s das operações de socket. Se expirar, registra `drain/TimeoutError`, torna o gate inconclusivo, preserva `transport_cleanup_failed` no encerramento e continua removendo os demais recursos próprios.
+
+Regressão concorrente RED→GREEN: o cleanup não pode retornar enquanto a conexão retida ainda não registrou `ConnectionResetError`. A variante de prazo confirma falha explícita, relatório final inconclusivo e remoção da credencial mesmo com conexão pendente. Uma contraprova sem tratamento do timeout falhou antes da restauração da correção. Integração Python afetada: **63 testes aprovados**, com sockets reais e sem cache/bytecode; Ruff dos arquivos alterados aprovado. A primeira rodada em sandbox foi interrompida por restrição de sockets e não é evidência de aprovação.
+
+O CI local iniciado antes da correção foi interrompido para evitar validar uma revisão obsoleta: 625 testes chegaram a passar, mas houve KeyboardInterrupt e o script terminou com falha unitária. Sua cobertura é parcial (combine também identificou 10 fragmentos inválidos); não é prova da suíte inteira. Tipos e testes dos três frontends passaram nessa rodada (17 TUI, 223 Web, 18 desktop), com fontes/configurações de frontend inalterados nesta correção. A suíte integral e a prova HTTPS corrigida continuam pendentes até os registros abaixo.
+
+Decisões sobre os limites considerados pela revisão: as 21 exceções históricas permanecem sem classe; não reclassificar a coleta antiga. A prova Mac depende dos artefatos protegidos referenciados, sem atestação independente do hardware. DOM não prova pintura física da tela nem suporte macOS nativo. E0/E1, merge e deploy mantêm seus gates próprios. Aceitar qualquer dessas extrapolações produziria uma aprovação sem evidência; nenhuma foi adotada.
