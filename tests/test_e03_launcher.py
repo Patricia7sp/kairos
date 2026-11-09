@@ -332,7 +332,10 @@ def test_incomplete_pressure_report_still_cleans_owned_resources(tmp_path, monke
     run.container, run.network = "3" * 64, "4" * 64
     remaining = {run.container, run.network}
     closed = []
-    run.forward = SimpleNamespace(failures=0, rejected=0, close=lambda: closed.append(True))
+    run.forward = SimpleNamespace(
+        close=lambda: closed.append(True),
+        summary=lambda: {"state": "observed", "failures": 0, "rejections": 0},
+    )
     run.kernel_attestation = {}
 
     def daemon(*args):

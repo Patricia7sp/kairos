@@ -8,6 +8,7 @@ import dataclasses
 import http.client
 import ipaddress
 import json
+import logging
 import os
 import re
 import secrets
@@ -21,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from .measurements import SCENARIOS, ControlSample, summarize_samples
@@ -181,16 +183,23 @@ class _Forward(socketserver.BaseRequestHandler):
     def handle(self):
         import select
 
+        context = self.server.context
+        context.operation = "connect"
         with socket.create_connection(self.server.target, timeout=10) as upstream:
             self.request.settimeout(10)
             upstream.settimeout(10)
             peers = [self.request, upstream]
             while not self.server.stopping.is_set():
+                context.operation = "select"
                 ready, _, _ = select.select(peers, [], [], 1)
                 for source in ready:
+                    context.operation = (
+                        "receive_client" if source is self.request else "receive_upstream"
+                    )
                     data = source.recv(65536)
                     if not data:
                         return
+                    context.operation = "send_upstream" if source is self.request else "send_client"
                     (upstream if source is self.request else self.request).sendall(data)
 
 
@@ -209,6 +218,11 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
             raise ValueError("destino da ponte inválido")
         self.target = (str(target), port)
         self.stopping = threading.Event()
+        self.context = threading.local()
+        self.diagnostic_lock = threading.Lock()
+        self.errors = Counter()
+        self.startup_connection_refusals = 0
+        self.ready = False
         self.failures = 0
         self.rejected = 0
         self.slots = threading.BoundedSemaphore(32)
@@ -216,9 +230,41 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
         self.thread.start()
 
+    def wait_until_ready(self, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(
+                    self.target, timeout=max(0.001, min(1, deadline - time.monotonic()))
+                ):
+                    self.ready = True
+                    return
+            except ConnectionRefusedError:
+                self.startup_connection_refusals += 1
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        raise RuntimeError("temporary_upstream_timeout")
+
+    def summary(self):
+        with self.diagnostic_lock:
+            return {
+                "state": "failed"
+                if self.failures or self.rejected
+                else "observed"
+                if self.ready
+                else "unavailable",
+                "failures": self.failures,
+                "rejections": self.rejected,
+                "startup_connection_refusals": self.startup_connection_refusals,
+                "errors": [
+                    {"operation": operation, "error_kind": kind, "count": count}
+                    for (operation, kind), count in sorted(self.errors.items())
+                ],
+            }
+
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
-            self.rejected += 1
+            with self.diagnostic_lock:
+                self.rejected += 1
             self.shutdown_request(request)
             return
         try:
@@ -234,7 +280,27 @@ class LoopbackForward(socketserver.ThreadingTCPServer):
             self.slots.release()
 
     def handle_error(self, request, client_address):
-        self.failures += 1
+        error = sys.exc_info()[1]
+        kind = (
+            type(error).__name__
+            if type(error)
+            in {
+                OSError,
+                TimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                BrokenPipeError,
+            }
+            else "unexpected"
+        )
+        operation = getattr(self.context, "operation", "unknown")
+        with self.diagnostic_lock:
+            self.failures += 1
+            self.errors[(operation, kind)] += 1
+        logging.getLogger(__name__).error(
+            "temporary_forward_failed", extra={"operation": operation, "error_kind": kind}
+        )
 
     def close(self):
         self.stopping.set()
@@ -397,6 +463,7 @@ class TemporaryRun:
         self.kernel_attestation = kernel
         address = next(iter(inspected["NetworkSettings"]["Networks"].values()))["IPAddress"]
         self.forward = LoopbackForward(address)
+        self.forward.wait_until_ready()
         self.local_origin = f"http://127.0.0.1:{self.forward.server_address[1]}"
         self.origin = self.local_origin
         write_json(
@@ -709,6 +776,7 @@ class TemporaryRun:
         self.cleanup_directory()
         self.token = ""
         if self.final_report is not None:
+            self.record_transport(self.final_report)
             self.final_report["teardown_state"] = "failed" if errors else "complete"
             self.final_report["teardown_errors"] = errors
             write_json(self.directory / "report.json", self.final_report, 0o600)
@@ -741,6 +809,19 @@ class TemporaryRun:
                 }
         return result
 
+    def record_transport(self, report):
+        if self.forward is None:
+            report["transport"] = {"state": "unavailable"}
+            if report["gate"] == "passed":
+                report["gate"] = "inconclusive"
+            return
+        transport = self.forward.summary()
+        report["transport"] = transport
+        report["loopback_forward_errors"] = transport["failures"]
+        report["loopback_forward_rejections"] = transport["rejections"]
+        if transport["state"] != "observed" and report["gate"] == "passed":
+            report["gate"] = "inconclusive"
+
     def finalize_report(self, raw):
         from .resources import summarize
 
@@ -771,8 +852,7 @@ class TemporaryRun:
         resources = summarize(self.stats)
         report["resource_state"] = resources["state"]
         report["server_kernel_attestation"] = self.kernel_attestation
-        report["loopback_forward_errors"] = self.forward.failures
-        report["loopback_forward_rejections"] = self.forward.rejected
+        self.record_transport(report)
         report["resources"] = resources
         report["artifacts"] = {
             "source_commit": command("git", "-C", str(REPO), "rev-parse", "HEAD"),
