@@ -1,4 +1,4 @@
-import { ControlAttempt, cleanExport } from "./collector.js";
+import { ControlAttempt, cleanExport, getDomDiagnostic, clearDomDiagnostic } from "./collector.js";
 import { ChatChannel, jsonRequest, waitForReport } from "./channel.js";
 
 const scenarios = ["ocioso", "conversa_painel", "auditoria", "execucao_isolada", "recuperacao"];
@@ -98,12 +98,17 @@ async function submitReport() {
     const raw = { schema_version: 1, run_id: manifest.run_id, client: clientMetadata(), samples: samples.map(cleanExport) };
     await channel.plain(reportSession, `e03-synthetic:report:${JSON.stringify(raw)}`);
     await patchSession(reportSession, "report");
+    const diagnostic = getDomDiagnostic();
+    const failed = samples.find(row => row.error_kind === "dom");
+    if (diagnostic && failed) await channel.plain(reportSession, `e03-synthetic:dom-diagnostic:${JSON.stringify({
+      run_id: manifest.run_id, session_id: failed.session_id, call_id: failed.call_id, diagnostic })}`);
   } finally { channel.close(); }
   return waitForReport({ runId: manifest.run_id, readReport: () => publicArtifact("report.json") });
 }
 
 async function run() {
   cancelled = false; samples.length = 0; report = null;
+  clearDomDiagnostic();
   byId("start").disabled = true; byId("stop").disabled = false; byId("download").disabled = true;
   byId("progress").textContent = "";
   try {

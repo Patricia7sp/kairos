@@ -65,3 +65,16 @@
 - [ ] Encerrar somente os recursos próprios, conferir resíduos e remover página/dados/credencial temporários após exportação/TTL. Registrar aceite ou parcial com limites.
 
 Checkpoint da retomada: correções da revisão e integração local nos commits `d8abf86`, `88968a0` e `b83d959`. A prova Linux de `b83d959` tem 150/150 negações, relatório recebido pela página e teardown conferido. A publicação HTTPS observada, o envio da atualização ao PR #134 e a coleta no Mac continuam pendentes; a revisão automática exige autorização explícita para o push. Isso mantém Task 3 e o aceite do E0 abertos. Evidências e limites estão no relatório operacional.
+
+## Retomada de 09/11 — transporte e coleta real
+
+O checkpoint acima é histórico: o PR #134 foi integrado em `43cf04d`, com CI/Sonar/deploy conferidos no ledger. A coleta real no Mac terminou em 09/11 com 150/150 negações válidas e teardown confirmado. A falha DOM da coleta anterior não se repetiu; sua causa permanece desconhecida. O [relatório da retomada](../reports/2026-11-09-e03-mac-transporte.md) preserva os resultados e a ressalva de 21 exceções sem classe no contador antigo.
+
+Correção limitada à Task 3, sem mudar o gateway, núcleo, protocolo de medidas, denominadores ou limiares:
+
+- [x] Reproduzir o contador com registro sanitizado de tipo/operação/horário, preservando a coleta original.
+- [x] Escrever regressões RED para inicialização indisponível, falha real durante operação e gate que não aprova transporte com falha.
+- [x] Aguardar o listener privado antes de usar a ponte; contar `ConnectionRefusedError` esperada do boot separadamente. Manter autenticação obrigatória após a espera.
+- [x] Registrar falhas de operação com campos fixos, sem mensagem/payload/credencial; conservar diagnóstico no relatório e atualizar o estado após encerramento.
+- [ ] Verificar o fluxo HTTPS completo com o código corrigido, todos os testes pertinentes e revisão independente da branch.
+- [ ] Consolidar E0.2/E0.3 e submeter os limites e lacunas ao aceite exigido, sem habilitar E1 por inferência.
