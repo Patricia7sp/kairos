@@ -1,0 +1,16 @@
+# Complemento de compose.yaml para o HTTPS privado (ver docs/ci-cd-komodo.md).
+services:
+  kairos:
+    ports: !override
+      - "127.0.0.1:9119:9119"
+    environment:
+      KAIROS_WEB_HTTP_COOKIE_HOST: "none"
+    networks:
+      default: {}
+      https-backend:
+        aliases: [kairos-web.invalid]
+
+networks:
+  https-backend:
+    external: true
+    name: kairos-https-backend

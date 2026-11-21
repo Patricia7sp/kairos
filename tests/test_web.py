@@ -613,6 +613,14 @@ class AutenticacaoTests(unittest.TestCase):
         c = TestClient(app, headers={TOKEN_HEADER: SESSION_TOKEN})
         self.assertEqual(c.get("/api/skills").status_code, 200)
 
+    def test_https_direto_exige_cookie_seguro_mesmo_no_host_de_transicao(self):
+        with patch.dict(os.environ, KAIROS_WEB_HTTP_COOKIE_HOST="legado.test:9119"):
+            c = TestClient(app, base_url="https://legado.test:9119")
+            res = c.post("/api/auth/login", json={"token": SESSION_TOKEN})
+            self.assertEqual(res.status_code, 200)
+            self.assertTrue(c.get("/api/auth/me").json()["authenticated"])
+            self.assertFalse(c.get("http://legado.test:9119/api/auth/me").json()["authenticated"])
+
 
 class CatalogoDeSkillsTests(unittest.TestCase):
     """As skills migradas do Hermes carregam e não trazem a marca de origem."""
