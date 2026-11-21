@@ -247,9 +247,13 @@ separa o cookie de sessão entre os dois serviços.
    janela combinada, confirmar que o logout remove o cookie e invalida um
    ticket ainda pendente: a revogação de tickets é global. Registrar resultados
    sem valores de cookies, tokens, tickets ou URLs que os contenham.
-5. **Retirar o HTTP remoto.** Manter apenas `compose.yaml` e `compose.https.yaml`
-   na stack e reaplicar. O único bind esperado é `127.0.0.1:9119` e nenhum
-   host tem exceção a `Secure`. No Mac, conferir que uma nova conexão a
+5. **Retirar o HTTP remoto.** Remover `compose.https-transicao.yaml` da stack
+   no Komodo e reaplicar apenas `compose.yaml` e `compose.https.yaml`. Conferir
+   com `docker port kairos 9119/tcp` que o único bind é `127.0.0.1:9119`.
+   Com `KAIROS_WEB_HTTP_COOKIE_HOST=none`, o cookie de sessão é sempre `Secure`.
+   Usar o HTTPS do Service para login e logout; login via HTTP não é suportado
+   nem em loopback. O smoke local em `http://127.0.0.1:9119/api/health` continua
+   disponível sem login. No Mac, conferir que uma nova conexão a
    `http://100.87.25.101:9119/api/health` não se estabelece (sem enviar
    credenciais), e repetir o login/reconexão no HTTPS. Confirmar os dois
    smokes, o serviço anterior em 443 e Funnel desativado. Registrar SHA, nome
