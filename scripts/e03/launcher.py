@@ -350,11 +350,13 @@ class TemporaryRun:
         self.served = False
         self.final_report = None
 
-    def prepare(self):
+    def prepare_files(self):
         self.directory.mkdir(mode=0o700)
         info = self.directory.stat()
         self.directory_identity = (info.st_dev, info.st_ino)
         self.public.mkdir(mode=0o755)
+        # Bind somente leitura: o UID 10000 precisa atravessar esta raiz mesmo com umask 077.
+        self.public.chmod(0o755)
         (self.directory / "workloads").mkdir(mode=0o700)
         secret = self.directory / "credential"
         secret.write_text(self.token)
@@ -366,6 +368,10 @@ class TemporaryRun:
         for path in snapshot.rglob("*"):
             path.chmod(0o755 if path.is_dir() else 0o644)
         snapshot.chmod(0o755)
+        return snapshot
+
+    def prepare(self):
+        snapshot = self.prepare_files()
         image_info = json.loads(command("docker", "image", "inspect", self.config.image))[0]
         if set(image_info["Config"].get("Volumes") or {}) - {"/opt/data"}:
             raise ValueError("unexpected_image_volume")

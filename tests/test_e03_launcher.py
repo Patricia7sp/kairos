@@ -76,6 +76,26 @@ def test_launch_requires_immutable_images_private_new_directory_and_no_inherited
     assert not (tmp_path / "new").exists()
 
 
+def test_private_umask_preserves_public_manifest_and_private_credential_modes(tmp_path):
+    import stat
+
+    from scripts.e03.launcher import LaunchConfig, TemporaryRun, write_json
+
+    run = TemporaryRun(LaunchConfig("sha256:" + "1" * 64, "sha256:" + "2" * 64, tmp_path / "run"))
+    old = os.umask(0o077)
+    try:
+        run.prepare_files()
+        manifest = run.public / "manifest.json"
+        write_json(manifest, {"run_id": run.run_id})
+    finally:
+        os.umask(old)
+    assert run.public.stat().st_mode & stat.S_IXOTH
+    assert manifest.stat().st_mode & stat.S_IROTH
+    assert not run.public.stat().st_mode & stat.S_IWOTH
+    assert not run.directory.stat().st_mode & 0o077
+    assert not (run.directory / "credential").stat().st_mode & 0o077
+
+
 def test_cleanup_refuses_changed_identity_even_with_matching_name():
     from scripts.e03.launcher import require_owned
 

@@ -48,3 +48,20 @@ Regressão concorrente RED→GREEN: o cleanup não pode retornar enquanto a cone
 O CI local iniciado antes da correção foi interrompido para evitar validar uma revisão obsoleta: 625 testes chegaram a passar, mas houve KeyboardInterrupt e o script terminou com falha unitária. Sua cobertura é parcial (combine também identificou 10 fragmentos inválidos); não é prova da suíte inteira. Tipos e testes dos três frontends passaram nessa rodada (17 TUI, 223 Web, 18 desktop), com fontes/configurações de frontend inalterados nesta correção. A suíte integral e a prova HTTPS corrigida continuam pendentes até os registros abaixo.
 
 Decisões sobre os limites considerados pela revisão: as 21 exceções históricas permanecem sem classe; não reclassificar a coleta antiga. A prova Mac depende dos artefatos protegidos referenciados, sem atestação independente do hardware. DOM não prova pintura física da tela nem suporte macOS nativo. E0/E1, merge e deploy mantêm seus gates próprios. Aceitar qualquer dessas extrapolações produziria uma aprovação sem evidência; nenhuma foi adotada.
+
+## Prova HTTPS após o dreno — 20/11/2026
+
+Checkout limpo `9fc9c76`, Chromium headless no executor Linux, Tailscale Serve HTTPS 8443. O daemon não resolvia o antigo ID `15287ae6` como imagem. O índice imutável `85545442` foi usado após comparar seu manifesto `linux/amd64` com `ImageManifestDescriptor.Digest` do container implantado: ambos `sha256:8aee015019cc2786d0f034e68cb6ef5cc576a20e6284bf6316cee51c8f2bf08b`. Worker `05096dbc`, também por ID imutável.
+
+| Rodada | Resultado |
+| --- | --- |
+| `54bc742a3ec6411aa8661a305d4399b6` | Com a `umask 077` do roteiro, página HTTP 200, manifesto HTTP 401 e arquivo ilegível para UID 10000. `public/` nasceu 0700. Encerrada sem iniciar medidas; relatório `inconclusive/client_measurement_not_received`. |
+| `5230e1c0920d4d64b73e60d4d3d0cbd0` | Nova rodada em pai privado, `umask 022`, mesmo código. Manifesto HTTP 200. O navegador recebeu a consolidação; 30/30 negações em cada cenário, 150/150 ao todo. Transporte final: 25 recusas **na inicialização**, zero falhas e zero rejeições em operação. |
+
+Na segunda rodada, o maior p95 de controle entre cenários foi 179,3 ms (execução isolada); o maior p95 do limite superior até o DOM foi 69,9 ms (recuperação). As cargas ficaram sem lacunas; nas 54 observações de recursos não houve OOM ou mudança de ciclo de vida detectados. O relatório final manteve `gate=passed`, `gate_scope=measurements_only`, `teardown_state=complete` e nenhum erro de encerramento. Para ambas as rodadas, a consulta posterior por label não encontrou containers/redes próprios e a credencial foi removida. Serve voltou a ter apenas 443, sem Funnel ativo; aplicação e broker saudáveis.
+
+Relatórios privados: `~/.local/state/kairos-e03-evidence/linux-<run_id>-final.json` (0600). SHA-256 do relatório completo da segunda rodada: `1cb6004b312c38a2d35c63d540894a838caa14d2d62fbf97c4b53705851d045f`. O arquivo final da coleta Mac de 09/11 também foi reconferido pelo hash registrado acima. A rodada Linux valida o transporte corrigido; não substitui o cliente Mac nem atesta TLS no endereço de produção.
+
+Após as medições, o launcher passou a aplicar 0755 explicitamente à raiz do bind de artefatos públicos, mantendo o diretório da rodada em 0700 e a credencial em 0600 fora do bind. Verificação isolada com `umask 077`: o mesmo UID 10000 leu o `run_id` do manifesto pelo bind somente leitura. Esta é a evidência da correção de permissões; as 150 medidas acima pertencem ao commit anterior a ela.
+
+Na árvore de trabalho sobre `9fc9c76`, já com a correção de permissões e os complementos de Compose, a suíte Python padrão terminou em 36 min 39 s (Python 3.11.16, Codex 0.154.0 no PATH): 4.433 testes e 6.657 subtestes passaram, 55 testes foram pulados e 1 foi deselecionado. Ruff (lint e formato), `uv lock --check` e a renderização das duas configurações HTTPS no Compose passaram. O [ensaio local de login e WSS](2026-11-02-fase2-plataforma.md#atualização-do-gate--20112026) é separado do aceite em produção no Mac; esta rodada não executou o pipeline completo de CI.
