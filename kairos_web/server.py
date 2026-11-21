@@ -1454,7 +1454,7 @@ async def get_auth_me(request: Request):
 
 
 @app.post("/api/auth/login")
-async def login(req: LoginRequest, response: Response):
+async def login(req: LoginRequest, request: Request, response: Response):
     if not _token_ok(req.token.strip()):
         # Uma pausa curta encarece a tentativa em série sem punir quem erra
         # de verdade uma vez.
@@ -1463,6 +1463,7 @@ async def login(req: LoginRequest, response: Response):
     response.set_cookie(
         SESSION_COOKIE,
         SESSION_TOKEN,
+        secure=_secure_session_cookie(request),
         httponly=True,  # fora do alcance de qualquer script da página
         samesite="lax",  # não acompanha requisição vinda de outro site
         max_age=60 * 60 * 12,
@@ -1471,11 +1472,24 @@ async def login(req: LoginRequest, response: Response):
     return {"authenticated": True, "user": "kairos"}
 
 
+def _secure_session_cookie(request: Request) -> bool:
+    if request.url.scheme != "http":
+        return True
+    # Após terminação TLS o backend vê HTTP. Na migração só a autoridade
+    # legada pode receber o cookie sem Secure; "none" encerra essa exceção.
+    legacy = os.environ.get("KAIROS_WEB_HTTP_COOKIE_HOST")
+    if legacy is None:
+        return False
+    return legacy in {"", "none"} or request.headers.get("host") != legacy
+
+
 @app.post("/api/auth/logout")
 async def logout(request: Request, response: Response):
     if _autenticado(request):
         _revoke_ws_tickets()
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(
+        SESSION_COOKIE, path="/", secure=_secure_session_cookie(request), httponly=True
+    )
     return {"authenticated": False}
 
 

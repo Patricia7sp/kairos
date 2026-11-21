@@ -99,6 +99,53 @@ def test_compose_configura_fallback_criptografado_com_segredo_somente_leitura():
     assert passphrase_mount["read_only"] is True
 
 
+@pytest.mark.parametrize("transicao", [True, False])
+def test_https_privado_restringe_bind_e_cookie_em_cada_etapa(monkeypatch, transicao):
+    from fastapi.testclient import TestClient
+
+    from kairos_web.server import SESSION_TOKEN, app
+
+    command = ["docker", "compose", "-f", "compose.yaml", "-f", "compose.https.yaml"]
+    if transicao:
+        command.extend(["-f", "compose.https-transicao.yaml"])
+    result = subprocess.run(
+        [*command, "config"], cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    service = yaml.safe_load(result.stdout)["services"]["kairos"]
+    assert {(p["host_ip"], str(p["published"]), p["target"]) for p in service["ports"]} == (
+        {("127.0.0.1", "9119", 9119), ("100.87.25.101", "9119", 9119)}
+        if transicao
+        else {("127.0.0.1", "9119", 9119)}
+    )
+    monkeypatch.setenv(
+        "KAIROS_WEB_HTTP_COOKIE_HOST", service["environment"]["KAIROS_WEB_HTTP_COOKIE_HOST"]
+    )
+
+    async def backend(scope, receive, send):
+        # O navegador usa o esquema externo; após o Serve o backend recebe HTTP.
+        await app({**scope, "scheme": "http"}, receive, send)
+
+    for host, secure in (
+        ("kairos.example.test", True),
+        ("100.87.25.101:9119", not transicao),
+    ):
+        origin = f"https://{host}" if secure else f"http://{host}"
+        with TestClient(backend, base_url=origin) as client:
+            res = client.post("/api/auth/login", json={"token": SESSION_TOKEN})
+            assert res.status_code == 200
+            (cookie,) = client.cookies.jar
+            assert cookie.secure is secure
+            assert not cookie.domain_specified
+            http_me = client.get(f"http://{host}/api/auth/me").json()
+            assert http_me["authenticated"] is not secure
+            assert client.get("/api/auth/me").json()["authenticated"] is True
+            assert not client.get("https://outro.example.test/api/auth/me").json()["authenticated"]
+            res = client.post("/api/auth/logout")
+            assert res.status_code == 200
+            assert ("secure" in res.headers["set-cookie"].lower()) is secure
+            assert not list(client.cookies.jar)
+
+
 def test_compose_nao_eleva_runtime_nem_expoe_docker_socket():
     result = subprocess.run(
         ["docker", "compose", "-f", str(ROOT / "compose.yaml"), "config"],
@@ -115,6 +162,47 @@ def test_compose_nao_eleva_runtime_nem_expoe_docker_socket():
     data_mount = next(mount for mount in service["volumes"] if mount["target"] == "/opt/data")
     assert data_mount["type"] == "volume"
     assert data_mount["source"] == "kairos-data"
+
+
+def test_proxy_https_tem_identidade_propria_e_alcanca_apenas_a_web_na_bridge_compartilhada():
+    def compose(*files):
+        flags = [arg for file in files for arg in ("-f", file)]
+        result = subprocess.run(
+            ["docker", "compose", *flags, "--profile", "agent-runtime", "config"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return yaml.safe_load(result.stdout)
+
+    proxy_stack = compose("compose.https-proxy.yaml")
+    app_stack = compose("compose.yaml", "compose.https.yaml")
+    assert proxy_stack["name"] != app_stack["name"]
+    proxy = proxy_stack["services"]["proxy"]
+    assert "--tun=userspace-networking" in proxy["command"]
+    forbidden = ("ports", "privileged", "devices", "cap_add", "network_mode")
+    assert not any(proxy.get(k) for k in forbidden)
+    assert proxy["read_only"] and "ALL" in proxy["cap_drop"]
+    assert "no-new-privileges:true" in proxy["security_opt"]
+    (state,) = proxy["volumes"]
+    assert state["type"] == "volume" and state["target"] == "/var/lib/tailscale"
+    identity = proxy_stack["volumes"][state["source"]]["name"]
+    assert all(volume["name"] != identity for volume in app_stack["volumes"].values())
+
+    proxy_nets = [proxy_stack["networks"][net] for net in proxy["networks"]]
+    (backend,) = [net["name"] for net in proxy_nets if net.get("internal")]
+    assert any(not net.get("internal") for net in proxy_nets)  # saída para o tailnet
+    proxy_names = {net["name"] for net in proxy_nets}
+    shared = [
+        (service, app_stack["networks"][net], attachment)
+        for service, spec in app_stack["services"].items()
+        for net, attachment in spec.get("networks", {}).items()
+        if app_stack["networks"][net]["name"] in proxy_names
+    ]
+    ((service, network, attachment),) = shared
+    assert service == "kairos" and network["external"] and network["name"] == backend
+    assert "kairos-web.invalid" in attachment["aliases"]
 
 
 def test_config_semeada_desabilita_runtime_com_codex_pinned():

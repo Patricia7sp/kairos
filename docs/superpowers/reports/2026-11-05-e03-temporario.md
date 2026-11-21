@@ -1,6 +1,6 @@
 # E0.3 — operação do coletor temporário
 
-Estado: implementação isolada em validação. Não há medição no Mac nem aceite do E0. A produção não recebe flag, gateway ou dados sintéticos deste coletor. Origem: [desenho aprovado](2026-11-02-fase2-plataforma.md#camada-c--seeder-temporário-aprovado-em-0511) e [plano](../plans/2026-11-05-e03-temporario.md).
+Estado: o coletor temporário foi usado na [coleta no Mac e na verificação de transporte no Linux](2026-11-09-e03-mac-transporte.md). O aceite de E0 continua pendente. A produção não recebe flag, gateway ou dados sintéticos deste coletor. Origem: [desenho aprovado](2026-11-02-fase2-plataforma.md#camada-c--seeder-temporário-aprovado-em-0511) e [plano](../plans/2026-11-05-e03-temporario.md).
 
 O Mac usa somente o navegador. Não é necessário clonar Kairos, instalar ferramentas ou iniciar Docker nele. O operador prepara a temporária no executor Linux; a usuária abre a página, informa a credencial própria, mantém a aba visível, inicia a coleta e baixa o JSON.
 
@@ -21,6 +21,13 @@ umask 077
 E03_PARENT=$(mktemp -d)
 E03_IMAGE=$(docker inspect kairos --format '{{.Image}}')
 E03_WORKER=$(docker inspect kairos-runtime-worker-image --format '{{.Image}}')
+# Alguns daemons resolvem o índice OCI, mas não o ID antigo gravado no container.
+if ! docker image inspect "$E03_IMAGE" >/dev/null 2>&1; then
+  E03_IMAGE=$(docker image inspect kairos:local --format '{{.Id}}') || exit 1
+  manifest=$(docker image inspect --platform linux/amd64 "$E03_IMAGE" --format '{{.Descriptor.Digest}}') || exit 1
+  implantado=$(docker inspect kairos --format '{{.ImageManifestDescriptor.Digest}}') || exit 1
+  [[ $manifest =~ ^sha256:[a-f0-9]{64}$ && $manifest == "$implantado" ]] || exit 1
+fi
 uv run --no-sync python -m scripts.benchmark_phase2 \
   --temporary --image "$E03_IMAGE" --worker-image "$E03_WORKER" \
   --directory "$E03_PARENT/run" --ttl 3300 --publish-tailnet

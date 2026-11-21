@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlAttempt, cleanExport } from "../../../scripts/e03/ui/collector.js";
+import { ControlAttempt, cleanExport, visibleElement, getDomDiagnostic, clearDomDiagnostic } from "../../../scripts/e03/ui/collector.js";
 
 const ids = { sessionId: `e03-synthetic-${"a".repeat(32)}`, approvalId: "b".repeat(32), callId: `e03-${"c".repeat(32)}` };
 const denied = { type: "tool_result", protocol: 1, session_id: ids.sessionId,
@@ -17,6 +17,51 @@ function fixture(extra = {}) {
   return { attempt, root };
 }
 afterEach(() => { document.body.replaceChildren(); vi.useRealTimers(); });
+
+describe("diagnóstico de visibilidade sem dados da página", () => {
+  it("identifica painel fora da área visível sem aceitar o controle", () => {
+    clearDomDiagnostic();
+    const root = document.createElement("div");document.body.append(root);
+    root.textContent = "private-content-must-not-export";
+    root.dataset.token = "private-token-must-not-export";
+    root.getBoundingClientRect = () => ({ top: innerHeight + 20, bottom: innerHeight + 120, width: 400, height: 100 });
+    expect(visibleElement(root, "root")).toBe(false);
+    const diagnostic = getDomDiagnostic();
+    expect(diagnostic.reason).toBe("outside_viewport");
+    expect(diagnostic.phase).toBe("root");
+    expect(diagnostic.top).toBe(innerHeight + 20);
+    expect(diagnostic.connected).toBe(true);
+    expect(JSON.stringify(diagnostic)).not.toMatch(/private-content|private-token|dataset|textContent/);
+  });
+
+  it("distingue estado oculto do documento", () => {
+    clearDomDiagnostic();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      const root = document.createElement("div");document.body.append(root);
+      expect(visibleElement(root, "root")).toBe(false);
+      expect(getDomDiagnostic().reason).toBe("document_not_visible");
+      expect(getDomDiagnostic().visibility).toBe("hidden");
+    } finally { visibility.mockRestore(); }
+  });
+
+  it("limpa evidências anteriores ao iniciar outra rodada", () => {
+    visibleElement(null, "root");
+    expect(getDomDiagnostic().reason).toBe("detached");
+    clearDomDiagnostic();
+    expect(getDomDiagnostic()).toBeNull();
+  });
+
+  it("preserva a falha DOM e registra exceção sem copiar sua mensagem", async () => {
+    clearDomDiagnostic();
+    const { attempt } = fixture({ frames: async () => { throw new Error("private-error-must-not-export"); } });
+    const pending = attempt.start();await attempt.onEvent(denied);
+    const row = await pending;
+    expect(row.outcome).toBe("erro");expect(row.error_kind).toBe("dom");
+    expect(getDomDiagnostic().reason).toBe("dom_exception");
+    expect(JSON.stringify(getDomDiagnostic())).not.toContain("private-error");
+  });
+});
 
 describe("ACK composto e projeção real no DOM", () => {
   it("não termina só com decided e correlaciona a mutação do resultado", async () => {

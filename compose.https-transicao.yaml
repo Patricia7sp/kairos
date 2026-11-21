@@ -1,0 +1,7 @@
+# Aplicar depois de compose.yaml e compose.https.yaml, só até validar no Mac.
+services:
+  kairos:
+    ports:
+      - "100.87.25.101:9119:9119"
+    environment:
+      KAIROS_WEB_HTTP_COOKIE_HOST: "100.87.25.101:9119"

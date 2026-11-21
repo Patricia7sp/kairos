@@ -168,6 +168,108 @@ forkada — **sempre** com `KAIROS_HEALTH_URL` explícito, o default
 KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health bash scripts/smoke-deploy.sh
 ```
 
+## Migração da Web para HTTPS privado
+
+**Preparada, ainda não implantada.** O destino escolhido é um [Tailscale
+Service](https://tailscale.com/kb/1552/tailscale-services) próprio (`svc:kairos`),
+com HTTPS em 443 no **nome do Service**. O HTTPS em 443 do **nome do nó** já
+atende `127.0.0.1:8090`. Usar outra porta ou caminho nesse mesmo nome não
+separa o cookie de sessão entre os dois serviços.
+
+1. **Cadastrar somente o proxy.** O servidor é administrado por Tailscale SSH:
+   sua identidade permanece a mesma. O projeto Compose `kairos-https` contém
+   um único nó Tailscale em modo userspace, com socket e volume de identidade
+   próprios. Ele não publica portas no host. O Service `svc:kairos` (`tcp:443`)
+   e a tag `tag:kairos-host` já foram definidos no painel. **A tag é só para o
+   proxy**, não para `hermesserver`. Conferir os grants efetivos: a regra atual
+   `* → *` permite tráfego no tailnet, não restringe o acesso ao Mac.
+
+   Na raiz do checkout no Linux, iniciar o projeto separado (não acrescentar
+   este arquivo à lista de arquivos da stack principal):
+
+   ```sh
+   docker compose -p kairos-https -f compose.https-proxy.yaml up -d proxy
+   ```
+
+   Na primeira instalação, `NeedsLogin` é esperado. Pelo terminal privado do
+   operador no servidor, executar **dentro do contêiner** e abrir no Mac o link
+   de autenticação exibido. Não copiar esse link para a conversa. Não é preciso
+   criar uma auth key. O volume `kairos-https_identidade` preserva o cadastro
+   em reinícios/recriações; não refazer o login em cada deploy.
+
+   ```sh
+   docker exec -it kairos-https-proxy tailscale up --hostname=kairos-https-proxy --advertise-tags=tag:kairos-host --accept-dns=false --ssh=false
+   ```
+
+   Conferir em *Machines* que **kairos-https-proxy** está online com a tag e
+   `hermesserver` segue sem ela. Antes de mudar a stack, registrar os arquivos,
+   profiles e smokes atuais e o estado de Serve/Funnel do host.
+2. **Abrir a transição.** Com a revisão que implementa `Secure` disponível
+   na stack, selecionar nela estes três arquivos, nesta ordem, preservando o
+   projeto, os profiles e o ambiente do Komodo. O projeto do proxy já deve ter
+   criado a bridge interna `kairos-https-backend`. Só a aplicação se junta a
+   ela, com o alias `kairos-web.invalid`; o broker continua na rede anterior.
+   Conferir a composição antes de aplicar (Compose 2.24.4+ para `!override`):
+
+   ```sh
+   docker compose -f compose.yaml -f compose.https.yaml -f compose.https-transicao.yaml config --quiet
+   ```
+
+   Após o deploy, `docker port kairos 9119/tcp` deve listar somente
+   `127.0.0.1:9119` e `100.87.25.101:9119`. O smoke antigo continua válido;
+   conferir também `/api/health` em loopback **no host**. A autoridade HTTP
+   legada exata é a única exceção a `Secure`. Para os demais hosts, login e
+   logout usam `Secure` mesmo que o proxy encaminhe HTTP ao backend.
+3. **Publicar no nome dedicado.** Antes de anunciar, confirmar que o proxy
+   alcança o `/api/health` do Kairos pelo alias do Docker (HTTP 200, campos
+   `app=kairos` e `status=ok`). `127.0.0.1` dentro do proxy é o próprio proxy.
+   Conferir no painel que o Service está reservado para a stack, sem outro
+   anunciante, e executar no **daemon do contêiner**:
+
+   ```sh
+   docker exec kairos-https-proxy wget -qO- http://kairos-web.invalid:9119/api/health
+   docker exec kairos-https-proxy tailscale serve --service=svc:kairos --https=443 http://kairos-web.invalid:9119
+   docker exec kairos-https-proxy tailscale serve status --json
+   docker exec kairos-https-proxy tailscale funnel status --json
+   ```
+
+   Em *Services → kairos*, aprovar **kairos-https-proxy** se estiver pendente.
+   Conferir o destino do Service, a rota anterior
+   do nó para 8090 e a ausência de Funnel. Usar o **FQDN do Service** para
+   validar o certificado, sem ignorar erros de TLS. Enquanto ambos os binds
+   existem, apontar e executar o `post_deploy` **no periphery** e a action
+   `kairos-smoke` **no Core** contra `https://<FQDN-do-Service>/api/health`.
+   Ambos devem obter HTTP 200 e `status=ok` de seus próprios ambientes.
+4. **Aceitar no Mac antes do corte.** Em janela privada, entrar pelo HTTPS,
+   confirmar `/api/auth/me` autenticado e cookie `kairos_session` host-only,
+   `Secure`, `HttpOnly` e `SameSite=Lax`. Verificar tráfego WSS, reconexão com
+   ticket novo e recusa de reuso do primeiro ticket ainda dentro do TTL. Em
+   janela combinada, confirmar que o logout remove o cookie e invalida um
+   ticket ainda pendente: a revogação de tickets é global. Registrar resultados
+   sem valores de cookies, tokens, tickets ou URLs que os contenham.
+5. **Retirar o HTTP remoto.** Remover `compose.https-transicao.yaml` da stack
+   no Komodo e reaplicar apenas `compose.yaml` e `compose.https.yaml`. Conferir
+   com `docker port kairos 9119/tcp` que o único bind é `127.0.0.1:9119`.
+   Com `KAIROS_WEB_HTTP_COOKIE_HOST=none`, o cookie de sessão é sempre `Secure`.
+   Usar o HTTPS do Service para login e logout; login via HTTP não é suportado
+   nem em loopback. O smoke local em `http://127.0.0.1:9119/api/health` continua
+   disponível sem login. No Mac, conferir que uma nova conexão a
+   `http://100.87.25.101:9119/api/health` não se estabelece (sem enviar
+   credenciais), e repetir o login/reconexão no HTTPS. Confirmar os dois
+   smokes, o serviço anterior em 443 e Funnel desativado. Registrar SHA, nome
+   validado e resultados na [matriz E0](superpowers/reports/2026-11-02-fase2-plataforma.md).
+
+**Reversão:** se o corte falhar e for necessário reabrir o acesso legado,
+reaplicar a composição de transição. Verificar o acesso antigo e restaurar
+os alvos anteriores dos dois smokes enquanto os dois binds existem. Para
+desfazer a publicação, conferir que o Service ainda aponta para o destino
+desta migração, executar `docker exec kairos-https-proxy tailscale serve drain svc:kairos`,
+aguardar as conexões existentes e usar `docker exec kairos-https-proxy tailscale serve clear svc:kairos`.
+Voltar à lista original de arquivos no Komodo, reaplicar e verificar binds,
+smokes, Serve e Funnel contra o estado anterior. Só depois de desconectar a
+aplicação da bridge, parar o projeto dedicado com `docker compose -p kairos-https -f compose.https-proxy.yaml down`
+(sem `-v`, para preservar a identidade). O daemon Tailscale do host não participa da reversão.
+
 ## Como o deploy funciona
 
 1. `push` em `main` (ou `workflow_dispatch` na `main`) com os 8 jobs verdes
