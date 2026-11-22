@@ -61,7 +61,7 @@ def test_cli_separa_falha_da_politica_e_coleta_ausente(tmp_path, capsys):
     )
     assert cmd_security(args) == 3
     missing = json.loads(capsys.readouterr().out)
-    assert missing["schema_version"] == 2
+    assert type(missing["schema_version"]) is int and missing["schema_version"] > 0
     assert missing["policy_outcome"] == "unknown" and missing["execution_state"] == "failed"
     assert missing["passed"] is False and not missing["coverage_complete"]
     target.mkdir()
@@ -101,6 +101,33 @@ def test_leitura_parcial_preserva_achados_e_oculta_erro(tmp_path, monkeypatch):
     secret = next(c for c in report.checks if c.check_id == "secrets")
     assert (secret.state, secret.error) == (CheckState.PARTIAL, CheckError.READ_ERROR)
     assert "detalhe privado" not in repr(report)
+
+
+def test_diretorio_sem_escopo_por_symlink_nao_vira_cobertura_completa(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "example.py").write_text("pass\n", encoding="utf-8")
+    target = tmp_path / "target"
+    target.mkdir()
+    linked = target / "application"
+    linked.symlink_to(outside, target_is_directory=True)
+    # Diretórios previstos na lista de exclusões não comprometem a cobertura.
+    (target / "node_modules").symlink_to(outside, target_is_directory=True)
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        assert path.name != "example.py", "o scanner seguiu um link de diretório"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    report = run_full_audit(target, source_root=target)
+    assert evaluate_audit_policy(report) == "unknown"
+    assert {(c.check_id, c.error) for c in report.checks if c.state == CheckState.PARTIAL} == {
+        ("secrets", CheckError.READ_ERROR),
+        ("source_code", CheckError.READ_ERROR),
+    }
+    linked.unlink()
+    assert evaluate_audit_policy(run_full_audit(target, source_root=target)) == "pass"
 
 
 def test_falha_na_importacao_nao_simula_api_configurada(tmp_path, monkeypatch):

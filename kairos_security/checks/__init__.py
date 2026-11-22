@@ -18,7 +18,20 @@ def regular_files(
     """Enumeração local com erros observáveis; não percorre links de diretório."""
     for directory, dirs, files in os.walk(root, onerror=lambda _error: on_error()):
         base = Path(directory)
-        dirs[:] = sorted(d for d in dirs if d not in ignored_dirs and not (base / d).is_symlink())
+        descend = []
+        for name in sorted(dirs):
+            if name in ignored_dirs:
+                continue
+            try:
+                mode = (base / name).lstat().st_mode
+            except OSError:
+                on_error()
+                continue
+            if stat.S_ISDIR(mode):
+                descend.append(name)
+            else:
+                on_error()
+        dirs[:] = descend
         for name in sorted(files):
             path = base / name
             relative = path.relative_to(root)
