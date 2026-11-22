@@ -198,6 +198,8 @@ Artefato E0.4 revisado independentemente e pronto para revisão da usuária; E0.
 
 Gate E0: baseline, capacidades/medições do destino e threat model registrados; limites aceitos ou explicitamente revisados antes de habilitar background/voz. O relatório de E0.4 é pré-requisito do design de autoridade; testes do executor não substituem medições reais da interface no navegador.
 
+Em 22/11, a [matriz consolidada](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026) registrou o corte HTTPS, os resultados dos cinco cenários e o parecer para I1. A decisão pendente é o aceite dos limites desse escopo pela operadora.
+
 ## E1 Tornar segurança confiável
 
 ### E1.4a Principal e alvo autorizado — fronteira mínima
