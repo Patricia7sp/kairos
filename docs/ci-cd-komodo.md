@@ -126,14 +126,14 @@ No *Settings → Secrets and variables → Actions* do repositório:
 O job do GitHub valida **que o deploy terminou com sucesso**, mas não que a
 stack responde — o smoke faz isso.
 
-> Fato verificado: o `/api/health` do kairos **não responde em `127.0.0.1:9119`**
-> — a porta 9119 é publicada só no IP do tailnet. Use
-> `http://100.87.25.101:9119/api/health`.
+> Use `https://kairos.taild36cf5.ts.net/api/health` nos dois smokes. A porta
+> `127.0.0.1:9119` serve para diagnóstico local do backend no host; consultá-la
+> não verifica o DNS, o certificado nem o encaminhamento do Service.
 
 Implementação em uso (criada e validada no Core):
 
 - **Action `kairos-smoke`** (script TypeScript/deno que roda no **Core** =
-  host `hermesserver`): faz `fetch` em `http://100.87.25.101:9119/api/health`,
+  host `hermesserver`): faz `fetch` em `https://kairos.taild36cf5.ts.net/api/health`,
   exige `HTTP 200` e `{"status":"ok"}`, e lança erro caso contrário.
 - **Procedure `kairos-smoke-deploy`**: um estágio com `RunAction kairos-smoke`.
   Em sucesso deriva `Complete`/`success=true`; em falha, `Failed` com o log do
@@ -141,8 +141,8 @@ Implementação em uso (criada e validada no Core):
 - **Smoke pós-deploy automático na stack (em uso):** a stack `kairos` tem
   `post_deploy` (`SystemCommand`, `shell_mode: true`) que executa no **host**
   (periphery) imediatamente após o `Compose Up` — um laço **shell-only**
-  (curl + `case`, até 60s) contra `http://100.87.25.101:9119/api/health`. Só
-  responde `{"status":"ok"}` deixa o Update terminar `Complete`/`success=true`;
+  (curl + `case`, até 60s) contra o mesmo endereço HTTPS. Uma resposta com
+  `status=ok` permite ao Update terminar `Complete`/`success=true`;
   se não responder, o Update termina `success=false` com o motivo no estágio
   `Post Deploy`. O job `deploy` do CI depende apenas do poll do Update — o smoke
   passa a ser condição do próprio deploy. A procedure acima continua disponível
@@ -160,17 +160,17 @@ curl -fsS -X POST $HOST/execute/RunProcedure \
   -d '{"procedure":"kairos-smoke-deploy"}'
 ```
 
-Alternativa (repositório): rodar o `scripts/smoke-deploy.sh` no host com a URL
-forkada — **sempre** com `KAIROS_HEALTH_URL` explícito, o default
-`127.0.0.1:9119` **não alcança**:
+Para verificar o mesmo caminho a partir do host, passe a URL do Service ao script:
 
 ```sh
-KAIROS_HEALTH_URL=http://100.87.25.101:9119/api/health bash scripts/smoke-deploy.sh
+KAIROS_HEALTH_URL=https://kairos.taild36cf5.ts.net/api/health bash scripts/smoke-deploy.sh
 ```
 
 ## Migração da Web para HTTPS privado
 
-**Preparada, ainda não implantada.** O destino escolhido é um [Tailscale
+**Corte concluído em 22/11/2026 (UTC).** A stack usa `compose.yaml` e `compose.https.yaml`.
+A [matriz de plataforma](superpowers/reports/2026-11-02-fase2-plataforma.md#corte-do-http-remoto-em-produção--22112026-utc) registra o resultado. O roteiro abaixo descreve a migração e sua reversão.
+O destino escolhido é um [Tailscale
 Service](https://tailscale.com/kb/1552/tailscale-services) próprio (`svc:kairos`),
 com HTTPS em 443 no **nome do Service**. O HTTPS em 443 do **nome do nó** já
 atende `127.0.0.1:8090`. Usar outra porta ou caminho nesse mesmo nome não
@@ -279,7 +279,7 @@ aplicação da bridge, parar o projeto dedicado com `docker compose -p kairos-ht
    `Complete`. Em `Complete`+`success=true` saí 0; em falha, imprime os logs do
    Update (a causa está lá — o Update não tem campo `error`) e saí 1.
 4. Smoke: a stack roda o `post_deploy` automaticamente — um laço shell-only no
-   **host** (periphery) consulta `http://100.87.25.101:9119/api/health` até 60s;
+   **host** (periphery) consulta `https://kairos.taild36cf5.ts.net/api/health` até 60s;
    só com `{"status":"ok"}` o Update termina `Complete`/`success=true` (falhou =
    `success=false` com o motivo no estágio `Post Deploy`). A procedure
    `kairos-smoke-deploy` (`RunAction kairos-smoke`, deno no Core) continua

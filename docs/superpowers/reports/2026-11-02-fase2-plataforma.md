@@ -2,7 +2,7 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: gate do destino pendente; topologia confirmada.** Em 04/11 a usuária definiu uso inicial pelo navegador no Mac, com Kairos no servidor Linux existente. E0.2 valida o executor Linux; E0.3 mede também o caminho navegador–servidor. A coleta do Docker Desktop abaixo fica como histórico, sem bloquear esse uso. Não é necessário instalar ou clonar Kairos no Mac. Execução local no Mac seria outra decisão.
+**Resultado atual: HTTPS privado validado; E0 aceito para o escopo medido.** O [parecer de 22/11](#parecer-e0-para-o-primeiro-incremento--22112026) consolida as evidências para o navegador no Mac e o executor Linux existente. A coleta do Docker Desktop abaixo fica como histórico, sem bloquear esse uso. Não é necessário instalar ou clonar Kairos no Mac. Execução local no Mac seria outra decisão.
 
 ## Histórico — coleta manual do Mac em 03/11/2026
 
@@ -183,3 +183,28 @@ O proxy userspace 1.104.7 iniciou com `NeedsLogin`, volume de estado exclusivo, 
 **Cadastro do proxy confirmado:** após o login pelo operador, o daemon do contêiner informou `Running`, online e com `tag:kairos-host`; o host `hermesserver` continuou online e sem tag. Só o proxy estava na bridge interna, sem handler para `svc:kairos` nem Funnel ativo. A próxima etapa é implantar a configuração de transição e verificar `/api/health` da aplicação a partir do proxy. Anúncio, aprovação e aceite do HTTPS no Mac continuam pendentes.
 
 **Ensaio da migração no Linux (base `9fc9c76` + alterações locais):** Caddy 2.11.4 em loopback terminou TLS com certificado temporário validado pelo cliente; o Uvicorn recebeu HTTP, sem confiar em headers de proxy, com a configuração de cookie da etapa final. O cliente HTTPX autenticou por HTTPS com cookie `Secure`, `HttpOnly` e sem `Domain`; ao consultar o backend por HTTP voltou a aparecer como anônimo. Dois tickets novos permitiram `ping`/`pong` em duas conexões WSS; o reuso de cada um foi recusado. O logout removeu o cookie e um ticket ainda pendente também foi recusado. Esse ensaio usou credencial e estado descartáveis. Não valida o DNS/certificado do Service nem o navegador do Mac.
+
+### Corte do HTTP remoto em produção — 22/11/2026 (UTC)
+
+Checkout do Komodo: `fa3524b`. A stack aplicou `compose.yaml` e `compose.https.yaml` sem o complemento de transição. Endereço do Service: `https://kairos.taild36cf5.ts.net`.
+
+| Ponto de observação | Resultado |
+| --- | --- |
+| Comet no Mac (relato da operadora) | Na janela privada, login persistiu, chat respondeu e reconectou por WSS (101). Cookie `Secure`, `HttpOnly`, `SameSite=Lax`. Após sair, `/api/auth/me` retornou `authenticated: false`. |
+| Comet no Mac após o corte (relato da operadora) | Com o Tailscale conectado, o endereço antigo `http://100.87.25.101:9119/api/health` não abriu. |
+| Cliente separado no Linux, via HTTPS de produção | Cookie host-only. Um ticket fez `ping`/`pong` e teve o reuso recusado antes de vencer; outro permitiu reconectar. O logout removeu o cookie e invalidou um ticket ainda não utilizado, também antes do vencimento. |
+| Docker e host Linux após o corte | Kairos saudável, com `KAIROS_WEB_HTTP_COOKIE_HOST=none`. Único bind: `127.0.0.1:9119`, com health `ok`. Uma nova conexão TCP do host a `100.87.25.101:9119` foi recusada. |
+| Core e Periphery após o corte | Consultas independentes ao `/api/health` do Service retornaram HTTP 200, `app=kairos` e `status=ok`, com certificado validado nos dois ambientes. |
+| Tailscale | O Service encaminha ao alias interno `kairos-web.invalid:9119`; o nome do nó continua apontando para `127.0.0.1:8090`. Serve sem Funnel no proxy e no host. |
+
+O 403 da pesquisa não se reproduziu na consulta de controle pela ferramenta de produção nem na nova tentativa da operadora no Comet. A causa não foi identificada. O resultado não altera a avaliação do transporte.
+
+### Parecer E0 para o primeiro incremento — 22/11/2026
+
+**Decisão de 22/11:** após receber o parecer e a ressalva sobre a coleta corrigida no Linux, a operadora aceitou o E0 para o servidor Linux existente com cliente web no Mac. O aceite é posterior à verificação do corte e permite iniciar o desenho de E1.4a nos limites abaixo.
+
+- **Base e executor (E0.1/E0.2).** O [baseline](2026-11-02-fase2-baseline.md), a [atestação de dependências](2026-11-04-fase2-atestacao-deploy.md) e os ciclos de isolamento e recuperação registrados em 20/11 sustentam o uso do worker externo offline nos cenários ensaiados. Cada worker continua sujeito à atestação em execução. Sandbox interna, execução nativa no Mac, egress e perfis ativos não têm aceite.
+- **Limites medidos (E0.3).** Na [coleta do Mac](2026-11-09-e03-mac-transporte.md), houve 30 negações válidas em cada um dos cinco cenários. O maior p95 de controle foi 213,7 ms; o maior p95 do limite superior até o DOM foi 107,8 ms. Ambos ficaram abaixo dos limiares propostos (2 s e 3 s). São limites de ensaio para negações, não SLA nem medição de ações permitidas. As 21 exceções do transporte antigo permanecem sem classificação. O ensaio corrigido no Linux e o uso real do Comet por HTTPS têm resultados próprios; nenhum deles é uma repetição do benchmark corrigido no Mac.
+- **Autoridade (E0.4).** No [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md), o HTTPS e a revogação de tickets cobrem parte de T01. Uma sessão autenticada não concede leitura de qualquer projeto (T01/T04); texto do modelo não concede permissão (T02), e uma autorização não vale para outro alvo ou revisão (T07).
+
+**Próxima etapa:** [revisar o desenho de E1.4a](../specs/2026-11-22-e14a-autoridade-de-leitura.md). O aceite não reclassifica as ocorrências históricas nem habilita novos perfis, exceções ou delegação.
