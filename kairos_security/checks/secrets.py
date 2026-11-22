@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
-from kairos_security.checks import OMITTED_LINE_EVIDENCE
+from kairos_security.checks import OMITTED_LINE_EVIDENCE, regular_files
 from kairos_security.models import Category, Finding, Severity
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern, Severity], ...] = (
@@ -25,29 +26,28 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern, Severity], ...] = (
 )
 
 
-def check_hardcoded_secrets(code_root: Path) -> list[Finding]:
+def _eligible(path: Path) -> bool:
+    return path.name != "auth.json" and (
+        path.name == ".env"
+        or path.name.startswith(".env.")
+        or path.suffix in (".py", ".json", ".yaml", ".yml", ".ts", ".js", ".env")
+    )
+
+
+def check_hardcoded_secrets(
+    code_root: Path, *, on_error: Callable[[], None] | None = None
+) -> list[Finding]:
     findings: list[Finding] = []
     ignore_dirs = {".git", ".venv", "node_modules", "web_dist", "__pycache__", "dist"}
 
-    for path in code_root.rglob("*"):
-        if any(ignored in path.parts for ignored in ignore_dirs):
-            continue
-        if not path.is_file():
-            continue
-        if (
-            path.name != ".env"
-            and not path.name.startswith(".env.")
-            and path.suffix not in (".py", ".json", ".yaml", ".yml", ".ts", ".js", ".env")
-        ):
-            continue
-        if path.name == "auth.json":
-            continue
-
+    for path, relative in regular_files(
+        code_root, include=_eligible, ignored_dirs=ignore_dirs, on_error=on_error or (lambda: None)
+    ):
         try:
-            content = path.read_text(encoding="utf-8", errors="ignore")
+            content = path.read_text(encoding="utf-8", errors="strict" if on_error else "ignore")
             for line_idx, line in enumerate(content.splitlines(), start=1):
                 if (
-                    "test" in path.parts
+                    "test" in relative.parts
                     or "fake" in line
                     or "sk-test" in line
                     or "sk-ant-test" in line
@@ -69,7 +69,8 @@ def check_hardcoded_secrets(code_root: Path) -> list[Finding]:
                                 evidence=OMITTED_LINE_EVIDENCE,
                             )
                         )
-        except Exception:  # noqa: BLE001, S112
-            continue
+        except (OSError, UnicodeError):
+            if on_error:
+                on_error()
 
     return findings

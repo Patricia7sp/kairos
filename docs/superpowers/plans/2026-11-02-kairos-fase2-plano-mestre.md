@@ -198,7 +198,7 @@ Artefato E0.4 revisado independentemente e pronto para revisão da usuária; E0.
 
 Gate E0: baseline, capacidades/medições do destino e threat model registrados; limites aceitos ou explicitamente revisados antes de habilitar background/voz. O relatório de E0.4 é pré-requisito do design de autoridade; testes do executor não substituem medições reais da interface no navegador.
 
-Em 22/11, a operadora aceitou os limites da [matriz consolidada](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026). O [desenho de E1.4a](../specs/2026-11-22-e14a-autoridade-de-leitura.md) segue para revisão independente antes da implementação.
+Em 22/11, a operadora aceitou os limites da [matriz consolidada](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026). O [desenho de E1.4a](../specs/2026-11-22-e14a-autoridade-de-leitura.md) foi revisado e o primeiro corte interno entrou na `main` em `ea6844e` ([#137](https://github.com/Patricia7sp/kairos/pull/137)).
 
 ## E1 Tornar segurança confiável
 
@@ -220,7 +220,10 @@ Files: kairos_security/models.py, auditor.py, formatter.py; novo kairos_security
 
 Dependência: E1.4a (Principal autenticado + AuthorizedTarget/leitura) e H0 sanitizado. Exceções ficam desabilitadas; E1.4b não bloqueia lançar o auditor. Não substituir identidade/autorização por campo de JSON do modelo.
 
-Interface inicial proposta: evaluate_audit_policy(report: SecurityReport, *, now: datetime) -> PolicyOutcome. E1.4b acrescenta o parâmetro exceptions: Sequence[AuditException] = () somente com adaptador autenticado e validação; não há exceções aceitas em E1.1.
+Interface de E1.1: `evaluate_audit_policy(report, *, threshold=Severity.HIGH) -> PolicyOutcome`.
+`assess_audit` também retorna estado e cobertura. O limiar explícito pode
+endurecer a política. A avaliação só precisará consultar o relógio em E1.4b,
+quando passar a verificar a validade das exceções autenticadas.
 
 - [ ] RED: auditoria vazia/incompleta não passa; alvo ausente, detector indisponível e falha de importação aparecem como cobertura/erro.
 - [ ] RED: coleta concluída com alto/crítico é completed + fail; coleta parcial com alto preserva partial + fail; falta obrigatória sem alto é unknown.
@@ -231,6 +234,8 @@ Interface inicial proposta: evaluate_audit_policy(report: SecurityReport, *, now
 - [ ] GREEN: testar JSON versionado, saída CLI e códigos de política versus falha operacional. Revisar compatibilidade com consumidores.
 
 Verificação: uv run pytest -q tests/test_security_audit.py tests/test_security_policy.py tests/test_security_profiles.py. Commit: feat(security): separa coleta cobertura e politica.
+
+Compatibilidade no corte E1.1: os consumidores em execução são `cmd_security` e seus formatadores (incluindo o uso documentado da CLI por scripts/CI), além do workload sintético E0.3, que chama `run_full_audit` sem usar `passed` ou `score`. Não foi encontrado consumidor da decisão de auditoria na Web, no cron ou em relatório persistido do projeto. A CLI preserva `--target`, `--source`, `--no-source` e `--fail-on`, usa JSON v2 e distingue aprovação (0), reprovação (1) e coleta inconclusiva (3). A coleta via `Path` é o diagnóstico local legado. `snapshot_static` depende dos adaptadores de E1.2 sobre a captura autorizada de E1.4a; `dependency_advisories` e `runtime_config` têm requisitos de cobertura declarados, mas dependem dos coletores em E1.3. Nenhum desses perfis novos é anunciado como ativo.
 
 ### E1.2 Snapshot e segredos pelo caminho seguro
 

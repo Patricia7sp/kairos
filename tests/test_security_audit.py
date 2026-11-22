@@ -48,7 +48,7 @@ class SecurityAuditTests(unittest.TestCase):
 
     def test_security_report_metrics(self):
         report = SecurityReport(target="/tmp/test")
-        self.assertTrue(report.passed)
+        self.assertFalse(report.passed, "ausência de coleta não equivale a aprovação")
         self.assertEqual(report.security_score, 100)
 
         # Adiciona finding

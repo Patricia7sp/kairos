@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from kairos_security.checks.agent_guardrails import check_agent_policy_invariants
@@ -12,7 +14,29 @@ from kairos_security.checks.permissions import check_file_permissions
 from kairos_security.checks.prompt_injection import evaluate_prompt_hardening
 from kairos_security.checks.secrets import check_hardcoded_secrets
 from kairos_security.checks.source_code import scan_source_tree
-from kairos_security.models import Finding, SecurityReport
+from kairos_security.models import (
+    AuditProfile,
+    CheckError,
+    CheckResult,
+    CheckState,
+    Finding,
+    SecurityReport,
+)
+
+
+def _check_api() -> list[Finding]:
+    from kairos_web.server import app
+
+    cors = next((m for m in app.user_middleware if m.cls.__name__ == "CORSMiddleware"), None)
+    origins = cors.kwargs.get("allow_origins", []) if cors is not None else []
+    return check_api_security_configuration(origins)
+
+
+def _available_directory(path: Path | None) -> bool:
+    try:
+        return path is not None and path.is_dir()
+    except OSError:
+        return False
 
 
 def find_source_root(start: Path | None = None) -> Path | None:
@@ -49,54 +73,96 @@ class SecurityAuditor:
     ) -> None:
         self.target_dir = target_dir or Path.cwd()
         self.scan_source = scan_source
-        self.source_root = source_root or (find_source_root() if scan_source else None)
+        if not scan_source:
+            self.source_root = None
+        elif source_root is not None:
+            self.source_root = source_root
+        else:
+            try:
+                self.source_root = find_source_root()
+            except (OSError, RuntimeError):
+                self.source_root = None
 
     def run_audit(self, system_prompt: str = "") -> SecurityReport:
-        t0 = time.time()
+        t0 = time.monotonic()
         findings: list[Finding] = []
+        checks: list[CheckResult] = []
 
-        # 1. Permissões de arquivos
-        findings.extend(check_file_permissions(self.target_dir))
+        def collect(
+            check_id: str,
+            run: Callable[[Callable[[], None]], list[Finding]],
+            *,
+            available: bool,
+        ) -> None:
+            if not available:
+                checks.append(
+                    CheckResult(check_id, CheckState.UNAVAILABLE, CheckError.TARGET_UNAVAILABLE)
+                )
+                return
+            read_error = False
 
-        # 2. Segredos expostos
-        findings.extend(check_hardcoded_secrets(self.target_dir))
+            def mark_read_error() -> None:
+                nonlocal read_error
+                read_error = True
 
-        # 3. Path traversal guards
-        findings.extend(run_path_traversal_tests(self.target_dir))
+            try:
+                collected = run(mark_read_error)
+            except ImportError:
+                checks.append(
+                    CheckResult(check_id, CheckState.UNAVAILABLE, CheckError.DETECTOR_UNAVAILABLE)
+                )
+            except Exception:  # noqa: BLE001 - erro isolado no detector; texto bruto não sai
+                checks.append(CheckResult(check_id, CheckState.FAILED, CheckError.COLLECTION_ERROR))
+            else:
+                findings.extend(
+                    replace(f, detector=check_id, detector_version=1) for f in collected
+                )
+                state = CheckState.PARTIAL if read_error else CheckState.COMPLETED
+                checks.append(
+                    CheckResult(check_id, state, CheckError.READ_ERROR if read_error else None)
+                )
 
-        # 4. Guardrails e políticas de agente
-        findings.extend(check_agent_policy_invariants())
-
-        # 5. API Surface
-        try:
-            from kairos_web.server import app
-
-            cors_middleware = next(
-                (m for m in getattr(app, "user_middleware", []) if "CORS" in str(m.cls)), None
-            )
-            origins = (
-                cors_middleware.kwargs.get("allow_origins", [])
-                if cors_middleware and hasattr(cors_middleware, "kwargs")
-                else []
-            )
-        except Exception:  # noqa: BLE001
-            origins = []
-        findings.extend(check_api_security_configuration(origins))
-
-        # 6. Prompt Injection Hardening
+        runtime = _available_directory(self.target_dir)
+        collect("permissions", lambda _: check_file_permissions(self.target_dir), available=runtime)
+        collect(
+            "secrets",
+            lambda mark: check_hardcoded_secrets(self.target_dir, on_error=mark),
+            available=runtime,
+        )
+        collect(
+            "path_traversal", lambda _: run_path_traversal_tests(self.target_dir), available=runtime
+        )
+        collect("agent_guardrails", lambda _: check_agent_policy_invariants(), available=runtime)
+        collect("api_surface", lambda _: _check_api(), available=runtime)
         default_prompt = system_prompt or "Você é o Kairos, um assistente agentic de programação."
-        findings.extend(evaluate_prompt_hardening(default_prompt))
+        collect(
+            "prompt_injection",
+            lambda _: evaluate_prompt_hardening(default_prompt),
+            available=runtime,
+        )
+        if self.scan_source:
+            source = self.source_root
+            if source is None:
+                checks.append(
+                    CheckResult(
+                        "source_code", CheckState.UNAVAILABLE, CheckError.TARGET_UNAVAILABLE
+                    )
+                )
+            else:
+                collect(
+                    "source_code",
+                    lambda mark: scan_source_tree(source, on_error=mark),
+                    available=_available_directory(source),
+                )
 
-        # 7. Código-fonte (SAST) — o repositório, não a instalação.
-        if self.scan_source and self.source_root is not None:
-            findings.extend(scan_source_tree(self.source_root))
-
-        duration = (time.time() - t0) * 1000
+        duration = (time.monotonic() - t0) * 1000
         return SecurityReport(
             target=str(self.target_dir),
             source_root=str(self.source_root) if self.source_root else None,
             findings=findings,
             duration_ms=round(duration, 2),
+            checks=tuple(checks),
+            profile=AuditProfile.LOCAL_FULL if self.scan_source else AuditProfile.LOCAL_RUNTIME,
         )
 
 

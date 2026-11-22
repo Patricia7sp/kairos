@@ -488,7 +488,7 @@ def _extra_args(  # noqa: PLR0912, PLR0915 - dispatcher de argumentos por comand
             "--fail-on",
             choices=["critical", "high", "medium", "low"],
             default="high",
-            help="Severidade mínima que reprova a auditoria (padrão: high)",
+            help="Endurece o limiar padrão high com medium/low; critical não dispensa achado high",
         )
     elif command == "dashboard":
         parser.add_argument("--port", type=int, default=9119, help="Porta HTTP (padrão: 9119)")
