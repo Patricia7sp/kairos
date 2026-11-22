@@ -2,7 +2,7 @@
 
 Aberto em 02/11/2026 às 23:30:35 UTC, base `c6a083f51e12aaddeac8720185ecc55a27d010de`. Contratos: [SPEC v0.2](../specs/2026-11-02-kairos-evolucao-v0.2.md), seções 12–15, e [E0 do plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md).
 
-**Resultado atual: HTTPS privado validado; aceite dos limites do E0 pendente.** O [parecer de 22/11](#parecer-e0-para-o-primeiro-incremento--22112026) consolida as evidências para o navegador no Mac e o executor Linux existente. A coleta do Docker Desktop abaixo fica como histórico, sem bloquear esse uso. Não é necessário instalar ou clonar Kairos no Mac. Execução local no Mac seria outra decisão.
+**Resultado atual: HTTPS privado validado; E0 aceito para o escopo medido.** O [parecer de 22/11](#parecer-e0-para-o-primeiro-incremento--22112026) consolida as evidências para o navegador no Mac e o executor Linux existente. A coleta do Docker Desktop abaixo fica como histórico, sem bloquear esse uso. Não é necessário instalar ou clonar Kairos no Mac. Execução local no Mac seria outra decisão.
 
 ## Histórico — coleta manual do Mac em 03/11/2026
 
@@ -201,10 +201,10 @@ O 403 da pesquisa não se reproduziu na consulta de controle pela ferramenta de 
 
 ### Parecer E0 para o primeiro incremento — 22/11/2026
 
-**Decisão técnica: transporte de produção validado; recomendar aceite delimitado do E0 para o servidor Linux existente com cliente web no Mac.** O aceite dos limites pela operadora continua pendente. A confirmação de que o endereço antigo fechou responde à verificação do corte, não a essa decisão de escopo.
+**Decisão de 22/11:** após receber o parecer e a ressalva sobre a coleta corrigida no Linux, a operadora aceitou o E0 para o servidor Linux existente com cliente web no Mac. O aceite é posterior à verificação do corte e permite iniciar o desenho de E1.4a nos limites abaixo.
 
 - **Base e executor (E0.1/E0.2).** O [baseline](2026-11-02-fase2-baseline.md), a [atestação de dependências](2026-11-04-fase2-atestacao-deploy.md) e os ciclos de isolamento e recuperação registrados em 20/11 sustentam o uso do worker externo offline nos cenários ensaiados. Cada worker continua sujeito à atestação em execução. Sandbox interna, execução nativa no Mac, egress e perfis ativos não têm aceite.
 - **Limites medidos (E0.3).** Na [coleta do Mac](2026-11-09-e03-mac-transporte.md), houve 30 negações válidas em cada um dos cinco cenários. O maior p95 de controle foi 213,7 ms; o maior p95 do limite superior até o DOM foi 107,8 ms. Ambos ficaram abaixo dos limiares propostos (2 s e 3 s). São limites de ensaio para negações, não SLA nem medição de ações permitidas. As 21 exceções do transporte antigo permanecem sem classificação. O ensaio corrigido no Linux e o uso real do Comet por HTTPS têm resultados próprios; nenhum deles é uma repetição do benchmark corrigido no Mac.
 - **Autoridade (E0.4).** No [modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md), o HTTPS e a revogação de tickets cobrem parte de T01. Uma sessão autenticada não concede leitura de qualquer projeto (T01/T04); texto do modelo não concede permissão (T02), e uma autorização não vale para outro alvo ou revisão (T07).
 
-**Próxima decisão:** aceitar esses limites para iniciar o desenho de E1.4a ou pedir uma nova coleta no Mac com o coletor corrigido antes de aceitar. Até a decisão, I1 continua fechado. Em caso de aceite, o primeiro contrato a revisar é quem, no backend, pode ler qual projeto e revisão, e onde essa autorização é revalidada antes da primeira leitura. A revisão independente dessa fronteira precede sua implementação; exceções e delegação permanecem fora desta entrega.
+**Próxima etapa:** [revisar o desenho de E1.4a](../specs/2026-11-22-e14a-autoridade-de-leitura.md). O aceite não reclassifica as ocorrências históricas nem habilita novos perfis, exceções ou delegação.
