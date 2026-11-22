@@ -56,6 +56,33 @@ def test_export_two_immutable_revisions_and_idempotence(repo, tmp_path):
     assert project_metadata(repo) is None
 
 
+def test_authorized_capture_of_exported_revision(repo, tmp_path):
+    import queue
+    import time
+
+    from kairos_tools.authorization import AuditAuthority, AuthorityDenied
+
+    catalog = tmp_path / "catalog"
+    meta = export_project(repo, "HEAD", catalog)
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    authority = AuditAuthority(private)
+    authority.initialize()
+    project = authority.register(catalog, meta["revision"])
+    ref = authority.grant("web:operador", project, meta["revision"], expires=int(time.time()) + 60)
+    box = queue.Queue(maxsize=1)
+    authority.capture("web:operador", project, meta["revision"], ref, box)
+    result = box.get_nowait()
+    assert (
+        result.fingerprint == meta["baseline_fingerprint"] and result.contents["file"] == b"first\n"
+    )
+    authority.retire(project)
+    assert authority.register(catalog, meta["revision"]) != project
+    with pytest.raises(AuthorityDenied):
+        authority.capture("web:operador", project, meta["revision"], ref, box)
+    assert box.empty()
+
+
 @pytest.mark.parametrize(
     "tamper", ["content", "manifest", "workspace_link", "file_link", "name", "excluded"]
 )

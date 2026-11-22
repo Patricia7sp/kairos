@@ -374,11 +374,11 @@ class RemovalServiceTests(unittest.TestCase):
                 (staged / "SKILL.md").write_bytes(b"x" * 65537)
                 inflated = True
 
-        def read_and_observe(fd, size, *, include_contents):
+        def read_and_observe(fd, size, *, include_contents, **kwargs):
             path = Path(os.readlink(f"/proc/self/fd/{fd}"))
             if path.name == "SKILL.md" and size > 65536 and include_contents:
                 allocations.append(size)
-            return original_read(fd, size, include_contents=include_contents)
+            return original_read(fd, size, include_contents=include_contents, **kwargs)
 
         with (
             patch.object(tree_io.os, "fsync", fsync_then_inflate),

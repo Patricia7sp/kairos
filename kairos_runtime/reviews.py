@@ -90,7 +90,7 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _fingerprint(files: dict[str, tuple[bytes, int]]) -> str:
+def fingerprint_files(files: dict[str, tuple[bytes, int]]) -> str:
     return _sha(
         canonical_json(
             [
@@ -103,7 +103,7 @@ def _fingerprint(files: dict[str, tuple[bytes, int]]) -> str:
 
 def workspace_fingerprint(archive: bytes) -> str:
     """Hash sorted path/content/normalized-mode entries of a validated archive."""
-    return _fingerprint(archive_files(archive))
+    return fingerprint_files(archive_files(archive))
 
 
 def _diff(path: str, old: tuple[bytes, int] | None, new: tuple[bytes, int] | None) -> str:
@@ -157,7 +157,7 @@ def build_review(
         "schema_version": 1,
         "session_id": session_id,
         "base_commit": base_commit,
-        "baseline_fingerprint": _fingerprint(before),
+        "baseline_fingerprint": fingerprint_files(before),
         "checkpoint_digest": _sha(checkpoint),
         "changes": changes,
         "diff": "".join(diff),
@@ -266,7 +266,7 @@ def verify_review_baseline(bundle: dict, baseline: bytes) -> None:
     """
     validate_review(bundle)
     before = archive_files(baseline)
-    if _fingerprint(before) != bundle["baseline_fingerprint"]:
+    if fingerprint_files(before) != bundle["baseline_fingerprint"]:
         raise ValueError("review baseline fingerprint mismatch")
     after, diff = before.copy(), []
     for change in bundle["changes"]:

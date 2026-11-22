@@ -1,6 +1,6 @@
 # E1.4a — quem pode ler qual revisão de um projeto
 
-**Estado:** a revisão de `51dafc6` aprovou a direção e exigiu três definições antes de código. Este adendo propõe essas definições para revalidação. O [aceite do E0](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026) cobre o navegador no Mac e o executor Linux. Contratos de origem: [SPEC v0.2, §5 e §8.3](2026-11-02-kairos-evolucao-v0.2.md) e [ameaças T01/T02/T04/T07](2026-11-02-fase2-threat-model.md).
+**Estado:** direção revisada em `51dafc6`; adendo aprovado em `3a62f1c`. O primeiro corte de implementação está em revisão. O [aceite do E0](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026) cobre o navegador no Mac e o executor Linux. Contratos de origem: [SPEC v0.2, §5 e §8.3](2026-11-02-kairos-evolucao-v0.2.md) e [ameaças T01/T02/T04/T07](2026-11-02-fase2-threat-model.md).
 
 ## De onde vem a autoridade
 
@@ -44,4 +44,10 @@ Usar um projeto exportado de fixture, dois projetos com a mesma revisão e dois 
 
 **Contraprovas do adendo:** instrumentar a enumeração/leitura real, inclusive hash sem retenção de bytes. Despacho só-manifesto deve ler zero entradas de `workspace`; header/query sem cookie e cookie sem origem válida devem parar antes do catálogo. Em dois processos, usar barreiras (não sleeps) entre despacho/admissão, dois blocos e captura/entrega: a operação posterior ao commit da revogação não lê nem entrega; na ordem inversa, a entrega já observada ocorre uma única vez. Cobrir falta do store e troca de política/expiração nas duas fronteiras. Substituir a raiz por outra com bytes idênticos deve falhar pela identidade; alterar bytes mantendo a raiz deve falhar pela integridade. Após entrega, tornar a origem inacessível e executar os checks sobre a vista: os achados sintéticos esperados ainda aparecem, sem nova abertura da origem nem conteúdo sensível nas saídas.
 
-**Ponto de parada:** revalidar estas decisões na revisão independente antes de implementar. Exceções de achados e aprovações genéricas pertencem a E1.4b.
+**Decisão:** após a revisão de `51dafc6`, a operadora aprovou o adendo `3a62f1c` para implementação. A revisão da implementação e seus testes é separada do aceite do desenho. Exceções de achados e aprovações genéricas pertencem a E1.4b.
+
+### Primeiro corte para revisão de código
+
+O [adaptador Web interno](../../../kairos_web/audit_authority.py) recebe o `Request`, a origem configurada, a autoridade e a caixa limitada do consumidor. Só os três seletores vêm do JSON. A [autoridade local](../../../kairos_tools/authorization.py) oferece `initialize`, `register`, `grant`, `revoke`, `invalidate_policy` e `retire`; nenhum deles é despachável pelo modelo. A inicialização é explícita, num diretório privado já existente. O recadastro após retirada recebe outro ID. A captura entrega uma vista imutável em memória, não um relatório de auditoria.
+
+Os [testes de autoridade](../../../tests/test_audit_target_authority.py) usam uma caixa de prova e revogação em processo separado; o [teste de exportação](../../../tests/test_runtime_projects.py) confere compatibilidade com o manifesto de uma exportação Git real. Não há criação automática de store nem rota pública de auditoria neste incremento. A ligação a um consumidor de produção depende de E1.1/E1.2 e da revisão desta implementação.
