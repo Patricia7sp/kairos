@@ -680,10 +680,10 @@ class TreeIOTests(unittest.TestCase):
             if fd == self.parent and (self.home / "copy/SKILL.md").exists():
                 (self.home / "copy/SKILL.md").write_bytes(b"x" * 65537)
 
-        def observe(fd, size, *, include_contents):
+        def observe(fd, size, *, include_contents, **kwargs):
             if include_contents and size == 65537:
                 allocations.append(size)
-            return _read_file(fd, size, include_contents=include_contents)
+            return _read_file(fd, size, include_contents=include_contents, **kwargs)
 
         with (
             patch("kairos_filesystem.tree.os.fsync", side_effect=inflate),

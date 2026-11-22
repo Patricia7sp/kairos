@@ -173,20 +173,18 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
-    with _directory(workspace.parent) as version_fd:
-        if set(os.listdir(version_fd)) != {"workspace", "project.json"}:
-            raise ValueError("project version layout invalid")
-        fd = os.open("project.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=version_fd)
-        with os.fdopen(fd, "rb") as source:
-            metadata = os.fstat(source.fileno())
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_nlink != 1
-                or metadata.st_size > 4096
-            ):
-                raise ValueError("project manifest invalid")
-            raw = source.read(4097)
+def read_export_manifest(version_fd: int, revision: str, *, trusted_owner: bool = False) -> dict:
+    """Lê somente metadados da versão; nunca enumera nem captura o workspace."""
+    fd = os.open("project.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=version_fd)
+    with os.fdopen(fd, "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_size > 4096:
+            raise ValueError("project manifest invalid")
+        if trusted_owner and (metadata.st_uid not in (0, os.geteuid()) or metadata.st_mode & 0o022):
+            raise ValueError("project manifest ownership invalid")
+        raw = source.read(4097)
+        if len(raw) != metadata.st_size:
+            raise ValueError("project manifest changed")
     try:
         manifest = json.loads(raw, object_pairs_hook=_unique_object)
     except (UnicodeError, ValueError) as exc:
@@ -198,7 +196,7 @@ def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
         or manifest["schema_version"] != 1
         or not isinstance(manifest["revision"], str)
         or not _COMMIT.fullmatch(manifest["revision"])
-        or manifest["revision"] != workspace.parent.name
+        or manifest["revision"] != revision
         or not isinstance(manifest["name"], str)
         or not manifest["name"]
         or "/" in manifest["name"]
@@ -207,6 +205,14 @@ def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
         or not _HASH.fullmatch(manifest["baseline_fingerprint"])
     ):
         raise ValueError("project manifest schema invalid")
+    return manifest
+
+
+def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
+    with _directory(workspace.parent) as version_fd:
+        if set(os.listdir(version_fd)) != {"workspace", "project.json"}:
+            raise ValueError("project version layout invalid")
+        manifest = read_export_manifest(version_fd, workspace.parent.name)
     with _directory(workspace):
         pass
     blob = baseline if baseline is not None else snapshot_project(workspace, include_all=True)

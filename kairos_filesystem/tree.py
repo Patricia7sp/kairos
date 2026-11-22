@@ -10,7 +10,7 @@ import stat
 import struct
 import sys
 from collections.abc import Callable
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 
 from kairos_filesystem.contract import (
     MAX_COMPONENT_BYTES,
@@ -124,12 +124,15 @@ def _stamp(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _read_file(fd: int, size: int, *, include_contents: bool) -> tuple[str, bytes | None]:
+def _read_file(
+    fd: int, size: int, *, include_contents: bool, guard=nullcontext
+) -> tuple[str, bytes | None]:
     digest = hashlib.sha256()
     data = bytearray() if include_contents else None
     count = 0
     while True:
-        chunk = os.read(fd, min(65536, size - count + 1))
+        with guard():
+            chunk = os.read(fd, min(65536, size - count + 1))
         if not chunk:
             break
         count += len(chunk)
@@ -141,7 +144,16 @@ def _read_file(fd: int, size: int, *, include_contents: bool) -> tuple[str, byte
     return digest.hexdigest(), bytes(data) if data is not None else None
 
 
-def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, include_contents: bool):
+def _scan(
+    stack: ExitStack,
+    parent_fd: int,
+    name: str,
+    limits: TreeLimits,
+    include_contents: bool,
+    *,
+    root_fd=None,
+    guard=nullcontext,
+):
     mount = observed_mount_id(parent_fd)
     entries = []
     contents = {} if include_contents else None
@@ -164,7 +176,11 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
         flags = os.O_RDONLY | os.O_NONBLOCK
         if stat.S_ISDIR(linked.st_mode):
             flags |= os.O_DIRECTORY
-        fd = open_fd(stack, component, flags, parent=parent)
+        fd = (
+            root_fd
+            if not path and root_fd is not None
+            else open_fd(stack, component, flags, parent=parent)
+        )
         before = _metadata(fd, mount)
         _require(_stamp(linked) == _stamp(before), "Entrada alterada durante abertura.", "conflict")
         same_entry(parent, component, fd)
@@ -180,7 +196,7 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
         total += size
         digest = None
         if not directory:
-            digest, data = _read_file(fd, size, include_contents=include_contents)
+            digest, data = _read_file(fd, size, include_contents=include_contents, guard=guard)
             if contents is not None:
                 contents[path] = data
         entry = TreeEntry(
@@ -197,7 +213,7 @@ def _scan(stack: ExitStack, parent_fd: int, name: str, limits: TreeLimits, inclu
         handles[path] = (parent, component, fd, before)
         if directory:
             children = []
-            with os.scandir(fd) as iterator:
+            with guard(), os.scandir(fd) as iterator:
                 for child in iterator:
                     _require(
                         len(children) < limits.entries - len(entries),
@@ -248,6 +264,17 @@ def capture_tree(
     _require(type(include_contents) is bool, "Opção de conteúdo inválida.")
     with _io_errors(), ExitStack() as stack:
         capture, _handles, _chain = _scan(stack, parent_fd, name, limits, include_contents)
+        return capture
+
+
+def capture_authorized_root(
+    parent_fd: int, name: str, root_fd: int, *, limits: TreeLimits, guard
+) -> TreeCapture:
+    """Captura do descritor admitido; cada enumeração/leitura ocorre sob o guard."""
+    _name(name)
+    _limits(limits)
+    with _io_errors(), ExitStack() as stack:
+        capture, _, _ = _scan(stack, parent_fd, name, limits, True, root_fd=root_fd, guard=guard)
         return capture
 
 
