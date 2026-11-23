@@ -7,12 +7,16 @@ from pathlib import Path
 from kairos_security.models import Category, Finding, Severity
 
 
+def _confined(workspace_root: Path, target_path_str: str) -> bool:
+    root_resolved = workspace_root.resolve()
+    target_resolved = (workspace_root / target_path_str).resolve()
+    return root_resolved in target_resolved.parents or target_resolved == root_resolved
+
+
 def check_path_traversal_guards(workspace_root: Path, target_path_str: str) -> bool:
     """Verifica se um caminho alvo tenta escapar do diretório raiz permitido."""
     try:
-        root_resolved = workspace_root.resolve()
-        target_resolved = (workspace_root / target_path_str).resolve()
-        return root_resolved in target_resolved.parents or target_resolved == root_resolved
+        return _confined(workspace_root, target_path_str)
     except Exception:  # noqa: BLE001
         return False
 
@@ -27,7 +31,7 @@ def run_path_traversal_tests(workspace: Path) -> list[Finding]:
     ]
 
     for payload in escape_payloads:
-        is_confined = check_path_traversal_guards(workspace, payload)
+        is_confined = _confined(workspace, payload)
         if is_confined:
             findings.append(
                 Finding(

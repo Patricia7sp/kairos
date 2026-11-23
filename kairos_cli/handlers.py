@@ -20,6 +20,7 @@ class ExitCode:
     OK = 0
     ERROR = 1
     USAGE = 2
+    AUDIT_INCONCLUSIVE = 3
     #: Comando existe na superfície mas ainda não faz nada. Código próprio,
     #: para script conseguir distinguir "falhou" de "não existe ainda".
     NOT_IMPLEMENTED = 69
@@ -809,6 +810,7 @@ def cmd_runtime(args) -> int:
 
 def cmd_security(args) -> int:
     from kairos_security import Severity, format_cli_summary, format_json_report, run_full_audit
+    from kairos_security.policy import PolicyOutcome, assess_audit
 
     as_json = getattr(args, "json", False)
     target = getattr(args, "target", None)
@@ -822,19 +824,14 @@ def cmd_security(args) -> int:
         scan_source=scan_source,
     )
 
-    if as_json:
-        print(format_json_report(report))
-    else:
-        print(format_cli_summary(report))
-        if scan_source and report.source_root is None:
-            print("aviso: código-fonte não encontrado — auditado só o runtime.")
-
-    # Ordem decrescente: reprovar em "medium" também reprova em high/critical.
-    ladder = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW]
-    threshold = getattr(args, "fail_on", "high") or "high"
-    reproving = set(ladder[: ladder.index(Severity(threshold)) + 1])
-    if any(f.severity in reproving for f in report.findings):
+    threshold = Severity(getattr(args, "fail_on", "high") or "high")
+    result = assess_audit(report, threshold=threshold)
+    formatter = format_json_report if as_json else format_cli_summary
+    print(formatter(report, threshold=threshold))
+    if result.policy_outcome is PolicyOutcome.FAIL:
         return ExitCode.ERROR
+    if result.policy_outcome is PolicyOutcome.UNKNOWN:
+        return ExitCode.AUDIT_INCONCLUSIVE
     return ExitCode.OK
 
 

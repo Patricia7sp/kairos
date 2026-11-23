@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kairos_security.checks import OMITTED_LINE_EVIDENCE
+from kairos_security.checks import OMITTED_LINE_EVIDENCE, regular_files
 from kairos_security.models import Category, Finding, Severity
 
 # Diretórios que nunca são código-fonte auditável deste projeto.
@@ -261,24 +261,25 @@ def _is_noise(line: str) -> bool:
     return stripped.startswith(("#", "//", "*")) or "noqa" in stripped
 
 
-def scan_source_tree(source_root: Path) -> list[Finding]:
+def scan_source_tree(
+    source_root: Path, *, on_error: Callable[[], None] | None = None
+) -> list[Finding]:
     """Percorre o código-fonte aplicando as regras estáticas."""
     findings: list[Finding] = []
-    if not source_root.is_dir():
-        return findings
-
-    for path in sorted(source_root.rglob("*")):
-        if not path.is_file() or _should_skip(path):
-            continue
+    for path, relative in regular_files(
+        source_root,
+        include=lambda p: not _should_skip(p),
+        ignored_dirs=IGNORE_DIRS,
+        on_error=on_error or (lambda: None),
+    ):
         try:
-            content = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+            content = path.read_text(encoding="utf-8", errors="strict" if on_error else "ignore")
+        except (OSError, UnicodeError):
+            if on_error:
+                on_error()
             continue
 
-        try:
-            shown = str(path.relative_to(source_root))
-        except ValueError:
-            shown = str(path)
+        shown = str(relative)
 
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):

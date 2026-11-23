@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -25,6 +27,41 @@ class Category(StrEnum):
     SOURCE_CODE = "source_code"
 
 
+class AuditProfile(StrEnum):
+    LOCAL_FULL = "local_runtime_and_source"
+    LOCAL_RUNTIME = "local_runtime"
+    SNAPSHOT_STATIC = "snapshot_static"
+    DEPENDENCY_ADVISORIES = "dependency_advisories"
+    RUNTIME_CONFIG = "runtime_config"
+
+
+class CheckState(StrEnum):
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    UNAVAILABLE = "unavailable"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class CheckError(StrEnum):
+    TARGET_UNAVAILABLE = "target_unavailable"
+    DETECTOR_UNAVAILABLE = "detector_unavailable"
+    READ_ERROR = "read_error"
+    COLLECTION_ERROR = "collection_error"
+    MISSING_RESULT = "missing_result"
+    INVALID_RESULT = "invalid_result"
+
+
+@dataclass(frozen=True, slots=True)
+class CheckResult:
+    """Produtores de `PARTIAL` devem informar a causa em `error`."""
+
+    check_id: str
+    state: CheckState
+    error: CheckError | None = None
+    applicable_manifests: int | None = None
+
+
 @dataclass(frozen=True)
 class Finding:
     id: str
@@ -36,6 +73,22 @@ class Finding:
     line_number: int | None = None
     remediation: str | None = None
     evidence: str | None = None
+    detector: str | None = None
+    detector_version: int | None = None
+    confidence: str = "unknown"
+
+    @property
+    def fingerprint(self) -> str:
+        # Não incorporar texto de evidência, descrição, timestamp ou revisão.
+        identity = (
+            self.detector,
+            self.id,
+            self.title,
+            self.category,
+            self.file_path,
+            self.line_number,
+        )
+        return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
 @dataclass
@@ -45,10 +98,16 @@ class SecurityReport:
     timestamp: float = field(default_factory=time.time)
     findings: list[Finding] = field(default_factory=list)
     duration_ms: float = 0.0
+    profile: AuditProfile = AuditProfile.LOCAL_FULL
+    checks: tuple[CheckResult, ...] = ()
+    # Reservado ao futuro produtor de cancelamento; o coletor local não o sinaliza.
+    cancelled: bool = False
 
     @property
     def passed(self) -> bool:
-        return not any(f.severity in (Severity.CRITICAL, Severity.HIGH) for f in self.findings)
+        from kairos_security.policy import PolicyOutcome, evaluate_audit_policy
+
+        return evaluate_audit_policy(self) is PolicyOutcome.PASS
 
     @property
     def counts_by_severity(self) -> dict[str, int]:

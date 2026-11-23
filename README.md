@@ -86,7 +86,7 @@ para configuração, OpenRouter, Ollama, operação e rollback.
 kairos security                  # runtime (~/.kairos) + código-fonte
 kairos security --no-source      # só o runtime
 kairos security --source .       # aponta a raiz do código explicitamente
-kairos security --fail-on low    # reprova em qualquer achado
+kairos security --fail-on low    # reprova a partir de severidade baixa
 kairos security --json           # para script/CI
 ```
 
@@ -103,8 +103,17 @@ propósito — e cada regra propensa a ruído tem um validador (`DIRECT_API_KEY 
 "direct_api_key"` é constante de enum, não credencial; `md5(usedforsecurity=
 False)` já se declarou fora de uso criptográfico).
 
-Sai com **1** quando há achado no nível de `--fail-on` (padrão: `high`), o que
-o torna utilizável como passo de CI.
+O comando sai com **0** quando a cobertura obrigatória do perfil é completa
+e não há achados bloqueantes; **1** quando a política reprova, mesmo que a
+coleta esteja incompleta; e **3** quando não há bloqueio observado, mas faltou
+cobertura obrigatória. `--fail-on medium` e `--fail-on low` tornam a política
+mais estrita; alto/crítico sempre reprovam, inclusive com `--fail-on critical`.
+`--no-source` escolhe o perfil local de runtime, sem afirmar que o código foi auditado.
+
+Em `--json`, `schema_version: 2` acrescenta `profile`, `execution_state`,
+`policy_outcome`, `coverage_complete` e `checks`. `passed` só é `true` quando
+`policy_outcome` é `pass`. O `score` resume apenas os achados observados; um
+score de 100 com coleta incompleta não significa aprovação.
 
 ## Ambiente
 
