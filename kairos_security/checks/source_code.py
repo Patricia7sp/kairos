@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from kairos_security.checks import OMITTED_LINE_EVIDENCE, regular_files
 from kairos_security.models import Category, Finding, Severity
@@ -231,7 +231,7 @@ _EXCEPT_RE = re.compile(r"^\s*except\s*(\(?\s*(Exception|BaseException)\b[^:]*)?
 _PASS_RE = re.compile(r"^\s*(pass|continue)\s*(#.*)?$")
 
 
-def _is_test_file(path: Path) -> bool:
+def _is_test_file(path: PurePath) -> bool:
     if "tests" in path.parts or "__tests__" in path.parts:
         return True
     name = path.name
@@ -240,7 +240,7 @@ def _is_test_file(path: Path) -> bool:
     )
 
 
-def _should_skip(path: Path) -> bool:
+def _should_skip(path: PurePath) -> bool:
     if any(part in IGNORE_DIRS for part in path.parts):
         return True
     if path.suffix not in SOURCE_SUFFIXES:
@@ -253,6 +253,10 @@ def _should_skip(path: Path) -> bool:
         return True
     # Mesma razão para o arquivo de regras: cada padrão encontraria a si mesmo.
     return path.name == "source_code.py"
+
+
+def is_source_candidate(path: PurePath) -> bool:
+    return not _should_skip(path)
 
 
 def _is_noise(line: str) -> bool:
@@ -268,7 +272,7 @@ def scan_source_tree(
     findings: list[Finding] = []
     for path, relative in regular_files(
         source_root,
-        include=lambda p: not _should_skip(p),
+        include=is_source_candidate,
         ignored_dirs=IGNORE_DIRS,
         on_error=on_error or (lambda: None),
     ):
@@ -279,48 +283,52 @@ def scan_source_tree(
                 on_error()
             continue
 
-        shown = str(relative)
+        findings.extend(scan_source_text(content, location=str(relative)))
+    return findings
 
-        lines = content.splitlines()
-        for idx, line in enumerate(lines, start=1):
-            # Este check roda antes do filtro de ruído de propósito: um
-            # supressor de linter silencia o ruff, não a revisão de segurança.
-            if _EXCEPT_RE.match(line) and idx < len(lines) and _PASS_RE.match(lines[idx]):
+
+def scan_source_text(content: str, *, location: str) -> list[Finding]:
+    findings = []
+    lines = content.splitlines()
+    for idx, line in enumerate(lines, start=1):
+        # Este check roda antes do filtro de ruído de propósito: um
+        # supressor de linter silencia o ruff, não a revisão de segurança.
+        if _EXCEPT_RE.match(line) and idx < len(lines) and _PASS_RE.match(lines[idx]):
+            findings.append(
+                Finding(
+                    id="SEC-SRC-011",
+                    title="Exceção ampla silenciada sem registro",
+                    description=(
+                        "`except Exception: pass` descarta qualquer falha sem deixar "
+                        "rastro — o erro some e o código segue com estado inesperado."
+                    ),
+                    severity=Severity.LOW,
+                    category=Category.SOURCE_CODE,
+                    file_path=location,
+                    line_number=idx,
+                    remediation="Registre com `logger.warning` antes de degradar.",
+                    evidence=OMITTED_LINE_EVIDENCE,
+                )
+            )
+
+        if _is_noise(line):
+            continue
+
+        for rule in RULES:
+            match = rule.pattern.search(line)
+            if match and (rule.validate is None or rule.validate(line, match)):
                 findings.append(
                     Finding(
-                        id="SEC-SRC-011",
-                        title="Exceção ampla silenciada sem registro",
-                        description=(
-                            "`except Exception: pass` descarta qualquer falha sem deixar "
-                            "rastro — o erro some e o código segue com estado inesperado."
-                        ),
-                        severity=Severity.LOW,
+                        id=rule.id,
+                        title=rule.title,
+                        description=rule.description,
+                        severity=rule.severity,
                         category=Category.SOURCE_CODE,
-                        file_path=shown,
+                        file_path=location,
                         line_number=idx,
-                        remediation="Registre com `logger.warning` antes de degradar.",
+                        remediation=rule.remediation,
                         evidence=OMITTED_LINE_EVIDENCE,
                     )
                 )
-
-            if _is_noise(line):
-                continue
-
-            for rule in RULES:
-                match = rule.pattern.search(line)
-                if match and (rule.validate is None or rule.validate(line, match)):
-                    findings.append(
-                        Finding(
-                            id=rule.id,
-                            title=rule.title,
-                            description=rule.description,
-                            severity=rule.severity,
-                            category=Category.SOURCE_CODE,
-                            file_path=shown,
-                            line_number=idx,
-                            remediation=rule.remediation,
-                            evidence=OMITTED_LINE_EVIDENCE,
-                        )
-                    )
 
     return findings

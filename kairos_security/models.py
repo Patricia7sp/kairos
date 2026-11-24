@@ -102,6 +102,8 @@ class SecurityReport:
     checks: tuple[CheckResult, ...] = ()
     # Reservado ao futuro produtor de cancelamento; o coletor local não o sinaliza.
     cancelled: bool = False
+    target_revision: str | None = None
+    scope_notes: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:

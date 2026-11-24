@@ -128,7 +128,7 @@ def _git(repo: Path, *args: str, limit: int) -> bytes:
         raise ValueError("Git export failed or timed out") from exc
 
 
-def _source_path(path: str) -> str:
+def validate_export_path(path: str) -> str:
     safe_path(path)
     if any(part in EXCLUDED or part.startswith(".env") for part in path.split("/")):
         raise ValueError("tracked path excluded by snapshot policy")
@@ -148,7 +148,7 @@ def _git_archive(repo: Path, commit: str) -> bytes:
             if kind != b"blob" or mode not in (b"100644", b"100755"):
                 raise ValueError("tracked links, submodules or special files forbidden")
             try:
-                path = _source_path(raw_path.decode("utf-8"))
+                path = validate_export_path(raw_path.decode("utf-8"))
             except UnicodeError as exc:
                 raise ValueError("tracked path must be UTF-8") from exc
             content = _git(
@@ -217,7 +217,7 @@ def _manifest(workspace: Path, *, baseline: bytes | None = None) -> dict:
         pass
     blob = baseline if baseline is not None else snapshot_project(workspace, include_all=True)
     for path in archive_files(blob):
-        _source_path(path)
+        validate_export_path(path)
     if workspace_fingerprint(blob) != manifest["baseline_fingerprint"]:
         raise ValueError("project baseline fingerprint mismatch")
     return {**manifest, "cwd": str(workspace)}
