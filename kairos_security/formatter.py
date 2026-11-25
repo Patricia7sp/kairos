@@ -28,6 +28,7 @@ def format_cli_summary(report: SecurityReport, *, threshold: Severity = Severity
         "          🛡️  KAIROS SECURITY AUDIT REPORT                  ",
         "============================================================",
         f"Alvo auditado:  {report.target}",
+        *([f"Revisão:        {report.target_revision}"] if report.target_revision else []),
         f"Código-fonte:   {report.source_root or '(não auditado)'}",
         f"Duração:        {report.duration_ms} ms",
         f"Perfil:         {report.profile} (v{PROFILE_VERSION})",
@@ -35,6 +36,7 @@ def format_cli_summary(report: SecurityReport, *, threshold: Severity = Severity
         f"Cobertura:      {'completa' if result.coverage_complete else 'incompleta'}",
         f"Security Score: {report.security_score}/100 (somente achados observados)",
         f"Status Geral:   {status[result.policy_outcome]} (limiar: {result.severity_threshold})",
+        *(f"Escopo: {note}" for note in report.scope_notes),
         "------------------------------------------------------------",
         "Resumo de Vulnerabilidades:",
     ]
@@ -97,6 +99,8 @@ def format_json_report(report: SecurityReport, *, threshold: Severity = Severity
             for c in result.checks
         ],
         "target": report.target,
+        "target_revision": report.target_revision,
+        "scope_notes": report.scope_notes,
         "source_root": report.source_root,
         "timestamp": report.timestamp,
         "duration_ms": report.duration_ms,

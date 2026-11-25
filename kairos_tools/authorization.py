@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Mapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
@@ -38,8 +38,8 @@ class Snapshot:
     project: str
     revision: str
     fingerprint: str
-    entries: tuple[TreeEntry, ...]
-    contents: Mapping[str, bytes]
+    entries: tuple[TreeEntry, ...] = field(repr=False)
+    contents: Mapping[str, bytes] = field(repr=False)
 
 
 def _identity(fd):

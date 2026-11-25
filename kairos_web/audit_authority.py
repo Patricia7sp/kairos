@@ -1,12 +1,14 @@
 """Adaptador de despacho interno. Origem, autoridade e consumidor vêm do servidor."""
 
 import json
+import queue
 import re
 from urllib.parse import urlsplit
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 
+from kairos_security.models import SecurityReport
 from kairos_tools.audit_store import AuthorityDenied, require
 
 
@@ -53,3 +55,16 @@ async def dispatch_capture(request: Request, *, authority, origin: str, inbox):
         and re.fullmatch(r"gr_[a-f0-9]{64}", selectors["grant"])
     )
     await run_in_threadpool(authority.capture, "web:operador", inbox=inbox, **selectors)
+
+
+async def dispatch_snapshot_audit(request: Request, *, authority, origin: str) -> SecurityReport:
+    """Despacho interno: consumir somente a cópia entregue pela autoridade."""
+    from kairos_security.snapshot import audit_snapshot
+
+    inbox = queue.Queue(maxsize=1)
+    await dispatch_capture(request, authority=authority, origin=origin, inbox=inbox)
+    try:
+        snapshot = inbox.get_nowait()
+    except queue.Empty:
+        raise AuthorityDenied() from None
+    return await run_in_threadpool(audit_snapshot, snapshot)

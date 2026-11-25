@@ -251,6 +251,15 @@ Interface proposta: capture_audit_snapshot(target: AuthorizedTarget, limits: Tre
 
 Verificação: uv run pytest -q tests/test_security_audit.py tests/test_security_snapshot.py tests/test_security_redaction.py. Commit: fix(security): captura alvo e redige segredos com cobertura explicita.
 
+Primeiro corte interno: `dispatch_snapshot_audit` consome a entrega autorizada
+de E1.4a e `audit_snapshot` aplica `snapshot_static` à cópia em memória. O
+inventário revalida limites, entradas, bytes e fingerprint antes dos detectores.
+O relatório vincula projeto e revisão, declara os limites do perfil e usa um
+identificador determinístico derivado do caminho para correlacionar achados sem
+publicar o nome do arquivo. Falha de leitura/decodificação reduz a cobertura e
+não apaga achados bloqueantes já observados. O comando local legado mantém sua
+interface; o despacho novo ainda não está ligado a uma rota ou ao agendamento.
+
 ### E1.4b Exceções autenticadas e ações existentes
 
 Files: autorização de E1.4a; registry.py, workspace.py e policy.py; kairos_integration/chat_tools.py e interaction_service.py; superfícies CLI/Web/runtime. Dependência: E1.1/E1.2 e threat model atualizado; nenhuma habilitação por fixture ou configuração.
