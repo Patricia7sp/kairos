@@ -1,4 +1,4 @@
-"""E1.1: perfis e avaliação determinística sem exceções de segurança."""
+"""Perfis, cobertura e avaliação determinística da auditoria."""
 
 from dataclasses import dataclass
 from enum import StrEnum, auto
@@ -28,6 +28,7 @@ _REQUIRED = {
     AuditProfile.RUNTIME_CONFIG: ("runtime_configuration", "runtime_isolation"),
 }
 PROFILE_VERSION = 1
+AUDIT_POLICY_VERSION = 1
 _SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
 
 
@@ -97,6 +98,15 @@ def _coverage(report: SecurityReport) -> tuple[CheckResult, ...]:
 
 
 def assess_audit(report: SecurityReport, *, threshold: Severity = Severity.HIGH) -> AuditAssessment:
+    return _assess_audit(report, threshold=threshold)
+
+
+def _assess_audit(
+    report: SecurityReport,
+    *,
+    threshold: Severity = Severity.HIGH,
+    validated_indices: frozenset[int] = frozenset(),
+) -> AuditAssessment:
     checks = _coverage(report)
     complete = all(c.state in (CheckState.COMPLETED, CheckState.NOT_APPLICABLE) for c in checks)
     if report.cancelled:
@@ -109,7 +119,10 @@ def assess_audit(report: SecurityReport, *, threshold: Severity = Severity.HIGH)
         execution = ExecutionState.FAILED
 
     cutoff = max(_SEVERITY_ORDER.index(Severity.HIGH), _SEVERITY_ORDER.index(threshold))
-    if any(f.severity in _SEVERITY_ORDER[: cutoff + 1] for f in report.findings):
+    if any(
+        f.severity in _SEVERITY_ORDER[: cutoff + 1] and i not in validated_indices
+        for i, f in enumerate(report.findings)
+    ):
         outcome = PolicyOutcome.FAIL
     elif execution is ExecutionState.COMPLETED:
         outcome = PolicyOutcome.PASS

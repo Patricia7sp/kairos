@@ -2,7 +2,7 @@
 
 Revisão de arquitetura: produto `c6a083f51e12aaddeac8720185ecc55a27d010de`, 02/11/2026. Fontes: [SPEC v0.2](2026-11-02-kairos-evolucao-v0.2.md), [plano mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md), [baseline E0.1](../reports/2026-11-02-fase2-baseline.md) e [matriz de plataforma](../reports/2026-11-02-fase2-plataforma.md).
 
-**Estado: revisão independente documental concluída; aceite da usuária pendente; eficácia não certificada.** A inspeção e os testes existentes sustentam os controles delimitados na coluna atual. Controles exigidos/propostos não são anunciados como implementação. E0.2/E0.3 permanecem pendentes; este documento não habilita E1.4a, exceções, delegação ou testes ativos.
+**Estado:** o modelo original passou por revisão independente em 02/11. O [aceite limitado do E0 em 22/11](../reports/2026-11-02-fase2-plataforma.md#parecer-e0-para-o-primeiro-incremento--22112026) foi registrado depois. A [revisão de E1.4b](#revisão-para-e14b--exceções-de-auditoria) foi revisada em 26/11/2026 como desenho para implementação do primeiro recorte; não atesta eficácia, não habilita exceções e não cobre a migração das aprovações genéricas do chat.
 
 ## Intenção, escopo e invariantes
 
@@ -75,7 +75,7 @@ Retenção de 30 dias, teto de armazenamento, alerta e preservação de incident
 
 ## Matriz de ameaças, controles e testes
 
-Responsável indica o componente/entrega que deve responder pelo contrato, não uma atribuição já acordada a uma pessoa. Evidências listadas são testes existentes exercitados no CI Linux da base; lacunas exigem novos testes e revisão, não checkboxes presumidos.
+A matriz abaixo registra a base de 02/11. Responsável indica o componente/entrega que deve responder pelo contrato, não uma atribuição já acordada a uma pessoa. Evidências listadas são testes existentes exercitados no CI Linux da base; lacunas exigem novos testes e revisão, não checkboxes presumidos.
 
 | ID / ameaça | Controle atual e evidência delimitada | Lacuna / controle exigido | Responsável / gate |
 | --- | --- | --- | --- |
@@ -96,7 +96,7 @@ Responsável indica o componente/entrega que deve responder pelo contrato, não 
 
 ## Pontos de integração a revisar antes de código
 
-E1.4a deve derivar identidade nas superfícies já autenticadas, vincular projeto/alvo/revisão/permissão e recusar mudanças antes de leitura. E1.1 recebe apenas essa referência, mantém exceções desabilitadas e não usa score como certificado. E1.2 conecta a captura segura aos detectores, preservando o H0.
+O primeiro corte de [E1.4a](2026-11-22-e14a-autoridade-de-leitura.md) entrou em `ea6844e`: deriva identidade no despacho Web interno, vincula projeto/alvo/revisão e revalida permissão antes da leitura. E1.1 (`bd5ec2e`) separou cobertura, coleta e política com exceções fechadas. E1.2 (`83b39c0`) conecta a captura autorizada aos detectores estáticos e de segredos com sanitização, sem anunciar cobertura fora do snapshot ou criar rota de auditoria. O auditor local legado ainda usa seu caminho próprio.
 
 Antes de TaskService/TaskRecord/migrações, a nota própria fixa referências por FK, composição de estados/resultados e adaptação da admissão; RuntimeStore continua canônico para turnos e AuditRun para coleta. Aprovações existentes precisam de migração compatível, não de troca por um booleano ou nova fila.
 
@@ -108,4 +108,18 @@ Revisão documental executada em 02/11/2026 por GPT-6 Luna/high, com contexto is
 
 Os testes existentes cobrem contratos específicos com fixtures sintéticas e integrações Linux; não constituem pentest, teste adversarial de toda a cadeia ou certificação do host. Cobertura de subprocessos contém fragmentos inválidos registrados no baseline. Nenhum dado real sensível foi coletado para esta documentação.
 
-Gate E0 continua pendente das capacidades e medições do destino, da revisão deste design e do aceite dos limites. A próxima fronteira de implementação continua **E1.4a → E1.1 sem exceções → E1.2 → E1.4b**, depois de E0 aceito. E4 tem Prioridade Alta após suas dependências; voz não o bloqueia.
+## Revisão para E1.4b — exceções de auditoria
+
+Base revisada: `83b39c0`, 25/11/2026; revisão de desenho atualizada em 26/11/2026. O limite continua sendo o Service HTTPS privado, com navegador no Mac e autoridade, relógio, auditor e SQLite no servidor Linux. O [desenho de E1.4b](2026-11-25-e14b-excecoes-de-auditoria.md) propõe duas novas passagens por essa fronteira: apresentar a projeção sanitizada de um achado observado e confirmar ou revogar uma exceção ligada a ele. Possuir o cookie da instância não concede acesso a qualquer projeto por si só. O cliente, a conversa e o modelo fornecem dados, não autoridade; uma credencial compartilhada continua sem atribuição por pessoa.
+
+Os dados novos são internos por projeto: prova mínima de observação, intenção de confirmação, concessão, revogação e avaliação com exceção. O desenho os destina ao store privado e à projeção restrita da operadora, com teto e prazos próprios. Nunca persistir conteúdo bruto do snapshot, credenciais ou caminho em decisões. Namespace, montagem e proteções locais da E1.4a não defendem contra restaurar uma cópia antiga por ação administrativa; a retomada depois de uma restauração precisa invalidar a autoridade antiga. Guardas de incidente e retenção geral continuam em E1.7.
+
+| Ameaça e fronteira | Controle já existente em `83b39c0` | Lacuna e teste de aceite do recorte |
+| --- | --- | --- |
+| T01/T02/T07: outro cliente, transporte ou conteúdo tenta fabricar/confirmar aprovação | O [despacho interno](../../../kairos_web/audit_authority.py) verifica origem e cookie, deriva principal, e o store limita a ação a `read_snapshot`. | Adaptador Web e autoridade de exceção: provar no despacho real que login sem grant apropriado, leitura sem permissão de aprovação, troca de origem, replay e campos de autoridade no payload não gravam decisão nem expõem prova. |
+| T04/T07/T12: achado forjado ou aprovação deslocada para outra ocorrência/exportação | A [autoridade](../../../kairos_tools/authorization.py) fixa alvo e conteúdo da captura, e o auditor verifica a cópia; o relatório atual não atesta a origem de um achado recebido de fora. | Despacho e store: só prova do servidor pode originar decisão. Testar seletor inventado, mesmo commit em outro projeto, troca de revisão/versão do detector e chave duplicada; nunca reaproveitar bloqueio aceito para outro achado. |
+| T06: exceção faz ausência de coleta virar aprovação | A [política](../../../kairos_security/policy.py) separa cobertura e bloqueio, sem exceções. | Política: testar `partial + unknown` com exceção válida e outro check obrigatório ausente, `partial + fail` com bloqueante não coberto e recusa quando o próprio detector produtor ficou incompleto. |
+| T07/T08: revogação não vence leitura antiga, perda de resposta repete efeito ou restauração reativa privilégio | Locks, epoch, revogação e prazos protegem a leitura de E1.4a. Não há decisão de exceção persistida hoje. | Store: testar ambas as ordens sob lock, expiração, duplicata, falha de commit, reinício e procedimento de restauração. Exigir decisão durável para usar exceção e estado histórico datado para efeitos já observados. |
+| T05/T10/T11/T12: projeção leva segredo para fora do serviço ou prova cresce sem limite | E1.2 omite caminhos e conteúdo bruto no snapshot report; o alcance atual está descrito em [test_security_snapshot.py](../../../tests/test_security_snapshot.py). | Custódia Web/store: testar sentinelas em conteúdo, nome e erro e filtrar antes de persistir ou exibir; testar isolamento de leitura, teto de armazenamento e falha ao registrar, sem liberar exceções sem prova. |
+
+**Revisão de desenho (26/11/2026):** aprovada como base para implementação do primeiro recorte, condicionada aos invariantes do spec (fonte de verdade no store/despacho, chave inequívoca, concorrência sob lock, custódia sanitizada e recuperação sem replay/ressurreição). Não atesta eficácia; a revisão da implementação deve provar os casos da tabela com despacho real, store real e concorrência controlada. A migração das aprovações genéricas do chat tem análise própria antes de fechar E1.4b. Rever novamente antes de E4 e Trilha S.
