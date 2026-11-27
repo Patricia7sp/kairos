@@ -269,8 +269,12 @@ Primeiro recorte: [desenho de aprovação e revogação de exceções](../specs/
 Implementação do recorte interno: o despacho de auditoria registra a prova no
 SQLite da autoridade, aplica somente correspondências revalidadas e publica o
 resultado após confirmação do commit. O [runbook local](../specs/2026-11-25-e14b-excecoes-de-auditoria.md#runbook-local-do-primeiro-recorte)
-cobre migração e restauração. A revisão da implementação e o aceite do
-incremento permanecem pendentes.
+cobre migração e restauração. A [revisão técnica em `f5c913d`](../specs/2026-11-25-e14b-excecoes-de-auditoria.md#revisão-técnica-da-implementação-27112026)
+registrou duas lacunas: distinguir a ocorrência na confirmação e preservar o
+vínculo da decisão no histórico durante a retenção. As
+[correções com regressões](../specs/2026-11-25-e14b-excecoes-de-auditoria.md#correções-após-a-revisão-técnica)
+passaram por revisão independente sem achados no escopo; o aceite do
+incremento permanece pendente.
 
 - [ ] RED por despacho real: página/resultado pede ação negada; aprovação não libera arquivo externo; revogação, parâmetro/política alterado, expiração e troca de transporte recusam execução.
 - [ ] Produzir design compatível da migração das aprovações efêmeras do chat para vínculo persistido com ação concreta, parâmetro, projeto/escopo e prazo. Preservar protocolo/negação atuais e recuperar pedidos pendentes sem reaplicar efeito incerto.

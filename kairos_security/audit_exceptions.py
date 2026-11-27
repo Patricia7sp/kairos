@@ -38,6 +38,7 @@ MAX_ROWS = 4096
 MAX_PROOF_BYTES = 64 * 1024
 MAX_TOTAL_PROOF_BYTES = 16 * 1024 * 1024
 FINDING_KEY_VERSION = 1
+PROJECTION_VERSION = 2
 _RULES = {
     "snapshot_secrets": {"SEC-SECRET-001"},
     "snapshot_sast": {*(r.id for r in RULES), "SEC-SRC-011"},
@@ -108,12 +109,16 @@ def _descriptor(snapshot, finding):
     version = finding.detector_version
     if type(version) is not int or not 0 < version < 2**31:
         version = None
+    line = finding.line_number
+    if type(line) is not int or not 0 < line < 2**31:
+        line = None
     info = {
         "rule": rule,
         "severity": Severity(finding.severity).value,
         "detector": detector,
         "detector_version": version,
         "location": location,
+        "line_number": line,
     }
     key = None
     if all(info.values()):
@@ -152,8 +157,12 @@ def _project(snapshot, report, assessment):
     descriptors = [_descriptor(snapshot, f) for f in report.findings]
     counts = Counter(key for _, key in descriptors)
     complete = {c["check_id"] for c in checks if c["state"] == CheckState.COMPLETED}
-    eligible, findings = {}, []
+    eligible, findings, occurrences = {}, [], Counter()
     for i, (info, key) in enumerate(descriptors):
+        if key:
+            location = (info["location"], info["line_number"])
+            occurrences[location] += 1
+            info["occurrence"] = occurrences[location]
         if valid_inventory and key and counts[key] == 1 and info["detector"] in complete:
             info.update(finding_ref=_ref("finding_"), key=key)
             eligible[key] = i
@@ -162,6 +171,7 @@ def _project(snapshot, report, assessment):
         valid_inventory,
         eligible,
         {
+            "version": PROJECTION_VERSION,
             "execution_state": assessment.execution_state,
             "checks": checks,
             "findings": findings,
@@ -175,6 +185,9 @@ def _public_finding(finding, *, selectable=True):
     public = {
         k: finding[k] for k in ("rule", "severity", "detector", "detector_version", "location")
     }
+    for field in ("line_number", "occurrence"):
+        if field in finding:
+            public[field] = finding[field]
     if selectable and "finding_ref" in finding:
         public["finding_ref"] = finding["finding_ref"]
     return public
@@ -196,6 +209,24 @@ def _public_proof(scope, projection, run_id, *, profile_version, selectable=True
             _public_finding(f, selectable=selectable and run_id is not None)
             for f in projection["findings"]
         ],
+    }
+
+
+def _public_assessment(projection, applied_ids):
+    applications = [
+        {"finding": _public_finding(f, selectable=False)}
+        | {
+            key: f["applied_exception"][key]
+            for key in ("exception_id", "reason_code", "issued_at", "expires_at")
+        }
+        for f in projection["findings"]
+        if "applied_exception" in f
+    ]
+    return {
+        "applied_exception_ids": applied_ids,
+        "applied_exceptions": applications,
+        "historical_links_complete": sorted(str(a["exception_id"]) for a in applications)
+        == applied_ids,
     }
 
 
@@ -268,11 +299,22 @@ def _matching(db, principal, proof, epoch, *, now, eligible):
     ):
         key = row["finding_key"]
         if key in eligible and _live_exception(db, now, row, proof):
-            matches[key] = row["id"] if key not in matches else None
-    return {eligible[key]: ref for key, ref in matches.items() if ref is not None}
+            matches[key] = row if key not in matches else None
+    return {eligible[key]: decision for key, decision in matches.items() if decision is not None}
 
 
-def _evaluate(db, now, *, principal, snapshot, grant, report, baseline, eligible, payload):
+def _application(decision):
+    return {
+        "exception_id": decision["id"],
+        "reason_code": decision["reason_code"],
+        "issued_at": decision["issued_at"],
+        "expires_at": decision["expires_at"],
+    }
+
+
+def _evaluate(
+    db, now, *, principal, snapshot, grant, report, baseline, eligible, projection, payload
+):
     read = _snapshot_access(db, now, principal, snapshot, grant)
     run_id, assessment_id = _ref("run_"), _ref("assessment_")
     proof = {
@@ -287,7 +329,18 @@ def _evaluate(db, now, *, principal, snapshot, grant, report, baseline, eligible
         else {}
     )
     assessed = _assess_audit(report, validated_indices=frozenset(matches)) if matches else baseline
-    applied = sorted(matches.values())
+    applied = sorted(decision["id"] for decision in matches.values())
+    if matches:
+        projection = projection | {
+            "findings": [
+                finding | {"applied_exception": _application(matches[i])}
+                if i in matches
+                else finding
+                for i, finding in enumerate(projection["findings"])
+            ]
+        }
+        payload = _json(projection)
+    _reserve(db, rows=2, payload=payload)
     db.execute(
         "INSERT INTO audit_proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
@@ -320,7 +373,7 @@ def _evaluate(db, now, *, principal, snapshot, grant, report, baseline, eligible
             now.boot_ns,
         ),
     )
-    return run_id, assessment_id, assessed, applied
+    return run_id, assessment_id, assessed, applied, projection
 
 
 def observe(authority, principal, *, project, revision, grant):
@@ -335,9 +388,10 @@ def observe(authority, principal, *, project, revision, grant):
     if valid:
         try:
             payload = _json(projection)
+            if len(payload) > MAX_PROOF_BYTES:
+                raise CapacityExceeded()
             with authority.connection(write=True) as db:
                 _janitor(db, Clock.read())
-                _reserve(db, rows=2, payload=payload)
                 now = Clock.read()
                 result = _evaluate(
                     db,
@@ -348,6 +402,7 @@ def observe(authority, principal, *, project, revision, grant):
                     report=report,
                     baseline=baseline,
                     eligible=eligible,
+                    projection=projection,
                     payload=payload,
                 )
             committed = (now, result)
@@ -361,18 +416,19 @@ def observe(authority, principal, *, project, revision, grant):
             _snapshot_access(db, now, principal, snapshot, grant)
         run_id, evaluation_id, assessed, applied = None, None, baseline, []
     else:
-        now, (run_id, evaluation_id, assessed, applied) = committed
-    return _public_proof(
-        (project, revision), projection, run_id, profile_version=PROFILE_VERSION
-    ) | {
-        "assessment_id": evaluation_id,
-        "evaluated_at": now.utc,
-        "exceptions_available": committed is not None,
-        "policy_outcome": assessed.policy_outcome,
-        "coverage_complete": assessed.coverage_complete,
-        "threshold": assessed.severity_threshold,
-        "applied_exception_ids": applied,
-    }
+        now, (run_id, evaluation_id, assessed, applied, projection) = committed
+    return (
+        _public_proof((project, revision), projection, run_id, profile_version=PROFILE_VERSION)
+        | {
+            "assessment_id": evaluation_id,
+            "evaluated_at": now.utc,
+            "exceptions_available": committed is not None,
+            "policy_outcome": assessed.policy_outcome,
+            "coverage_complete": assessed.coverage_complete,
+            "threshold": assessed.severity_threshold,
+        }
+        | _public_assessment(projection, applied)
+    )
 
 
 def _proof(db, now, principal, run_id):
@@ -403,23 +459,31 @@ def open_proof(authority, principal, *, run_id):
         ).fetchone()
         if history is None:
             raise AuthorityDenied()
-        selectable = _proof_current(now, proof) and proof["profile_version"] == PROFILE_VERSION
+        stored = json.loads(proof["projection"])
+        selectable = (
+            _proof_current(now, proof)
+            and proof["profile_version"] == PROFILE_VERSION
+            and stored.get("version") == PROJECTION_VERSION
+        )
         projection = _public_proof(
             (proof["project"], proof["revision"]),
-            json.loads(proof["projection"]),
+            stored,
             run_id,
             profile_version=proof["profile_version"],
             selectable=selectable,
         )
-        return projection | {
-            "historical": True,
-            "assessment_id": history["id"],
-            "evaluated_at": history["evaluated_at"],
-            "policy_outcome": history["policy_outcome"],
-            "coverage_complete": bool(history["coverage_complete"]),
-            "threshold": history["threshold"],
-            "applied_exception_ids": json.loads(history["applied_ids"]),
-        }
+        return (
+            projection
+            | {
+                "historical": True,
+                "assessment_id": history["id"],
+                "evaluated_at": history["evaluated_at"],
+                "policy_outcome": history["policy_outcome"],
+                "coverage_complete": bool(history["coverage_complete"]),
+                "threshold": history["threshold"],
+            }
+            | _public_assessment(stored, json.loads(history["applied_ids"]))
+        )
 
 
 def _requested_deadline(now, expires, read, approve):
@@ -445,8 +509,11 @@ def prepare(authority, principal, *, origin, run_id, finding_ref, reason_code, e
         now = Clock.read()
         proof, read = _proof(db, now, principal, run_id)
         require(_proof_current(now, proof) and proof["profile_version"] == PROFILE_VERSION)
-        findings = json.loads(proof["projection"])["findings"]
-        selected = [f for f in findings if f.get("finding_ref") == finding_ref and "key" in f]
+        projection = json.loads(proof["projection"])
+        require(projection.get("version") == PROJECTION_VERSION)
+        selected = [
+            f for f in projection["findings"] if f.get("finding_ref") == finding_ref and "key" in f
+        ]
         require(len(selected) == 1)
         finding = selected[0]
         approve = _approve_grant(db, now, principal, proof)
@@ -539,6 +606,7 @@ def confirm(authority, principal, *, origin, intent_ref):
             _proof_current(now, proof)
             and _within_ttl(now, intent, "issued_at", "issued_boot_ns", INTENT_TTL)
             and now.boot_ns < intent["deadline_boot_ns"]
+            and json.loads(proof["projection"]).get("version") == PROJECTION_VERSION
         )
         _janitor(db, now)
         _reserve(db)
@@ -549,11 +617,12 @@ def confirm(authority, principal, *, origin, intent_ref):
         require(
             db.execute(
                 """SELECT 1 FROM audit_exceptions WHERE principal=? AND finding_key=? AND policy_epoch=?
-            AND revoked_at IS NULL AND boot_id=? AND expires_boot_ns>? LIMIT 1""",
+                AND policy_version=? AND revoked_at IS NULL AND boot_id=? AND expires_boot_ns>? LIMIT 1""",
                 (
                     principal,
                     intent["finding_key"],
                     proof["policy_epoch"],
+                    AUDIT_POLICY_VERSION,
                     now.generation,
                     now.boot_ns,
                 ),

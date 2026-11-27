@@ -315,6 +315,31 @@ def test_resta_outro_achado_bloqueante(tmp_path):
     assert after["applied_exception_ids"] == [decision["exception_id"]]
 
 
+def test_resumo_distingue_mesma_regra_no_mesmo_arquivo_e_na_mesma_linha(tmp_path):
+    second_pattern = "AIza" + "Sy" + "T" * 33
+    content = json.dumps({"one": f"{SECRET} {second_pattern}", "two": SECRET}, indent=2)
+    audit = Harness(tmp_path, {f"{MARKER}.json": content.encode()})
+    audit.grant(APPROVE_EXCEPTION)
+    proof = audit.call("observe")
+    findings = proof["findings"]
+    assert len({(f["rule"], f["severity"], f["location"]) for f in findings}) == 1
+    positions = {(f["line_number"], f["occurrence"]): f for f in findings}
+    assert positions.keys() == {(2, 1), (2, 2), (3, 1)}
+    selected = positions[(2, 2)]
+    intent = audit.call(
+        "prepare", audit.prepare_data(proof) | {"finding_ref": selected["finding_ref"]}
+    )
+    assert intent["finding"] == selected
+    approved = audit.call("confirm", {"intent_ref": intent["intent_ref"]})
+    after = audit.call("observe")
+    assert after["policy_outcome"] == "fail" and after["counts"] == proof["counts"]
+    (application,) = after["applied_exceptions"]
+    assert application["exception_id"] == approved["exception_id"]
+    assert application["finding"] == {k: v for k, v in selected.items() if k != "finding_ref"}
+    for value in (SECRET, second_pattern, MARKER):
+        assert value not in json.dumps([proof, intent, after, audit.rows("audit_proofs")])
+
+
 @pytest.mark.parametrize("change", ["read", "approve", "epoch", "retired"])
 def test_revalidacao_dos_grants_originais(audit, change):
     audit.approved()
@@ -373,6 +398,69 @@ def test_prova_antiga_pode_ser_lida_mas_nao_confirma(audit, clock):
     history = audit.call("open_proof", {"run_id": proof["run_id"]})
     assert history["historical"] and "finding_ref" not in history["findings"][0]
     assert audit.rows("audit_exceptions") == []
+
+
+def test_historico_preserva_a_ocorrencia_e_a_decisao_apos_a_limpeza(audit, clock):
+    audit.target["grant"] = audit.grant("read_snapshot", seconds=exceptions.RETENTION + 3600)
+    original, intent, decision = audit.approved()
+    clock.utc += 30
+    clock.boot += 30
+    applied = audit.call("observe")
+    assert applied["policy_outcome"] == "pass"
+    (application,) = applied["applied_exceptions"]
+    assert application["exception_id"] == decision["exception_id"]
+    assert application["reason_code"] == intent["reason_code"]
+    assert application["expires_at"] == decision["expires_at"]
+    assert application["issued_at"] < applied["evaluated_at"] < application["expires_at"]
+    assert application["finding"]["line_number"] == original["findings"][0]["line_number"]
+    assert "finding_ref" not in application["finding"]
+
+    clock.utc += exceptions.RETENTION - 29
+    clock.boot += exceptions.RETENTION - 29
+    current = audit.call("observe")
+    assert current["policy_outcome"] == "fail" and not current["applied_exceptions"]
+    assert audit.rows("audit_exceptions") == []
+    assert audit.call("open_proof", {"run_id": original["run_id"]}) == DENIED
+    history = audit.call("open_proof", {"run_id": applied["run_id"]})
+    assert history["historical"] and history["historical_links_complete"]
+    assert history["applied_exceptions"] == applied["applied_exceptions"]
+    assert history["evaluated_at"] == applied["evaluated_at"]
+    clock.utc += 30
+    clock.boot += 30
+    assert audit.call("open_proof", {"run_id": applied["run_id"]}) == DENIED
+
+
+def test_projecao_anterior_preserva_veredito_mas_exige_nova_confirmacao(audit, monkeypatch):
+    with monkeypatch.context() as legacy:
+        legacy.setattr(exceptions, "AUDIT_POLICY_VERSION", exceptions.AUDIT_POLICY_VERSION - 1)
+        proof, _, decision = audit.approved()
+        pending = audit.call("prepare", audit.prepare_data(proof))
+        applied = audit.call("observe")
+    with audit.authority.connection(write=True) as db:
+        for row in db.execute("SELECT id,projection FROM audit_proofs").fetchall():
+            old = json.loads(row["projection"])
+            del old["version"]
+            for finding in old["findings"]:
+                for field in ("line_number", "occurrence", "applied_exception"):
+                    finding.pop(field, None)
+            db.execute(
+                "UPDATE audit_proofs SET projection=? WHERE id=?", (json.dumps(old), row["id"])
+            )
+
+    assert audit.call("prepare", audit.prepare_data(proof)) == DENIED
+    assert audit.call("confirm", {"intent_ref": pending["intent_ref"]}) == DENIED
+    history = audit.call("open_proof", {"run_id": applied["run_id"]})
+    assert history["policy_outcome"] == "pass" and history["historical"]
+    assert history["applied_exception_ids"] == [decision["exception_id"]]
+    assert not history["historical_links_complete"] and not history["applied_exceptions"]
+    assert "finding_ref" not in history["findings"][0]
+
+    current = audit.call("observe")
+    assert current["policy_outcome"] == "fail" and not current["applied_exception_ids"]
+    new = audit.call("prepare", audit.prepare_data(current))
+    confirmed = audit.call("confirm", {"intent_ref": new["intent_ref"]})
+    assert confirmed["exception_id"] != decision["exception_id"]
+    assert audit.call("observe")["applied_exception_ids"] == [confirmed["exception_id"]]
 
 
 @pytest.mark.parametrize("defect", ["cancelled", "inventory", "read_revoked"])
@@ -474,6 +562,16 @@ def test_commit_falho_e_teto_usam_politica_sem_excecao(audit, monkeypatch):
             and not result["exceptions_available"]
         )
     assert len(audit.rows("audit_assessments")) == len(audit.rows("audit_exceptions")) == 1
+
+
+def test_teto_em_bytes_inclui_o_vinculo_historico(audit, monkeypatch):
+    audit.approved()
+    (baseline,) = audit.rows("audit_proofs")
+    monkeypatch.setattr(exceptions, "MAX_PROOF_BYTES", len(baseline["projection"]))
+    result = audit.call("observe")
+    assert result["policy_outcome"] == "fail" and not result["exceptions_available"]
+    assert result["run_id"] is None and not result["applied_exceptions"]
+    assert len(audit.rows("audit_assessments")) == 1
 
 
 def test_nao_publica_avaliacao_quando_confirmacao_do_commit_se_perde(audit, monkeypatch):

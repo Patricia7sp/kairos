@@ -28,7 +28,7 @@ _REQUIRED = {
     AuditProfile.RUNTIME_CONFIG: ("runtime_configuration", "runtime_isolation"),
 }
 PROFILE_VERSION = 1
-AUDIT_POLICY_VERSION = 1
+AUDIT_POLICY_VERSION = 2
 _SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
 
 
