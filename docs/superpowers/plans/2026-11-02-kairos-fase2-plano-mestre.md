@@ -264,6 +264,14 @@ interface; o despacho novo ainda não está ligado a uma rota ou ao agendamento.
 
 Files: autorização de E1.4a; registry.py, workspace.py e policy.py; kairos_integration/chat_tools.py e interaction_service.py; superfícies CLI/Web/runtime. Dependência: E1.1/E1.2 e threat model atualizado; nenhuma habilitação por fixture ou configuração.
 
+Primeiro recorte: [desenho de aprovação e revogação de exceções](../specs/2026-11-25-e14b-excecoes-de-auditoria.md), com [atualização do modelo de ameaças](../specs/2026-11-02-fase2-threat-model.md#revisão-para-e14b--exceções-de-auditoria). A revisão de desenho de 26/11/2026 autorizou a implementação condicionada aos invariantes do spec (sem aceite de eficácia, sem habilitar exceção por config/fixture, sem migrar aprovações genéricas do chat). O servidor comprova a origem do achado antes de oferecer uma confirmação.
+
+Implementação do recorte interno: o despacho de auditoria registra a prova no
+SQLite da autoridade, aplica somente correspondências revalidadas e publica o
+resultado após confirmação do commit. O [runbook local](../specs/2026-11-25-e14b-excecoes-de-auditoria.md#runbook-local-do-primeiro-recorte)
+cobre migração e restauração. A revisão da implementação e o aceite do
+incremento permanecem pendentes.
+
 - [ ] RED por despacho real: página/resultado pede ação negada; aprovação não libera arquivo externo; revogação, parâmetro/política alterado, expiração e troca de transporte recusam execução.
 - [ ] Produzir design compatível da migração das aprovações efêmeras do chat para vínculo persistido com ação concreta, parâmetro, projeto/escopo e prazo. Preservar protocolo/negação atuais e recuperar pedidos pendentes sem reaplicar efeito incerto.
 - [ ] Implementar aprovação/revogação de AuditException como ação autenticada própria, com fingerprint, alvo/escopo/revisão, motivo e expiração. Backend deriva Principal; modelo não fornece aprovação válida.

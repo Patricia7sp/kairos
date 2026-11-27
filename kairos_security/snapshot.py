@@ -31,6 +31,7 @@ _SCOPE = (
     "Segredos e SAST cobrem apenas os arquivos elegíveis às regras do perfil.",
     "Localizações usam identificadores de arquivo; caminhos e conteúdo bruto são omitidos.",
 )
+DETECTOR_VERSIONS = {"snapshot_secrets": 1, "snapshot_sast": 1}
 
 
 def _identity(snapshot: Snapshot) -> tuple[str, str]:
@@ -86,7 +87,10 @@ def _scan(
         except Exception:  # noqa: BLE001 - falha de um detector não descarta os achados já observados
             error = CheckError.COLLECTION_ERROR
             continue
-        findings.extend(replace(f, detector=check_id, detector_version=1) for f in collected)
+        findings.extend(
+            replace(f, detector=check_id, detector_version=DETECTOR_VERSIONS[check_id])
+            for f in collected
+        )
     state = CheckState.PARTIAL if error is not None else CheckState.COMPLETED
     return CheckResult(check_id, state, error), findings
 
