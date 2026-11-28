@@ -1,6 +1,6 @@
 # E1.4b — aprovação e revogação de exceções de auditoria
 
-**Estado:** desenho revisado em 26/11/2026 sobre `83b39c0` (E1.2, [#139](https://github.com/Patricia7sp/kairos/pull/139)). Primeiro recorte implementado no despacho interno, pendente de revisão da implementação e aceite de eficácia. Fontes: [autorização e contrato de auditoria da SPEC v0.2](2026-11-02-kairos-evolucao-v0.2.md#autorização-de-ação), [plano-mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md#e14b-exceções-autenticadas-e-ações-existentes), [E1.4a](2026-11-22-e14a-autoridade-de-leitura.md) e [modelo de ameaças](2026-11-02-fase2-threat-model.md#revisão-para-e14b--exceções-de-auditoria).
+**Estado:** desenho revisado em 26/11/2026 sobre `83b39c0` (E1.2, [#139](https://github.com/Patricia7sp/kairos/pull/139)). Primeiro recorte interno integrado em `f5c913d` ([#140](https://github.com/Patricia7sp/kairos/pull/140)). A [revisão técnica](#revisão-técnica-da-implementação-27112026) identificou duas lacunas; as [correções](#correções-após-a-revisão-técnica) passaram por revisão independente sem achados no escopo. O aceite de eficácia segue aberto. Fontes: [autorização e contrato de auditoria da SPEC v0.2](2026-11-02-kairos-evolucao-v0.2.md#autorização-de-ação), [plano-mestre](../plans/2026-11-02-kairos-fase2-plano-mestre.md#e14b-exceções-autenticadas-e-ações-existentes), [E1.4a](2026-11-22-e14a-autoridade-de-leitura.md) e [modelo de ameaças](2026-11-02-fase2-threat-model.md#revisão-para-e14b--exceções-de-auditoria).
 
 ## Efeito e escopo
 
@@ -30,7 +30,7 @@ Os grants de exceção têm o mesmo modelo de persistência, epoch, prazo e revo
 
 O backend prepara uma intenção curta de uso único: resolve `run_id` e `finding_ref`, fixa ação, principal, transporte/origem, projeto, revisão, prova do achado, versão da política, grants, motivo e prazo no estado privado. O segundo POST envia somente a referência da intenção para confirmar. O servidor revalida os vínculos e confirma o registro exato que exibiu. Alterar motivo, prazo, alvo ou ação exige outra intenção. Revogação identifica uma exceção concreta; dupla submissão de revogação devolve o estado revogado sem novo efeito. O fluxo não usa `/tool-approvals`, nem oferece ferramenta de modelo ou aprovação por configuração.
 
-Schemas fechados e limitados; identidade, decisão de política, fingerprint e caminhos nunca são aceitos como afirmações do cliente. A tela mostra identificadores e metadados sanitizados: projeto/revisão, regra, severidade, localização opaca, motivo e validade. O primeiro corte usa motivos de catálogo (falso positivo verificado, risco temporariamente aceito com mitigação externa), como declaração da operadora. Detalhes da investigação ficam no canal privado apropriado. Não armazenar justificativa livre, snippets, argumentos brutos, cookies, conteúdo de arquivos ou caminhos neste fluxo.
+Schemas fechados e limitados; identidade, decisão de política, fingerprint e caminhos nunca são aceitos como afirmações do cliente. A apresentação usa identificadores e metadados sanitizados: projeto/revisão, regra, severidade, ID opaco do arquivo, linha, ordinal das ocorrências reportadas na mesma linha, motivo e validade. O ordinal segue a ordem da coleta; não é coluna ou trecho do arquivo. O primeiro corte usa motivos de catálogo (falso positivo verificado, risco temporariamente aceito com mitigação externa), como declaração da operadora. Detalhes da investigação ficam no canal privado apropriado. Não armazenar justificativa livre, snippets, argumentos brutos, cookies, conteúdo de arquivos ou caminhos neste fluxo.
 
 ### Contrato mínimo do despacho
 
@@ -58,10 +58,10 @@ Campos lógicos mínimos, todos privados ao serviço e serializados em formato c
 
 | Registro | Campos mínimos | Observações |
 | --- | --- | --- |
-| Prova de observação | `run_id`, `principal`, `read_grant_ref`, `project`, `revision`, `export_identity`, `capture_fingerprint`, `profile`, `profile_version`, `execution_state`, `checks[]`, `findings[]` sanitizados, `created_at_utc`, `created_boot_ns` | `findings[]` contém apenas chave canônica, severidade, regra/detector/versão e localização opaca já produzida pelo auditor. |
+| Prova de observação | `run_id`, `principal`, `read_grant_ref`, `project`, `revision`, `export_identity`, `capture_fingerprint`, `profile`, `profile_version`, `execution_state`, `checks[]`, `findings[]` sanitizados, `created_at_utc`, `created_boot_ns` | A projeção versionada guarda chave canônica, severidade, regra/detector/versão, localização opaca, linha e ordinal; o cliente não recebe a chave. |
 | Intenção | `intent_ref`, `action`, `principal`, `origin`, `transport`, `run_id`, `finding_key`, `approve_grant_ref` ou `revoke_target_ref`, `policy_epoch`, `reason_code`, `requested_expires_at_utc`, `issued_at_utc`, `deadline_boot_ns`, `consumed_at_utc?` | Uso único; confirmação altera estado na mesma transação. |
 | Exceção | `exception_id`, `finding_key`, `proof_run_id`, `principal`, `approve_grant_ref`, `read_grant_ref`, `policy_epoch`, `reason_code`, `issued_at_utc`, `expires_at_utc`, `expires_boot_ns`, `revoked_at_utc?`, `revoked_by_principal?`, `revocation_reason?` | ID opaco; revogação terminal. |
-| Avaliação com exceção | `assessment_id`, `run_id`, `policy_outcome`, `coverage_complete`, `threshold`, `applied_exception_ids[]`, `evaluated_at_utc`, `evaluated_boot_ns`, `commit_confirmed` | Histórico datado; não autoriza efeito futuro. |
+| Avaliação com exceção | `assessment_id`, `run_id`, `policy_outcome`, `coverage_complete`, `threshold`, `applied_exception_ids[]`, `evaluated_at_utc`, `evaluated_boot_ns`, `commit_confirmed` | A mesma transação congela, na projeção, o vínculo por ocorrência com ID, motivo, emissão e validade da decisão. O histórico é datado e não autoriza efeito futuro. |
 
 ## Vigência, concorrência e falhas
 
@@ -182,3 +182,25 @@ Esta revisão aprova o desenho como base para implementação do **primeiro reco
 | Recuperação | Sem replay de decisão incerta; restauração/downgrade invalida autoridade antiga antes de reabrir. | Runbook local obrigatório antes de expor serviço após restore. |
 
 A revisão da implementação deve verificar `test_audit_exception_authority.py` e as regressões de autoridade, snapshot, política e redaction. As confirmações genéricas do [chat](../../../kairos_integration/interaction_service.py) e as [aprovações duráveis do runtime](../../../kairos_runtime/service.py) mantêm seus protocolos; a migração do chat terá seu próprio vínculo de efeito, validade e recuperação sem replay antes de fechar E1.4b.
+
+## Revisão técnica da implementação (27/11/2026)
+
+Base verificada: `f5c913d`, com [CI pós-merge e deploy verdes](https://github.com/Patricia7sp/kairos/actions/runs/45942162040). Reexecução focada: 107 testes e 86 subtestes aprovados com `uv run pytest -q tests/test_audit_exception_authority.py tests/test_audit_target_authority.py tests/test_security_snapshot.py tests/test_security_policy.py tests/test_security_redaction.py tests/test_runtime_projects.py`.
+
+O [harness de testes](../../../tests/test_audit_exception_authority.py) exercita o despacho interno com requisição ASGI, cookie, store, auditor e exportação reais. As provas de concorrência usam processos distintos. Isso verifica a fronteira interna; o `https://` no `TestClient` não exercita TLS, e o smoke de produção confirma a saúde do serviço, não o fluxo de aprovação pelo navegador. O adaptador ainda não está ligado a uma rota de produção. Esta revisão foi feita no mesmo contexto da implementação e não substitui a revisão independente do gate I1.
+
+| Pendência | Evidência reproduzida | Critério para resolver |
+| --- | --- | --- |
+| Distinguir a ocorrência no resumo da confirmação | Duas ocorrências sintéticas da mesma regra em linhas distintas do mesmo arquivo geram chaves e seletores diferentes, mas a [projeção pública](../../../kairos_security/audit_exceptions.py) mostra a mesma regra, severidade, detector e localização de arquivo para ambas. O seletor aleatório distingue os registros ao servidor, mas não explica a diferença à operadora. | Incluir no resumo um discriminador sanitizado da ocorrência, sem nome de arquivo ou conteúdo, e provar que confirmar uma das duas conserva o bloqueio da outra. |
+| Preservar o vínculo no histórico durante a retenção | Em uma exportação temporária com relógio controlado, uma avaliação usou a exceção 30 segundos após a prova de origem. Aos 30 dias mais 1 segundo a limpeza removeu a prova original e a decisão em cascata. `open_proof` ainda retornou a avaliação posterior com o ID aplicado, mas a decisão já não existia no store. | Conservar o vínculo histórico sanitizado enquanto a avaliação for consultável, respeitando os limites de retenção e capacidade e sem estender a vigência da exceção. Cobrir a limpeza com relógio controlado. |
+
+O primeiro recorte segue pendente de aceite. Resolver essas lacunas e submeter a evidência à revisão independente antes de tratar o fluxo como aceito; o desenho de migração das aprovações genéricas do chat permanece a entrega seguinte.
+
+### Correções após a revisão técnica
+
+- A confirmação exibe linha e ordinal, inclusive para achados distintos na mesma linha. A correspondência continua usando a chave canônica, e colisões continuam inelegíveis. O teste com três achados da mesma regra confirma um deles e verifica que os demais mantêm `fail`.
+- O histórico conserva o resumo sanitizado da decisão no próprio achado da avaliação que a aplicou. A limpeza pode remover a prova e a decisão de origem no prazo original; a avaliação posterior conserva o vínculo até o seu próprio prazo. O resumo conta no teto da projeção. Se ele não couber, o despacho não publica avaliação com exceção.
+- O SQLite continua no esquema v2. A mudança de versão da política e da projeção exige nova observação e confirmação para decisões anteriores. O histórico anterior continua datado e mantém os IDs originais, mas indica `historical_links_complete: false` quando não contém os resumos por ocorrência. Nenhum vínculo anterior é reconstruído por suposição.
+- Verificação local da correção: 156 testes e 86 subtestes passaram, incluindo as quatro regressões novas e as suítes de autoridade, snapshot, política, sanitização, projetos e aprovações do chat/Web/runtime. Ruff, formatação e `uv lock --check` passaram.
+- Revisão independente das correções sobre `f5c913d`: GPT‑5.6 Luna, em sessão isolada e somente leitura, sem achados no escopo. Executou `uv run pytest -q tests/test_audit_exception_authority.py tests/test_audit_target_authority.py tests/test_security_snapshot.py tests/test_security_policy.py tests/test_security_redaction.py`: 87 testes e 86 subtestes passaram. O teto agregado não foi exercitado em caso próprio; a regressão nova verifica o teto por projeção. O parecer não atesta TLS real, navegador ou uso em produção.
+- O aceite de eficácia permanece pendente.
